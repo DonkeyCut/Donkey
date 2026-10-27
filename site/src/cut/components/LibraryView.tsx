@@ -5,6 +5,7 @@ import { LibraryImportCard } from "@/cut/components/LibraryImportCard";
 import { libraryFolderRef } from "@/cut/lib/folderReference";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { useTranslations } from "next-intl";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   StickyNote,
@@ -87,9 +88,7 @@ import {
 import {
   DeleteConfirm,
   SelectionMenu,
-  foldersGoNote,
-  phoneGoNote,
-  pickLabel,
+  usePickWords,
   useSelectionMenu,
 } from "./selectionMenu";
 
@@ -108,6 +107,8 @@ type DeleteSet = { folders: LibraryFolder[]; items: (LibraryAsset | LibraryTempl
 const NO_PICK: DeleteSet = { folders: [], items: [] };
 
 export function LibraryView() {
+  const t = useTranslations("home");
+  const { pickLabel, foldersGoNote, phoneGoNote } = usePickWords();
   const noteView = useRef<NotesViewHandle>(null);
   const router = useRouter();
   const base = useCutBase();
@@ -471,7 +472,7 @@ export function LibraryView() {
   // The way down to the open folder, and what is filed right here.
   const trail = useMemo(() => folderTrail(folders, openFolder), [folders, openFolder]);
   // The tab names the open folder; an open note names itself.
-  useTabTitle(params.has("note") ? null : openFolder ? trail.at(-1)?.name : "Library");
+  useTabTitle(params.has("note") ? null : openFolder ? trail.at(-1)?.name : t("tabs.library"));
   const shownFolders = useMemo(() => childrenOf(folders, openFolder), [folders, openFolder]);
   // What can be picked at this level, in the order a ⇧-range runs: the
   // shelf's folders, then the grid with templates leading.
@@ -622,10 +623,10 @@ export function LibraryView() {
       <div className="mx-auto w-full max-w-6xl px-10 py-9">
         <div className="mb-5 flex items-center justify-between gap-4">
           {openFolder === null ? (
-            <h1 className="text-lg font-semibold tracking-tight">Library</h1>
+            <h1 className="text-lg font-semibold tracking-tight">{t("tabs.library")}</h1>
           ) : (
             <FolderCrumb
-              root="Library"
+              root={t("tabs.library")}
               trail={trail}
               onRename={openOwner && live(openOwner) ? renameFolder : undefined}
               mime={LIBRARY_MOVE_MIME}
@@ -636,14 +637,14 @@ export function LibraryView() {
             />
           )}
           <div className="flex items-center gap-2">
-            {openFolder && openOwner && <Button variant="outline" disabled={!live(openOwner)} onClick={() => shareFolder(openFolder)}><Share2 data-icon="inline-start" /> Share</Button>}
+            {openFolder && openOwner && <Button variant="outline" disabled={!live(openOwner)} onClick={() => shareFolder(openFolder)}><Share2 data-icon="inline-start" /> {t("library.share")}</Button>}
             {(openFolder === null || newParent) && (
               <Button variant="outline" onClick={() => setFolderCreating(true)}>
-                <FolderPlus data-icon="inline-start" /> New folder
+                <FolderPlus data-icon="inline-start" /> {t("library.newFolder")}
               </Button>
             )}
             <Button onClick={() => setAddOpen(true)}>
-              <Upload data-icon="inline-start" /> Add media
+              <Upload data-icon="inline-start" /> {t("library.addMedia")}
             </Button>
           </div>
           <input
@@ -709,7 +710,7 @@ export function LibraryView() {
           onDropFiles={(files, fid) => void upload(files, fid)}
         />
 
-        <NotesView ref={noteView} library={{ folderId: openFolder, residency: openOwner ?? target, name: trail.at(-1)?.name ?? "Library" }} />
+        <NotesView ref={noteView} library={{ folderId: openFolder, residency: openOwner ?? target, name: trail.at(-1)?.name ?? t("tabs.library") }} />
 
         {!library.data && library.isPending && shownPending.length === 0 ? (
           <div className="grid place-items-center py-24 text-muted-foreground">
@@ -723,10 +724,10 @@ export function LibraryView() {
             <div className="flex flex-col items-center gap-3 text-center">
               <FolderOpen className="size-8 text-muted-foreground" />
               <div className="text-base font-medium">
-                Your Library is shared across all projects.
+                {t("library.emptyTitle")}
               </div>
               <p className="text-sm text-muted-foreground">
-                Drag and drop videos, images, audio, or font files here.
+                {t("library.emptyHint")}
               </p>
             </div>
           </button>
@@ -825,7 +826,7 @@ export function LibraryView() {
         <Dialog open={addOpen} onOpenChange={setAddOpen}>
           <DialogContent className="sm:max-w-md">
             <DialogHeader>
-              <DialogTitle>Add media</DialogTitle>
+              <DialogTitle>{t("library.addMedia")}</DialogTitle>
             </DialogHeader>
             <div className="flex flex-col gap-4">
               <button
@@ -833,10 +834,10 @@ export function LibraryView() {
                 onClick={() => inputRef.current?.click()}
               >
                 <Upload className="size-6 text-muted-foreground" />
-                <span className="text-sm font-medium">Choose files</span>
+                <span className="text-sm font-medium">{t("library.chooseFiles")}</span>
               </button>
               <div className="flex items-center gap-3 text-[11px] tracking-wide text-muted-foreground uppercase">
-                <div className="h-px flex-1 bg-border" /> or paste a link{" "}
+                <div className="h-px flex-1 bg-border" /> {t("library.orPasteLink")}{" "}
                 <div className="h-px flex-1 bg-border" />
               </div>
               <div className="flex flex-col gap-1.5">
@@ -846,7 +847,7 @@ export function LibraryView() {
                     <Input
                       autoFocus
                       value={url}
-                      placeholder="TikTok, YouTube, or Instagram link…"
+                      placeholder={t("library.linkPlaceholder")}
                       className="pl-8"
                       onChange={(e) => setUrl(e.target.value)}
                       onKeyDown={(e) => {
@@ -858,7 +859,7 @@ export function LibraryView() {
                     disabled={!url.trim()}
                     onClick={() => void importLink(url)}
                   >
-                    <LinkIcon /> Import
+                    <LinkIcon /> {t("library.import")}
                   </Button>
                 </div>
               </div>
@@ -869,10 +870,10 @@ export function LibraryView() {
         <SelectionMenu menu={ctx.menu} onClose={ctx.close}>
           {ctx.menu?.ids.length === 0 ? <>
             {(openFolder === null || newParent) && (
-              <DropdownMenuItem onClick={() => setFolderCreating(true)}><FolderPlus /> New folder</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setFolderCreating(true)}><FolderPlus /> {t("library.newFolder")}</DropdownMenuItem>
             )}
-            <DropdownMenuItem onClick={() => noteView.current?.create()}><StickyNote /> Add note</DropdownMenuItem>
-            <DropdownMenuItem onClick={() => setAddOpen(true)}><Upload /> Add media</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => noteView.current?.create()}><StickyNote /> {t("library.addNote")}</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setAddOpen(true)}><Upload /> {t("library.addMedia")}</DropdownMenuItem>
           </> : ctxFolder ? (
             <FolderMenuItems
               onShare={() => shareFolder(ctxFolder.id)}
@@ -889,11 +890,11 @@ export function LibraryView() {
                       setSharing({ kind: "asset", id: asset.id, residency: asset.residency });
                   }}
                 >
-                  <Share2 /> Share
+                  <Share2 /> {t("library.share")}
                 </DropdownMenuItem>
               )}
               <DropdownMenuItem variant="destructive" onClick={() => setDeleting(ctxSet)}>
-                <Trash2 /> Delete
+                <Trash2 /> {t("library.delete")}
               </DropdownMenuItem>
             </>
           )}
@@ -902,10 +903,10 @@ export function LibraryView() {
         <DeleteConfirm
           open={!!deleting}
           title={
-            deleting ? `Delete ${pickLabel(deleting.folders, deleting.items, ["item", "items"], deletingHeld)}?` : ""
+            deleting ? t("library.deleteTitle", { what: pickLabel(deleting.folders, deleting.items, "item", deletingHeld) }) : ""
           }
-          description={`${foldersGoNote(deleting?.folders.length ?? 0, deletingHeld)}${phoneGoNote(deleting ? phoneSynced(deleting) : 0, deletingTotal)}Projects that already use ${deletingTotal === 1 ? "it" : "them"} keep their own copy.`}
-          action="Remove"
+          description={`${foldersGoNote(deleting?.folders.length ?? 0, deletingHeld)}${phoneGoNote(deleting ? phoneSynced(deleting) : 0, deletingTotal)}${t("library.keepCopy", { count: deletingTotal })}`}
+          action={t("library.remove")}
           onClose={() => setDeleting(null)}
           onConfirm={() => deleting && void remove(deleting)}
         />

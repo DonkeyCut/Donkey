@@ -1,3 +1,5 @@
+import { UserError } from "./userError";
+
 /** How a WAV's samples are coded: integer PCM or IEEE float. */
 export type WavCoding = "pcm" | "float";
 
@@ -15,7 +17,7 @@ export function wavHeader(
 ): Uint8Array<ArrayBuffer> {
   const bytes = bits / 8;
   const data = frames * channels * bytes;
-  if (data + 36 > 0xffffffff) throw new Error("Audio this long does not fit in a WAV file.");
+  if (data + 36 > 0xffffffff) throw new UserError("wav_too_long", "Audio this long does not fit in a WAV file.");
   const b = new Uint8Array(44);
   const v = new DataView(b.buffer);
   const ascii = (at: number, s: string) => [...s].forEach((ch, i) => (b[at + i] = ch.charCodeAt(0)));

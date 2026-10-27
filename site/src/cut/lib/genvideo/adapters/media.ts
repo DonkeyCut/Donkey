@@ -44,6 +44,7 @@ import { buildShotAttempts } from "../shotAttempts";
 import type { ImageRole, VideoRole, VoiceRole } from "../capabilities";
 import { refRoleNote } from "../prompt";
 import type { RefAsset } from "../types";
+import { UserError, errorFromBody } from "../../userError";
 
 /** Resolve the pipeline's media-id references to the project assets the
  * generators take, dropping any that are no longer in the project. Resolution
@@ -81,7 +82,7 @@ export function makeImageRole(projectId: string, chatId?: string): ImageRole {
         ...(chatId ? { chatId } : {}),
       });
       if (job.status !== "done" || !job.assetId) {
-        throw new Error(job.error || "Image generation failed.");
+        throw errorFromBody(job, new UserError("image_generation_failed", "Image generation failed."));
       }
       return job.assetId;
     },
@@ -186,7 +187,7 @@ export function makeVideoRole(projectId: string, chatId?: string): VideoRole {
       }).settled;
       if (job.status === "done" && job.assetId)
         return { mediaId: job.assetId, anchored: anchoredRung(job.rung) };
-      throw new Error(job.error || "Video generation failed.");
+      throw errorFromBody(job, new UserError("video_generation_failed", "Video generation failed."));
     },
   };
 }

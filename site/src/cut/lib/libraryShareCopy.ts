@@ -6,10 +6,11 @@ import {
   moveLibraryItem, type LibraryData, type LibraryAsset, type LibraryTemplateItem,
 } from "@/cut/lib/library";
 import type { LibraryShareTarget } from "@/cut/lib/librarySharing";
+import { UserError } from "@/cut/lib/userError";
 
 async function uploadFile(residency: Residency, fileName: string) {
   const response = await backendFor(residency).fetch(`/api/cut/library/media/${encodeURIComponent(fileName)}`);
-  if (!response.ok) throw new Error("Could not read the file for sharing.");
+  if (!response.ok) throw new UserError("share_file_read_failed", "Could not read the file for sharing.");
   const blob = await response.blob();
   return presignedUpload("/api/cut/library/presign", blob, fileName, cloudBackend);
 }
@@ -34,7 +35,7 @@ export async function copyLibraryForSharing(
         width: asset.width, height: asset.height, source: asset.source,
       } }),
     });
-    if (!response.ok) throw new Error("Could not copy the asset to Cloud.");
+    if (!response.ok) throw new UserError("share_asset_copy_failed", "Could not copy the asset to Cloud.");
     const landed = await response.json() as { id: string };
     assets.push(landed.id);
     if (folderId) await moveLibraryItem("cloud", landed.id, folderId);
@@ -47,19 +48,19 @@ export async function copyLibraryForSharing(
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ...template, folderId, keys }),
     });
-    if (!response.ok) throw new Error("Could not copy the template to Cloud.");
+    if (!response.ok) throw new UserError("share_template_copy_failed", "Could not copy the template to Cloud.");
     const landed = await response.json() as { id: string };
     templates.push(landed.id);
   };
   try {
     if (target.kind === "asset") {
       const asset = library.assets.find((a) => a.id === target.id && a.residency === residency);
-      if (!asset) throw new Error("Asset not found.");
+      if (!asset) throw new UserError("asset_not_found", "Asset not found.");
       return { kind: "asset", id: await copyAsset(asset, null) };
     }
     const sourceFolders = library.folders.filter((f) => f.residency === residency);
     const root = sourceFolders.find((f) => f.id === target.id);
-    if (!root) throw new Error("Folder not found.");
+    if (!root) throw new UserError("folder_not_found", "Folder not found.");
     const group = <T,>(items: T[], parentOf: (item: T) => string | null) => {
       const groups = new Map<string | null, T[]>();
       for (const item of items) {
@@ -78,7 +79,7 @@ export async function copyLibraryForSharing(
     let rootId = "";
     for (let i = 0; i < todo.length; i++) {
       const { folder, parent } = todo[i];
-      if (seen.has(folder.id)) throw new Error("This folder contains a cycle.");
+      if (seen.has(folder.id)) throw new UserError("folder_cycle", "This folder contains a cycle.");
       seen.add(folder.id);
       const copy = await createLibraryFolder(folder.name, "cloud", parent);
       folders.push(copy.id);
@@ -99,7 +100,7 @@ export async function copyLibraryForSharing(
       cleanup.push(...await Promise.allSettled([deleteLibraryFolder("cloud", id)]));
     }
     if (cleanup.some((result) => result.status === "rejected"))
-      throw new Error("Copy failed. Some unshared copies remain in your Cloud library; remove them before retrying.");
+      throw new UserError("share_copy_leftovers", "Copy failed. Some unshared copies remain in your Cloud library; remove them before retrying.");
     throw error;
   }
 }

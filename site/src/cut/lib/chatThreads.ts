@@ -4,6 +4,8 @@
 // resume a render whose thread the user deleted — can reach it without
 // importing each other.
 
+import { UserError } from "./userError";
+
 // The keys derive from the route's project id, never the editor store's
 // projectId (that still points at the previously open project until loadProject
 // lands, which used to leak one project's chat into another).
@@ -449,15 +451,15 @@ export async function flushThreadSaves(): Promise<void> {
 // A failed save is told once in the console and shown in the panel until a
 // save lands again — for this browser's copy and for a cloud project's server
 // copy alike.
-const failures: Record<"local" | "cloud", string | null> = { local: null, cloud: null };
+const failures: Record<"local" | "cloud", UserError | null> = { local: null, cloud: null };
 const warned = { local: false, cloud: false };
 const failureChanges = new Set<() => void>();
-function setFailure(where: "local" | "cloud", message: string | null): void {
-  if (message === failures[where]) return;
+function setFailure(where: "local" | "cloud", message: UserError | null): void {
+  if (message?.code === failures[where]?.code) return;
   failures[where] = message;
   for (const onChange of failureChanges) onChange();
 }
-function setSaveFailure(message: string | null): void {
+function setSaveFailure(message: UserError | null): void {
   setFailure("local", message);
 }
 function saveFailed(err: unknown): void {
@@ -467,8 +469,8 @@ function saveFailed(err: unknown): void {
   }
   setSaveFailure(
     isQuotaError(err)
-      ? "Chat history couldn't be saved — this browser's storage is full."
-      : "Chat history couldn't be saved in this browser.",
+      ? new UserError("chat_save_storage_full", "Chat history couldn't be saved — this browser's storage is full.")
+      : new UserError("chat_save_local_failed", "Chat history couldn't be saved in this browser."),
   );
 }
 /** A cloud project's thread didn't reach the server. It is still in this
@@ -478,12 +480,12 @@ export function cloudThreadSaveFailed(err: unknown): void {
     warned.cloud = true;
     console.warn("[chat] couldn't save chat history to the cloud", err);
   }
-  setFailure("cloud", "Chat history couldn't be saved to the cloud — it's kept in this browser and will retry.");
+  setFailure("cloud", new UserError("chat_save_cloud_failed", "Chat history couldn't be saved to the cloud — it's kept in this browser and will retry."));
 }
 export function cloudThreadSaved(): void {
   setFailure("cloud", null);
 }
-export function threadSaveFailure(): string | null {
+export function threadSaveFailure(): UserError | null {
   return failures.local ?? failures.cloud;
 }
 export function subscribeThreadSaveFailure(onChange: () => void): () => void {

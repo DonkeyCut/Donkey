@@ -27,6 +27,7 @@ import { coveredSrc, frameSink, openMedia, videoTrackOf, type FrameCanvasSink, t
 import { sampleClipColorRead, sampleClipFrameData } from "./previewCanvas";
 import { colorRead, fileAt, previewFile, type ColorRead } from "./sourceColor";
 import { useEditor } from "./store";
+import { UserError } from "./userError";
 import type { InputVideoTrack, WrappedCanvas } from "mediabunny";
 
 export { sourceProfileOf } from "./sourceColor";
@@ -154,7 +155,7 @@ export async function baseFrameAt(master: string, time: number, size?: FrameSize
   const input = openMedia(url);
   try {
     const track = await videoTrackOf(input);
-    if (!track) throw new Error("This file has no readable video.");
+    if (!track) throw new UserError("media_no_readable_video", "This file has no readable video.");
     return await baseFrameSink(track, size, colorReadAt(url)).getCanvas(Math.max(0, time));
   } finally {
     input.dispose();
@@ -170,7 +171,7 @@ export async function rawFrameAt(master: string, time: number, size: FrameSize):
   const input = openMedia(url);
   try {
     const track = await videoTrackOf(input);
-    if (!track) throw new Error("This file has no readable video.");
+    if (!track) throw new UserError("media_no_readable_video", "This file has no readable video.");
     const read = colorReadAt(url);
     const colorSpace = read.colorSpace;
     const frame = await frameSink(track, size, colorSpace ? { colorSpace } : {}).getCanvas(Math.max(0, time));
@@ -205,7 +206,7 @@ export async function* baseFramesAt(master: string, times: number[], size?: Fram
   const input = openMedia(url);
   try {
     const track = await videoTrackOf(input);
-    if (!track) throw new Error("This file has no readable video.");
+    if (!track) throw new UserError("media_no_readable_video", "This file has no readable video.");
     let next = 0;
     try {
       for await (const frame of baseFrameSink(track, size, colorReadAt(url)).canvasesAtTimestamps(times)) {

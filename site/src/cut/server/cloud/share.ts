@@ -5,6 +5,7 @@ import { randomBytes } from "node:crypto";
 import { isTimelineId, type ShareFeatures } from "@/cut/lib/types";
 import { prisma } from "@/lib/prisma";
 import { getProject } from "./projects";
+import { UserError } from "@/cut/lib/userError";
 import { caught, err } from "./util";
 
 export type ShareAccess = "restricted" | "public";
@@ -57,16 +58,19 @@ const shareJson = (row: ShareRow) => ({
   features: normalizeFeatures(row.features),
 });
 
+// The share dialog reads this refusal, coded so the page words it.
+const PROJECT_NOT_FOUND = new UserError("project_not_found", "Project not found.");
+
 export const shareCloud = {
   async get(userId: string, projectId: string) {
-    if (!(await getProject(userId, projectId))) return err("Project not found.", 404);
+    if (!(await getProject(userId, projectId))) return err(PROJECT_NOT_FOUND, 404);
     const row = await prisma.cutProjectShare.findUnique({ where: { projectId } });
     return Response.json({ share: row && row.userId === userId ? shareJson(row) : null });
   },
 
   async put(userId: string, projectId: string, req: Request) {
     try {
-      if (!(await getProject(userId, projectId))) return err("Project not found.", 404);
+      if (!(await getProject(userId, projectId))) return err(PROJECT_NOT_FOUND, 404);
       const body = (await req.json()) as {
         access?: unknown;
         emails?: unknown;
@@ -84,7 +88,7 @@ export const shareCloud = {
       });
       return Response.json({ share: shareJson(row) });
     } catch (e) {
-      return caught(e, "Could not save the share.");
+      return caught(e, new UserError("share_save_failed", "Could not save the share."));
     }
   },
 
@@ -93,7 +97,7 @@ export const shareCloud = {
       await prisma.cutProjectShare.deleteMany({ where: { projectId, userId } });
       return Response.json({ ok: true });
     } catch (e) {
-      return caught(e, "Could not remove the share.");
+      return caught(e, new UserError("share_remove_failed", "Could not remove the share."));
     }
   },
 };

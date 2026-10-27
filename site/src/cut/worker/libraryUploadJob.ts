@@ -9,6 +9,7 @@ import { assetView } from "@/cut/server/cloud/library";
 import type { LibraryAsset } from "@/cut/server/library";
 import { prisma, registerObjectIn, storageTransaction, type ClaimedJob } from "@/cut/worker/db";
 import { deleteObjects, downloadToFile, libraryKey, uploadFile } from "@/cut/worker/r2";
+import { UserError } from "@/cut/lib/userError";
 
 const dependencies = {
   db: prisma, download: downloadToFile, upload: uploadFile, remove: deleteObjects,
@@ -27,15 +28,15 @@ export async function runLibraryUploadJob(
   const source = await io.db.cutMediaObject.findFirst({
     where: { userId: job.userId, r2Key: input.key, kind: "library", projectId: null },
   });
-  if (!source || libraryUploadId(source.id) !== job.id) throw new Error("Upload not found.");
+  if (!source || libraryUploadId(source.id) !== job.id) throw new UserError("upload_not_found", "Upload not found.");
   const already = await io.db.cutLibraryAsset.findFirst({ where: { id: job.id, userId: job.userId } });
   if (already) {
-    if (already.deletedAt) throw new Error("This imported file was deleted.");
+    if (already.deletedAt) throw new UserError("imported_file_deleted", "This imported file was deleted.");
     const media = await io.db.cutMediaObject.findFirst({ where: { id: already.mediaObjectId, userId: job.userId } });
-    if (!media) throw new Error("Imported media is missing.");
+    if (!media) throw new UserError("imported_media_missing", "Imported media is missing.");
     return assetView(already, media);
   }
-  const checkCanceled = () => { if (isCanceled()) throw new Error("Import canceled."); };
+  const checkCanceled = () => { if (isCanceled()) throw new UserError("import_canceled", "Import canceled."); };
   const tmp = await mkdtemp(path.join(os.tmpdir(), "cut-library-upload-"));
   handle.tmpDir = tmp;
   let stagedKey: string | undefined;
@@ -46,11 +47,11 @@ export async function runLibraryUploadJob(
     await io.download(source.r2Key, src);
     checkCanceled();
     const bytes = (await stat(src)).size;
-    if (bytes !== Number(source.bytes)) throw new Error("The uploaded file is incomplete.");
+    if (bytes !== Number(source.bytes)) throw new UserError("uploaded_file_incomplete", "The uploaded file is incomplete.");
     const codecs = await io.codecs(src);
     const type = codecs.video ? "video" : "audio";
     const duration = await io.duration(src);
-    if (!(duration > 0)) throw new Error("This file has no readable media duration.");
+    if (!(duration > 0)) throw new UserError("media_duration_unreadable", "This file has no readable media duration.");
     const outputName = `${source.id}.${type === "video" ? "mp4" : "m4a"}`;
     const out = path.join(tmp, outputName);
     handle.outPath = out;
@@ -71,10 +72,10 @@ export async function runLibraryUploadJob(
     const row = await io.transact(async (tx) => {
       checkCanceled();
       const active = await tx.cutRenderJob.findFirst({ where: { id: job.id, userId: job.userId, state: "running" } });
-      if (!active) throw new Error("Import canceled.");
+      if (!active) throw new UserError("import_canceled", "Import canceled.");
       if (input.folderId && !(await tx.cutFolder.findFirst({
         where: { id: input.folderId, userId: job.userId, scope: "library" },
-      }))) throw new Error("The destination folder was deleted.");
+      }))) throw new UserError("destination_folder_deleted", "The destination folder was deleted.");
       const sourceId = await io.register(tx, {
         userId: job.userId, projectId: null, r2Key: source.r2Key, fileName: source.fileName,
         mime: source.mime, bytes, kind: "library",

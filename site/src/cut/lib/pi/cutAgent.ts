@@ -1,4 +1,5 @@
 import type { UIMessage, UIMessageChunk } from "ai";
+import type { Locale } from "@/i18n/locales";
 import { Agent, type AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Message, UserMessage } from "@earendil-works/pi-ai";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
@@ -675,12 +676,15 @@ export function streamCutChat({
   threadId,
   model,
   messages,
+  locale,
   abortSignal,
   deps,
 }: {
   threadId: string;
   model: string;
   messages: UIMessage[];
+  /** The person's interface language; replies are written in it. */
+  locale: Locale;
   abortSignal?: AbortSignal;
   deps: CutAgentDeps;
 }): ReadableStream<UIMessageChunk> {
@@ -786,7 +790,7 @@ export function streamCutChat({
 
           const agent = new Agent({
             initialState: {
-              systemPrompt: systemPrompt(),
+              systemPrompt: systemPrompt(locale),
               model: donkeyModel(roundModel, thinkingLevel),
               messages: sessionFor(threadId, messages.filter((m) => m !== lastUser)),
               tools,

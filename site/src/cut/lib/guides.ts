@@ -17,6 +17,10 @@ export interface GuideLines {
   h: number[];
 }
 
+/** Which part of a platform's UI a keep-out box covers; the preview names
+ * it in the page's language. */
+export type GuideRegion = "topBar" | "cropped" | "actions" | "caption";
+
 /** A region the platform's own UI covers, as frame fractions. */
 export interface GuideBox {
   x: number;
@@ -24,6 +28,7 @@ export interface GuideBox {
   w: number;
   h: number;
   label: string;
+  region: GuideRegion;
 }
 
 /** Lines (frame fractions along one axis) and keep-out boxes to draw. The
@@ -94,11 +99,11 @@ export const GUIDE_PRESETS: readonly GuidePreset[] = [
       v: [],
       h: [],
       boxes: [
-        { x: 0, y: 0, w: 1, h: phone(215, 1920), label: "Top bar" },
-        { x: 0, y: 0, w: phone(50, 1080), h: 1, label: "Cropped" },
-        { x: 1 - phone(50, 1080), y: 0, w: phone(50, 1080), h: 1, label: "Cropped" },
-        { x: phone(895, 1080), y: phone(730, 1920), w: phone(185, 1080), h: phone(730, 1920), label: "Actions" },
-        { x: 0, y: phone(1460, 1920), w: 1, h: phone(460, 1920), label: "Caption · music · nav" },
+        { x: 0, y: 0, w: 1, h: phone(215, 1920), label: "Top bar", region: "topBar" },
+        { x: 0, y: 0, w: phone(50, 1080), h: 1, label: "Cropped", region: "cropped" },
+        { x: 1 - phone(50, 1080), y: 0, w: phone(50, 1080), h: 1, label: "Cropped", region: "cropped" },
+        { x: phone(895, 1080), y: phone(730, 1920), w: phone(185, 1080), h: phone(730, 1920), label: "Actions", region: "actions" },
+        { x: 0, y: phone(1460, 1920), w: 1, h: phone(460, 1920), label: "Caption · music · nav", region: "caption" },
       ],
     },
   },

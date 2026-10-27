@@ -3,7 +3,8 @@ import os from "node:os";
 import path from "node:path";
 import { convertModeIn } from "../../lib/convertMode";
 import { convertToMp4, mp4NameFor } from "../convert";
-import { errorMessage } from "../util";
+import { UserError } from "../../lib/userError";
+import { errorReply } from "../util";
 
 /**
  * Convert media the caller supplies, for a project this engine does not store.
@@ -40,7 +41,7 @@ export const convertApi = {
       });
     } catch (e) {
       return Response.json(
-        { error: errorMessage(e, "Could not convert that file.") },
+        errorReply(e, new UserError("convert_failed", "Could not convert that file.")),
         { status: 500 }
       );
     } finally {

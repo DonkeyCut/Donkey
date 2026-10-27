@@ -1,23 +1,27 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { useRef, useState } from "react";
 import { Check, Pipette } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { parsePercentInput, ScrubValue } from "@/cut/components/ScrubValue";
 import { cn } from "@/lib/utils";
 
-/** The named colors every color field offers. */
-export const COLOR_PRESETS: { hex: string; name: string }[] = [
-  { hex: "#FFFFFF", name: "White" },
-  { hex: "#111114", name: "Black" },
-  { hex: "#8E8E93", name: "Grey" },
-  { hex: "#FF375F", name: "Red" },
-  { hex: "#FF9F0A", name: "Orange" },
-  { hex: "#FFD60A", name: "Yellow" },
-  { hex: "#30D158", name: "Green" },
-  { hex: "#0A84FF", name: "Blue" },
-  { hex: "#BF5AF2", name: "Purple" },
+/** The named colors every color field offers. The UI names each by `id`
+ * under `inspector.colorField.presets`. */
+export const COLOR_PRESETS: { id: ColorPresetId; hex: string; name: string }[] = [
+  { id: "white", hex: "#FFFFFF", name: "White" },
+  { id: "black", hex: "#111114", name: "Black" },
+  { id: "grey", hex: "#8E8E93", name: "Grey" },
+  { id: "red", hex: "#FF375F", name: "Red" },
+  { id: "orange", hex: "#FF9F0A", name: "Orange" },
+  { id: "yellow", hex: "#FFD60A", name: "Yellow" },
+  { id: "green", hex: "#30D158", name: "Green" },
+  { id: "blue", hex: "#0A84FF", name: "Blue" },
+  { id: "purple", hex: "#BF5AF2", name: "Purple" },
 ];
+
+type ColorPresetId = "white" | "black" | "grey" | "red" | "orange" | "yellow" | "green" | "blue" | "purple";
 
 /** Colors the user picked by hand, newest first. */
 const RECENT_COLORS_KEY = "cut-recent-colors";
@@ -107,7 +111,7 @@ export function ColorField({
   onLive,
   onCommit,
   opacity,
-  label = "Color",
+  label: labelProp,
   className,
   mixed,
 }: {
@@ -129,6 +133,8 @@ export function ColorField({
    * wheel and the readout "Mixed"; a pick lands one color on all of them. */
   mixed?: boolean;
 }) {
+  const t = useTranslations("inspector.colorField");
+  const label = labelProp ?? t("color");
   const [pickerOpen, setPickerOpen] = useState(false);
   const [listOpen, setListOpen] = useState(false);
   const hex = safeHex(value);
@@ -149,8 +155,8 @@ export function ColorField({
     >
       <Popover open={pickerOpen} onOpenChange={setPickerOpen}>
         <PopoverTrigger
-          aria-label={`${label} — open the picker`}
-          title="Pick a color"
+          aria-label={t("openPicker", { label })}
+          title={t("pickColor")}
           className="color-field-swatch size-5 shrink-0 rounded-[5px] shadow-xs ring-1 ring-border transition-transform outline-none hover:scale-105 focus-visible:ring-2 focus-visible:ring-primary/60"
           style={{ background: mixed ? "conic-gradient(#f43f5e, #f59e0b, #22c55e, #3b82f6, #a855f7, #f43f5e)" : hex }}
         />
@@ -160,10 +166,10 @@ export function ColorField({
       </Popover>
       <Popover open={listOpen} onOpenChange={setListOpen}>
         <PopoverTrigger
-          aria-label={`${label} — open the list`}
+          aria-label={t("openList", { label })}
           className="color-field-value w-[7ch] shrink-0 rounded-sm text-left font-mono text-[11.5px] tabular-nums text-foreground uppercase outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
         >
-          {mixed ? <span className="font-sans italic normal-case">Mixed</span> : hex.slice(1)}
+          {mixed ? <span className="font-sans italic normal-case">{t("mixed")}</span> : hex.slice(1)}
         </PopoverTrigger>
         <PopoverContent side="bottom" align="end" sideOffset={6} className="w-56 p-1">
           <ColorList
@@ -212,6 +218,7 @@ export function ColorPicker({
   const [pad, setPad] = useState(() => ({ hex: value, hsv: hexToHsv(value) }));
   if (pad.hex !== value) setPad({ hex: value, hsv: hexToHsv(value) });
   const hsv = pad.hsv;
+  const t = useTranslations("inspector.colorField");
 
   const push = (next: Hsv) => {
     const hex = hsvToHex(next);
@@ -224,7 +231,7 @@ export function ColorPicker({
   return (
     <div className="flex flex-col gap-2.5">
       <DragArea
-        label="Saturation and brightness"
+        label={t("saturationBrightness")}
         className="relative h-28 w-full cursor-crosshair rounded-md ring-1 ring-border"
         style={{
           background: `linear-gradient(to top, #000, transparent), linear-gradient(to right, #fff, ${hueCss})`,
@@ -236,7 +243,7 @@ export function ColorPicker({
         <Handle color={value} left={hsv.s} top={1 - hsv.v} />
       </DragArea>
       <DragArea
-        label="Hue"
+        label={t("hue")}
         className="relative h-3 w-full cursor-ew-resize rounded-full ring-1 ring-border"
         style={{
           background:
@@ -327,9 +334,10 @@ function DragArea({
 
 /** The presets and the user's recent picks, current value checked. */
 function ColorList({ value, onPick }: { value: string; onPick: (hex: string) => void }) {
+  const t = useTranslations("inspector.colorField");
   const [recents] = useState(readRecentColors);
   const items = [
-    ...COLOR_PRESETS,
+    ...COLOR_PRESETS.map((p) => ({ hex: p.hex, name: t(`presets.${p.id}`) })),
     ...recents.filter((r) => !COLOR_PRESETS.some((p) => p.hex === r)).map((hex) => ({ hex, name: hex.slice(1) })),
   ];
 
@@ -369,6 +377,7 @@ function HexInput({
   autoFocus?: boolean;
   className?: string;
 }) {
+  const t = useTranslations("inspector.colorField");
   const [entry, setEntry] = useState({ hex: value, draft: value.slice(1) });
   if (entry.hex !== value) setEntry({ hex: value, draft: value.slice(1) });
   const setDraft = (draft: string) => setEntry({ hex: value, draft });
@@ -391,7 +400,7 @@ function HexInput({
         style={{ background: value }}
       />
       <input
-        aria-label="Hex color"
+        aria-label={t("hexColor")}
         autoFocus={autoFocus}
         value={entry.draft}
         spellCheck={false}
@@ -416,13 +425,14 @@ type EyeDropperCtor = new () => { open(): Promise<{ sRGBHex: string }> };
 
 /** Screen sampling, on the browsers that carry the EyeDropper API. */
 function Eyedropper({ onPick }: { onPick: (hex: string) => void }) {
+  const t = useTranslations("inspector.colorField");
   const [supported] = useState(() => typeof window !== "undefined" && "EyeDropper" in window);
   if (!supported) return null;
   return (
     <button
       type="button"
-      aria-label="Sample a color from the screen"
-      title="Sample a color from the screen"
+      aria-label={t("sampleScreen")}
+      title={t("sampleScreen")}
       className="grid size-7 shrink-0 place-items-center rounded-md bg-secondary/60 text-muted-foreground transition-colors hover:text-foreground"
       onClick={async () => {
         const Ctor = (window as unknown as { EyeDropper: EyeDropperCtor }).EyeDropper;

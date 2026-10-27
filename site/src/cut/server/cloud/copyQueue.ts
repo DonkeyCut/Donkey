@@ -8,14 +8,17 @@
 // copy requests drains one copy at a time instead of stampeding R2 and the
 // database all at once.
 import { randomUUID } from "node:crypto";
+import { defaultNames } from "@/cut/lib/defaultNames";
 import type { ProjectDoc } from "@/cut/lib/types";
 import type { Prisma } from "@/generated/prisma/client";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { creatorLocaleOf } from "./creatorLocale";
 import { copy, projectMediaKey } from "./r2";
 import { normalizeEmails, normalizeFeatures } from "./share";
 import { filterDocForShare, resolveShare, type ShareRow } from "./sharedView";
 import { addUsage, quotaCheck } from "./usage";
+import { errorFields, UserError } from "@/cut/lib/userError";
 import { caught, err } from "./util";
 
 const COPY_QUEUE_NAME = "donkey-cut-copy";
@@ -28,8 +31,29 @@ const STALE_QUEUED_MS = 30_000;
 // failure instead of spinning the viewer forever.
 const STALE_RUNNING_MS = 10 * 60_000;
 
-const QUOTA_MESSAGE =
-  "Your cloud storage is full — free some space, then copy again.";
+// The failures a copy job records on its row, by their English. The row
+// keeps only that English, so a status reply finds the code by looking the
+// stored message up here; a thrown exception's text stays uncoded.
+const COPY_FAILURES = {
+  stalled: new UserError("copy_stalled", "The copy stalled — try again."),
+  storageFull: new UserError(
+    "copy_storage_full",
+    "Your cloud storage is full — free some space, then copy again."
+  ),
+  shareRemoved: new UserError("share_removed", "The share was removed."),
+  accessLost: new UserError("share_access_lost", "You no longer have access to this project."),
+  projectDeleted: new UserError("project_deleted", "The project was deleted."),
+} as const;
+
+// Refusals the copy and duplicate requests answer with.
+const SIGN_IN_TO_COPY = new UserError("copy_sign_in_required", "Sign in to copy this project.");
+const COPY_NOT_FOUND = new UserError("copy_not_found", "Copy not found.");
+const PROJECT_NOT_FOUND = new UserError("project_not_found", "Project not found.");
+
+/** The coded failure a row's stored message is, when this module wrote it. */
+function recordedFailure(message: string): UserError | string {
+  return Object.values(COPY_FAILURES).find((failure) => failure.message === message) ?? message;
+}
 
 // --- Queue publish (Cloudflare Queues REST API; producers outside Workers
 // publish over HTTP). The queue id is looked up from the name once per
@@ -154,18 +178,18 @@ async function copyPlan(share: ShareRow) {
 /** A share copy's source: access re-checked at drain time, doc filtered to
  * the shared surfaces, mid-flight brief-to-video runs dropped (the copy is
  * the viewer's project — a live plan would auto-resume on their account),
- * chats only when chat is shared. Returns the permanent-failure message when
+ * chats only when chat is shared. Returns the permanent failure when
  * the copy can no longer happen. */
-async function shareSource(job: { shareId: string | null; userId: string }): Promise<CopySource | string> {
+async function shareSource(job: { shareId: string | null; userId: string }): Promise<CopySource | UserError> {
   const share = job.shareId
     ? await prisma.cutProjectShare.findUnique({ where: { id: job.shareId } })
     : null;
-  if (!share) return "The share was removed.";
+  if (!share) return COPY_FAILURES.shareRemoved;
   if (!(await viewerAllowed(share, job.userId))) {
-    return "You no longer have access to this project.";
+    return COPY_FAILURES.accessLost;
   }
   const plan = await copyPlan(share);
-  if (!plan) return "The project was deleted.";
+  if (!plan) return COPY_FAILURES.projectDeleted;
   const chats = plan.features.chat
     ? await prisma.cutChatThread.findMany({
         where: { userId: share.userId, projectId: share.projectId },
@@ -196,11 +220,11 @@ async function shareSource(job: { shareId: string | null; userId: string }): Pro
 async function duplicateSource(job: {
   projectId: string | null;
   userId: string;
-}): Promise<CopySource | string> {
+}): Promise<CopySource | UserError> {
   const row = job.projectId
     ? await prisma.cutProject.findFirst({ where: { id: job.projectId, userId: job.userId } })
     : null;
-  if (!row) return "The project was deleted.";
+  if (!row) return COPY_FAILURES.projectDeleted;
   const media = await completeMedia(job.userId, row.id);
   const { doc, proxies } = await withProxies(job.userId, row.id, row.doc as unknown as ProjectDoc, media);
   const chats = await prisma.cutChatThread.findMany({
@@ -208,12 +232,13 @@ async function duplicateSource(job: {
     select: { id: true, data: true },
   });
   const gv = doc.genvideo;
+  const names = await defaultNames(await creatorLocaleOf(job.userId));
   return {
     doc: {
       ...doc,
       genvideo: gv && (gv.phase === "done" || gv.phase === "failed") ? gv : undefined,
     },
-    name: `${doc.name} copy`,
+    name: names.copy(doc.name),
     folderId: row.folderId,
     media,
     proxies,
@@ -259,14 +284,14 @@ async function statusResponse(job: NonNullable<Awaited<ReturnType<typeof prisma.
   } else if (job.state === "running" && idleMs > STALE_RUNNING_MS) {
     await prisma.cutCopyJob.updateMany({
       where: { id: job.id, state: "running" },
-      data: { state: "error", error: "The copy stalled — try again." },
+      data: { state: "error", error: COPY_FAILURES.stalled.message },
     });
     job = (await prisma.cutCopyJob.findUnique({ where: { id: job.id } })) ?? job;
   }
   return Response.json({
     state: job.state,
     newProjectId: job.newProjectId ?? undefined,
-    error: job.error ?? undefined,
+    ...(job.error ? errorFields(recordedFailure(job.error), job.error) : {}),
   });
 }
 
@@ -278,14 +303,14 @@ export const copyJobs = {
       const view = await resolveShare(token, req);
       if (view instanceof Response) return view;
       const session = await auth.api.getSession({ headers: req.headers });
-      if (!session?.user) return err("Sign in to copy this project.", 401);
+      if (!session?.user) return err(SIGN_IN_TO_COPY, 401);
       const plan = await copyPlan(view.share);
-      if (!plan) return err("Project not found.", 404);
+      if (!plan) return err(PROJECT_NOT_FOUND, 404);
       const over = await quotaCheck(session.user.id, plan.added);
       if (over) return over;
       return await enqueue({ kind: "share", shareId: view.share.id, userId: session.user.id });
     } catch (e) {
-      return caught(e, "Could not copy the project.");
+      return caught(e, new UserError("project_copy_failed", "Could not copy the project."));
     }
   },
 
@@ -294,13 +319,13 @@ export const copyJobs = {
   async requestDuplicate(userId: string, projectId: string) {
     try {
       const row = await prisma.cutProject.findFirst({ where: { id: projectId, userId } });
-      if (!row) return err("Project not found.", 404);
+      if (!row) return err(PROJECT_NOT_FOUND, 404);
       const media = await completeMedia(userId, projectId);
       const over = await quotaCheck(userId, mediaBytes(media));
       if (over) return over;
       return await enqueue({ kind: "duplicate", projectId, userId });
     } catch (e) {
-      return caught(e, "Could not duplicate the project.");
+      return caught(e, new UserError("project_duplicate_failed", "Could not duplicate the project."));
     }
   },
 
@@ -309,18 +334,18 @@ export const copyJobs = {
     const view = await resolveShare(token, req);
     if (view instanceof Response) return view;
     const session = await auth.api.getSession({ headers: req.headers });
-    if (!session?.user) return err("Sign in to copy this project.", 401);
+    if (!session?.user) return err(SIGN_IN_TO_COPY, 401);
     const job = await prisma.cutCopyJob.findFirst({
       where: { id: jobId, userId: session.user.id, shareId: view.share.id },
     });
-    if (!job) return err("Copy not found.", 404);
+    if (!job) return err(COPY_NOT_FOUND, 404);
     return statusResponse(job);
   },
 
   /** Poll any of the caller's own copy jobs (authed surface). */
   async ownerStatus(userId: string, jobId: string) {
     const job = await prisma.cutCopyJob.findFirst({ where: { id: jobId, userId } });
-    if (!job) return err("Copy not found.", 404);
+    if (!job) return err(COPY_NOT_FOUND, 404);
     return statusResponse(job);
   },
 };
@@ -338,10 +363,10 @@ export async function executeCopyJob(jobId: string): Promise<Response> {
   // Already running, settled, or unknown — double delivery lands here.
   if (claimed.count === 0) return Response.json({ ok: true });
 
-  const fail = async (message: string) => {
+  const fail = async (failure: UserError) => {
     await prisma.cutCopyJob.update({
       where: { id: jobId },
-      data: { state: "error", error: message },
+      data: { state: "error", error: failure.message },
     });
     return Response.json({ ok: true });
   };
@@ -350,9 +375,9 @@ export async function executeCopyJob(jobId: string): Promise<Response> {
     const job = await prisma.cutCopyJob.findUnique({ where: { id: jobId } });
     if (!job) return Response.json({ ok: true });
     const src = job.kind === "duplicate" ? await duplicateSource(job) : await shareSource(job);
-    if (typeof src === "string") return fail(src);
+    if (src instanceof UserError) return fail(src);
     const over = await quotaCheck(job.userId, src.added);
-    if (over) return fail(QUOTA_MESSAGE);
+    if (over) return fail(COPY_FAILURES.storageFull);
     const now = Date.now();
     const copyDoc: ProjectDoc = { ...src.doc, name: src.name, createdAt: now, updatedAt: now };
 

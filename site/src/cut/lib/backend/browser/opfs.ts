@@ -22,8 +22,12 @@ import { isDeliveryName } from "../../exportDelivery";
 import { timelineEnd } from "../../timelineEnd";
 import type { ProjectDoc, ProjectFolder, ProjectSummary } from "../../types";
 import { currentEngineUser } from "../../api";
+import { UserError } from "../../userError";
 
 const ROOT_DIR = "cut-store";
+
+// The failure every write meets when the page cannot reach its own storage.
+const storageUnavailable = () => new UserError("browser_storage_unavailable", "Browser storage is unavailable.");
 
 /** Whether this browser can hold a store: OPFS with committed writes. The
  * same capability line the in-tab render draws. */
@@ -159,7 +163,7 @@ export async function readIndex(): Promise<StoreIndex> {
 export async function updateIndex(mutate: (idx: StoreIndex) => StoreIndex | void): Promise<StoreIndex> {
   return withStoreLock("index", async () => {
     const dir = await dirAt(userParts(), true);
-    if (!dir) throw new Error("Browser storage is unavailable.");
+    if (!dir) throw storageUnavailable();
     const idx = await readIndex();
     const next = mutate(idx) ?? idx;
     await writeFileAt(dir, "index.json", JSON.stringify(next));
@@ -180,12 +184,12 @@ export async function readDoc(id: string): Promise<ProjectDoc | null> {
 export async function writeDoc(id: string, doc: ProjectDoc): Promise<string> {
   return withStoreLock(`doc:${id}`, async () => {
     const dir = await projectDir(id, true);
-    if (!dir) throw new Error("Browser storage is unavailable.");
+    if (!dir) throw storageUnavailable();
     doc.id = id;
     doc.updatedAt = Date.now();
     await writeFileAt(dir, "project.json", JSON.stringify(doc));
     const file = await readFileAt(dir, "project.json");
-    if (!file) throw new Error("Could not read the saved project.");
+    if (!file) throw new UserError("saved_project_unreadable", "Could not read the saved project.");
     return String(file.lastModified);
   });
 }
@@ -273,7 +277,7 @@ export async function freeName(
 /** Store media bytes in a project under a deduped name. */
 export async function saveMedia(id: string, file: Blob, wantName: string): Promise<string> {
   const dir = await mediaDir(id, true);
-  if (!dir) throw new Error("Browser storage is unavailable.");
+  if (!dir) throw storageUnavailable();
   const name = await freeName(dir, wantName);
   await writeFileAt(dir, name, file);
   askPersist();
@@ -301,7 +305,7 @@ export const libraryMediaDir = (create = false) => dirAt([...libraryParts(), "me
 
 export async function saveLibraryMedia(file: Blob, wantName: string): Promise<string> {
   const dir = await libraryMediaDir(true);
-  if (!dir) throw new Error("Browser storage is unavailable.");
+  if (!dir) throw storageUnavailable();
   const name = await freeName(dir, wantName);
   await writeFileAt(dir, name, file);
   askPersist();
@@ -336,7 +340,7 @@ export async function listExports(id: string): Promise<ExportListing[]> {
 /** Land a finished render in exports/, deduping like media names do. */
 export async function saveExport(id: string, file: File, wantName: string): Promise<string> {
   const dir = await exportsDir(id, true);
-  if (!dir) throw new Error("Browser storage is unavailable.");
+  if (!dir) throw storageUnavailable();
   const dot = wantName.lastIndexOf(".");
   const ext = dot > 0 ? wantName.slice(dot) : ".mp4";
   const stem = dot > 0 ? wantName.slice(0, dot) : wantName;

@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import {
   Captions,
   ChevronDown,
@@ -27,13 +28,13 @@ import type {
 // slide data. Class strings mirror SidePanel/ImageGenPanel/GeneratePanel so it
 // is indistinguishable from the real editor at a glance.
 
-const TABS: { id: MockPanelTab; label: string; icon: typeof Film }[] = [
-  { id: "media", label: "Media", icon: Clapperboard },
-  { id: "video", label: "Video", icon: Film },
-  { id: "image", label: "Image", icon: ImageIcon },
-  { id: "audio", label: "Audio", icon: Music },
-  { id: "subtitles", label: "Subtitles", icon: Captions },
-  { id: "details", label: "Details", icon: ClipboardList },
+const TABS: { id: MockPanelTab; icon: typeof Film }[] = [
+  { id: "media", icon: Clapperboard },
+  { id: "video", icon: Film },
+  { id: "image", icon: ImageIcon },
+  { id: "audio", icon: Music },
+  { id: "subtitles", icon: Captions },
+  { id: "details", icon: ClipboardList },
 ];
 
 /** The rounded pill-select chrome, closed. */
@@ -52,13 +53,14 @@ function Pill({ label, className }: { label: string; className?: string }) {
 }
 
 export function MockSidePanel({ project }: { project: MockProject }) {
+  const t = useTranslations("mock.sidePanel");
   const { panel } = project;
 
   return (
     <div className="flex h-full min-h-0 overflow-hidden border-r border-border bg-card">
       {/* Icon rail */}
       <div className="flex min-h-0 w-[68px] shrink-0 flex-col items-center gap-1 overflow-hidden border-r border-border py-3">
-        {TABS.map(({ id, label, icon: Icon }) => [
+        {TABS.map(({ id, icon: Icon }) => [
           // Soft breaks between the file tabs, the AI-generate tabs, and the finishing tabs.
           id === "video" || id === "subtitles" ? (
             <div key={`${id}-break`} aria-hidden className="my-1 h-px w-8 shrink-0 bg-border" />
@@ -81,7 +83,7 @@ export function MockSidePanel({ project }: { project: MockProject }) {
                 panel.tab === id && "text-foreground"
               )}
             >
-              {label}
+              {t(`tabs.${id}`)}
             </span>
           </div>,
         ])}
@@ -102,28 +104,29 @@ export function MockSidePanel({ project }: { project: MockProject }) {
  * arrangements they saved. Generated media lives where it was made, so it
  * never shows up here. */
 function MediaPanel({ panel }: { panel: Extract<MockPanel, { tab: "media" }> }) {
+  const t = useTranslations("mock.sidePanel");
   return (
     <>
       <div className="flex h-12 shrink-0 items-center px-3.5">
         <div className="flex w-full rounded-lg bg-muted p-0.5 text-[11.5px]">
           <span className="flex-1 rounded-md bg-background px-3 py-0.5 text-center font-medium text-foreground shadow-sm">
-            Project Files
+            {t("projectFiles")}
           </span>
           <span className="flex-1 rounded-md px-3 py-0.5 text-center font-medium text-muted-foreground">
-            Library
+            {t("library")}
           </span>
         </div>
       </div>
       <div className="shrink-0 px-3.5 pb-3">
         <span className="flex h-8 w-full items-center justify-center gap-1.5 rounded-lg border border-input text-sm font-medium">
-          <Upload className="size-4" /> Upload
+          <Upload className="size-4" /> {t("upload")}
         </span>
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden px-3.5 pb-4">
         <div className="flex shrink-0 flex-col gap-1.5">
-          {panel.templates.map((t, i) => (
-            <TemplateRow key={i} template={t} />
+          {panel.templates.map((template, i) => (
+            <TemplateRow key={i} template={template} />
           ))}
         </div>
         <div className="grid shrink-0 grid-cols-2 content-start gap-2.5">
@@ -137,13 +140,14 @@ function MediaPanel({ panel }: { panel: Extract<MockPanel, { tab: "media" }> }) 
 }
 
 function TemplateRow({ template }: { template: MockTemplate }) {
+  const t = useTranslations("mock.sidePanel");
   return (
     <div className="light flex items-center gap-2 rounded-lg border border-page-border bg-background bg-clip-padding px-2.5 py-1.5 text-foreground">
       <Layers className="size-3.5 shrink-0 text-violet-500" />
       <div className="min-w-0 flex-1">
         <div className="truncate text-[12px] font-medium">{template.name}</div>
         <div className="flex items-center gap-0.5 text-[10.5px] text-muted-foreground">
-          {template.duration} · {template.items} items
+          {t("templateMeta", { duration: template.duration, count: template.items })}
           <ChevronDown className="size-3" />
         </div>
       </div>
@@ -233,13 +237,16 @@ function GeneratePanel({
   panel: Extract<MockPanel, { tab: "image" | "video" }>;
   aspect: MockProject["aspect"];
 }) {
+  const t = useTranslations("mock");
   const isImage = panel.tab === "image";
+  const aspectName = t(aspect === "9:16" ? "aspectNames.vertical" : "aspectNames.widescreen");
+  const generate = t(isImage ? "sidePanel.generateImage" : "sidePanel.generateVideo");
 
   return (
     <>
       <div className="flex h-12 shrink-0 items-center pr-2.5 pl-4">
         <span className="text-sm font-semibold tracking-tight">
-          {isImage ? "Generate image" : "Generate video"}
+          {generate}
         </span>
       </div>
 
@@ -255,7 +262,7 @@ function GeneratePanel({
           <div className="flex shrink-0 items-center gap-2">
             <Pill
               className="min-w-0 flex-1"
-              label={aspect === "9:16" ? "Vertical" : "Widescreen"}
+              label={aspectName}
             />
             <Pill label="2K" />
           </div>
@@ -264,23 +271,23 @@ function GeneratePanel({
             <Pill className="h-7 shrink-0" label="Omni Flash" />
             <Pill
               className="h-7 shrink-0"
-              label={aspect === "9:16" ? "Vertical" : "Widescreen"}
+              label={aspectName}
             />
           </>
         )}
 
         <div className="flex h-8 w-full shrink-0 items-center justify-center gap-1.5 rounded-lg border border-transparent bg-primary pr-2.5 pl-2 text-sm font-medium whitespace-nowrap text-primary-foreground">
           <Sparkles className="size-4 shrink-0" />
-          {isImage ? "Generate image" : "Generate video"}
+          {generate}
         </div>
 
         {!isImage && (
           <p className="shrink-0 text-[11px] leading-relaxed text-muted-foreground">
-            Renders take a minute or two. Keep editing while it runs.
+            {t("sidePanel.renderNote")}
           </p>
         )}
 
-        {isImage && <div className="text-xs font-semibold text-muted-foreground">Generated</div>}
+        {isImage && <div className="text-xs font-semibold text-muted-foreground">{t("sidePanel.generated")}</div>}
 
         {isImage ? (
           <div className="grid shrink-0 grid-cols-2 content-start gap-2.5">

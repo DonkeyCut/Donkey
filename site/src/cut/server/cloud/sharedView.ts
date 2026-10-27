@@ -13,9 +13,14 @@ import { mediaObjectUrl, mediaTreeUrl, mediaUrlLifetime } from "./mediaCdn";
 import { projectHlsPrefix, projectMediaKey } from "./r2";
 import { normalizeEmails, normalizeFeatures, type ShareFeatures } from "./share";
 import { shareCacheHeaders, shareRedirectHeaders } from "./shareCache";
+import { UserError } from "@/cut/lib/userError";
 import { caught, decodeFileParam, err, redirect } from "./util";
 
 const PRESIGN_GET_BATCH_MAX = 500;
+
+// Refusals the share viewer reads, coded so the page words them.
+const SHARE_NOT_FOUND = new UserError("share_not_found", "Share not found.");
+const PROJECT_NOT_FOUND = new UserError("project_not_found", "Project not found.");
 /** How long a media redirect may be reused. Tokens are minted on window
  * boundaries, so the redirect is reusable until the window turns over; this
  * keeps it well inside that. */
@@ -34,17 +39,17 @@ interface ShareView {
  * additionally needs a signed-in viewer who is the owner or an invitee.
  * Returns the error Response to send when access fails. */
 export async function resolveShare(token: string, req: Request): Promise<ShareView | Response> {
-  if (!token || token.length > 64) return err("Share not found.", 404);
+  if (!token || token.length > 64) return err(SHARE_NOT_FOUND, 404);
   const share = await prisma.cutProjectShare.findUnique({ where: { id: token } });
-  if (!share) return err("Share not found.", 404);
+  if (!share) return err(SHARE_NOT_FOUND, 404);
   const features = normalizeFeatures(share.features);
   if (share.access === "public") return { share, features };
   const session = await auth.api.getSession({ headers: req.headers });
-  if (!session?.user) return err("Sign in to view this project.", 401);
+  if (!session?.user) return err(new UserError("share_sign_in_required", "Sign in to view this project."), 401);
   const email = session.user.email?.toLowerCase() ?? "";
   const invited = (normalizeEmails(share.emails) ?? []).includes(email);
   if (session.user.id !== share.userId && !invited) {
-    return err("You don't have access to this project.", 403);
+    return err(new UserError("share_access_denied", "You don't have access to this project."), 403);
   }
   return { share, features };
 }
@@ -169,7 +174,7 @@ export const sharedView = {
     const view = await resolveShare(token, req);
     if (view instanceof Response) return view;
     const row = await ownerProject(view.share);
-    if (!row) return err("Share not found.", 404);
+    if (!row) return err(SHARE_NOT_FOUND, 404);
     return Response.json(
       {
         projectId: view.share.projectId,
@@ -184,7 +189,7 @@ export const sharedView = {
   async doc(token: string, id: string, req: Request) {
     const view = await resolveShare(token, req);
     if (view instanceof Response) return view;
-    if (id !== view.share.projectId) return err("Project not found.", 404);
+    if (id !== view.share.projectId) return err(PROJECT_NOT_FOUND, 404);
     // The viewer's 10s change-poll is a HEAD that only reads the version
     // header. Serve it from a version-only select instead of reading and
     // filtering the whole doc every tick.
@@ -193,7 +198,7 @@ export const sharedView = {
         where: { id: view.share.projectId, userId: view.share.userId },
         select: { version: true, updatedAt: true },
       });
-      if (!meta) return err("Project not found.", 404);
+      if (!meta) return err(PROJECT_NOT_FOUND, 404);
       return new Response(null, {
         headers: {
           "x-cut-doc-version": String(meta.version),
@@ -202,7 +207,7 @@ export const sharedView = {
       });
     }
     const row = await ownerProject(view.share);
-    if (!row) return err("Project not found.", 404);
+    if (!row) return err(PROJECT_NOT_FOUND, 404);
     return Response.json(filterDocForShare(row.doc as unknown as ProjectDoc, view.features), {
       headers: {
         "x-cut-doc-version": String(row.version),

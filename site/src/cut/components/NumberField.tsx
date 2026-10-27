@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { useRef, useState } from "react";
 import { Check, ChevronDown } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -51,6 +52,7 @@ export function NumberField({
    * value is typed, dragged or picked, which lands on all of them. */
   mixed?: boolean;
 }) {
+  const t = useTranslations("inspector.controls");
   const show = (v: number) => (mixed ? "" : format(v));
   const [entry, setEntry] = useState({ value, mixed: !!mixed, draft: show(value) });
   const [open, setOpen] = useState(false);
@@ -83,7 +85,7 @@ export function NumberField({
       {icon && (
         <span
           aria-hidden
-          title="Drag to adjust"
+          title={t("dragToAdjust")}
           className="grid shrink-0 cursor-ew-resize touch-none place-items-center text-muted-foreground [&_svg]:size-3.5"
           onPointerDown={(e) => {
             if (e.button !== 0) return;
@@ -117,7 +119,7 @@ export function NumberField({
       <input
         aria-label={label}
         value={entry.draft}
-        placeholder={mixed ? "Mixed" : undefined}
+        placeholder={mixed ? t("mixed") : undefined}
         inputMode="decimal"
         spellCheck={false}
         className="w-full min-w-0 bg-transparent font-mono text-[11.5px] tabular-nums outline-none"
@@ -140,7 +142,7 @@ export function NumberField({
       {presets && presets.length > 0 && (
         <Popover open={open} onOpenChange={setOpen}>
           <PopoverTrigger
-            aria-label={`${label} presets`}
+            aria-label={t("presets", { label })}
             className="grid size-6 shrink-0 place-items-center rounded-[5px] text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-primary/60"
           >
             <ChevronDown className="size-3.5" />

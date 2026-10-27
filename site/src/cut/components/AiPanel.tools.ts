@@ -15,6 +15,7 @@ import { PROJECT_PAGE_DEFAULT, PROJECT_PAGE_MAX } from "@/cut/lib/projectLink";
 import { FIND_MEDIA_DEFAULT, FIND_MEDIA_MAX, FIND_MEDIA_SNAPSHOT_CAP } from "@/cut/lib/findMedia";
 import { COMPARE_MODES, MAX_COMPARE, SWEEP_TARGET } from "@/cut/lib/frameDiff";
 import { EASE_IDS } from "@donkeycut/effects-kit";
+import { LOCALES, type Locale } from "@/i18n/locales";
 import {
   DETECT_CHANGES_MAX,
   DETECT_CUTS_MAX,
@@ -58,6 +59,16 @@ const pictureArg = {
   description:
     'Read inside this box of the source\'s frame, or "full" for the whole frame. Default: the picture box find_picture keeps on the source, else the whole frame. Every x, y, w, h the call takes and returns is a fraction of it.',
 };
+
+/** A locale's language by its English name, the way the model reads it:
+ * "ko" → "Korean", "pt-BR" → "Brazilian Portuguese". */
+export function languageName(locale: Locale): string {
+  return new Intl.DisplayNames(["en"], { type: "language" }).of(locale) ?? locale;
+}
+
+/** The interface languages, as the prompt and set_interface_language list
+ * them: "en (English), es (Spanish), …". */
+export const INTERFACE_LANGUAGE_LIST = LOCALES.map((locale) => `${locale} (${languageName(locale)})`).join(", ");
 
 export const AI_PANEL_TOOLS = [
   {
@@ -466,6 +477,15 @@ export const AI_PANEL_TOOLS = [
         asset_ids: { type: "array", items: { type: "string" }, description: "Reference asset ids to copy" },
       },
       ["link", "asset_ids"]
+    ),
+  },
+  {
+    name: "set_interface_language",
+    description:
+      `Change the language the editor's own interface shows — its menus, buttons and messages — for this account: ${INTERFACE_LANGUAGE_LIST}. Call it only when the person asks to change the interface language; a reply in another language needs no call. In the editor the change saves to the account and the page reloads in the new language as this reply finishes; a session with no editor page saves it to the account, and the editor opens in it next time. The result says which happened.`,
+    inputSchema: obj(
+      { locale: { type: "string", enum: [...LOCALES], description: "The interface language" } },
+      ["locale"]
     ),
   },
   {

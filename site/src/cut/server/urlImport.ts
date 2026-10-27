@@ -7,6 +7,7 @@ import { mediaDir, mediaPath as projectMediaPath, readProject } from "./projects
 import { download, type Downloaded, type DownloadOptions } from "./urlDownload";
 import { URL_BUSY_MESSAGE, URL_DOWNLOADS_MAX } from "../lib/urlBatch";
 import { uniqueName } from "./util";
+import { UserError } from "../lib/userError";
 
 // Import a URL (TikTok, YouTube, Instagram, an X post, a page, …) into the
 // library or a project. The fetch itself lives in urlDownload.ts (the bundled yt-dlp,
@@ -29,9 +30,9 @@ async function withDownload<T>(
   consume: (dl: Downloaded) => Promise<T>
 ): Promise<T> {
   assertLocalRuntime();
-  if (!/^https?:\/\//i.test(url.trim())) throw new Error("Enter a valid http(s) URL.");
+  if (!/^https?:\/\//i.test(url.trim())) throw new UserError("url_invalid", "Enter a valid http(s) URL.");
   if (active >= MAX_ACTIVE) {
-    throw new Error(URL_BUSY_MESSAGE);
+    throw new UserError("downloads_busy", URL_BUSY_MESSAGE);
   }
   active++;
   try {
@@ -55,7 +56,7 @@ export async function importFromUrl(
   opts: DownloadOptions = {}
 ): Promise<LibraryAsset[]> {
   return withDownload(url, opts, async (dl) => {
-    if (dl.files.length === 0) throw new Error("That link has no media to import.");
+    if (dl.files.length === 0) throw new UserError("link_no_media", "That link has no media to import.");
     const assets: LibraryAsset[] = [];
     for (const f of dl.files) {
       assets.push(await addDownloaded(f.file, f.title, dl.source, f.poster));
@@ -73,7 +74,7 @@ export async function importUrlToProject(
   url: string,
   opts: DownloadOptions = {}
 ): Promise<{ files: { fileName: string; title: string }[]; source: LibrarySource; text?: string }> {
-  if (!(await readProject(projectId))) throw new Error("Project not found.");
+  if (!(await readProject(projectId))) throw new UserError("project_not_found", "Project not found.");
   return withDownload(url, opts, async (dl) => {
     await mkdir(mediaDir(projectId), { recursive: true });
     const files: { fileName: string; title: string }[] = [];

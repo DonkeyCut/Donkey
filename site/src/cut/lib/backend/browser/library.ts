@@ -24,6 +24,7 @@ import type {
 import * as store from "./opfs";
 import { registerBlobFile, registeredUrl, revokeRegistered } from "./registry";
 import { caught, err, json, serveFile } from "./respond";
+import { UserError } from "../../userError";
 
 const INDEX_FILE = "library.json";
 
@@ -106,7 +107,7 @@ async function readIndex(): Promise<LibraryIndex> {
 async function mutateIndex<T>(fn: (idx: LibraryIndex) => T): Promise<T> {
   return store.withStoreLock("library", async () => {
     const dir = await store.libraryDir(true);
-    if (!dir) throw new Error("Browser storage is unavailable.");
+    if (!dir) throw new UserError("browser_storage_unavailable", "Browser storage is unavailable.");
     const idx = await readIndex();
     const result = fn(idx);
     await store.writeFileAt(dir, INDEX_FILE, JSON.stringify(idx));
@@ -171,7 +172,7 @@ async function addAsset(
   posterFile?: string,
 ): Promise<StoredAsset> {
   const type = meta?.type ?? libraryTypeOf(fileName);
-  if (!type) throw new Error("Unsupported file type.");
+  if (!type) throw new UserError("file_type_unsupported", "Unsupported file type.");
   const asset: StoredAsset = {
     id: crypto.randomUUID().slice(0, 8),
     fileName,
@@ -212,7 +213,7 @@ async function upload(req: Request): Promise<Response> {
     const meta = parseField<UploadMeta>(form.get("meta"));
     const source = parseField<LibrarySource>(form.get("source"));
     if (!(meta?.type ?? libraryTypeOf(file.name)))
-      return err("Unsupported file type.", 400);
+      return err(new UserError("file_type_unsupported", "Unsupported file type."), 400);
     const fileName = await store.saveLibraryMedia(file, file.name);
     await register(fileName, file);
     // An import carries the source's cover alongside the media; it is stored
@@ -229,7 +230,7 @@ async function upload(req: Request): Promise<Response> {
     }
     return json(await addAsset(fileName, name, meta, source, posterFile));
   } catch (e) {
-    return caught(e, "Upload failed.");
+    return caught(e, new UserError("upload_failed", "Upload failed."));
   }
 }
 
@@ -238,7 +239,7 @@ async function serveMedia(
   download: boolean,
 ): Promise<Response> {
   const file = await store.readFileAt(await store.libraryMediaDir(), fileName);
-  if (!file) return err("Media file not found.", 404);
+  if (!file) return err(new UserError("media_file_not_found", "Media file not found."), 404);
   await register(fileName, file);
   return serveFile(file, fileName, download);
 }
@@ -281,13 +282,13 @@ async function dropFiles(files: string[]): Promise<void> {
 async function removeAsset(id: string): Promise<Response> {
   try {
     const files = await mutateIndex((idx) => {
-      if (!idx.assets.some((a) => a.id === id)) throw new Error("Library asset not found.");
+      if (!idx.assets.some((a) => a.id === id)) throw new UserError("library_asset_not_found", "Library asset not found.");
       return takeAssets(idx, new Set([id]));
     });
     await dropFiles(files);
     return json({ ok: true });
   } catch (e) {
-    return caught(e, "Could not delete.");
+    return caught(e, new UserError("library_delete_failed", "Could not delete."));
   }
 }
 
@@ -304,15 +305,15 @@ async function makeProxy(req: Request, id: string): Promise<Response> {
     const { compatCoverIn, compatCovers, compatProxyNameFor } = await import("../../proxyNames");
     const compat = compatCoverIn(asked);
     const asset = (await readIndex()).assets.find((a) => a.id === id);
-    if (!asset) return err("Library asset not found.", 404);
-    if (asset.type !== "video") return err("Only a video takes a playable copy.", 400);
+    if (!asset) return err(new UserError("library_asset_not_found", "Library asset not found."), 404);
+    if (asset.type !== "video") return err(new UserError("playable_copy_video_only", "Only a video takes a playable copy."), 400);
     const dir = await store.libraryMediaDir(true);
-    if (!dir) return err("Browser storage is unavailable.", 500);
+    if (!dir) return err(new UserError("browser_storage_unavailable", "Browser storage is unavailable."), 500);
     const held = asset.proxyFile;
     const answers = !!held && (!compat || compatCovers(held, compat));
     if (held && answers && (await store.readFileAt(dir, held))) return json(asset);
     const master = await store.readFileAt(dir, asset.fileName);
-    if (!master) return err("Media file not found.", 404);
+    if (!master) return err(new UserError("media_file_not_found", "Media file not found."), 404);
 
     // Loaded on the ask: the encoder pulls in the decoders and the muxer.
     const { encodeProxyInPage, proxyNameFor, proxyOnTheMac } = await import("../../proxyEncode");
@@ -331,7 +332,7 @@ async function makeProxy(req: Request, id: string): Promise<Response> {
     }
     if (!fileName) {
       const blob = await proxyOnTheMac(async () => master, asset.fileName, maxHeight!, crf!);
-      if (!blob) return err("This browser can't make a playable copy of this video. Open the Donkey app to make one.", 422);
+      if (!blob) return err(new UserError("playable_copy_needs_app", "This browser can't make a playable copy of this video. Open the Donkey app to make one."), 422);
       fileName = await store.saveLibraryMedia(blob, proxyNameFor(asset.fileName));
     }
     const landed = fileName;
@@ -339,7 +340,7 @@ async function makeProxy(req: Request, id: string): Promise<Response> {
       // The asset may have been deleted while the copy was built.
       const updated = await mutateIndex((idx) => {
         const live = idx.assets.find((a) => a.id === id);
-        if (!live) throw new Error("Library asset not found.");
+        if (!live) throw new UserError("library_asset_not_found", "Library asset not found.");
         live.proxyFile = landed;
         return live;
       });
@@ -352,7 +353,7 @@ async function makeProxy(req: Request, id: string): Promise<Response> {
       throw e;
     }
   } catch (e) {
-    return caught(e, "Could not make the playable copy.");
+    return caught(e, new UserError("playable_copy_make_failed", "Could not make the playable copy."));
   }
 }
 
@@ -366,15 +367,15 @@ async function move(req: Request): Promise<Response> {
       const item =
         idx.assets.find((a) => a.id === id) ??
         idx.templates.find((t) => t.id === id);
-      if (!item) throw new Error("Library item not found.");
+      if (!item) throw new UserError("library_item_not_found", "Library item not found.");
       if (folderId && !idx.folders.some((f) => f.id === folderId)) {
-        throw new Error("Folder not found.");
+        throw new UserError("folder_not_found", "Folder not found.");
       }
       item.folderId = folderId ?? null;
     });
     return json({ ok: true });
   } catch (e) {
-    return caught(e, "Could not move item.");
+    return caught(e, new UserError("library_item_move_failed", "Could not move item."));
   }
 }
 
@@ -385,7 +386,7 @@ async function createFolder(req: Request): Promise<Response> {
       parentId?: string | null;
     };
     const trimmed = (name ?? "").trim();
-    if (!trimmed) return err("Folder name required.", 500);
+    if (!trimmed) return err(new UserError("folder_name_required", "Folder name required."), 500);
     const id = crypto.randomUUID().slice(0, 8);
     return json(
       await mutateIndex((idx) => {
@@ -400,7 +401,7 @@ async function createFolder(req: Request): Promise<Response> {
       }),
     );
   } catch (e) {
-    return caught(e, "Could not create folder.");
+    return caught(e, new UserError("folder_create_failed", "Could not create folder."));
   }
 }
 
@@ -413,11 +414,11 @@ async function updateFolder(req: Request, id: string): Promise<Response> {
       parentId?: string | null;
     };
     const trimmed = name?.trim();
-    if (name !== undefined && !trimmed) return err("Folder name required.", 500);
+    if (name !== undefined && !trimmed) return err(new UserError("folder_name_required", "Folder name required."), 500);
     return json(
       await mutateIndex((idx) => {
         const folder = idx.folders.find((f) => f.id === id);
-        if (!folder) throw new Error("Folder not found.");
+        if (!folder) throw new UserError("folder_not_found", "Folder not found.");
         if (trimmed) folder.name = trimmed.slice(0, 80);
         if (parentId !== undefined) {
           folder.parentId = resolveParent(idx.folders, id, parentId);
@@ -426,7 +427,7 @@ async function updateFolder(req: Request, id: string): Promise<Response> {
       }),
     );
   } catch (e) {
-    return caught(e, "Could not update folder.");
+    return caught(e, new UserError("folder_update_failed", "Could not update folder."));
   }
 }
 
@@ -446,7 +447,7 @@ async function deleteFolder(id: string): Promise<Response> {
     await dropFiles(files);
     return json({ ok: true });
   } catch (e) {
-    return caught(e, "Could not delete folder.");
+    return caught(e, new UserError("folder_delete_failed", "Could not delete folder."));
   }
 }
 
@@ -456,7 +457,7 @@ async function copyIntoProject(
   fileName: string,
 ): Promise<string> {
   const file = await store.readFileAt(await store.libraryMediaDir(), fileName);
-  if (!file) throw new Error("Library file not found.");
+  if (!file) throw new UserError("library_file_not_found", "Library file not found.");
   const stored = await store.saveMedia(projectId, file, fileName);
   registerBlobFile(projectMediaApiPath(projectId, stored), file);
   return stored;
@@ -471,7 +472,7 @@ async function copyFromProject(
     await store.mediaDir(projectId),
     fileName,
   );
-  if (!file) throw new Error("Media file not found in project.");
+  if (!file) throw new UserError("project_media_not_found", "Media file not found in project.");
   const stored = await store.saveLibraryMedia(file, fileName);
   await register(stored, file);
   return stored;
@@ -484,12 +485,12 @@ async function addToProject(req: Request): Promise<Response> {
       projectId: string;
     };
     const asset = (await readIndex()).assets.find((a) => a.id === assetId);
-    if (!asset) return err("Library asset not found.", 404);
+    if (!asset) return err(new UserError("library_asset_not_found", "Library asset not found."), 404);
     if (!(await store.readDoc(projectId)))
-      return err("Project not found.", 404);
+      return err(new UserError("project_not_found", "Project not found."), 404);
     return json({ fileName: await copyIntoProject(projectId, asset.fileName) });
   } catch (e) {
-    return caught(e, "Could not add from library.");
+    return caught(e, new UserError("library_add_failed", "Could not add from library."));
   }
 }
 
@@ -506,7 +507,7 @@ async function saveFromProject(req: Request): Promise<Response> {
       name?: string;
     };
     const doc = await store.readDoc(projectId);
-    if (!doc) return err("Project not found.", 404);
+    if (!doc) return err(new UserError("project_not_found", "Project not found."), 404);
     const known = doc.assets.find((a) => a.fileName === fileName);
     const stored = await copyFromProject(projectId, fileName);
     return json(
@@ -518,7 +519,7 @@ async function saveFromProject(req: Request): Promise<Response> {
       }),
     );
   } catch (e) {
-    return caught(e, "Could not save to library.");
+    return caught(e, new UserError("library_save_failed", "Could not save to library."));
   }
 }
 
@@ -547,8 +548,8 @@ async function saveTemplate(req: Request): Promise<Response> {
       projectId: string;
     } & TemplateInput;
     if (!(await store.readDoc(projectId)))
-      return err("Project not found.", 404);
-    if (templateEmpty(input)) return err("Nothing to save.", 500);
+      return err(new UserError("project_not_found", "Project not found."), 404);
+    if (templateEmpty(input)) return err(new UserError("template_nothing_to_save", "Nothing to save."), 500);
     const media: TemplateMedia[] = [];
     for (const m of input.media ?? []) {
       media.push({
@@ -574,7 +575,7 @@ async function saveTemplate(req: Request): Promise<Response> {
     });
     return json(template);
   } catch (e) {
-    return caught(e, "Could not save the template.");
+    return caught(e, new UserError("template_save_failed", "Could not save the template."));
   }
 }
 
@@ -594,7 +595,7 @@ async function importTemplate(req: Request): Promise<Response> {
     const media: TemplateMedia[] = [];
     for (const [i, m] of (input.media ?? []).entries()) {
       const file = files[i];
-      if (!file) return err("Template media missing.", 400);
+      if (!file) return err(new UserError("template_media_missing", "Template media missing."), 400);
       const fileName = await store.saveLibraryMedia(
         file,
         m.fileName || file.name,
@@ -621,7 +622,7 @@ async function importTemplate(req: Request): Promise<Response> {
     });
     return json(template);
   } catch (e) {
-    return caught(e, "Could not add the template.");
+    return caught(e, new UserError("template_add_failed", "Could not add the template."));
   }
 }
 
@@ -632,9 +633,9 @@ async function materializeTemplate(
   try {
     const { projectId } = (await req.json()) as { projectId: string };
     if (!(await store.readDoc(projectId)))
-      return err("Project not found.", 404);
+      return err(new UserError("project_not_found", "Project not found."), 404);
     const template = (await readIndex()).templates.find((t) => t.id === id);
-    if (!template) return err("Template not found.", 404);
+    if (!template) return err(new UserError("template_not_found", "Template not found."), 404);
     const media: TemplateMedia[] = [];
     for (const m of template.media) {
       media.push({
@@ -644,7 +645,7 @@ async function materializeTemplate(
     }
     return json({ template, media });
   } catch (e) {
-    return caught(e, "Could not add the template.");
+    return caught(e, new UserError("template_add_failed", "Could not add the template."));
   }
 }
 
@@ -662,7 +663,7 @@ async function addToTemplate(req: Request, id: string): Promise<Response> {
       return json(
         await mutateIndex((idx) => {
           const t = idx.templates.find((x) => x.id === id);
-          if (!t) throw new Error("Template not found.");
+          if (!t) throw new UserError("template_not_found", "Template not found.");
           const mi = t.media.length;
           t.media = [...t.media, { ...media, fileName: stored }];
           if (audio)
@@ -681,7 +682,7 @@ async function addToTemplate(req: Request, id: string): Promise<Response> {
       throw e;
     }
   } catch (e) {
-    return caught(e, "Could not add to the template.");
+    return caught(e, new UserError("template_append_failed", "Could not add to the template."));
   }
 }
 
@@ -692,13 +693,13 @@ async function renameTemplate(req: Request, id: string): Promise<Response> {
     return json(
       await mutateIndex((idx) => {
         const template = idx.templates.find((t) => t.id === id);
-        if (!template) throw new Error("Template not found.");
+        if (!template) throw new UserError("template_not_found", "Template not found.");
         template.name = next;
         return template;
       }),
     );
   } catch (e) {
-    return caught(e, "Could not rename the template.");
+    return caught(e, new UserError("template_rename_failed", "Could not rename the template."));
   }
 }
 
@@ -709,13 +710,13 @@ async function renameAsset(req: Request, id: string): Promise<Response> {
     return json(
       await mutateIndex((idx) => {
         const asset = idx.assets.find((a) => a.id === id);
-        if (!asset) throw new Error("Library asset not found.");
+        if (!asset) throw new UserError("library_asset_not_found", "Library asset not found.");
         asset.name = next;
         return asset;
       }),
     );
   } catch (e) {
-    return caught(e, "Could not rename the file.");
+    return caught(e, new UserError("file_rename_failed", "Could not rename the file."));
   }
 }
 
@@ -725,7 +726,7 @@ async function deleteTemplate(id: string): Promise<Response> {
     await dropFiles(files);
     return json({ ok: true });
   } catch (e) {
-    return caught(e, "Could not delete the template.");
+    return caught(e, new UserError("template_delete_failed", "Could not delete the template."));
   }
 }
 

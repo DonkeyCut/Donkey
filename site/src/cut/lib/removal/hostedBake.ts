@@ -30,8 +30,8 @@ import {
   refineMatteAgainstFrame,
 } from "@donkeycut/effects-kit";
 import { openCanvasVideo, scaledEvenSize, type CanvasVideoEncoder } from "../canvasVideo";
-import { NO_CREDITS_MESSAGE } from "../credits";
 import { ClipReader } from "../exportRender";
+import { NoCreditsError } from "../hostedError";
 import { hostedPost } from "../hosted";
 import { storeHostedBlob } from "../hostedBlobs";
 import { falMatteModels } from "@/lib/inference/matte-models";
@@ -39,6 +39,7 @@ import { createRasterCanvas, decodeRasterImageUrl, type RasterSurface } from "..
 import type { MediaAsset, RemovalSeeds, VideoClip } from "../types";
 import { liveReader } from "../liveReader";
 import { MatteBakeCancelled } from "./localBake";
+import { UserError } from "../userError";
 
 /** Segment sent to the tracker: capped resolution and rate — the mask comes
  * back at the same shape, and tracking cost scales with both. The bitrate
@@ -55,18 +56,19 @@ const CARRY_POINTS_MAX = 6;
 /** The hosted tier answered 402: credits unlock it, the local matte stands.
  * Carries the app-wide balance message so every surface renders it the same
  * way, with the credits link. */
-export class MatteNeedsCredits extends Error {
-  constructor() {
-    super(NO_CREDITS_MESSAGE);
-  }
-}
+export class MatteNeedsCredits extends NoCreditsError {}
 
 /** The tracker settled a generation as failed — the charge is spent and the
  * track is dead. The run forgets the dead part in the ticket it reports, so
  * a retry re-buys that piece alone and resumes the rest. Transient errors
  * (a poll that couldn't reach the route) throw plain errors instead, and
  * the whole ticket stands for a resume. */
-export class MatteTrackFailed extends Error {}
+export class MatteTrackFailed extends Error {
+  /** What the person reads: the tracker's own words, or a coded failure. */
+  constructor(readonly reason: Error) {
+    super(reason.message);
+  }
+}
 
 type Point = { x: number; y: number; frame: number; label: 0 | 1; object: string };
 
@@ -101,7 +103,9 @@ async function renderSegment(
   onProgress?: (fraction: number) => void
 ): Promise<{ blob: Blob; from: number; w: number; h: number; frames: number }> {
   const first = await reader.frameAt(from);
-  if (first.kind !== "ready") throw new Error("The clip's picture could not be read.");
+  if (first.kind !== "ready") {
+    throw new UserError("clip_picture_unreadable", "The clip's picture could not be read.");
+  }
   const { w, h } = scaledEvenSize(first.width, first.height, SEGMENT_SHORT);
   const seconds = frames / MATTE_FPS;
   const enc = await openCanvasVideo({
@@ -280,7 +284,9 @@ async function pollTrack(
   const deadline = Date.now() + DEADLINE_MS;
   while (gen.status === "in_progress" || gen.status === "pending") {
     checkAborted(opts.signal);
-    if (Date.now() > deadline) throw new Error("The quality cutout is taking too long.");
+    if (Date.now() > deadline) {
+      throw new UserError("matte_cutout_timeout", "The quality cutout is taking too long.");
+    }
     await new Promise((r2) => setTimeout(r2, POLL_MS));
     checkAborted(opts.signal);
     const poll = await hostedPost("/api/inference/assets/refresh", {
@@ -293,19 +299,24 @@ async function pollTrack(
       providerPollingUrl: gen.providerPollingUrl,
       metadata: gen.metadata ?? {},
     });
-    if (!poll.ok) throw new Error("The quality cutout failed.");
+    if (!poll.ok) {
+      throw new UserError("matte_cutout_failed", "The quality cutout failed.");
+    }
     gen = (await poll.json()) as Generation;
     onFrac(Math.min(1, 1 - (deadline - Date.now()) / DEADLINE_MS));
   }
   if (gen.status !== "completed") {
-    const message =
-      typeof (gen.error as { message?: string } | undefined)?.message === "string"
-        ? (gen.error as { message: string }).message
-        : "The quality cutout failed.";
-    throw new MatteTrackFailed(message);
+    const message = (gen.error as { message?: string } | undefined)?.message;
+    throw new MatteTrackFailed(
+      typeof message === "string"
+        ? new Error(message)
+        : new UserError("matte_cutout_failed", "The quality cutout failed."),
+    );
   }
   const maskUrl = gen.outputs.find((o) => o.url)?.url;
-  if (!maskUrl) throw new MatteTrackFailed("The tracker returned no mask.");
+  if (!maskUrl) {
+    throw new MatteTrackFailed(new UserError("matte_tracker_no_mask", "The tracker returned no mask."));
+  }
   return maskUrl;
 }
 
@@ -340,7 +351,9 @@ async function refinePart(
   let localUrl: string | null = null;
   if (typeof URL !== "undefined" && typeof URL.createObjectURL === "function") {
     const got = await fetch(maskUrl).catch(() => null);
-    if (!got?.ok) throw new Error("The tracked mask could not be downloaded.");
+    if (!got?.ok) {
+      throw new UserError("matte_mask_download_failed", "The tracked mask could not be downloaded.");
+    }
     localUrl = URL.createObjectURL(await got.blob());
   }
   const readUrl = localUrl ?? maskUrl;
@@ -354,7 +367,9 @@ async function refinePart(
   const maskReader = new ClipReader(maskAsset, () => readUrl);
   try {
     const firstMask = await maskReader.frameAt(0);
-    if (firstMask.kind !== "ready") throw new Error("The tracked mask could not be read.");
+    if (firstMask.kind !== "ready") {
+      throw new UserError("matte_mask_unreadable", "The tracked mask could not be read.");
+    }
     let s = sink.current;
     if (!s) {
       const { w, h } = scaledEvenSize(firstMask.width, firstMask.height, MATTE_SHORT);
@@ -424,7 +439,7 @@ async function refinePart(
 /**
  * Run the hosted quality bake for a clip and return the refined matte, ready
  * to store as the project's matte asset. Throws `MatteNeedsCredits` on a 402,
- * `MatteTrackFailed` when the tracker settled a paid run as dead, and
+ * the tracker's reason when it settled a paid run as dead, and
  * `MatteBakeCancelled` on abort. Each part's submit bills, so the caller
  * persists the ticket handed to `onSubmitted` and passes it back as `resume`
  * after a reload — the run then re-attaches to every submitted part and pays
@@ -441,7 +456,9 @@ export async function hostedBakeMatte(
   } = {}
 ): Promise<{ blob: Blob; in: number }> {
   const r = clip.removal;
-  if (!r) throw new Error("The clip has no removal to bake.");
+  if (!r) {
+    throw new UserError("matte_no_removal", "The clip has no removal to bake.");
+  }
   const still = asset.type === "image";
   const from = still ? 0 : Math.max(0, clip.in);
   const to = still ? from + 1 / MATTE_FPS : Math.min(clip.out, asset.duration || clip.out);
@@ -501,8 +518,8 @@ export async function hostedBakeMatte(
         }
         if (custom && !concept && points.length === 0) {
           throw p === 0
-            ? new Error("No selection to track.")
-            : new MatteTrackFailed("The selection was lost at a part boundary.");
+            ? new UserError("matte_no_selection", "No selection to track.")
+            : new UserError("matte_selection_lost", "The selection was lost at a part boundary.");
         }
         const parameters = {
           ...(concept ? { prompt: concept } : {}),
@@ -511,7 +528,9 @@ export async function hostedBakeMatte(
         checkAborted(opts.signal);
 
         const blobRef = await storeHostedBlob(segment.blob, "donkey-cut");
-        if (!blobRef) throw new Error("The segment could not reach storage.");
+        if (!blobRef) {
+          throw new UserError("matte_segment_upload_failed", "The segment could not reach storage.");
+        }
         frac(0.2);
 
         const submit = await hostedPost("/api/inference/assets", {
@@ -524,7 +543,9 @@ export async function hostedBakeMatte(
           parameters,
         });
         if (submit.status === 402) throw new MatteNeedsCredits();
-        if (!submit.ok) throw new Error("The quality cutout could not start.");
+        if (!submit.ok) {
+          throw new UserError("matte_cutout_start_failed", "The quality cutout could not start.");
+        }
         gen = (await submit.json()) as Generation;
         gens[p] = gen;
         // The submit is the billable moment: from here the ticket outlives the
@@ -546,7 +567,7 @@ export async function hostedBakeMatte(
           gens[p] = null;
           opts.onSubmitted?.(ticket(Math.max(p + 1, gens.length)));
         }
-        throw e;
+        throw e instanceof MatteTrackFailed ? e.reason : e;
       }
       checkAborted(opts.signal);
       const last = await refinePart(
@@ -562,9 +583,12 @@ export async function hostedBakeMatte(
     }
 
     const s = sink.current;
-    if (!s) throw new MatteTrackFailed("The tracker returned no mask.");
+    if (!s) {
+      throw new UserError("matte_tracker_no_mask", "The tracker returned no mask.");
+    }
     if (!s.lit) {
-      throw new MatteTrackFailed(
+      throw new UserError(
+        "matte_tracker_found_nothing",
         "The tracker found nothing to keep — describe the subject or paint it."
       );
     }

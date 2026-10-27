@@ -16,6 +16,7 @@ import { reportSwallowed } from "./report";
 import { createRasterCanvas, rasterCanvasToDataUrl } from "./raster";
 import { useEditor } from "./store";
 import { formatTime } from "./time";
+import { UserError } from "./userError";
 
 // Turn refs and dropped files into what the hosted models take. Generation
 // routes read `inputs.images = [{ data, mimeType }]`: stock images upload
@@ -152,7 +153,7 @@ export async function videoSafeInline(img: InlineImage): Promise<InlineImage> {
   if (img.mimeType === "image/jpeg" || img.mimeType === "image/png") return img;
   const blob = await (await fetch(`data:${img.mimeType};base64,${img.data}`)).blob();
   const fitted = await encodeWithin(blob);
-  if (!fitted) throw new Error("A reference image is in a format the video model can't read.");
+  if (!fitted) throw new UserError("ref_format_unreadable", "A reference image is in a format the video model can't read.");
   return fitted;
 }
 
@@ -175,9 +176,9 @@ async function readRefBytes(ref: AssetRef): Promise<Blob> {
     // A rejected fetch never reached a server: DNS, CORS, mixed content, or a
     // refused connection.
     const why = err instanceof Error ? err.message : String(err);
-    throw new Error(`Could not reach “${ref.name}” at ${where} — ${why}.`);
+    throw new UserError("ref_unreachable", `Could not reach “${ref.name}” at ${where} — ${why}.`, { name: ref.name, where, why });
   }
-  if (!res.ok) throw new Error(`Could not load “${ref.name}” — ${res.status} from ${where}.`);
+  if (!res.ok) throw new UserError("ref_load_failed", `Could not load “${ref.name}” — ${res.status} from ${where}.`, { name: ref.name, status: res.status, where });
   return res.blob();
 }
 
@@ -217,7 +218,10 @@ async function captureFrame(
   const input = openMedia(url);
   try {
     const track = await videoTrackOf(input);
-    if (!track) throw new Error(`Could not read ${mediaAddress(url)} for a reference frame.`);
+    if (!track) {
+      const where = mediaAddress(url);
+      throw new UserError("ref_frame_unreadable", `Could not read ${where} for a reference frame.`, { where });
+    }
     const dur = duration || (await input.computeDuration()) || 2;
     // A pinned moment reads exactly there (kept inside the source); otherwise
     // the same poster spot the cards show, so the reference matches the preview.
@@ -227,7 +231,7 @@ async function captureFrame(
         : Math.min(1, Math.max(0.1, dur / 10));
     const width = Math.min(opts?.width ?? MAX_W, await track.getDisplayWidth());
     const frame = await frameSink(track, { width }).getCanvas(at);
-    if (!frame) throw new Error("The video has no readable frame.");
+    if (!frame) throw new UserError("video_frame_unreadable", "The video has no readable frame.");
     const canvas = frame.canvas;
     return splitDataUrl(
       canvas instanceof OffscreenCanvas
@@ -251,7 +255,7 @@ const sourceDuration = (ref: AssetRef): number | undefined =>
  * spot otherwise. Audio and text have no picture and reject. */
 export async function refToInlineImage(ref: AssetRef): Promise<InlineImage> {
   if (ref.kind === "audio" || ref.kind === "text") {
-    throw new Error(`“${ref.name}” has no picture — it can't be a visual reference.`);
+    throw new UserError("ref_no_picture", `“${ref.name}” has no picture — it can't be a visual reference.`, { name: ref.name });
   }
   if (ref.kind === "image") return blobToInline(await readRefBytes(ref));
   return captureFrame(ref.url, sourceDuration(ref), ref.t !== undefined ? { at: ref.t } : undefined);
@@ -280,7 +284,7 @@ export async function copyRefImage(ref: AssetRef): Promise<void> {
     canvas.getContext("2d")!.drawImage(bitmap, 0, 0);
     bitmap.close();
     return new Promise<Blob>((resolve, reject) =>
-      canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("Could not encode the frame."))), "image/png")
+      canvas.toBlob((b) => (b ? resolve(b) : reject(new UserError("frame_encode_failed", "Could not encode the frame."))), "image/png")
     );
   })();
   await navigator.clipboard.write([new ClipboardItem({ "image/png": png })]);
@@ -339,7 +343,7 @@ export async function refsFromDroppedFiles(
 /** A text ref's contents (a dropped script, notes, subtitles…). */
 export async function readRefText(ref: AssetRef): Promise<string> {
   const res = await fetch(ref.url);
-  if (!res.ok) throw new Error(`Could not read “${ref.name}”.`);
+  if (!res.ok) throw new UserError("media_read_failed", `Could not read “${ref.name}”.`, { name: ref.name });
   return res.text();
 }
 

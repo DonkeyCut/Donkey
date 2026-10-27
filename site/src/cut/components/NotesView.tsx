@@ -3,6 +3,7 @@
 import { useEffect, useImperativeHandle, useRef, useState, type Ref } from "react";
 import { useSearchParams } from "next/navigation";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { useTranslations } from "next-intl";
 import { FolderPlus, Loader2, Plus, StickyNote, Trash2 } from "lucide-react";
 import { useDeleteKey } from "@/cut/hooks/useDeleteKey";
 import { useTabTitle } from "@/cut/hooks/useTabTitle";
@@ -35,7 +36,7 @@ import { additiveClick } from "@/cut/lib/hostKeys";
 import { PICKED_RING } from "@/cut/lib/assetPick";
 import { FolderCrumb, FolderShelf, Marquee, useTilePicks } from "./desktopFolders";
 import { CardActionsMenu } from "./CardActionsMenu";
-import { DeleteConfirm, SelectionMenu, foldersGoNote, pickLabel, useSelectionMenu } from "./selectionMenu";
+import { DeleteConfirm, SelectionMenu, usePickWords, useSelectionMenu } from "./selectionMenu";
 import { LIBRARY_SQUARE } from "./LibraryCard";
 import { NoteComposer, noteChanged, type NoteDraft } from "./NoteComposer";
 import { NoteBodyPreview } from "./NoteBodyPreview";
@@ -164,6 +165,8 @@ type Props = {
   ref?: Ref<NotesViewHandle>;
 };
 export function NotesView({ library, ref }: Props = {}) {
+  const t = useTranslations("home");
+  const { pickLabel, foldersGoNote } = usePickWords();
   const client = useQueryClient();
   const base = useCutBase();
   const notes = useNotes();
@@ -250,12 +253,12 @@ export function NotesView({ library, ref }: Props = {}) {
   // Inside the library, the library names the folder.
   useTabTitle(
     draft
-      ? draft.title.trim() || "Untitled"
+      ? draft.title.trim() || t("notes.untitled")
       : library
         ? null
         : openFolder
           ? trail.at(-1)?.name
-          : "Notes",
+          : t("tabs.notes"),
   );
 
   const reload = () => void client.invalidateQueries({ queryKey: notesKey });
@@ -616,7 +619,7 @@ export function NotesView({ library, ref }: Props = {}) {
   useDeleteKey(pageRef, pick.length > 0 ? () => setDeletingNotes(pick.map((n) => n.id)) : null);
   // What the confirm names: each note by its title.
   const deletingNames = (deletingNotes ?? []).map((id) => ({
-    name: list.find((n) => n.id === id)?.title.trim() || "Untitled note",
+    name: list.find((n) => n.id === id)?.title.trim() || t("notes.untitledNote"),
   }));
 
   return (
@@ -625,14 +628,14 @@ export function NotesView({ library, ref }: Props = {}) {
       className={library ? (shown.length > 0 ? "mb-6" : undefined) : "mx-auto w-full max-w-6xl px-10 py-9"}
       onContextMenu={ctx.onContextMenu}
     >
-      {failedDraft && <p role="alert" className="py-3 text-sm text-destructive">Could not save the note. <button className="underline" onClick={() => { edit(failedDraft); openAt(failedDraft.id); setFailedDraft(null); }}>Reopen and retry</button></p>}
+      {failedDraft && <p role="alert" className="py-3 text-sm text-destructive">{t("notes.saveFailed")} <button className="underline" onClick={() => { edit(failedDraft); openAt(failedDraft.id); setFailedDraft(null); }}>{t("notes.reopen")}</button></p>}
       {/* One note at a time, over the whole window. The list stays mounted
           behind it, so closing comes back to the same scroll position. */}
       {draft && (
         <NoteComposer
           key={draft.id}
           draft={draft}
-          back={library?.name ?? draftFolderName ?? "All notes"}
+          back={library?.name ?? draftFolderName ?? t("notes.allNotes")}
           from={pageRef}
           labels={labels}
           onChange={change}
@@ -645,10 +648,10 @@ export function NotesView({ library, ref }: Props = {}) {
       )}
       {!library && <div className="mb-5 flex items-center justify-between gap-4">
         {openFolder === null ? (
-          <h1 className="text-lg font-semibold tracking-tight">Notes</h1>
+          <h1 className="text-lg font-semibold tracking-tight">{t("tabs.notes")}</h1>
         ) : (
           <FolderCrumb
-            root="Notes"
+            root={t("tabs.notes")}
             trail={trail}
             onRename={renameFolder}
             mime={NOTES_MOVE_MIME}
@@ -660,10 +663,10 @@ export function NotesView({ library, ref }: Props = {}) {
         )}
         <div className="flex items-center gap-2">
           <Button variant="outline" onClick={() => setFolderCreating(true)}>
-            <FolderPlus data-icon="inline-start" /> New folder
+            <FolderPlus data-icon="inline-start" /> {t("notes.newFolder")}
           </Button>
           <Button onClick={openNew}>
-            <Plus data-icon="inline-start" /> New note
+            <Plus data-icon="inline-start" /> {t("notes.newNote")}
           </Button>
         </div>
       </div>}
@@ -719,7 +722,7 @@ export function NotesView({ library, ref }: Props = {}) {
         />
       ) : null}
 
-      {notes.isError && <p role="alert" className="py-3 text-sm text-destructive">Could not load notes. <button onClick={reload} className="underline">Retry</button></p>}
+      {notes.isError && <p role="alert" className="py-3 text-sm text-destructive">{t("notes.loadFailed")} <button onClick={reload} className="underline">{t("notes.retry")}</button></p>}
       {library && shown.length === 0 ? null : !notes.data && notes.isPending ? (
         <div className="grid place-items-center py-24 text-muted-foreground">
           <Loader2 className="size-5 animate-spin" />
@@ -731,10 +734,9 @@ export function NotesView({ library, ref }: Props = {}) {
         >
           <div className="flex flex-col items-center gap-3 text-center">
             <StickyNote className="size-8 text-muted-foreground" />
-            <div className="text-base font-medium">No notes yet.</div>
+            <div className="text-base font-medium">{t("notes.emptyTitle")}</div>
             <p className="text-sm text-muted-foreground">
-              Notes sync with the Donkey Cut iOS app — a script written here is ready on the
-              phone&apos;s teleprompter.
+              {t("notes.emptyHint")}
             </p>
           </div>
         </button>
@@ -817,13 +819,13 @@ export function NotesView({ library, ref }: Props = {}) {
       )}
       <SelectionMenu menu={ctxSet.length > 0 ? ctx.menu : null} onClose={ctx.close}>
         <DropdownMenuItem variant="destructive" onClick={() => setDeletingNotes(ctxSet.map((n) => n.id))}>
-          <Trash2 /> Delete
+          <Trash2 /> {t("notes.delete")}
         </DropdownMenuItem>
       </SelectionMenu>
       <DeleteConfirm
         open={deletingNotes !== null}
-        title={`Delete ${pickLabel([], deletingNames, ["note", "notes"], 0)}?`}
-        description={`${deletingNotes?.length === 1 ? "It is" : "They are"} removed from your phone too.`}
+        title={t("notes.deleteTitle", { what: pickLabel([], deletingNames, "note", 0) })}
+        description={t("notes.removedFromPhone", { count: deletingNotes?.length ?? 0 })}
         onClose={() => setDeletingNotes(null)}
         onConfirm={() => {
           const ids = deletingNotes;
@@ -833,8 +835,8 @@ export function NotesView({ library, ref }: Props = {}) {
       />
       <DeleteConfirm
         open={deletingFolder !== null}
-        title={`Delete “${folders.find((f) => f.id === deletingFolder)?.name ?? "folder"}”?`}
-        description={`${foldersGoNote(1, deletingFolder ? folderTakes(deletingFolder).held : 0)}It is removed from your phone too.`}
+        title={t("notes.deleteFolderTitle", { name: folders.find((f) => f.id === deletingFolder)?.name ?? t("notes.folderFallback") })}
+        description={`${foldersGoNote(1, deletingFolder ? folderTakes(deletingFolder).held : 0)}${t("notes.removedFromPhone", { count: 1 })}`}
         onClose={() => setDeletingFolder(null)}
         onConfirm={() => {
           const id = deletingFolder;

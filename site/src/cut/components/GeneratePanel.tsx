@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { useTranslations } from "next-intl";
 import { Copy, Film, Loader2, Maximize2, Plus, RotateCw, Sparkles, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
@@ -27,15 +28,14 @@ import { nearestAspect } from "@/cut/lib/types";
 import { useLocalPref } from "@/cut/lib/uiState";
 import { useVideoGen } from "@/cut/lib/videoGen";
 import {
-  VIDEO_ASPECT_LABEL,
   VIDEO_MODELS,
-  VIDEO_RESOLUTION_LABEL,
   type VideoAspect,
   type VideoModelOption,
   type VideoResolution,
   DEFAULT_VIDEO_RESOLUTION,
 } from "@/cut/lib/videoModels";
 import { videoRenderMicros } from "@/lib/credits/price-sheet";
+import { useLabels } from "@/i18n/labels";
 import { cn } from "@/lib/utils";
 import { CopyHandlePill, MentionTextarea, RefChips } from "./AssetRefs";
 import { DictationControl } from "./MicDictation";
@@ -53,12 +53,15 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 // takes one input image, so the first reference's picture becomes the start
 // frame.
 
-const ASPECT_WORD: Record<VideoAspect, string> = {
-  "16:9": "Landscape",
-  "9:16": "Portrait",
+const ASPECT_WORD: Record<VideoAspect, "landscape" | "portrait"> = {
+  "16:9": "landscape",
+  "9:16": "portrait",
 };
 
 export function GenerateVideoPanel({ projectId }: { projectId: string }) {
+  const t = useTranslations("media");
+  const aspectLabel = useLabels("videoAspect");
+  const resolutionLabel = useLabels("videoResolution");
   const readOnly = useEditor((s) => s.readOnly);
   const signedIn = useSignedIn();
   const allJobs = useGenerate((s) => s.jobs);
@@ -99,10 +102,10 @@ export function GenerateVideoPanel({ projectId }: { projectId: string }) {
   // model's longest clip.
   const cost = useGenerateCost((sheet) => videoRenderMicros(sheet, effResolution, effDuration));
   const durationOptions = [
-    { value: "auto", label: "Auto length" },
+    { value: "auto", label: t("generateVideo.autoLength") },
     ...Array.from({ length: maxSeconds - minSeconds + 1 }, (_, i) => {
       const s = minSeconds + i;
-      return { value: String(s), label: `${s} seconds` };
+      return { value: String(s), label: t("generateVideo.seconds", { count: s }) };
     }),
   ];
 
@@ -141,7 +144,7 @@ export function GenerateVideoPanel({ projectId }: { projectId: string }) {
   return (
     <>
       <div className="flex h-12 shrink-0 items-center justify-between pr-2.5 pl-4">
-        <span className="text-sm font-semibold tracking-tight">Generate video</span>
+        <span className="text-sm font-semibold tracking-tight">{t("generateVideo.title")}</span>
       </div>
 
       <ScrollArea
@@ -172,7 +175,7 @@ export function GenerateVideoPanel({ projectId }: { projectId: string }) {
                 {stockTitle(character.id)}
               </span>
               <button
-                title="Leave character mode"
+                title={t("generateVideo.leaveCharacter")}
                 className="grid size-6 shrink-0 place-items-center rounded-full text-muted-foreground hover:text-foreground"
                 onClick={() => useVideoGen.getState().clearCharacter()}
               >
@@ -191,8 +194,8 @@ export function GenerateVideoPanel({ projectId }: { projectId: string }) {
             className="gen-prompt min-h-[88px] w-full resize-y bg-transparent px-2.5 py-2 pr-9 text-[12.5px] leading-relaxed outline-none"
             placeholder={
               character
-                ? "What should they say?"
-                : "A drone shot rising over a foggy coastline at sunrise… Drop media in or type @ to reference it."
+                ? t("generateVideo.characterPlaceholder")
+                : t("generateVideo.placeholder")
             }
             value={prompt}
             onChange={(v) => useVideoGen.getState().setPrompt(v)}
@@ -220,7 +223,7 @@ export function GenerateVideoPanel({ projectId }: { projectId: string }) {
             below are its shape, its output size, and its length. */}
         <PillSelect
           className="h-7 shrink-0"
-          title="Model"
+          title={t("generateVideo.model")}
           value={tier}
           display={model.model}
           options={VIDEO_MODELS.map((m) => ({
@@ -235,12 +238,12 @@ export function GenerateVideoPanel({ projectId }: { projectId: string }) {
         {/* Shape, the same pill family as the image panel. */}
         <PillSelect
           className="h-7 shrink-0"
-          title="Aspect ratio"
+          title={t("generateVideo.aspectRatio")}
           value={effAspect}
-          display={ASPECT_WORD[effAspect]}
+          display={t(`aspectWord.${ASPECT_WORD[effAspect]}`)}
           options={model.aspects.map((a) => ({
             value: a,
-            label: VIDEO_ASPECT_LABEL[a],
+            label: aspectLabel(a),
           }))}
           onChange={(v) => useVideoGen.getState().setAspect(v)}
         />
@@ -249,12 +252,12 @@ export function GenerateVideoPanel({ projectId }: { projectId: string }) {
             cost more per second. */}
         <PillSelect
           className="h-7 shrink-0"
-          title="Resolution"
+          title={t("generateVideo.resolution")}
           value={effResolution}
-          display={VIDEO_RESOLUTION_LABEL[effResolution]}
+          display={resolutionLabel(effResolution)}
           options={model.resolutions.map((r) => ({
             value: r,
-            label: VIDEO_RESOLUTION_LABEL[r],
+            label: resolutionLabel(r),
           }))}
           onChange={(v) => useVideoGen.getState().setResolution(v)}
         />
@@ -262,9 +265,13 @@ export function GenerateVideoPanel({ projectId }: { projectId: string }) {
         {/* Length: a fixed number of seconds, or the model's own pick. */}
         <PillSelect
           className="h-7 shrink-0"
-          title="Length"
+          title={t("generateVideo.length")}
           value={effDuration === null ? "auto" : String(effDuration)}
-          display={effDuration === null ? "Auto" : `${effDuration}s`}
+          display={
+            effDuration === null
+              ? t("generateVideo.auto")
+              : t("generateVideo.secondsShort", { count: effDuration })
+          }
           options={durationOptions}
           onChange={(v) =>
             useVideoGen.getState().setDurationSeconds(v === "auto" ? null : Number(v))
@@ -277,20 +284,22 @@ export function GenerateVideoPanel({ projectId }: { projectId: string }) {
           onClick={button.onClick}
         >
           <Sparkles data-icon="inline-start" />
-          Generate video
+          {t("generateVideo.button")}
         </Button>
 
         {signedIn === false ? (
           <p className="gen-signin shrink-0 text-[11px] leading-relaxed text-muted-foreground">
-            Generating runs on your Donkey account.{" "}
-            <a className="font-medium text-blue-600 hover:underline dark:text-blue-400" href={signInUrl()}>
-              Sign in
-            </a>{" "}
-            to continue.
+            {t.rich("signInToGenerate", {
+              link: (chunks) => (
+                <a className="font-medium text-blue-600 hover:underline dark:text-blue-400" href={signInUrl()}>
+                  {chunks}
+                </a>
+              ),
+            })}
           </p>
         ) : (
           <p className="shrink-0 text-[11px] leading-relaxed text-muted-foreground">
-            Renders take a minute or two. Keep editing while it runs.
+            {t("generateVideo.rendersTake")}
           </p>
         )}
         </>)}
@@ -318,6 +327,7 @@ export function GenerateVideoPanel({ projectId }: { projectId: string }) {
  * gradient, and the actions overlay the corners. In-flight and failed jobs
  * stay a compact status row. */
 function JobRow({ job, handle }: { job: GenerateJob; handle?: string }) {
+  const t = useTranslations("media.generateVideo");
   const asset = useEditor((s) => s.assets.find((a) => a.id === job.assetId));
   const readOnly = useEditor((s) => s.readOnly);
   const pulse = useGenPulse("video", job.assetId);
@@ -348,13 +358,13 @@ function JobRow({ job, handle }: { job: GenerateJob; handle?: string }) {
           >
             {job.status === "running" ? (
               <>
-                Rendering…{" "}
+                {t("rendering")}{" "}
                 {elapsed && (
                   <span className="tabular-nums text-muted-foreground/80">{elapsed}</span>
                 )}
               </>
             ) : (
-              <HostedErrorText error={job.error} />
+              <HostedErrorText error={job} />
             )}
           </div>
         </div>
@@ -362,7 +372,7 @@ function JobRow({ job, handle }: { job: GenerateJob; handle?: string }) {
           <div className="flex shrink-0 items-center gap-1">
             {job.status === "error" && !readOnly && (
               <button
-                title="Retry"
+                title={t("retry")}
                 className={cardIconButton}
                 onClick={() => useGenerate.getState().retry(job.id)}
               >
@@ -370,7 +380,7 @@ function JobRow({ job, handle }: { job: GenerateJob; handle?: string }) {
               </button>
             )}
             <button
-              title="Dismiss"
+              title={t("dismiss")}
               className={cn(cardIconButton, "opacity-0 group-hover:opacity-100")}
               onClick={() => useGenerate.getState().dismiss(job.id)}
             >
@@ -422,14 +432,14 @@ function JobRow({ job, handle }: { job: GenerateJob; handle?: string }) {
       </div>
       <div className="absolute top-1 right-1 flex gap-1">
         <button
-          title="Add to timeline"
+          title={t("addToTimeline")}
           className="grid size-5 place-items-center rounded-full bg-primary text-primary-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:brightness-110"
           onClick={() => useEditor.getState().addAssetAtPlayhead(asset.id)}
         >
           <Plus className="size-3" />
         </button>
         <button
-          title="Expand"
+          title={t("expand")}
           className="grid size-5 place-items-center rounded-full bg-black/45 text-white opacity-0 transition-opacity group-hover:opacity-100 hover:bg-black/65"
           onClick={() =>
             useLightbox.getState().open({
@@ -454,7 +464,7 @@ function JobRow({ job, handle }: { job: GenerateJob; handle?: string }) {
           before={
             <>
               <DropdownMenuItem onClick={() => useVideoGen.getState().openWith(job.prompt)}>
-                <Sparkles /> Use this prompt
+                <Sparkles /> {t("useThisPrompt")}
               </DropdownMenuItem>
               <DropdownMenuItem
                 onClick={() =>
@@ -463,7 +473,7 @@ function JobRow({ job, handle }: { job: GenerateJob; handle?: string }) {
                     .catch(() => {})
                 }
               >
-                <Copy /> Copy reference
+                <Copy /> {t("copyReference")}
               </DropdownMenuItem>
             </>
           }

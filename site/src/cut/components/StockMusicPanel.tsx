@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useTranslations } from "next-intl";
 import { Pause, Play, Plus } from "lucide-react";
 import { PeakStrip } from "@/cut/components/AudioPanel";
 import { clearRefDrag, refFromStockMusic, setRefDragData } from "@/cut/lib/assetRef";
@@ -31,6 +32,7 @@ const remix = (s: StockMusic) =>
  * loads its prompt into the generator, and it drags onto the timeline or the
  * prompt box. */
 export function SampleLibrary({ projectId }: { projectId: string }) {
+  const t = useTranslations("media");
   // Its own handle on the app-wide preview player, so a sample and a generated
   // row never play at once; leaving the tab silences this column's preview.
   const playingUrl = usePreviewAudio((s) => s.url);
@@ -59,11 +61,11 @@ export function SampleLibrary({ projectId }: { projectId: string }) {
       <div className="shrink-0 pt-4 pr-12 pb-3 pl-3.5">
         <div className="flex flex-wrap gap-1.5">
           <Chip active={cat === "all"} onClick={() => setCat("all")}>
-            All
+            {t("stockMusic.all")}
           </Chip>
           {STOCK_MUSIC_CATEGORIES.map((c) => (
             <Chip key={c} active={cat === c} onClick={() => setCat(c)}>
-              {c}
+              {t(`musicCategory.${c}`)}
             </Chip>
           ))}
         </div>
@@ -71,7 +73,7 @@ export function SampleLibrary({ projectId }: { projectId: string }) {
       <ScrollArea className="min-h-0 flex-1" contentClassName="flex flex-col gap-4 px-3.5 pb-4">
         {sections.map(({ category, items }) => (
           <div key={category} className="flex flex-col gap-2">
-            <div className="text-[13px] font-semibold tracking-tight">{category}</div>
+            <div className="text-[13px] font-semibold tracking-tight">{t(`musicCategory.${category}`)}</div>
             <div className="grid grid-cols-2 gap-2">
               {items.map((s) => (
                 <SampleCard
@@ -116,6 +118,7 @@ function SampleCard({
   onTogglePlay: () => void;
   onAdd: () => void;
 }) {
+  const t = useTranslations("media.stockMusic");
   const copyRef = useRefCopy(() => [refFromStockMusic(sample)]);
   return (
     <div
@@ -128,7 +131,7 @@ function SampleCard({
       }}
       onDragEnd={clearRefDrag}
       onClick={() => remix(sample)}
-      title="Click to load its prompt · drag onto the timeline or the prompt box"
+      title={t("cardHint")}
     >
       <div className="relative h-14">
         <PeakStrip
@@ -137,8 +140,8 @@ function SampleCard({
         />
         <button
           type="button"
-          title={playing ? "Pause" : "Play"}
-          aria-label={playing ? "Pause" : "Play"}
+          title={playing ? t("pause") : t("play")}
+          aria-label={playing ? t("pause") : t("play")}
           onClick={(e) => {
             e.stopPropagation();
             onTogglePlay();
@@ -152,8 +155,8 @@ function SampleCard({
         </span>
         <button
           type="button"
-          title="Add at the playhead"
-          aria-label="Add at the playhead"
+          title={t("addAtPlayhead")}
+          aria-label={t("addAtPlayhead")}
           onClick={(e) => {
             e.stopPropagation();
             onAdd();

@@ -6,10 +6,10 @@
 // offer looks the same from anywhere. Every slot keeps its height whether
 // or not it has words, so the card stands still as the offer is taken up.
 import Image from "next/image";
+import { useFormatter, useTranslations } from "next-intl";
 import { useEffect, useState } from "react";
-import { CUT_PRO } from "@/app/cut/_components/landing/cutPricingPlans";
+import { useCutPro } from "@/app/[locale]/cut/_components/landing/cutPricingPlans";
 import { Button } from "@/components/ui/button";
-import { formatCreditExpiry } from "@/lib/credits/top-up";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 // One picture per kind of offer: a gift for credit that comes with Pro, coins
@@ -61,54 +61,71 @@ function useBannerReady(banner: OfferBanner | null): boolean {
   return banner === null || loaded === banner;
 }
 
-/** A day as the card names it: "September 30". */
-export function offerDay(iso: string): string {
-  return new Date(iso).toLocaleDateString("en-US", { day: "numeric", month: "long" });
-}
-
 /** An offer's words: the message, and the terms line under it. */
 export type OfferCopy = { body: string; terms: string | null };
 
-/** How long the credit lasts once it lands, as the card says it; null when
- * it keeps forever. */
-export function creditValidity(offer: { expiresAt: string | null; lifetimeDays: number | null }): string | null {
-  if (offer.expiresAt) return `Extra credits are valid through ${offerDay(offer.expiresAt)}.`;
-  if (offer.lifetimeDays !== null) return `Extra credits are valid for ${offer.lifetimeDays} days.`;
-  return null;
-}
+/** The offer card's words in the page's language: how long landed credit
+ * lasts, the claim's message, and the Pro offer's. */
+export function useOfferCopy() {
+  const t = useTranslations("billing");
+  const format = useFormatter();
+  const pro = useCutPro();
 
-/** The claim's words: the credit that is waiting and the last day to take it,
- * then how long it lasts once taken. */
-export function claimOfferCopy(offer: { credits: string; closesAt: string | null; lifetimeDays: number | null }): OfferCopy {
-  const by = offer.closesAt ? ` Claim them by ${formatCreditExpiry(new Date(offer.closesAt))}.` : "";
-  return {
-    body: `You have ${offer.credits} to claim.${by}`,
-    terms: offer.lifetimeDays !== null ? `Once claimed, they’re valid for ${offer.lifetimeDays} days.` : null,
+  // How long the credit lasts once it lands; null when it keeps forever.
+  const creditValidity = (offer: { expiresAt: string | null; lifetimeDays: number | null }): string | null => {
+    if (offer.expiresAt) {
+      const date = format.dateTime(new Date(offer.expiresAt), { day: "numeric", month: "long" });
+      return t("offer.validThrough", { date });
+    }
+    if (offer.lifetimeDays !== null) {
+      return t("offer.validFor", { days: offer.lifetimeDays });
+    }
+    return null;
   };
-}
 
-/** The Pro offer's words. The deadline is the countdown's, so the message
- * leaves it out. */
-export function subscribeOfferCopy(offer: {
-  credits: string;
-  expiresAt: string | null;
-  lifetimeDays: number | null;
-}): OfferCopy {
-  return {
-    body: `Subscribe to Pro for ${CUT_PRO.price} and get an extra ${offer.credits}.`,
-    terms: creditValidity(offer),
+  // The credit that is waiting and the last day to take it, then how long it
+  // lasts once taken.
+  const claimOfferCopy = (offer: {
+    credits: string;
+    closesAt: string | null;
+    lifetimeDays: number | null;
+  }): OfferCopy => {
+    const body = offer.closesAt
+      ? t("offer.claimBodyBy", {
+          credits: offer.credits,
+          date: format.dateTime(new Date(offer.closesAt), { day: "numeric", month: "long", year: "numeric" }),
+        })
+      : t("offer.claimBody", { credits: offer.credits });
+    const terms = offer.lifetimeDays !== null ? t("offer.claimTerms", { days: offer.lifetimeDays }) : null;
+    return { body, terms };
   };
+
+  // The Pro offer. The deadline is the countdown's, so the message leaves it
+  // out.
+  const subscribeOfferCopy = (offer: {
+    credits: string;
+    expiresAt: string | null;
+    lifetimeDays: number | null;
+  }): OfferCopy => {
+    return {
+      body: t("offer.subscribeBody", { credits: offer.credits, price: pro.price }),
+      terms: creditValidity(offer),
+    };
+  };
+
+  return { claimOfferCopy, creditValidity, subscribeOfferCopy };
 }
 
-/** What is left until a moment, as the countdown reads it: hours, minutes
- * and seconds, the hours running past a day. */
-export function countdownLabel(closesAt: string, now: number): string {
+/** What is left until a moment, as the countdown reads it: hours, then
+ * two-digit minutes and seconds, the hours running past a day. */
+export function countdownParts(closesAt: string, now: number): { hours: number; minutes: string; seconds: string } {
   const left = Math.max(0, Math.floor((Date.parse(closesAt) - now) / 1000));
-  const hours = Math.floor(left / 3600);
-  const minutes = Math.floor((left % 3600) / 60);
-  const seconds = left % 60;
   const two = (n: number) => String(n).padStart(2, "0");
-  return `${hours}h ${two(minutes)}m ${two(seconds)}s`;
+  return {
+    hours: Math.floor(left / 3600),
+    minutes: two(Math.floor((left % 3600) / 60)),
+    seconds: two(left % 60),
+  };
 }
 
 /** The clock a countdown reads; one tick a second while it is on screen. */
@@ -122,10 +139,11 @@ export function useNow(): number {
 }
 
 function Countdown({ closesAt }: { closesAt: string }) {
+  const t = useTranslations("billing.offer");
   const now = useNow();
   return (
     <span className="absolute top-3 left-3 rounded-md bg-foreground/85 px-3 py-1.5 text-sm font-medium tabular-nums text-background">
-      Offer expires in {countdownLabel(closesAt, now)}
+      {t("expiresIn", countdownParts(closesAt, now))}
     </span>
   );
 }

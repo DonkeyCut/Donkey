@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { ChevronLeft, Loader2, RotateCcw, SlidersHorizontal, Trash2, Wand2, X } from "lucide-react";
@@ -12,6 +13,7 @@ import {
   GRADE_HUE_MAX,
   GRADE_MAX,
   GRADE_PRESET_CATEGORIES,
+  GRADE_PRESETS,
   gradeCssApprox,
   gradeKey,
   gradePresetsInCategory,
@@ -20,7 +22,6 @@ import {
   normalizeGrade,
   OUTPUT_SPACES,
   SOURCE_PROFILES,
-  WHEEL_LABELS,
   WHEEL_ZONES,
   type ColorGrade,
   type GradeLut,
@@ -42,6 +43,7 @@ import { usePanelState, useRememberedScroll } from "@/cut/lib/panelState";
 import type { MediaAsset, VideoClip } from "@/cut/lib/types";
 import { useProxyJobs } from "@/cut/lib/mediaProxy";
 import {
+  builtinLutOf,
   cachedLut,
   libraryLutId,
   listLutChoices,
@@ -76,6 +78,9 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useDescribeError } from "@/i18n/describeError";
+import { useLabels } from "@/i18n/labels";
+import type { Messages } from "@/i18n/namespaces";
 
 /**
  * The clip panel's Color subview, two levels deep. The first level is the
@@ -102,16 +107,42 @@ export function ColorPanel({ clip, peers }: { clip: VideoClip; peers?: readonly 
 }
 
 /** The tools of the Adjust view; `dirty` feeds each tab's marker dot. The
- * Basic tab owns the Detail group too. */
-const TOOLS = [
-  { id: "basic", label: "Basic" },
-  { id: "curves", label: "Curves" },
-  { id: "wheels", label: "Wheels" },
-  { id: "hsl", label: "HSL" },
-  { id: "lut", label: "LUT" },
-] as const;
+ * Basic tab owns the Detail group too. Each names itself under
+ * `inspector.color.tools`. */
+const TOOLS = [{ id: "basic" }, { id: "curves" }, { id: "wheels" }, { id: "hsl" }, { id: "lut" }] as const;
 
 type Tool = (typeof TOOLS)[number]["id"];
+
+type ColorMessages = Messages["inspector"]["color"];
+
+/**
+ * Names the color registries in the page's language: the shipped presets,
+ * the built-in LUTs and the source and delivery spaces, keyed by id. A saved
+ * grade and a Library LUT keep the name the person gave them.
+ */
+function useColorNames() {
+  const t = useTranslations("inspector.color");
+  const lutName = (l: { id: string; label: string }) => {
+    const builtin = builtinLutOf(l.id);
+    return builtin ? t(`builtinLuts.${builtin.id as keyof ColorMessages["builtinLuts"]}`) : l.label;
+  };
+  const presetName = (p: GradePreset | SavedTile | LutTile) => {
+    if ("saved" in p) {
+      return p.label;
+    }
+    if ("lutId" in p) {
+      return lutName({ id: p.lutId, label: p.label });
+    }
+    return GRADE_PRESETS[p.id] ? t(`gradePresets.${p.id as keyof ColorMessages["gradePresets"]}`) : p.label;
+  };
+  return {
+    lutName,
+    presetName,
+    category: (id: GradePresetCategory) => t(`categories.${id}`),
+    source: (id: SourceProfile) => t(`sourceProfiles.${id}`),
+    output: (id: OutputSpace) => t(`outputSpaces.${id}`),
+  };
+}
 
 const toolDirty = (g: ColorGrade | undefined, tool: Tool) =>
   tool === "basic" ? gradeToolDirty(g, "basic") || gradeToolDirty(g, "detail") : gradeToolDirty(g, tool);
@@ -159,6 +190,8 @@ function useGradeWriter(clip: VideoClip, peers?: readonly VideoClip[]) {
 /** What the clip's code values mean. The header's reading is the default;
  * picking another profile writes the override onto the asset, with undo. */
 function SourceColorRow({ clip }: { clip: VideoClip }) {
+  const t = useTranslations("inspector.color");
+  const names = useColorNames();
   const asset = useEditor((s) => s.assets.find((a) => a.id === clip.assetId));
   if (!asset || (asset.type !== "video" && asset.type !== "image")) return null;
   const detected: SourceProfile = asset.color?.detected ?? "rec709";
@@ -166,11 +199,11 @@ function SourceColorRow({ clip }: { clip: VideoClip }) {
   // The menu sets what the file said, and what Rec.709 means here, as a
   // small line under the name; the button carries the name alone.
   const noteOf = (id: SourceProfile) =>
-    [id === detected && "Detected", id === "rec709" && "No conversion"].filter(Boolean).join(" · ");
-  const items = Object.fromEntries(SOURCE_PROFILES.map((p) => [p.id, p.label]));
+    [id === detected && t("detected"), id === "rec709" && t("noConversion")].filter(Boolean).join(" · ");
+  const items = Object.fromEntries(SOURCE_PROFILES.map((p) => [p.id, names.source(p.id)]));
   return (
     <div className="px-3.5">
-      <Row label="Source color">
+      <Row label={t("sourceColor")}>
         <Select
           value={value}
           items={items}
@@ -189,7 +222,7 @@ function SourceColorRow({ clip }: { clip: VideoClip }) {
               return (
                 <SelectItem key={p.id} value={p.id} className="text-[12px]">
                   <span className="flex flex-col">
-                    {p.label}
+                    {names.source(p.id)}
                     {note && <span className="text-[10px] leading-tight text-muted-foreground">{note}</span>}
                   </span>
                 </SelectItem>
@@ -207,27 +240,31 @@ function SourceColorRow({ clip }: { clip: VideoClip }) {
  * the master itself when no proxy could be made here. Silent once the proxy
  * is in place, and for every file no proxy was asked for. */
 function ProxyLine({ asset }: { asset: MediaAsset }) {
+  const t = useTranslations("inspector.color");
+  const describeError = useDescribeError();
   const job = useProxyJobs((s) => s.jobs[asset.id]);
   // A job only exists for a file that needed a proxy where it was asked.
   if (!job) return null;
-  const master = asset.color?.codec?.startsWith("ap") ? "the ProRes master" : "the original file";
+  const master = asset.color?.codec?.startsWith("ap") ? "prores" : "original";
   const text =
     job.kind === "making"
-      ? `Preview proxy: ${Math.round(job.progress * 100)}%`
+      ? t("proxyMaking", { percent: Math.round(job.progress * 100) })
       : job.kind === "none"
-        ? `No preview proxy on this browser. The preview plays ${master}.`
-        : `Preview proxy failed: ${job.error}`;
+        ? t("proxyNone", { master })
+        : t("proxyFailed", { error: describeError(job) });
   return <p className="pb-2 text-[11px] leading-snug text-muted-foreground">{text}</p>;
 }
 
 /** The project's delivery space: what every clip converts to, what the
  * export writes, and what the stage shows on an HDR display. */
 function ProjectColorRow() {
+  const t = useTranslations("inspector.color");
+  const names = useColorNames();
   const colorSpace = useEditor((s) => s.colorSpace);
-  const items = Object.fromEntries(OUTPUT_SPACES.map((o) => [o.id, o.label]));
+  const items = Object.fromEntries(OUTPUT_SPACES.map((o) => [o.id, names.output(o.id)]));
   return (
     <div className="px-3.5">
-      <Row label="Project color">
+      <Row label={t("projectColor")}>
         <Select
           value={colorSpace}
           items={items}
@@ -239,7 +276,7 @@ function ProjectColorRow() {
           <SelectContent>
             {OUTPUT_SPACES.map((o) => (
               <SelectItem key={o.id} value={o.id} className="text-[12px]">
-                {o.label}
+                {names.output(o.id)}
               </SelectItem>
             ))}
           </SelectContent>
@@ -257,6 +294,7 @@ function ProjectColorRow() {
  * selected clips or on every clip, as one undo step; or keep it on the shelf
  * under a name. */
 function GradeFooter({ clip }: { clip: VideoClip }) {
+  const t = useTranslations("inspector.color");
   const ck = useSliderCheckpoint();
   const client = useQueryClient();
   const others = useEditor((s) =>
@@ -303,7 +341,7 @@ function GradeFooter({ clip }: { clip: VideoClip }) {
   return (
     <div className="flex shrink-0 items-center gap-3 border-t border-border bg-card px-3.5 py-2">
       <button type="button" className={cn("clip-grade-save-preset", link)} disabled={!grade} onClick={() => setNaming(true)}>
-        Save Preset
+        {t("savePresetButton")}
       </button>
       <span className="ml-auto" />
       <button
@@ -312,15 +350,15 @@ function GradeFooter({ clip }: { clip: VideoClip }) {
         disabled={others === 0}
         onClick={applySelected}
       >
-        Apply Selected
+        {t("applySelected")}
       </button>
       <button type="button" className={cn("clip-grade-apply-all", link)} onClick={applyAll}>
-        Apply to All
+        {t("applyAll")}
       </button>
       <Dialog open={naming} onOpenChange={(o) => !o && setNaming(false)}>
         <DialogContent className="sm:max-w-sm">
           <DialogHeader>
-            <DialogTitle>Save color preset</DialogTitle>
+            <DialogTitle>{t("saveDialogTitle")}</DialogTitle>
           </DialogHeader>
           <form
             onSubmit={(e) => {
@@ -328,11 +366,11 @@ function GradeFooter({ clip }: { clip: VideoClip }) {
               void save();
             }}
           >
-            <Input autoFocus placeholder="Preset name" value={name} onChange={(e) => setName(e.target.value)} />
+            <Input autoFocus placeholder={t("presetName")} value={name} onChange={(e) => setName(e.target.value)} />
             <DialogFooter className="mt-4">
               <Button type="submit" disabled={busy || !name.trim()} className="w-full">
                 {busy && <Loader2 className="animate-spin" data-icon="inline-start" />}
-                Save preset
+                {t("savePreset")}
               </Button>
             </DialogFooter>
           </form>
@@ -387,6 +425,8 @@ function withLutToggled(grade: ColorGrade | undefined, lutId: string): ColorGrad
 }
 
 function PresetView({ clip, peers, onAdjust }: { clip: VideoClip; peers?: readonly VideoClip[]; onAdjust: () => void }) {
+  const t = useTranslations("inspector.color");
+  const names = useColorNames();
   const [category, setCategory] = usePanelState<Category>(clip.id, "colorPresetCategory", "all");
   const gridScroll = useRememberedScroll(clip.id, `color-presets:${category}`);
   // The clip's own frame, ungraded: a swatch shows what its preset does to the
@@ -410,7 +450,7 @@ function PresetView({ clip, peers, onAdjust }: { clip: VideoClip; peers?: readon
   const active = clip.grade?.preset;
   const lut = clip.grade?.lut;
   const lutView = category === LUTS;
-  const manualDirty = TOOLS.some((t) => toolDirty(clip.grade, t.id));
+  const manualDirty = TOOLS.some((tool) => toolDirty(clip.grade, tool.id));
   const presets: (GradePreset | SavedTile | LutTile)[] =
     category === "all"
       ? GRADE_PRESET_CATEGORIES.flatMap((c) => gradePresetsInCategory(c.id))
@@ -455,17 +495,17 @@ function PresetView({ clip, peers, onAdjust }: { clip: VideoClip; peers?: readon
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="shrink-0 bg-card pb-2">
         <div className="flex h-10 shrink-0 items-center gap-1 px-3.5 text-sm font-semibold tracking-tight">
-          Color
-          <Tip label="Adjust">
+          {t("title")}
+          <Tip label={t("adjust")}>
             <button
               type="button"
-              aria-label="Adjust"
+              aria-label={t("adjust")}
               className="clip-color-adjust relative ml-auto grid size-6 place-items-center rounded text-muted-foreground transition-colors hover:text-foreground"
               onClick={onAdjust}
             >
               <SlidersHorizontal className="size-4" />
               {manualDirty && (
-                <span className="absolute top-0.5 right-0.5 size-1.5 rounded-full bg-violet-500" aria-label="Adjusted" />
+                <span className="absolute top-0.5 right-0.5 size-1.5 rounded-full bg-violet-500" aria-label={t("adjusted")} />
               )}
             </button>
           </Tip>
@@ -474,11 +514,11 @@ function PresetView({ clip, peers, onAdjust }: { clip: VideoClip; peers?: readon
         <ProjectColorRow />
         <div className="mt-2 flex min-w-0 flex-wrap gap-1 px-3.5">
           <button type="button" className={chip(category === "all")} onClick={() => setCategory("all")}>
-            All
+            {t("all")}
           </button>
           {GRADE_PRESET_CATEGORIES.map((c) => (
             <button key={c.id} type="button" className={chip(category === c.id)} onClick={() => setCategory(c.id)}>
-              {c.label}
+              {names.category(c.id)}
             </button>
           ))}
           <button
@@ -486,14 +526,14 @@ function PresetView({ clip, peers, onAdjust }: { clip: VideoClip; peers?: readon
             className={cn("clip-grade-category-luts", chip(category === LUTS))}
             onClick={() => setCategory(LUTS)}
           >
-            LUTs
+            {t("luts")}
           </button>
           <button
             type="button"
             className={cn("clip-grade-category-saved", chip(category === SAVED))}
             onClick={() => setCategory(SAVED)}
           >
-            Saved
+            {t("saved")}
           </button>
         </div>
       </div>
@@ -511,6 +551,7 @@ function PresetView({ clip, peers, onAdjust }: { clip: VideoClip; peers?: readon
           <PresetTile
             key={`${clip.id}:${p.id}`}
             preset={p}
+            label={names.presetName(p)}
             frame={frame}
             profile={profile}
             selected={
@@ -522,14 +563,14 @@ function PresetView({ clip, peers, onAdjust }: { clip: VideoClip; peers?: readon
         ))}
         {category === SAVED && presets.length === 0 && (
           <p className="col-span-2 py-6 text-center text-[12px] text-muted-foreground">
-            Grades you save land here.
+            {t("savedEmpty")}
           </p>
         )}
       </ScrollArea>
       <div className="shrink-0 border-t border-border bg-card px-3.5 py-1">
-        <Row label="Intensity">
+        <Row label={t("intensity")}>
           <ValueSlider
-            label="Intensity"
+            label={t("intensity")}
             sliderClassName="clip-grade-preset-amount data-horizontal:w-24"
             valueClassName="w-9 text-muted-foreground"
             value={Math.round(((lutView ? lut?.amount : active?.amount) ?? 1) * 100)}
@@ -551,7 +592,7 @@ function PresetView({ clip, peers, onAdjust }: { clip: VideoClip; peers?: readon
             }}
           />
         </Row>
-        <Row label="Protect skin tones">
+        <Row label={t("protectSkin")}>
           <Switch
             size="sm"
             className="clip-grade-protect-skin"
@@ -597,6 +638,7 @@ const presetNeedsLutThumb = (p: GradePreset) => !!(p.grade.curves || p.grade.whe
 
 function PresetTile({
   preset,
+  label,
   frame,
   profile,
   selected,
@@ -604,12 +646,15 @@ function PresetTile({
   onRemove,
 }: {
   preset: GradePreset;
+  /** The tile's name in the page's language. */
+  label: string;
   frame: string | null;
   profile: SourceProfile;
   selected: boolean;
   onPick: () => void;
   onRemove?: () => void;
 }) {
+  const t = useTranslations("inspector.color");
   const converted = profile !== "rec709" && profile !== "srgb";
   const needsLut = presetNeedsLutThumb(preset) || converted;
   const approx = useMemo(() => gradeCssApprox(preset.grade), [preset]);
@@ -711,13 +756,13 @@ function PresetTile({
             <StandInScene filter={approx.filter} tint={approx.tint} />
           )}
         </span>
-        <span className="max-w-full truncate">{preset.label}</span>
+        <span className="max-w-full truncate">{label}</span>
       </button>
       {onRemove && (
-        <Tip label="Delete preset">
+        <Tip label={t("deletePreset")}>
           <button
             type="button"
-            aria-label={`Delete ${preset.label}`}
+            aria-label={t("deleteNamed", { name: label })}
             className="absolute top-2 right-2 grid size-6 place-items-center rounded-full bg-black/55 text-white opacity-0 transition-opacity group-hover:opacity-100 hover:bg-black/75"
             onClick={onRemove}
           >
@@ -747,13 +792,14 @@ function StandInScene({ filter, tint }: { filter: string; tint: string | null })
 /* ------------------------------------------------------------------ */
 
 function AdjustView({ clip, peers, onBack }: { clip: VideoClip; peers?: readonly VideoClip[]; onBack: () => void }) {
+  const t = useTranslations("inspector.color");
   // The picked tool holds for the session, the same way the open level does.
   const [tool, setTool] = usePanelState<Tool>(clip.id, "colorTool", "basic");
   const toolScroll = useRememberedScroll(clip.id, `color-adjust:${tool}`);
   const { draft, commit } = useGradeWriter(clip, peers);
   const grade = clip.grade;
   // Manual adjustments only — reset-all keeps the preset layer.
-  const manualDirty = TOOLS.some((t) => toolDirty(grade, t.id));
+  const manualDirty = TOOLS.some((item) => toolDirty(grade, item.id));
   // Fit a starting grade from the clip's code values rendered through its
   // own recipe (never the graded preview, which would fold the current grade
   // back into the fit); the sliders show the result and stay fully
@@ -775,25 +821,25 @@ function AdjustView({ clip, peers, onBack }: { clip: VideoClip; peers?: readonly
         <div className="flex h-10 shrink-0 items-center gap-1 px-2.5 text-sm font-semibold tracking-tight">
           <button
             type="button"
-            aria-label="Back"
+            aria-label={t("back")}
             className="clip-color-back grid size-6 place-items-center rounded text-muted-foreground transition-colors hover:text-foreground"
             onClick={onBack}
           >
             <ChevronLeft className="size-4" />
           </button>
-          Adjust
+          {t("adjust")}
           <button
             type="button"
             className="clip-grade-auto ml-auto flex items-center gap-1 rounded-md border border-input px-2 py-0.5 text-[11.5px] font-medium text-muted-foreground transition-colors hover:text-foreground"
             onClick={autoGrade}
           >
             <Wand2 className="size-3" />
-            Auto
+            {t("auto")}
           </button>
-          <Tip label="Reset all adjustments">
+          <Tip label={t("resetAll")}>
             <button
               type="button"
-              aria-label="Reset all adjustments"
+              aria-label={t("resetAll")}
               className={cn(
                 "clip-grade-reset grid size-6 place-items-center rounded text-muted-foreground transition-colors hover:text-foreground",
                 !manualDirty && "invisible"
@@ -805,21 +851,21 @@ function AdjustView({ clip, peers, onBack }: { clip: VideoClip; peers?: readonly
           </Tip>
         </div>
         <div className="mx-3.5 flex shrink-0 rounded-lg bg-muted p-0.5 text-[11.5px] font-medium">
-          {TOOLS.map((t) => (
+          {TOOLS.map((item) => (
             <button
-              key={t.id}
+              key={item.id}
               type="button"
               className={cn(
-                `clip-grade-tab-${t.id} relative flex-1 rounded-md px-1 py-1 transition-colors`,
-                tool === t.id ? "bg-neutral-900 text-white" : "text-muted-foreground hover:text-foreground"
+                `clip-grade-tab-${item.id} relative flex-1 rounded-md px-1 py-1 transition-colors`,
+                tool === item.id ? "bg-neutral-900 text-white" : "text-muted-foreground hover:text-foreground"
               )}
-              onClick={() => setTool(t.id)}
+              onClick={() => setTool(item.id)}
             >
-              {t.label}
-              {toolDirty(grade, t.id) && (
+              {t(`tools.${item.id}`)}
+              {toolDirty(grade, item.id) && (
                 <span
-                  className={cn("absolute top-1 right-1 size-1 rounded-full", tool === t.id ? "bg-white/80" : "bg-violet-500")}
-                  aria-label={`${t.label} adjusted`}
+                  className={cn("absolute top-1 right-1 size-1 rounded-full", tool === item.id ? "bg-white/80" : "bg-violet-500")}
+                  aria-label={t("toolAdjusted", { tool: t(`tools.${item.id}`) })}
                 />
               )}
             </button>
@@ -859,17 +905,18 @@ type GradeWrite = {
 
 const formatSigned = (v: number) => (v > 0 ? `+${Math.round(v)}` : `${Math.round(v)}`);
 
+type GradeFieldKey = keyof ColorMessages["fields"];
+
 function BasicTool({ grade, draft, commit }: GradeWrite) {
+  const t = useTranslations("inspector.color");
   // Legacy fields keep rendering and stay editable on clips that carry them;
   // fresh grades never surface the rows.
-  const legacy: { key: "brightness" | "hue"; label: string; min: number; max: number }[] = [];
-  if (grade?.brightness) legacy.push({ key: "brightness", label: "Brightness", min: -GRADE_MAX, max: GRADE_MAX });
-  if (grade?.hue) legacy.push({ key: "hue", label: "Hue", min: -GRADE_HUE_MAX, max: GRADE_HUE_MAX });
-  const groups = [
-    { id: "light" as const, label: "Light" },
-    { id: "color" as const, label: "Color" },
-  ];
-  const sliderRow = (key: keyof ColorGrade & string, label: string, min: number, max: number) => {
+  const legacy: { key: "brightness" | "hue"; min: number; max: number }[] = [];
+  if (grade?.brightness) legacy.push({ key: "brightness", min: -GRADE_MAX, max: GRADE_MAX });
+  if (grade?.hue) legacy.push({ key: "hue", min: -GRADE_HUE_MAX, max: GRADE_HUE_MAX });
+  const groups = [{ id: "light" as const }, { id: "color" as const }];
+  const sliderRow = (key: GradeFieldKey, min: number, max: number) => {
+    const label = t(`fields.${key}`);
     const value = (grade?.[key] as number | undefined) ?? 0;
     // A one-sided slider reads as a plain amount; a centred one carries its sign.
     const format = (v: number) => (key === "hue" ? `${Math.round(v)}°` : min < 0 ? formatSigned(v) : `${Math.round(v)}`);
@@ -889,7 +936,7 @@ function BasicTool({ grade, draft, commit }: GradeWrite) {
           onDraft={(v) => draft({ ...grade, [key]: v })}
           onCommit={(v) => commit({ ...grade, [key]: v })}
         />
-        <ResetButton title={`Reset ${label.toLowerCase()}`} show={value !== 0} onClick={() => commit({ ...grade, [key]: 0 })} />
+        <ResetButton title={t(`resetField.${key}`)} show={value !== 0} onClick={() => commit({ ...grade, [key]: 0 })} />
       </Row>
     );
   };
@@ -897,18 +944,18 @@ function BasicTool({ grade, draft, commit }: GradeWrite) {
     <>
       {groups.map((g) => (
         <div key={g.id} className="flex flex-col gap-1">
-          <span className="mt-1 text-xs font-semibold text-muted-foreground">{g.label}</span>
-          {GRADE_BASIC_FIELDS.filter((f) => f.group === g.id).map((f) => sliderRow(f.key, f.label, f.min, GRADE_MAX))}
+          <span className="mt-1 text-xs font-semibold text-muted-foreground">{t(`groups.${g.id}`)}</span>
+          {GRADE_BASIC_FIELDS.filter((f) => f.group === g.id).map((f) => sliderRow(f.key, f.min, GRADE_MAX))}
         </div>
       ))}
       <div className="flex flex-col gap-1">
-        <span className="mt-1 text-xs font-semibold text-muted-foreground">Detail</span>
-        {GRADE_DETAIL_FIELDS.map((f) => sliderRow(f.key, f.label, f.min, GRADE_MAX))}
+        <span className="mt-1 text-xs font-semibold text-muted-foreground">{t("groups.detail")}</span>
+        {GRADE_DETAIL_FIELDS.map((f) => sliderRow(f.key, f.min, GRADE_MAX))}
       </div>
       {legacy.length > 0 && (
         <div className="flex flex-col gap-1">
-          <span className="mt-1 text-xs font-semibold text-muted-foreground">Legacy</span>
-          {legacy.map((f) => sliderRow(f.key, f.label, f.min, f.max))}
+          <span className="mt-1 text-xs font-semibold text-muted-foreground">{t("groups.legacy")}</span>
+          {legacy.map((f) => sliderRow(f.key, f.min, f.max))}
         </div>
       )}
     </>
@@ -916,6 +963,8 @@ function BasicTool({ grade, draft, commit }: GradeWrite) {
 }
 
 function WheelsTool({ grade, draft, commit }: GradeWrite) {
+  const t = useTranslations("inspector.color");
+  const wheelLabel = useLabels("wheel");
   const wheels = grade?.wheels;
   const tuple = (z: WheelZone): WheelTuple => wheels?.[z] ?? [0, 0, 0];
   const write = (to: (g: ColorGrade) => void, z: WheelZone, next: WheelTuple) =>
@@ -928,7 +977,7 @@ function WheelsTool({ grade, draft, commit }: GradeWrite) {
           return (
             <div key={z} className={`clip-grade-wheel-${z}`}>
               <ColorWheel
-                label={WHEEL_LABELS[z]}
+                label={wheelLabel(z)}
                 value={[dx, dy]}
                 onDraft={([nx, ny]) => write(draft, z, [nx, ny, lum])}
                 onCommit={([nx, ny]) => write(commit, z, [nx, ny, lum])}
@@ -937,14 +986,14 @@ function WheelsTool({ grade, draft, commit }: GradeWrite) {
           );
         })}
       </div>
-      <span className="mt-2 text-xs font-semibold text-muted-foreground">Luminance</span>
+      <span className="mt-2 text-xs font-semibold text-muted-foreground">{t("luminance")}</span>
       {WHEEL_ZONES.map((z) => {
         const [dx, dy, lum] = tuple(z);
-        const label = WHEEL_LABELS[z];
+        const label = wheelLabel(z);
         return (
           <Row key={z} label={label}>
             <ValueSlider
-              label={`${label} luminance`}
+              label={t("wheelLuminance", { wheel: label })}
               sliderClassName={`clip-grade-wheel-${z}-luma data-horizontal:w-24`}
               valueClassName="w-9 text-muted-foreground"
               value={lum}
@@ -958,7 +1007,7 @@ function WheelsTool({ grade, draft, commit }: GradeWrite) {
               onCommit={(v) => write(commit, z, [dx, dy, v])}
             />
             <ResetButton
-              title={`Reset ${label.toLowerCase()} wheel`}
+              title={t(`resetWheel.${z}`)}
               show={dx !== 0 || dy !== 0 || lum !== 0}
               onClick={() => write(commit, z, [0, 0, 0])}
             />
@@ -969,13 +1018,16 @@ function WheelsTool({ grade, draft, commit }: GradeWrite) {
   );
 }
 
+/** The three sliders of a hue band; each names itself under
+ * `inspector.color.hslAxes`. */
 const HSL_AXES = [
-  { index: 0, label: "Hue" },
-  { index: 1, label: "Saturation" },
-  { index: 2, label: "Luminance" },
+  { index: 0, id: "hue" },
+  { index: 1, id: "saturation" },
+  { index: 2, id: "luminance" },
 ] as const;
 
 function HslTool({ clipId, grade, draft, commit }: GradeWrite & { clipId: string }) {
+  const t = useTranslations("inspector.color");
   const [band, setBand] = usePanelState<HslBand>(clipId, "hslBand", "orange");
   const active = HSL_BANDS.find((b) => b.id === band)!;
   const tuple: HslTuple = grade?.hsl?.[band] ?? [0, 0, 0];
@@ -984,10 +1036,10 @@ function HslTool({ clipId, grade, draft, commit }: GradeWrite & { clipId: string
     <>
       <div className="mt-1 flex flex-wrap gap-1.5">
         {HSL_BANDS.map((b) => (
-          <Tip key={b.id} label={b.label}>
+          <Tip key={b.id} label={t(`hslBands.${b.id}`)}>
             <button
               type="button"
-              aria-label={b.label}
+              aria-label={t(`hslBands.${b.id}`)}
               aria-pressed={band === b.id}
               className={cn(
                 `clip-grade-hsl-${b.id} relative size-7 rounded-full border-2 transition-transform`,
@@ -1002,13 +1054,16 @@ function HslTool({ clipId, grade, draft, commit }: GradeWrite & { clipId: string
         ))}
       </div>
       <div className="mt-1 text-[12px] text-muted-foreground">
-        Adjusting <span className="font-semibold text-foreground">{active.label}</span>
+        {t.rich("adjustingBand", {
+          band: t(`hslBands.${active.id}`),
+          b: (chunks) => <span className="font-semibold text-foreground">{chunks}</span>,
+        })}
       </div>
       {HSL_AXES.map((axis) => (
-        <Row key={axis.label} label={axis.label}>
+        <Row key={axis.id} label={t(`hslAxes.${axis.id}`)}>
           <ValueSlider
-            label={`${active.label} ${axis.label.toLowerCase()}`}
-            sliderClassName={`clip-grade-hsl-${axis.label.toLowerCase()} data-horizontal:w-24`}
+            label={t(`bandAxis.${axis.id}`, { band: t(`hslBands.${active.id}`) })}
+            sliderClassName={`clip-grade-hsl-${axis.id} data-horizontal:w-24`}
             valueClassName="w-9 text-muted-foreground"
             value={tuple[axis.index]}
             min={-GRADE_MAX}
@@ -1029,7 +1084,7 @@ function HslTool({ clipId, grade, draft, commit }: GradeWrite & { clipId: string
             }}
           />
           <ResetButton
-            title={`Reset ${axis.label.toLowerCase()}`}
+            title={t(`resetField.${axis.id}`)}
             show={tuple[axis.index] !== 0}
             onClick={() => {
               const next = [...tuple] as HslTuple;
@@ -1050,7 +1105,9 @@ function HslTool({ clipId, grade, draft, commit }: GradeWrite & { clipId: string
 /** The label of a built-in or Library LUT, re-read as the Library changes. */
 function useLutLabel(id: string | null): string | undefined {
   const choices = useLutChoices();
-  return id ? choices.find((c) => c.id === id)?.label : undefined;
+  const names = useColorNames();
+  const choice = id ? choices.find((c) => c.id === id) : undefined;
+  return choice ? names.lutName(choice) : undefined;
 }
 
 /** The LUT tool: the applied table as a chip with its intensity, over every
@@ -1059,6 +1116,8 @@ function useLutLabel(id: string | null): string | undefined {
  * LUT sits under the grade — the picture after the source conversion goes
  * through it, and the sliders work on what comes out. */
 function LutTool({ clip, grade, draft, commit }: GradeWrite & { clip: VideoClip }) {
+  const t = useTranslations("inspector.color");
+  const names = useColorNames();
   const [over, setOver] = useState(false);
   const tiles = useLutTiles();
   // The clip's own frame, ungraded, so each tile shows what its LUT does.
@@ -1096,11 +1155,11 @@ function LutTool({ clip, grade, draft, commit }: GradeWrite & { clip: VideoClip 
         <div className="clip-grade-lut-chip mt-1 flex items-center gap-2 rounded-md bg-muted px-2 py-1.5 text-[12px]">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={LUT_MARK_ICON} alt="" aria-hidden className="size-5 shrink-0" />
-          <span className="min-w-0 flex-1 truncate font-medium">{label ?? "LUT not in the library"}</span>
-          <Tip label="Remove LUT">
+          <span className="min-w-0 flex-1 truncate font-medium">{label ?? t("lutMissing")}</span>
+          <Tip label={t("removeLut")}>
             <button
               type="button"
-              aria-label="Remove LUT"
+              aria-label={t("removeLut")}
               className="clip-grade-lut-remove grid size-5 shrink-0 place-items-center rounded text-muted-foreground transition-colors hover:text-foreground"
               onClick={remove}
             >
@@ -1110,12 +1169,12 @@ function LutTool({ clip, grade, draft, commit }: GradeWrite & { clip: VideoClip 
         </div>
       ) : (
         <p className="clip-grade-lut-empty mt-1 rounded-md border border-dashed border-input py-3 text-center text-[12px] text-muted-foreground">
-          Drag a LUT from the Library
+          {t("lutEmpty")}
         </p>
       )}
-      <Row label="Intensity">
+      <Row label={t("intensity")}>
         <ValueSlider
-          label="LUT intensity"
+          label={t("lutIntensity")}
           sliderClassName="clip-grade-lut-amount data-horizontal:w-24"
           valueClassName="w-9 text-muted-foreground"
           value={amount}
@@ -1130,14 +1189,15 @@ function LutTool({ clip, grade, draft, commit }: GradeWrite & { clip: VideoClip 
         />
       </Row>
       <div className="clip-grade-lut-grid mt-1 grid grid-cols-2 gap-2 pt-1">
-        {tiles.map((t) => (
+        {tiles.map((tile) => (
           <PresetTile
-            key={`${clip.id}:${t.id}`}
-            preset={t}
+            key={`${clip.id}:${tile.id}`}
+            preset={tile}
+            label={names.presetName(tile)}
             frame={frame}
             profile={profile}
-            selected={applied === t.lutId}
-            onPick={() => commit(withLutToggled(grade, t.lutId))}
+            selected={applied === tile.lutId}
+            onPick={() => commit(withLutToggled(grade, tile.lutId))}
           />
         ))}
       </div>

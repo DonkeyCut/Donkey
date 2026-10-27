@@ -19,6 +19,9 @@ const HIDDEN = new Set([
   // Page-local: the editor's clipboard and playback.
   "copy_selection",
   "paste_selection",
+  // The card speaks ChatGPT's language, so the editor's own language setting
+  // stays with the editor.
+  "set_interface_language",
   // Long generations settle after the batch ends, so nothing would place them.
   "generate_video",
   "generate_character_video",

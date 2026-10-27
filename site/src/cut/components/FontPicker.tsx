@@ -11,6 +11,7 @@
  */
 
 import { Loader2, Upload } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
 import {
   Select,
@@ -32,6 +33,7 @@ import {
   uploadLibraryFont,
 } from "@/cut/lib/linkedLibrary";
 import { allFonts, fontStack, onFontsChanged } from "@/cut/lib/types";
+import { useDescribeError } from "@/i18n/describeError";
 import { cn } from "@/lib/utils";
 
 /** Room left either side of the menu inside its panel. */
@@ -102,6 +104,8 @@ export function FontPicker({
 }) {
   // The menu re-reads the registry when the bundled families finish registering
   // or a shelf font lands (the bump re-renders, and the render re-reads).
+  const t = useTranslations("inspector.fontPicker");
+  const describeError = useDescribeError();
   const [, bump] = useState(0);
   const again = () => bump((n) => n + 1);
   useEffect(() => onFontsChanged(again), []);
@@ -140,14 +144,14 @@ export function FontPicker({
     );
     if (!file) {
       if (files?.length)
-        setError("That file has no font in it. Try a .ttf, .otf or .woff.");
+        setError(t("noFontInFile"));
       setBusy(false);
       return;
     }
     try {
       onChange(await uploadLibraryFont(file));
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not add that font.");
+      setError(describeError(e, t("addFailed")));
     } finally {
       setBusy(false);
     }
@@ -178,7 +182,7 @@ export function FontPicker({
             fontSize: rowSize(fontStack(value)),
           }}
         >
-          <SelectValue placeholder="Mixed" />
+          <SelectValue placeholder={t("mixed")} />
         </SelectTrigger>
         {/* The menu is the field's own width: a face's name sets in a face
             that runs wide, and the panel it drops out of is narrow. */}
@@ -194,7 +198,7 @@ export function FontPicker({
             <>
               <SelectSeparator />
               <SelectGroup>
-                <SelectLabel>Custom fonts</SelectLabel>
+                <SelectLabel>{t("customFonts")}</SelectLabel>
                 {mine.map(row)}
               </SelectGroup>
             </>
@@ -207,7 +211,7 @@ export function FontPicker({
               ) : (
                 <Upload className="size-3.5" />
               )}
-              {busy ? "Adding font…" : "Upload font…"}
+              {busy ? t("adding") : t("upload")}
             </span>
           </SelectItem>
         </SelectContent>

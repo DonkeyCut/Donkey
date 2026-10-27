@@ -7,7 +7,8 @@ import { apiFetch, apiJson, getBackend, type CutBackend } from "./backend";
 import { registerBlobFile } from "./backend/browser/registry";
 import { cloudBackend } from "./backend/cloud";
 import { pollCloudJob } from "./cloudJob";
-import { quotaErrorMessage } from "./backend/cloud";
+import { creatorNames } from "./defaultNames";
+import { errorFromBody, replyError, UserError } from "./userError";
 import { encodeWav } from "./cloudTranscribe";
 import { allowance, canvasBytes, holdMemory } from "./memoryBudget";
 import { normalizeLink } from "./link";
@@ -91,14 +92,14 @@ export async function createProjectFromFile(
   folderId: string | null
 ): Promise<string | null> {
   if (!isMediaFile(file)) return null;
-  const name = file.name.replace(/\.[^./]+$/, "") || "Untitled";
+  const name = file.name.replace(/\.[^./]+$/, "") || creatorNames().untitled;
   const res = await apiFetch("/api/cut/projects", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ name, folderId }),
   });
   const project = await apiJson<ProjectSummary>(res);
-  if (!res.ok || !project.id) throw new Error(project.error ?? "Could not create the project.");
+  if (!res.ok || !project.id) throw errorFromBody(project, new UserError("project_creation_failed", "Could not create the project."));
 
   const asset = await importFileToProject(project.id, file);
   // Media the engine rejects leaves an empty project rather than a dangling id.
@@ -229,9 +230,7 @@ export async function presignUpload(
   });
   const body = await apiJson<{ key?: string; url?: string; fileName?: string }>(res);
   if (!res.ok || !body.key || !body.url) {
-    const err = new Error(
-      quotaErrorMessage(res.status, body) ?? body.error ?? "Upload failed."
-    ) as Error & { status?: number };
+    const err = replyError(res.status, body, new UserError("upload_failed", "Upload failed.")) as Error & { status?: number };
     err.status = res.status;
     throw err;
   }
@@ -268,7 +267,7 @@ export function putSigned(
       body: file,
       signal: opts?.signal,
     }).then((res) => {
-      if (!res.ok) throw new Error("Upload failed.");
+      if (!res.ok) throw new UserError("upload_failed", "Upload failed.");
       opts?.onProgress?.(1);
     });
   }
@@ -283,8 +282,8 @@ export function putSigned(
       };
     }
     xhr.onload = () =>
-      xhr.status >= 200 && xhr.status < 300 ? resolve() : reject(new Error("Upload failed."));
-    xhr.onerror = () => reject(new ConnectionLostError("Upload failed."));
+      xhr.status >= 200 && xhr.status < 300 ? resolve() : reject(new UserError("upload_failed", "Upload failed."));
+    xhr.onerror = () => reject(new ConnectionLostError("upload_failed", "Upload failed."));
     xhr.onabort = () => reject(new DOMException("Upload cancelled.", "AbortError"));
     opts?.signal?.addEventListener("abort", () => xhr.abort(), { once: true });
     xhr.send(file);
@@ -308,16 +307,16 @@ function postFormWatched(
       };
     }
     xhr.onload = () => {
-      let body: { fileName?: string; error?: string } = {};
+      let body: { fileName?: string; error?: string; code?: string } = {};
       try {
         body = JSON.parse(xhr.responseText) as typeof body;
       } catch {
         // A reply that never reached a handler is plain text.
       }
       if (xhr.status >= 200 && xhr.status < 300 && body.fileName) resolve(body.fileName);
-      else reject(new Error(body.error ?? "Upload failed."));
+      else reject(errorFromBody(body, new UserError("upload_failed", "Upload failed.")));
     };
-    xhr.onerror = () => reject(new ConnectionLostError("Upload failed."));
+    xhr.onerror = () => reject(new ConnectionLostError("upload_failed", "Upload failed."));
     xhr.onabort = () => reject(new DOMException("Upload cancelled.", "AbortError"));
     opts?.signal?.addEventListener("abort", () => xhr.abort(), { once: true });
     xhr.send(form);
@@ -352,7 +351,7 @@ export async function uploadProjectMediaTo(
     }
     const res = await backend.fetch(path, { method: "POST", body: form, signal: opts?.signal });
     const body = await apiJson<{ fileName?: string }>(res);
-    if (!res.ok || !body.fileName) throw new Error(body.error ?? "Upload failed.");
+    if (!res.ok || !body.fileName) throw errorFromBody(body, new UserError("upload_failed", "Upload failed."));
     return body.fileName;
   }
   const signed = await presignUpload(
@@ -369,7 +368,7 @@ export async function uploadProjectMediaTo(
     body: JSON.stringify({ key }),
   });
   const body = await apiJson<{ fileName?: string }>(res);
-  if (!res.ok || !body.fileName) throw new Error(body.error ?? "Upload failed.");
+  if (!res.ok || !body.fileName) throw errorFromBody(body, new UserError("upload_failed", "Upload failed."));
   return body.fileName;
 }
 
@@ -385,12 +384,12 @@ export async function uploadProjectImage(
   projectId: string,
   file: Blob,
   fileName: string,
-  opts?: { name?: string; origin?: "generated" | "sticker"; failMessage?: string; backend?: CutBackend }
+  opts?: { name?: string; origin?: "generated" | "sticker"; failMessage?: UserError | string; backend?: CutBackend }
 ): Promise<MediaAsset> {
   // Callers whose work outlives navigation (finishing AI generations) pin the
   // backend they started on; everyone else rides the active one.
   const backend = opts?.backend ?? getBackend();
-  const failMessage = opts?.failMessage ?? "Could not add the image.";
+  const failMessage = opts?.failMessage ?? new UserError("image_add_failed", "Could not add the image.");
   if (backend.kind !== "cloud" || file.size < IMAGE_INLINE_MAX) {
     const form = new FormData();
     form.append("file", file, fileName);
@@ -402,7 +401,7 @@ export async function uploadProjectImage(
     });
     const body = await apiJson<MediaAsset>(res);
     if (!res.ok || !body.fileName) {
-      throw new Error(quotaErrorMessage(res.status, body) ?? body.error ?? failMessage);
+      throw replyError(res.status, body, failMessage);
     }
     return { ...body, url: await storedMediaUrl(projectId, body.fileName, backend) };
   }
@@ -677,7 +676,7 @@ function sendCloudImport(
         claim = { ...made, stored: storedUrl !== null };
       } else {
         const stashed = await stashUnclaimedMedia(projectId, file);
-        if (!stashed) throw new Error(quotaErrorMessage(413, {}) ?? "Upload failed.");
+        if (!stashed) throw replyError(413, {}, new UserError("upload_failed", "Upload failed."));
         claim = { signed: null, fileName: stashed.fileName, stored: true };
       }
       // Deleted, or left behind, while the claim ran: the copy comes back out
@@ -702,7 +701,7 @@ function sendCloudImport(
       body: JSON.stringify({ key: claim.signed.key }),
     });
     const body = await apiJson<{ fileName?: string }>(res);
-    if (!res.ok || !body.fileName) throw new Error(body.error ?? "Upload failed.");
+    if (!res.ok || !body.fileName) throw errorFromBody(body, new UserError("upload_failed", "Upload failed."));
     return body.fileName;
   };
 }
@@ -719,7 +718,7 @@ export function sendStoredUpload(
 ): PendingImport["send"] {
   return async (opts) => {
     const file = await localMediaFile(projectId, fileName);
-    if (!file) throw new Error("The local copy of this file is gone.");
+    if (!file) throw new UserError("local_copy_gone", "The local copy of this file is gone.");
     const mime = file.type || "application/octet-stream";
     // Steer the cloud's dedupe around the other pinned names, never this one:
     // this drain is the pin's own claim.
@@ -741,7 +740,7 @@ export function sendStoredUpload(
       res
     );
     if (!res.ok || !body.fileName || (!body.done && !(body.url && body.key))) {
-      throw new Error(quotaErrorMessage(res.status, body) ?? body.error ?? "Upload failed.");
+      throw replyError(res.status, body, new UserError("upload_failed", "Upload failed."));
     }
     let finalName = body.fileName;
     if (!body.done) {
@@ -761,7 +760,7 @@ export function sendStoredUpload(
         body: JSON.stringify({ key: body.key }),
       });
       const cbody = await apiJson<{ fileName?: string }>(cres);
-      if (!cres.ok || !cbody.fileName) throw new Error(cbody.error ?? "Upload failed.");
+      if (!cres.ok || !cbody.fileName) throw errorFromBody(cbody, new UserError("upload_failed", "Upload failed."));
       finalName = cbody.fileName;
     }
     await renameLocalMedia(projectId, fileName, finalName);
@@ -953,7 +952,7 @@ export function importRemote(
     signal?: AbortSignal;
   }) => {
     const dl = await fetch(init.url, { signal: opts?.signal });
-    if (!dl.ok) throw new Error("Could not read the media.");
+    if (!dl.ok) throw new UserError("media_fetch_failed", "Could not read the media.");
     const blob = await dl.blob();
     return uploadProjectMediaTo(getBackend(), projectId, blob, storeAs, opts);
   };
@@ -1026,7 +1025,7 @@ export async function importImage(
   // no longer resolves, a dead link). Registering that would place a broken
   // still and hand the first-asset aspect guess a meaningless size, so the
   // import fails here instead.
-  if (dims.width === 0 || dims.height === 0) throw new Error("Could not read the image.");
+  if (dims.width === 0 || dims.height === 0) throw new UserError("image_read_failed", "Could not read the image.");
   // A stock image lands on the timeline where the caller places it, not in the
   // Media panel — tag it so it stays out.
   return importRemote(projectId, {
@@ -1079,6 +1078,9 @@ export async function importStockAudio(
   });
 }
 
+// A URL import that failed, worded the same whichever residency ran it.
+const urlImportFailed = () => new UserError("url_import_failed", "Could not import that URL.");
+
 /** Download a URL (TikTok, YouTube, an X post, an article, …) into the project
  * through the engine's bundled downloader and register what came back — one
  * asset for a video, one per photo for a photo post, none at all for a source
@@ -1109,15 +1111,15 @@ export async function importUrlMedia(
   if (backend.kind === "cloud") {
     // The cloud route is async: it answers {jobId} and a worker does the fetch.
     const started = await apiJson<{ jobId?: string }>(res);
-    if (!res.ok || !started.jobId) throw new Error(started.error ?? "Could not import that URL.");
-    body = await pollCloudJob(started.jobId, backend, "Could not import that URL.");
+    if (!res.ok || !started.jobId) throw errorFromBody(started, urlImportFailed());
+    body = await pollCloudJob(started.jobId, backend, urlImportFailed());
   } else {
     body = await apiJson<{ files?: { fileName: string; title: string }[]; text?: string }>(res);
   }
   // A source that is only words (a text post, an article, a page) imports as
   // that text with no files, so an empty file list with text is a success.
   if (!res.ok || (!body.files?.length && !body.text)) {
-    throw new Error(body.error ?? "Could not import that URL.");
+    throw errorFromBody(body, urlImportFailed());
   }
   return adoptImportedFiles(projectId, body, backend);
 }
@@ -1163,13 +1165,13 @@ async function importUrlThroughCloud(
     body: JSON.stringify({ url, ...(opts.audio ? { audio: true } : {}) }),
   });
   const started = await apiJson<{ jobId?: string }>(res);
-  if (!res.ok || !started.jobId) throw new Error(started.error ?? "Could not import that URL.");
+  if (!res.ok || !started.jobId) throw errorFromBody(started, urlImportFailed());
   const done = await pollCloudJob<{
     assets?: { id: string; fileName: string; name: string }[];
     text?: string;
-  }>(started.jobId, cloudBackend, "Could not import that URL.");
+  }>(started.jobId, cloudBackend, urlImportFailed());
   // Words with no media are a successful import; nothing at all is a failure.
-  if (!done.assets?.length && !done.text) throw new Error("Could not import that URL.");
+  if (!done.assets?.length && !done.text) throw urlImportFailed();
   const files: { fileName: string; title: string }[] = [];
   // Every staged copy is dropped from the cloud shelf, however this ends: a
   // download or a local write that throws part way through would otherwise
@@ -1186,7 +1188,7 @@ async function importUrlThroughCloud(
     for (const staged of done.assets ?? []) {
       const path = `/api/cut/library/media/${encodeURIComponent(staged.fileName)}`;
       const bytes = await cloudBackend.fetch(path);
-      if (!bytes.ok) throw new Error("Could not import that URL.");
+      if (!bytes.ok) throw urlImportFailed();
       const fileName = await uploadProjectMediaTo(
         backend,
         projectId,
@@ -1322,7 +1324,7 @@ async function* sourcePcm(
 ): AsyncGenerator<PcmChunk> {
   const input = openMedia(sourceUrl);
   const track = await audioTrackOf(input).finally(() => input.dispose());
-  if (!track) throw new Error("This file has no audio track.");
+  if (!track) throw new UserError("media_no_audio_track", "This file has no audio track.");
   if (to !== undefined && !(to > from)) return;
   for await (const { buffer, timestamp } of audioChunks(sourceUrl, from, to)) {
     yield {
@@ -1428,7 +1430,7 @@ export async function renderAudioSpanWav(
   // Only the asked-for span is decoded, so pulling thirty seconds out of an
   // hour-long file costs thirty seconds of work.
   const span = await decodeAudioSpan(sourceUrl, Math.max(0, from), to);
-  if (!span) throw new Error("This file has no audio track.");
+  if (!span) throw new UserError("media_no_audio_track", "This file has no audio track.");
   const dur = span.duration;
   if (!(dur > 0)) throw new Error("from/to describe an empty range.");
   const rate = 16000; // encodeWav's fixed sample rate
@@ -1570,18 +1572,18 @@ export async function makeStillFrame(
   detail: WatchDetail = "scan"
 ): Promise<WatchFrames> {
   const img = await decodeRasterImageUrl(sourceUrl);
-  if (!img || img.width === 0 || img.height === 0) throw new Error("Could not read the image.");
+  if (!img || img.width === 0 || img.height === 0) throw new UserError("image_read_failed", "Could not read the image.");
   const g = watchGeometry(detail);
   const [w, h] = cellDims(img.width, img.height, g.cell);
   const canvas = createRasterCanvas(w, h);
   const ctx = canvas.getContext("2d") as CanvasRenderingContext2D | null;
-  if (!ctx) throw new Error("Could not read the image.");
+  if (!ctx) throw new UserError("image_read_failed", "Could not read the image.");
   ctx.imageSmoothingQuality = "high";
   ctx.drawImage(img.source, 0, 0, w, h);
   // A picture read through an element (a host that sends no CORS header)
   // taints the canvas, and the encode is where that surfaces.
   const image = await rasterCanvasToDataUrl(canvas, "image/jpeg", g.quality).catch(() => {
-    throw new Error("Could not read the image.");
+    throw new UserError("image_read_failed", "Could not read the image.");
   });
   return {
     frames: [{ t: 0, image, via: "first" }],

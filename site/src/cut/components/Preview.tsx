@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type RefObject } from "react";
 import { Check, Copy, Loader2, ZoomIn, ZoomOut } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { usePlayback } from "@/cut/hooks/usePlayback";
 import { startDrag } from "@/cut/lib/drag";
 import { isPreviewSelectionModifier, startSelectionDrag, togglePreviewSelection } from "@/cut/components/previewSelectionDrag";
@@ -140,6 +141,7 @@ function pictureInPane(
 /** While the Cutout panel's Original toggle is on, the stage says so — the
  * cutout looks gone otherwise. Clicking the badge brings the cutout back. */
 function OriginalPeekBadge() {
+  const t = useTranslations("editor.preview");
   const peeking = useEditor((st) => !!st.removalPeek);
   if (!peeking) return null;
   return (
@@ -149,7 +151,7 @@ function OriginalPeekBadge() {
         className="clip-peek-badge rounded-full bg-black/55 px-3 py-1 text-[11.5px] font-medium text-white shadow-lg transition-colors hover:bg-black/70"
         onClick={() => useEditor.setState({ removalPeek: null })}
       >
-        Showing the original — click to see the cutout
+        {t("showingOriginal")}
       </button>
     </div>
   );
@@ -170,6 +172,7 @@ function BufferingBadge() {
 }
 
 export function Preview() {
+  const t = useTranslations("editor.preview");
   const canvasRef = useRef<HTMLCanvasElement>(null);
   // The extended-range canvas the HDR picture is presented on, over the
   // composite canvas; shown only while the stage is in HDR.
@@ -667,7 +670,7 @@ export function Preview() {
           </StagePictureFx>
           {hdr === "sdr" && (
             <span className="pointer-events-none absolute top-2 left-2 rounded-full bg-black/55 px-2 py-0.5 text-[11px] font-medium text-white">
-              Previewing SDR
+              {t("previewingSdr")}
             </span>
           )}
           <BufferingBadge />
@@ -756,12 +759,12 @@ export function Preview() {
                 <Copy className="size-3.5 text-muted-foreground" />
               )}
               {copyState === "working"
-                ? "Copying frame…"
+                ? t("copyingFrame")
                 : copyState === "done"
-                  ? "Copied"
+                  ? t("copied")
                   : copyState === "failed"
-                    ? "Couldn't copy the frame"
-                    : "Copy frame"}
+                    ? t("copyFrameFailed")
+                    : t("copyFrame")}
             </DropdownMenuItem>
           </DropdownMenuContent>
         )}
@@ -793,6 +796,7 @@ function ZoomHud({
   onReset: () => void;
   onHold: (held: boolean) => void;
 }) {
+  const t = useTranslations("editor.preview");
   const Icon = zoom < 0.999 ? ZoomOut : ZoomIn;
   return (
     <div
@@ -821,7 +825,7 @@ function ZoomHud({
         </span>
         <button
           type="button"
-          title="Zoom out"
+          title={t("zoomOut")}
           onClick={() => onZoom(-1)}
           className="grid size-7 place-items-center rounded-full text-foreground hover:bg-accent"
         >
@@ -829,7 +833,7 @@ function ZoomHud({
         </button>
         <button
           type="button"
-          title="Zoom in"
+          title={t("zoomIn")}
           onClick={() => onZoom(1)}
           className="grid size-7 place-items-center rounded-full text-foreground hover:bg-accent"
         >
@@ -840,12 +844,12 @@ function ZoomHud({
           onClick={onReset}
           className="ml-1 rounded-full border px-2.5 py-1 text-xs font-medium hover:bg-accent"
         >
-          Reset
+          {t("reset")}
         </button>
       </div>
       <button
         type="button"
-        title={`Zoom ${Math.round(zoom * 100)}%`}
+        title={t("zoomLevel", { percent: Math.round(zoom * 100) })}
         onClick={onToggle}
         className="grid size-9 shrink-0 place-items-center rounded-full border bg-background/95 text-foreground shadow-md backdrop-blur hover:bg-accent"
       >
@@ -917,6 +921,10 @@ function ClipSelectionGizmos({ stage }: { stage: Stage }) {
 /** `grouped`: one of several selected items — the box still moves the set,
  * and the selection frame carries the grips for all of them. */
 function ClipTransformGizmo({ stage, selectedClip, grouped }: { stage: Stage; selectedClip: VideoClip; grouped: boolean }) {
+  const t = useTranslations("editor.preview");
+  // The grips' names, resolved once per locale: the gizmo redraws with the
+  // playhead, and a redraw takes no lookups.
+  const titles = useMemo(() => ({ pan: t("panPicture"), zoom: t("zoomPicture") }), [t]);
   const assets = useEditor((s) => s.assets);
   const skimTime = useSkim();
   const layerRef = useRef<HTMLDivElement>(null);
@@ -1266,7 +1274,7 @@ function ClipTransformGizmo({ stage, selectedClip, grouped }: { stage: Stage; se
               overflows && "pointer-events-auto cursor-grab active:cursor-grabbing"
             )}
             style={picBox}
-            title={overflows ? "Drag to pan the picture" : undefined}
+            title={overflows ? titles.pan : undefined}
             onPointerDown={overflows ? onPanPicture : undefined}
           >
             {overflows && !grouped && (
@@ -1275,7 +1283,7 @@ function ClipTransformGizmo({ stage, selectedClip, grouped }: { stage: Stage; se
                 handles={CORNER_HANDLES}
                 rotation={rotation}
                 onResize={(_h, e) => onZoom(e)}
-                resizeTitle="Drag to zoom the picture"
+                resizeTitle={titles.zoom}
               />
             )}
           </div>

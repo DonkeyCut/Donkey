@@ -19,6 +19,7 @@ import { faceEmAscent } from "./fontEm";
 import { allowance, holdMemory } from "./memoryBudget";
 import { createRasterCanvas, decodeRasterImage, rasterCanvasToPng } from "./raster";
 import { fontStack, type MediaAsset, type Overlay } from "./types";
+import { UserError } from "./userError";
 
 // The shared text metrics and painters live in the effects kit; these
 // re-exports keep the app's preview components on the same constants.
@@ -203,7 +204,8 @@ export async function requireStickers(overlays: Overlay[], assets: MediaAsset[])
       continue;
     }
     const why = stickerMisses.get(asset.id) ?? "no picture";
-    throw new Error(`The sticker "${o.name ?? asset.name}" could not be read (${why}).`);
+    const name = o.name ?? asset.name;
+    throw new UserError("sticker_unreadable", `The sticker "${name}" could not be read (${why}).`, { name, reason: why });
   }
 }
 

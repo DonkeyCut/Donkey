@@ -1,5 +1,8 @@
 import { createAudioTranscribeJob, getTranscribeJob } from "../transcribe";
-import { errorMessage } from "../util";
+import { UserError } from "../../lib/userError";
+import { errorReply } from "../util";
+
+const TRANSCRIBE_START_FAILED = new UserError("transcription_start_failed", "Transcription failed to start.");
 
 /** On-device speech for audio the caller supplies, rather than for a project
  * this engine stores: a cloud project renders its audible mix in the browser
@@ -19,23 +22,24 @@ export const sttApi = {
         locale: typeof locale === "string" && locale ? locale : undefined,
         duration: Number.isFinite(duration) ? duration : undefined,
       });
-      if (job.status === "error") return Response.json({ error: job.error }, { status: 400 });
+      if (job.status === "error") return Response.json(errorReply(job, TRANSCRIBE_START_FAILED), { status: 400 });
       return Response.json({ id: job.id });
     } catch (e) {
-      return Response.json(
-        { error: errorMessage(e, "Transcription failed to start.") },
-        { status: 500 }
-      );
+      return Response.json(errorReply(e, TRANSCRIBE_START_FAILED), { status: 500 });
     }
   },
 
   status(_req: Request, { jobId }: { jobId: string }) {
     const job = getTranscribeJob(jobId);
-    if (!job) return Response.json({ error: "Unknown transcription job." }, { status: 404 });
+    if (!job) {
+      return Response.json(errorReply(new UserError("transcribe_job_unknown", "Unknown transcription job."), ""), { status: 404 });
+    }
     return Response.json({
       status: job.status,
       stage: job.stage,
       error: job.error,
+      errorCode: job.errorCode,
+      errorParams: job.errorParams,
       cues: job.cues,
     });
   },

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useTranslations } from "next-intl";
 import { ChevronLeft, ChevronRight, Maximize2, Search } from "lucide-react";
 import { clearRefDrag, refFromStock, setRefDragData } from "@/cut/lib/assetRef";
 import { useRefCopy } from "@/cut/lib/refCopy";
@@ -34,6 +35,7 @@ const chip = (active: boolean) =>
   );
 
 export function StockImagesPanel() {
+  const t = useTranslations("media");
   const [view, setView] = useState<View>("all");
   const [query, setQuery] = useState("");
 
@@ -52,7 +54,7 @@ export function StockImagesPanel() {
     !q ||
     item.prompt.toLowerCase().includes(q) ||
     item.category.toLowerCase().includes(q) ||
-    item.tags.some((t) => t.includes(q));
+    item.tags.some((tag) => tag.includes(q));
 
   const stock = STOCK_IMAGES.filter(matches);
 
@@ -62,7 +64,7 @@ export function StockImagesPanel() {
         <span className="flex min-w-0 items-center gap-1 text-sm font-semibold tracking-tight">
           {view !== "all" && (
             <button
-              title="All stock images"
+              title={t("stockImages.allImages")}
               className="grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground hover:text-foreground"
               onClick={() => setView("all")}
             >
@@ -70,7 +72,7 @@ export function StockImagesPanel() {
             </button>
           )}
           <span className={cn("truncate", view === "all" && "pl-1.5")}>
-            {view === "all" ? "Stock Images" : view}
+            {view === "all" ? t("stockImages.title") : t(`stockCategory.${view}`)}
           </span>
         </span>
       </div>
@@ -80,7 +82,7 @@ export function StockImagesPanel() {
           <Search className="size-3.5 shrink-0 text-muted-foreground" />
           <input
             className="w-full bg-transparent text-[12px] outline-none placeholder:text-muted-foreground"
-            placeholder="Search…"
+            placeholder={t("stockImages.search")}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
@@ -88,11 +90,11 @@ export function StockImagesPanel() {
 
         <div className="flex shrink-0 flex-wrap gap-1">
           <button className={chip(view === "all")} onClick={() => setView("all")}>
-            All
+            {t("stockImages.all")}
           </button>
           {STOCK_CATEGORIES.map((c) => (
             <button key={c} className={chip(view === c)} onClick={() => setView(c)}>
-              {c}
+              {t(`stockCategory.${c}`)}
             </button>
           ))}
         </div>
@@ -104,7 +106,7 @@ export function StockImagesPanel() {
               if (items.length === 0) return null;
               return (
                 <section key={c} className="shrink-0">
-                  <SectionHead title={c} onViewAll={items.length > 6 ? () => setView(c) : undefined} />
+                  <SectionHead title={t(`stockCategory.${c}`)} onViewAll={items.length > 6 ? () => setView(c) : undefined} />
                   <div className="grid grid-cols-2 gap-1.5">
                     {items.slice(0, 6).map((i) => (
                       <StockTile key={i.id} item={i} />
@@ -135,6 +137,7 @@ export function StockImagesPanel() {
 }
 
 function SectionHead({ title, onViewAll }: { title: string; onViewAll?: () => void }) {
+  const t = useTranslations("media.stockImages");
   return (
     <div className="mb-1.5 flex items-center justify-between">
       <span className="text-[12px] font-semibold">{title}</span>
@@ -143,7 +146,7 @@ function SectionHead({ title, onViewAll }: { title: string; onViewAll?: () => vo
           className="flex items-center gap-0.5 text-[11px] text-muted-foreground hover:text-foreground"
           onClick={onViewAll}
         >
-          View all
+          {t("viewAll")}
           <ChevronRight className="size-3" />
         </button>
       )}
@@ -155,6 +158,7 @@ function SectionHead({ title, onViewAll }: { title: string; onViewAll?: () => vo
  * and it drags as an asset ref (chat attachment, generation reference). */
 function StockTile({ item }: { item: StockImage }) {
   const { flash, attachReveal } = useRevealFlash("stock", item.id);
+  const t = useTranslations("media.stockImages");
   const copyRef = useRefCopy(() => [refFromStock(item)]);
   return (
     <div
@@ -191,7 +195,7 @@ function StockTile({ item }: { item: StockImage }) {
       />
       <div className="absolute top-1 right-1 flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
         <button
-          title="Expand"
+          title={t("expand")}
           className="grid size-5 place-items-center rounded-full bg-black/45 text-white hover:bg-black/65"
           onClick={() =>
             useLightbox.getState().open({
@@ -213,5 +217,6 @@ function StockTile({ item }: { item: StockImage }) {
 }
 
 function Empty() {
-  return <p className="text-[11px] text-muted-foreground">No matches.</p>;
+  const t = useTranslations("media.stockImages");
+  return <p className="text-[11px] text-muted-foreground">{t("noMatches")}</p>;
 }

@@ -2,6 +2,7 @@
 import { TimelineActionButton } from "@/cut/components/TimelineActionButton";
 import { TimelineGroupActions } from "@/cut/components/TimelineGroupActions";
 
+import { useTranslations } from "next-intl";
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { ArrowDownToLine, AudioLines, Check, Clapperboard, Copy, Diamond, Download, EllipsisVertical, Eye, EyeOff, FolderOpen, FolderPlus, Fullscreen, Loader2, Magnet, MoreHorizontal, PanelBottomClose, Pause, Play, Scissors, SkipBack, Sticker, Trash2, Type, Volume2, VolumeX } from "lucide-react";
 import { EFFECT_CHIP_ICONS, effectIconKind, SHAPE_CHIP_ICONS, TRANSITION_ICONS } from "@/cut/components/entityIcons";
@@ -67,12 +68,13 @@ import { useMatteBakes } from "@/cut/lib/removal/bakeJobs";
 import { cardMatteKey } from "@/cut/lib/cameraCard";
 import { laneHidden, subtitleLaneCount } from "@/cut/lib/subtitles";
 import { formatTime, formatTimecode } from "@/cut/lib/time";
-import { EFFECT_LABELS, hasSpeedCurve, headSrc, retimeOf, SPEED_CURVE_MAX, SPEED_CURVE_MIN, tailSrc, type EffectId, type Retime, type SpeedNode } from "@donkeycut/effects-kit";
+import { hasSpeedCurve, headSrc, retimeOf, SPEED_CURVE_MAX, SPEED_CURVE_MIN, tailSrc, type EffectId, type Retime, type SpeedNode } from "@donkeycut/effects-kit";
 import { BLOCK_COLOR } from "@/cut/lib/blockSource";
-import { isLinkedAssetType, assetIsSilent, previewUrl, emptySubtitles, fontStack, IMAGE_CLIP_SECONDS, isAudioTransition, clipName, isTextOverlay, overlayName, SHAPE_LABELS, TRANSITION_STYLE_LABELS, transitionBarStart, transitionDefaultSeconds, XBAR_MAGNET_PX, type ShapeKind } from "@/cut/lib/types";
+import { isLinkedAssetType, assetIsSilent, previewUrl, emptySubtitles, fontStack, IMAGE_CLIP_SECONDS, isAudioTransition, clipName, isTextOverlay, overlayName, transitionBarStart, transitionDefaultSeconds, XBAR_MAGNET_PX, type ShapeKind } from "@/cut/lib/types";
 import type { AudioClip, ClipSpan, ColorGrade, MediaAsset, Overlay, Selection, StickerOverlay, SubtitleCue, TimelineTransition, TransitionBoundaryKind, TransitionStyle, VideoClip } from "@/cut/lib/types";
 import { isLottieAsset } from "@/cut/lib/lottieAssets";
 import { gradeCssApprox, normalizeGrade } from "@donkeycut/effects-kit";
+import { useLabels } from "@/i18n/labels";
 import { cn } from "@/lib/utils";
 
 /**
@@ -277,12 +279,11 @@ type OverlayFamily = "text" | "element" | "effect";
  * (`anchorLen`), since a cross dissolve wants a shorter one than a blend. */
 type Anchor = { kind: "cut" | "in" | "out"; clipId: string; at: number; len: number };
 
-/** One transition bar drawn on the row: the store object itself, the place it
- * resolved to (null while it sits inert), and how it reads. */
+/** One transition bar drawn on the row: the store object itself and the place
+ * it resolved to (null while it sits inert). */
 type XBar = {
   t: TimelineTransition;
   role: { kind: Anchor["kind"]; clipId: string } | null;
-  label: string;
 };
 
 
@@ -563,6 +564,10 @@ function carriedMedia(e: React.DragEvent): CarriedMedia[] {
 }
 
 export function Timeline() {
+  const tr = useTranslations("timeline.main");
+  const transitionLabel = useLabels("transition");
+  const shapeLabel = useLabels("shape");
+  const effectLabel = useLabels("effect");
   const clips = useEditor((s) => s.clips);
   const audioClips = useEditor((s) => s.audioClips);
   // The composited layers (every clip off track 0), derived from the one
@@ -1267,14 +1272,24 @@ export function Timeline() {
           // A bar can play several same-instant boundaries; the rank-first
           // one names it on the row.
           const role = barRoles.get(t.id)?.[0] ?? null;
-          const base = TRANSITION_STYLE_LABELS[t.style];
-          const label =
-            role?.kind === "in" ? `${base} in` : role?.kind === "out" ? `${base} out` : base;
-          return { t, role, label };
+          return { t, role };
         })
         .sort((a, b) => a.t.start - b.t.start),
     [bars, barRoles]
   );
+
+  /** How a bar reads on the row: its style, and the edge it plays when it
+   * plays one, e.g. "Cross fade in". */
+  const barLabel = (x: XBar) => {
+    const name = transitionLabel(x.t.style);
+    if (x.role?.kind === "in") {
+      return tr("transitionIn", { name });
+    }
+    if (x.role?.kind === "out") {
+      return tr("transitionOut", { name });
+    }
+    return name;
+  };
 
   /** The room a bar of `style` takes at this anchor: whatever already plays
    * there, or that style's own default length. */
@@ -2202,7 +2217,7 @@ export function Timeline() {
     >
       <div
         className="tl-resize absolute inset-x-0 top-0 z-30 h-1.5 cursor-row-resize"
-        title="Drag to resize the timeline"
+        title={tr("resize")}
         onPointerDown={resize}
       />
       {/* Three tracks with the transport in the middle, so playback sits centred
@@ -2261,11 +2276,11 @@ export function Timeline() {
               max={100}
               step={0.1}
               value={zoomToSlider(pps, zoomMin)}
-              aria-label="Zoom"
+              aria-label={tr("zoom")}
               onValueChange={(v) => zoomTo(sliderToZoom(Number(v), zoomMin))}
             />
-            <Button variant="ghost" size="sm" title="Fit timeline to window" onClick={fit}>
-              Fit
+            <Button variant="ghost" size="sm" title={tr("fitTitle")} onClick={fit}>
+              {tr("fit")}
             </Button>
             <HideTimelineButton />
           </div>
@@ -2422,12 +2437,12 @@ export function Timeline() {
                           const Icon = SHAPE_CHIP_ICONS[el.shape];
                           return <Icon className="mr-1 size-2.5 shrink-0" />;
                         })()}
-                        {SHAPE_LABELS[el.shape]}
+                        {shapeLabel(el.shape)}
                       </>
                     ) : el?.kind === "effect" ? (
                       <>
                         <EffectChipIcon effect={el.effect} />
-                        {EFFECT_LABELS[el.effect]}
+                        {effectLabel(el.effect)}
                       </>
                     ) : (
                       <>
@@ -2441,7 +2456,7 @@ export function Timeline() {
                         ) : (
                           <Sticker className="mr-1 size-2.5 shrink-0" />
                         )}
-                        Sticker
+                        {tr("sticker")}
                       </>
                     );
                   return (
@@ -2581,12 +2596,13 @@ export function Timeline() {
                 const drag = laneDragFor(laneDrag, "transition", x.t.id);
                 const Icon = TRANSITION_ICONS[x.t.style];
                 const playing = !!x.role;
+                const label = barLabel(x);
                 return (
                   <div
                     key={x.t.id}
                     role="button"
                     tabIndex={0}
-                    title={`${x.label} ${x.t.seconds.toFixed(1)}s — drag it anywhere along the row; it plays where it lines up with a cut or a clip edge`}
+                    title={tr("transitionTitle", { name: label, seconds: x.t.seconds.toFixed(1) })}
                     className={cn(
                       "tl-xfade-bar group absolute flex cursor-grab items-center gap-1 overflow-hidden rounded-[3px] px-1.5 text-[10.5px] font-medium text-white shadow-[inset_0_0_0_1px_rgba(0,0,0,0.1)]",
                       // A parked bar reads muted: it is on the row but playing
@@ -2611,7 +2627,7 @@ export function Timeline() {
                     }}
                   >
                     <Icon className="size-2.5 shrink-0" />
-                    <span className="truncate">{x.label}</span>
+                    <span className="truncate">{label}</span>
                     <HideChip
                       hidden={!!x.t.hidden}
                       small
@@ -2625,7 +2641,7 @@ export function Timeline() {
                     {(["l", "r"] as const).map((side) => (
                       <span
                         key={side}
-                        title="Drag to trim"
+                        title={tr("dragToTrim")}
                         className={cn(trimHandle, side === "l" ? "tl-trim-l left-0" : "tl-trim-r right-0")}
                         onPointerDown={(e) => trimTransition(e, x, side)}
                       />
@@ -3122,7 +3138,7 @@ export function Timeline() {
                 setGapMenu(null);
               }}
             >
-              <Scissors className="size-3.5 text-muted-foreground" /> Remove empty space
+              <Scissors className="size-3.5 text-muted-foreground" /> {tr("removeEmptySpace")}
             </DropdownMenuItem>
           </DropdownMenuContent>
         )}
@@ -3151,7 +3167,7 @@ export function Timeline() {
                       setBarMenu(null);
                     }}
                   >
-                    <Diamond className="size-3.5 text-muted-foreground" /> Remove keyframe
+                    <Diamond className="size-3.5 text-muted-foreground" /> {tr("removeKeyframe")}
                   </DropdownMenuItem>
                 )}
                 <DropdownMenuItem
@@ -3165,11 +3181,11 @@ export function Timeline() {
                 >
                   {o.hidden ? (
                     <>
-                      <Eye className="size-3.5 text-muted-foreground" /> Show
+                      <Eye className="size-3.5 text-muted-foreground" /> {tr("show")}
                     </>
                   ) : (
                     <>
-                      <EyeOff className="size-3.5 text-muted-foreground" /> Hide
+                      <EyeOff className="size-3.5 text-muted-foreground" /> {tr("hide")}
                     </>
                   )}
                 </DropdownMenuItem>
@@ -3200,7 +3216,7 @@ export function Timeline() {
                       setFrameMenu(null);
                     }}
                   >
-                    <Fullscreen className="size-3.5 text-muted-foreground" /> Capture frame
+                    <Fullscreen className="size-3.5 text-muted-foreground" /> {tr("captureFrame")}
                   </button>
                   <button
                     className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-sm whitespace-nowrap hover:bg-accent hover:text-accent-foreground"
@@ -3212,7 +3228,7 @@ export function Timeline() {
                       setFrameMenu(null);
                     }}
                   >
-                    <Copy className="size-3.5 text-muted-foreground" /> Copy frame
+                    <Copy className="size-3.5 text-muted-foreground" /> {tr("copyFrame")}
                   </button>
                 </div>
                 {/* Drawn after the bubble so the diamond's inner half covers
@@ -3389,6 +3405,7 @@ function TimelineTools({
   deleteSelection: () => void;
   selectionCount: number;
 }) {
+  const tr = useTranslations("timeline.toolbar");
   const splitEnabled = useSplitEnabled();
   const readOnly = useEditor((s) => s.readOnly);
   const magnet = useEditor((s) => s.magnet);
@@ -3396,22 +3413,22 @@ function TimelineTools({
   if (readOnly) return null;
   return (
     <>
-      <TimelineActionButton label="Text" tooltip="Text (T)" onClick={addText}><Type /></TimelineActionButton>
+      <TimelineActionButton label={tr("text")} tooltip={tr("textTooltip", { key: "T" })} onClick={addText}><Type /></TimelineActionButton>
       <SaveSelectionButton />
       <div role="separator" aria-orientation="vertical" className="mx-1 h-4 w-px shrink-0 bg-border" />
       <TimelineActionButton
-        label="Magnet"
-        tooltip={magnet ? "Magnet on: track 0 closes up" : "Magnet: close up track 0"}
+        label={tr("magnet")}
+        tooltip={magnet ? tr("magnetOn") : tr("magnetOff")}
         pressed={magnet}
         onClick={toggleMagnet}
       >
         <Magnet />
       </TimelineActionButton>
       {splitEnabled && (
-        <TimelineActionButton label="Split" tooltip="Split at pointer, or at playhead (⌘B or S)" onClick={split}><Scissors /></TimelineActionButton>
+        <TimelineActionButton label={tr("split")} tooltip={tr("splitTooltip")} onClick={split}><Scissors /></TimelineActionButton>
       )}
       {selectionCount > 0 && (
-        <TimelineActionButton label={selectionCount > 1 ? `Delete ${selectionCount}` : "Delete"} tooltip="Delete (⌫)" onClick={deleteSelection}><Trash2 /></TimelineActionButton>
+        <TimelineActionButton label={selectionCount > 1 ? tr("deleteCount", { count: selectionCount }) : tr("delete")} tooltip={tr("deleteTooltip", { key: "⌫" })} onClick={deleteSelection}><Trash2 /></TimelineActionButton>
       )}
       <TimelineGroupActions />
     </>
@@ -3440,6 +3457,7 @@ function TimelineToolsMenu({
   deleteSelection: () => void;
   selectionCount: number;
 }) {
+  const tr = useTranslations("timeline.toolbar");
   const splitEnabled = useSplitEnabled();
   const save = useSaveSelection();
   const readOnly = useEditor((s) => s.readOnly);
@@ -3452,29 +3470,29 @@ function TimelineToolsMenu({
     <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger
         render={
-          <Button variant="ghost" size="icon-sm" aria-label="Timeline tools" title="Timeline tools" />
+          <Button variant="ghost" size="icon-sm" aria-label={tr("tools")} title={tr("tools")} />
         }
       >
         <MoreHorizontal />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-56">
-        {!readOnly && <DropdownMenuItem onClick={addText}><Type /> Text</DropdownMenuItem>}
+        {!readOnly && <DropdownMenuItem onClick={addText}><Type /> {tr("text")}</DropdownMenuItem>}
         {save.available && (
           <DropdownMenuItem disabled={save.state === "saving"} onClick={save.save}>
             {save.state === "done" ? <Check /> : <FolderPlus />}
-            {save.state === "done" ? "Saved" : "Save template"}
+            {save.state === "done" ? tr("saved") : tr("saveTemplate")}
           </DropdownMenuItem>
         )}
         {!readOnly && <DropdownMenuSeparator />}
         {!readOnly && (
           <DropdownMenuCheckboxItem checked={magnet} onCheckedChange={toggleMagnet}>
-            <Magnet /> Magnet
+            <Magnet /> {tr("magnet")}
           </DropdownMenuCheckboxItem>
         )}
-        {splitEnabled && <DropdownMenuItem onClick={split}><Scissors /> Split</DropdownMenuItem>}
+        {splitEnabled && <DropdownMenuItem onClick={split}><Scissors /> {tr("split")}</DropdownMenuItem>}
         {!readOnly && selectionCount > 0 && (
           <DropdownMenuItem onClick={deleteSelection}>
-            <Trash2 /> {selectionCount > 1 ? `Delete ${selectionCount}` : "Delete"}
+            <Trash2 /> {selectionCount > 1 ? tr("deleteCount", { count: selectionCount }) : tr("delete")}
           </DropdownMenuItem>
         )}
         <TimelineGroupActions menu />
@@ -3493,7 +3511,7 @@ function TimelineToolsMenu({
               max={100}
               step={0.1}
               value={zoomToSlider(pps, zoomMin)}
-              aria-label="Zoom"
+              aria-label={tr("zoom")}
               onValueChange={(v) => zoomTo(sliderToZoom(Number(v), zoomMin))}
             />
           </div>
@@ -3501,18 +3519,18 @@ function TimelineToolsMenu({
             variant="ghost"
             size="sm"
             className="shrink-0"
-            title="Fit timeline to window"
+            title={tr("fitTitle")}
             onClick={() => {
               fit();
               setOpen(false);
             }}
           >
-            Fit
+            {tr("fit")}
           </Button>
         </div>
         <DropdownMenuSeparator />
         <DropdownMenuItem onClick={() => useEditor.getState().setTimelineOpen(false)}>
-          <PanelBottomClose /> Hide timeline
+          <PanelBottomClose /> {tr("hideTimeline")}
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
@@ -3522,12 +3540,13 @@ function TimelineToolsMenu({
 /** Folds the timeline away under the preview; the button over the canvas
  * brings it back. */
 function HideTimelineButton() {
+  const tr = useTranslations("timeline.toolbar");
   return (
     <Button
       variant="ghost"
       size="icon-sm"
-      aria-label="Hide timeline"
-      title="Hide timeline"
+      aria-label={tr("hideTimeline")}
+      title={tr("hideTimeline")}
       onClick={() => useEditor.getState().setTimelineOpen(false)}
     >
       <PanelBottomClose />
@@ -3553,12 +3572,13 @@ function useSaveSelection() {
 }
 
 function SaveSelectionButton() {
+  const tr = useTranslations("timeline.toolbar");
   const { available, state, save } = useSaveSelection();
   if (!available) return null;
   return (
     <TimelineActionButton
-      label={state === "done" ? "Saved" : "Save template"}
-      tooltip="Save template"
+      label={state === "done" ? tr("saved") : tr("saveTemplate")}
+      tooltip={tr("saveTemplate")}
       disabled={state === "saving"}
       onClick={save}
     >
@@ -3580,6 +3600,7 @@ function Timecode() {
 
 /** Playback transport, centered in the timeline toolbar. */
 function Transport({ total }: { total: number }) {
+  const tr = useTranslations("timeline.toolbar");
   const playing = useEditor((s) => s.playing);
   const hasClips = total > 0;
 
@@ -3597,7 +3618,7 @@ function Transport({ total }: { total: number }) {
       <Button
         variant="ghost"
         size="icon-sm"
-        aria-label="Back to start"
+        aria-label={tr("backToStart")}
         disabled={!hasClips}
         onClick={() => useEditor.getState().seek(0)}
       >
@@ -3605,7 +3626,7 @@ function Transport({ total }: { total: number }) {
       </Button>
       <button
         className="grid size-8 place-items-center rounded-full bg-foreground text-background transition-transform hover:opacity-90 active:scale-95 disabled:opacity-40"
-        title="Play/Pause (Space)"
+        title={tr("playPause")}
         disabled={!hasClips}
         onClick={toggle}
       >
@@ -3833,6 +3854,7 @@ function ClipView({
     grab: { asset: MediaAsset; srcT: number; from: FrameGrabOrigin }
   ) => void;
 }) {
+  const tr = useTranslations("timeline.clip");
   const { clip, asset } = span;
   const spine = clip.track === 0;
   const loading = useEditor((s) => s.loadingMedia.has(asset.fileName));
@@ -3945,7 +3967,7 @@ function ClipView({
         // eslint-disable-next-line @next/next/no-img-element
         <img
           src={LUT_MARK_ICON}
-          alt="LUT"
+          alt={tr("lut")}
           className="tl-clip-lut pointer-events-none absolute top-1 left-1 z-4 size-3.5 drop-shadow-[0_0_1px_rgba(0,0,0,0.6)]"
         />
       )}
@@ -3976,7 +3998,7 @@ function ClipView({
         // leaves. A clip too narrow for the word keeps the spinner and "C…".
         <span className="tl-cutting-chip pointer-events-none absolute top-1 left-1 z-2 flex items-center gap-1 rounded-[5px] bg-black/65 px-1.5 py-px font-mono text-[10px] text-white transition-opacity group-hover:opacity-0">
           <Loader2 className="size-2.5 shrink-0 animate-spin" />
-          {barW >= 96 ? "Cutting…" : "C…"}
+          {barW >= 96 ? tr("cutting") : tr("cuttingShort")}
         </span>
       )}
       {clip.name && !baking && !drag && (
@@ -4012,7 +4034,7 @@ function ClipView({
       {!rt.uniform ? (
         <span
           className="tl-speed-chip absolute right-[30px] bottom-1 z-2 rounded-[5px] bg-black/70 px-1 py-px font-mono text-[9.5px] tabular-nums text-white"
-          title={`Speed curve · ${+rt.rate.toFixed(2)}× on average`}
+          title={tr("speedCurve", { rate: +rt.rate.toFixed(2) })}
         >
           ∿ {+rt.rate.toFixed(1)}×
         </span>
@@ -4020,7 +4042,7 @@ function ClipView({
         rt.rate !== 1 && (
           <span
             className="tl-speed-chip absolute right-[30px] bottom-1 z-2 rounded-[5px] bg-black/70 px-1 py-px font-mono text-[9.5px] tabular-nums text-white"
-            title={`${rt.rate}× speed`}
+            title={tr("speed", { rate: rt.rate })}
           >
             {+rt.rate.toFixed(2)}×
           </span>
@@ -4045,7 +4067,7 @@ function ClipView({
                 void ensurePeaks(asset);
               }}
             >
-              <AudioLines /> Detach audio
+              <AudioLines /> {tr("detachAudio")}
             </DropdownMenuItem>
           ) : null}
         </ClipMenu>
@@ -4177,6 +4199,7 @@ function ClipStrokeMarks({
   pps: number;
   barW: number;
 }) {
+  const tr = useTranslations("timeline.clip");
   const open = useBrushUi((s) => s.clipId === clip.id);
   const seeds = clip.removal?.seeds;
   if (!open || clip.removal?.mode !== "custom") return null;
@@ -4194,7 +4217,7 @@ function ClipStrokeMarks({
             left: Math.min(barW - 4, Math.max(4, retime.tAt(t) * pps)),
             transform: "translateX(-50%)",
           }}
-          title="Brush stroke"
+          title={tr("brushStroke")}
           onPointerDown={(e) => {
             e.stopPropagation();
             e.preventDefault();
@@ -4312,13 +4335,14 @@ function ClipMenu({
   clip: VideoClip | AudioClip;
   children?: ReactNode;
 }) {
+  const tr = useTranslations("timeline.clip");
   const caps = useCutCaps();
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
         render={
           <button
-            aria-label="Clip options"
+            aria-label={tr("options")}
             className="tl-clip-menu absolute top-1 right-2 z-4 grid size-[18px] place-items-center rounded-[5px] bg-black/55 text-white opacity-0 transition-opacity group-hover:opacity-100 hover:bg-black/75"
             onPointerDown={(e) => e.stopPropagation()}
           />
@@ -4336,7 +4360,7 @@ function ClipMenu({
             useEditor.getState().updateAsset(asset.id, { origin: undefined, chatId: undefined })
           }
         >
-          <Clapperboard /> Add to Media
+          <Clapperboard /> {tr("addToMedia")}
         </DropdownMenuItem>
         <DropdownMenuItem
           onClick={() => {
@@ -4347,10 +4371,10 @@ function ClipMenu({
             });
           }}
         >
-          <FolderPlus /> Add to Library
+          <FolderPlus /> {tr("addToLibrary")}
         </DropdownMenuItem>
         <DropdownMenuItem onClick={() => exportSegment(asset, clip)}>
-          <ArrowDownToLine /> Export segment
+          <ArrowDownToLine /> {tr("exportSegment")}
         </DropdownMenuItem>
         <DropdownMenuItem
           disabled={!!asset.upload}
@@ -4361,7 +4385,7 @@ function ClipMenu({
             if (projectId) downloadMedia(projectId, asset);
           }}
         >
-          <Download /> Download
+          <Download /> {tr("download")}
         </DropdownMenuItem>
         {caps.revealInFinder && (
           <DropdownMenuItem
@@ -4371,7 +4395,7 @@ function ClipMenu({
               void revealMedia(projectId, asset.fileName).catch(() => {});
             }}
           >
-            <FolderOpen /> Show in Finder
+            <FolderOpen /> {tr("showInFinder")}
           </DropdownMenuItem>
         )}
       </DropdownMenuContent>
@@ -4895,10 +4919,11 @@ function RowGrip({
   enabled: boolean;
   onGrab: (e: React.PointerEvent) => void;
 }) {
+  const tr = useTranslations("timeline.clip");
   if (!enabled) return null;
   return (
     <div
-      title="Drag to reorder the row"
+      title={tr("reorderRow")}
       className="group pointer-events-auto absolute inset-x-0 cursor-grab"
       style={{ top, height }}
       onPointerDown={onGrab}
@@ -4930,15 +4955,16 @@ function GutterToggle({
    * that does not is a click on the toggle and nothing more. */
   onGrab?: (e: React.PointerEvent) => void;
 }) {
+  const tr = useTranslations("timeline.clip");
   const active = off || partial;
   const title =
     kind === "hide"
       ? off
-        ? "Show track"
-        : "Hide track"
+        ? tr("showTrack")
+        : tr("hideTrack")
       : off
-        ? "Unmute track"
-        : "Mute track";
+        ? tr("unmuteTrack")
+        : tr("muteTrack");
   const Icon = kind === "hide" ? (active ? EyeOff : Eye) : active ? VolumeX : Volume2;
   return (
     <button
@@ -4997,11 +5023,12 @@ function HideChip({
   /** The element bars are low; the chip steps down to fit them. */
   small?: boolean;
 }) {
+  const tr = useTranslations("timeline.clip");
   return (
     <button
       type="button"
-      title={hidden ? "Enable clip" : "Disable clip"}
-      aria-label={hidden ? "Enable clip" : "Disable clip"}
+      title={hidden ? tr("enable") : tr("disable")}
+      aria-label={hidden ? tr("enable") : tr("disable")}
       className={cn(
         "tl-hide-chip absolute z-4 grid place-items-center rounded-[5px] bg-black/55 text-white transition-opacity hover:bg-black/75",
         small ? "size-[13px]" : "size-[18px]",
@@ -5035,11 +5062,12 @@ function LoadingChip() {
  * missingMediaFor): an upload that never finished, or a file deleted from
  * under the project. The clip keeps its place and edits; nothing plays. */
 function MissingChip({ assetId }: { assetId: string }) {
+  const tr = useTranslations("timeline.clip");
   const missing = useSyncExternalStore(subscribeStripStatus, () => missingMediaFor(assetId), () => false);
   if (!missing) return null;
   return (
     <span className="tl-missing-chip pointer-events-none absolute right-1 bottom-1 z-4 rounded-[5px] bg-black/65 px-1.5 py-px text-[10px] whitespace-nowrap text-white">
-      Missing media
+      {tr("missingMedia")}
     </span>
   );
 }
@@ -5055,11 +5083,12 @@ function MuteChip({
   onToggle: () => void;
   className?: string;
 }) {
+  const tr = useTranslations("timeline.clip");
   return (
     <button
       type="button"
-      title={muted ? "Unmute clip" : "Mute clip"}
-      aria-label={muted ? "Unmute clip" : "Mute clip"}
+      title={muted ? tr("unmute") : tr("mute")}
+      aria-label={muted ? tr("unmute") : tr("mute")}
       className={cn(
         "tl-mute-chip absolute z-4 grid size-[18px] place-items-center rounded-[5px] bg-black/55 text-white transition-opacity hover:bg-black/75",
         muted ? "opacity-100 bg-black/70" : "opacity-0 group-hover:opacity-100",
@@ -5249,7 +5278,10 @@ function BeatDot({
   retime,
   pps,
   w,
+  title,
 }: {
+  /** The dot's hint, resolved once by the row of dots. */
+  title: string;
   assetId: string;
   /** The source's length, the drag's bound. */
   duration: number;
@@ -5268,7 +5300,7 @@ function BeatDot({
         left: Math.min(w - 4, Math.max(4, retime.tAt(t) * pps)),
         transform: "translateX(-50%)",
       }}
-      title="Drag to move, double-click to remove"
+      title={title}
       onPointerDown={(e) => {
         const s = useEditor.getState();
         let live = t;
@@ -5323,8 +5355,10 @@ function BeatDots({
   pps: number;
   w: number;
 }) {
+  const tr = useTranslations("timeline.clip");
   const beats = asset.beats?.beats;
   if (!beats?.length) return null;
+  const title = tr("beat");
   return (
     <>
       {beats
@@ -5338,6 +5372,7 @@ function BeatDots({
             retime={retime}
             pps={pps}
             w={w}
+            title={title}
           />
         ))}
     </>
@@ -5566,6 +5601,7 @@ function FadeGrip({
   live: boolean;
   onLive: (v: { side: "in" | "out"; v: number } | null) => void;
 }) {
+  const tr = useTranslations("timeline.clip");
   const px = Math.min(barW, fade * pps);
   // The grip keeps clear of the trim grab at its own end, so an edge grab still trims.
   const at = Math.max(TRIM_W + 2, px);
@@ -5606,7 +5642,7 @@ function FadeGrip({
           side === "in" ? "tl-fade-grip-in" : "tl-fade-grip-out"
         )}
         style={{ width: FADE_W, [edge]: at - FADE_W / 2 }}
-        title={side === "in" ? "Drag to set the fade in" : "Drag to set the fade out"}
+        title={side === "in" ? tr("fadeIn") : tr("fadeOut")}
         onPointerDown={grab}
       >
         <span
@@ -5661,6 +5697,7 @@ function KeyMarker({
    * click and Delete removes the picked key. */
   onMenu?: (m: { x: number; y: number; id: string; key?: number }) => void;
 }) {
+  const tr = useTranslations("timeline.clip");
   const picked = useEditor(
     (s) =>
       !!s.selectedKey &&
@@ -5683,7 +5720,7 @@ function KeyMarker({
         left: Math.min(width - inset, Math.max(inset, t * pps)),
         transform: "translate(-50%, -50%)",
       }}
-      title="Drag to retime, Delete to remove"
+      title={tr("key")}
       onContextMenu={
         onMenu
           ? (e) => {
@@ -5797,6 +5834,9 @@ function TextBar({
   /** Open the bar's right-click menu; `key` set when it landed on a keyframe. */
   onMenu: (m: { x: number; y: number; id: string; key?: number }) => void;
 }) {
+  const tr = useTranslations("timeline.clip");
+  const shapeLabel = useLabels("shape");
+  const effectLabel = useLabels("effect");
   const w = Math.max(8, (o.end - o.start) * pps);
   // The bar is drawn a gutter narrower than the footprint; the keys on it
   // measure against that.
@@ -5805,24 +5845,36 @@ function TextBar({
   // Per-kind chip content: a title shows its text, a shape its name behind a
   // shape glyph, a sticker its glyph and name.
   const ShapeIcon = SHAPE_CHIP_ICONS[o.kind === "shape" ? o.shape : "rect"];
+  // The name the person gave it, else what it is in the page's language; a
+  // title's own text is its name.
+  const own = o.name?.trim();
+  const name =
+    own ||
+    (o.kind === "shape"
+      ? shapeLabel(o.shape)
+      : o.kind === "effect"
+        ? effectLabel(o.effect)
+        : o.kind === "sticker"
+          ? tr("sticker")
+          : overlayName(o));
   const chip =
     o.kind === "shape" ? (
       <>
         <ShapeIcon className="mr-1 size-2.5 shrink-0" />
-        {overlayName(o)}
+        {name}
       </>
     ) : o.kind === "sticker" ? (
       <>
         <StickerThumb overlay={o} />
-        {overlayName(o)}
+        {name}
       </>
     ) : o.kind === "effect" ? (
       <>
         <EffectChipIcon effect={o.effect} />
-        {overlayName(o)}
+        {name}
       </>
     ) : (
-      overlayName(o)
+      name
     );
 
   return (

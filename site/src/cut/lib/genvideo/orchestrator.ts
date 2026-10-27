@@ -32,6 +32,7 @@ import { buildNegative, buildPrompt, buildRefPrompt, refsForAsset, shotRefs, sty
 import { segmentByDuration, type ModelSuite, type ReviewVerdict } from "./capabilities";
 import type { EditorBridge } from "./editor";
 import type { BeatVoice, RefAsset, ScriptBeat, Shot, TranscriptWord, VideoAsset, VideoEmit, VideoPhase, VideoProject } from "./types";
+import { UserError, errorFields } from "../userError";
 
 export interface OrchestratorDeps {
   editor: EditorBridge;
@@ -56,6 +57,8 @@ const BACKOFF_MS = 500;
 // narration rather than competing with it (a generated scene has no separate
 // voice track to duck the music beneath).
 const MUSIC_BED_VOLUME = 0.4;
+/** A shot's failure fields, cleared: the error and its catalog code go together. */
+const NO_ERROR = { error: undefined, errorCode: undefined, errorParams: undefined } as const;
 
 export class VideoOrchestrator {
   /** Serializes persistence so concurrent shot updates never interleave writes. */
@@ -441,7 +444,7 @@ export class VideoOrchestrator {
       // Set per attempt, not once: a declined review leaves the shot in
       // "reviewing", and the retake that follows must show as rendering (this
       // is also what fires the "retake N…" ticker line).
-      this.updateShot(shot, { status: "generating", error: undefined });
+      this.updateShot(shot, { status: "generating", ...NO_ERROR });
       const prompt = critique ? `${basePrompt} Note from the last take's review: ${critique}` : basePrompt;
       const video = this.deps.suite.video;
       try {
@@ -465,7 +468,7 @@ export class VideoOrchestrator {
           }
           shot.startKeyframe = shot.startKeyframe ?? prior.start;
           await this.save();
-          this.updateShot(shot, { status: "generating", error: undefined });
+          this.updateShot(shot, { status: "generating", ...NO_ERROR });
         }
         const take = await video.generate({
           prompt,
@@ -516,7 +519,7 @@ export class VideoOrchestrator {
             // so those re-mint too, with the critique.
             remintSeed = !verdict.offModel || !take.anchored;
             if (verdict.offModel && !take.anchored) unanchoredMisses++;
-            throw new Error(`Retake: ${critique}`);
+            throw new UserError("shot_retake", `Retake: ${critique}`, { note: critique });
           }
           srcInSec = verdict.fromSec;
         }
@@ -532,11 +535,11 @@ export class VideoOrchestrator {
           muted: this.project.audioMode === "provided",
           ...this.placementAnchors(shot),
         });
-        this.updateShot(shot, { status: "placed", error: undefined });
+        this.updateShot(shot, { status: "placed", ...NO_ERROR });
         this.emitProgress();
         return;
       } catch (e) {
-        shot.error = String(e instanceof Error ? e.message : e);
+        Object.assign(shot, NO_ERROR, errorFields(e, String(e)));
         if (attempt < VIDEO_ATTEMPTS) await this.sleep(BACKOFF_MS * attempt);
       }
     }
@@ -602,7 +605,12 @@ export class VideoOrchestrator {
       shot.timelineClipId = await this.deps.editor.placeClip(still, shot.startFrame, shot.endFrame, this.placementAnchors(shot));
     } else {
       // Nothing to hold — keep whatever was there rather than opening a hole.
-      this.deps.emit({ type: "error", message: `Shot ${shot.id} could not be generated or filled.` });
+      this.deps.emit({
+        type: "error",
+        message: `Shot ${shot.id} could not be generated or filled.`,
+        errorCode: "shot_unfilled",
+        errorParams: { shot: shot.id },
+      });
     }
     this.updateShot(shot, { status: "failed" });
   }
@@ -729,7 +737,7 @@ export class VideoOrchestrator {
       // fails. The beat voice is untouched, so narration never restacks.
       shot.startKeyframe = undefined;
       shot.lipSynced = false;
-      shot.error = undefined;
+      Object.assign(shot, NO_ERROR);
       shot.status = "pending";
       mutate?.(shot);
       targets.push(shot);
@@ -791,7 +799,9 @@ export class VideoOrchestrator {
     const list = this.project.shots;
     const first = list.findIndex((s) => s.id === ids[0]);
     const last = list.findIndex((s) => s.id === ids[ids.length - 1]);
-    if (first < 0 || last < first) throw new Error("Those shots are not in this scene.");
+    if (first < 0 || last < first) {
+      throw new UserError("scene_shots_missing", "Those shots are not in this scene.");
+    }
     const span = list.slice(first, last + 1);
     const startFrame = span[0].startFrame;
     const endFrame = span[span.length - 1].endFrame;

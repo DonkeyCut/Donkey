@@ -1,12 +1,17 @@
 import { expect, test } from "bun:test";
 import { AI_TOOLS, PROJECT_TOOLS } from "@/cut/server/ai/catalog";
-import { COMMANDS, READ_COMMANDS, SKILL_INDEX, readSkill, unknownCommandNames } from "./catalog";
+import { COMMAND_NAMES, COMMANDS, READ_COMMANDS, SKILL_INDEX, readSkill, unknownCommandNames } from "./catalog";
 
 test("first-class history tools can queue their editor commands", () => {
   expect(COMMANDS.some((tool) => tool.name === "undo" || tool.name === "redo")).toBe(false);
   expect(unknownCommandNames(["undo", "redo", "not_a_command"])).toEqual(["not_a_command"]);
   expect(READ_COMMANDS.has("undo")).toBe(false);
   expect(READ_COMMANDS.has("redo")).toBe(false);
+});
+
+test("the editor's language setting stays out of ChatGPT's commands", () => {
+  expect(COMMAND_NAMES).not.toContain("set_interface_language");
+  expect(unknownCommandNames(["set_interface_language"])).toEqual(["set_interface_language"]);
 });
 
 test("a command that keeps a picture box on the source saves the document", () => {

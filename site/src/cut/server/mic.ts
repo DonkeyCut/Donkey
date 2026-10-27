@@ -2,18 +2,18 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { assertLocalRuntime } from "./local-only";
 import { createJobRegistry } from "./jobRegistry";
 import { ensureStt } from "./transcribe";
+import { errorFields, UserError, type ErrorFields } from "../lib/userError";
 
 // Live mic dictation for the AI chat composer. The browser captures the mic
 // (it already holds that permission) and streams 16 kHz mono s16le PCM to the
 // engine; this spawns `cut-stt --live`, forwards the PCM to its stdin, and
 // exposes the evolving transcript. On-device only — nothing leaves the Mac.
 
-export interface MicJob {
+export interface MicJob extends ErrorFields {
   id: string;
   status: "running" | "done" | "error" | "canceled";
   /** Latest transcript: the evolving partial while running, the final text once done. */
   text: string;
-  error?: string;
   proc: ChildProcess;
   /** Resolves once the process has emitted its final text (or died). */
   finished: Promise<void>;
@@ -103,7 +103,7 @@ export async function startMicJob(locale: string): Promise<MicJob> {
   // that is still receiving audio is someone speaking — reject instead of
   // killing their dictation mid-sentence.
   if (reclaimStale().liveRemains) {
-    throw new Error("A dictation is already running — finish it first.");
+    throw new UserError("dictation_busy", "A dictation is already running — finish it first.");
   }
   const bin = await ensureStt();
   const id = crypto.randomUUID().slice(0, 12);
@@ -131,7 +131,7 @@ export async function startMicJob(locale: string): Promise<MicJob> {
           job.text = ev.text ?? job.text;
           if (job.status === "running") job.status = "done";
         } else if (ev.type === "error") {
-          job.error = ev.text || "Transcription failed.";
+          Object.assign(job, errorFields(ev.text, new UserError("transcription_failed", "Transcription failed.")));
           if (job.status === "running") job.status = "error";
         }
       } catch {
@@ -156,7 +156,11 @@ export async function startMicJob(locale: string): Promise<MicJob> {
     if (job.status === "running") {
       // Closed without a final line — surface whatever the process complained about.
       job.status = code === 0 ? "done" : "error";
-      if (job.status === "error") job.error = stderr.trim().split("\n").slice(-2).join("\n") || `cut-stt exited ${code}`;
+      if (job.status === "error") {
+        // The tool's own complaint stays in its words; a silent exit names itself.
+        const tail = stderr.trim().split("\n").slice(-2).join("\n");
+        Object.assign(job, errorFields(tail, new UserError("tool_exited", `cut-stt exited ${code}`, { tool: "cut-stt", code: String(code) })));
+      }
     }
     resolveFinished();
     retire(job);

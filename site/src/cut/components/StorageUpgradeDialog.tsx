@@ -5,6 +5,7 @@
 // Pro storage tier — or just explains, when the account already has it.
 import { useEffect, useState } from "react";
 import { HardDrive, Loader2 } from "lucide-react";
+import { useLocale, useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -13,7 +14,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { introTerms, wallBanner } from "./IntroOffer";
+import { useIntroTerms, wallBanner } from "./IntroOffer";
 import { OfferButton, OfferDialog, OfferDismiss } from "./OfferDialog";
 import { useUpgradeToPro } from "@/cut/lib/proUpgrade";
 import {
@@ -57,6 +58,9 @@ export function StorageUpgradeDialog() {
 
 // Split so the billing query only runs while the dialog is up.
 function OpenDialog({ detail, onClose }: { detail: StorageQuotaDetail; onClose: () => void }) {
+  const t = useTranslations("billing");
+  const locale = useLocale();
+  const introTerms = useIntroTerms();
   const pro = useProSubscription();
   const upgrade = useUpgradeToPro();
   const isPro = pro.data?.isActive === true;
@@ -68,17 +72,18 @@ function OpenDialog({ detail, onClose }: { detail: StorageQuotaDetail; onClose: 
   const bytes = detail.bytes ?? usage.data?.bytes;
   const quotaBytes = detail.quotaBytes ?? usage.data?.quotaBytes ?? undefined;
 
-  const used =
+  const meter =
     bytes !== undefined && quotaBytes !== undefined
-      ? `You've used ${formatBytes(bytes)} of ${formatBytes(quotaBytes)}.`
+      ? { used: formatBytes(bytes, locale), quota: formatBytes(quotaBytes, locale) }
       : null;
-  const title = detail.source === "pill" ? "Cloud storage" : "Cloud storage is full";
+  const used = meter ? t("storage.used", meter) : null;
+  const title = detail.source === "pill" ? t("storage.title") : t("storage.fullTitle");
   const graceDays = detail.grace ? daysUntil(detail.grace.deadline) : null;
   const grace =
     detail.grace && graceDays !== null
-      ? `Your Pro plan ended. Your oldest cloud projects will be deleted ${
-          graceDays === 0 ? "today" : `in ${graceDays} day${graceDays === 1 ? "" : "s"}`
-        } unless you upgrade or free ${formatBytes(detail.grace.overBytes)}.`
+      ? graceDays === 0
+        ? t("storage.graceToday", { bytes: formatBytes(detail.grace.overBytes, locale) })
+        : t("storage.graceDays", { bytes: formatBytes(detail.grace.overBytes, locale), days: graceDays })
       : null;
 
   // An account that already has Pro is being told something, not sold
@@ -93,11 +98,11 @@ function OpenDialog({ detail, onClose }: { detail: StorageQuotaDetail; onClose: 
           </DialogHeader>
           <div className="space-y-2 text-sm text-muted-foreground">
             {used && <p>{used}</p>}
-            <p>Free up space by deleting projects or media you no longer need.</p>
+            <p>{t("storage.proBody")}</p>
           </div>
           <DialogFooter className="mt-2">
             <Button className="w-full" onClick={onClose}>
-              OK
+              {t("ok")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -112,16 +117,16 @@ function OpenDialog({ detail, onClose }: { detail: StorageQuotaDetail; onClose: 
       banner={wallBanner(HardDrive, intro.data)}
       closesAt={intro.data?.endsAt}
       title={title}
-      body={`${used ? `${used} ` : ""}Pro includes 100 GB of cloud storage.`}
-      terms={intro.data ? introTerms(intro.data) : "Or free up space by deleting projects and media you no longer need."}
+      body={meter ? t("storage.bodyUsed", meter) : t("storage.body")}
+      terms={intro.data ? introTerms(intro.data) : t("storage.freeUpTerms")}
       error={grace}
       cta={
         <OfferButton disabled={upgrade.isPending} onClick={upgrade.start}>
           {upgrade.isPending && <Loader2 className="animate-spin" data-icon="inline-start" />}
-          Upgrade to Pro
+          {t("upgradeToPro")}
         </OfferButton>
       }
-      secondary={<OfferDismiss onClick={onClose}>Not now</OfferDismiss>}
+      secondary={<OfferDismiss onClick={onClose}>{t("notNow")}</OfferDismiss>}
     />
   );
 }

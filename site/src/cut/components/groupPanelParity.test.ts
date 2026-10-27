@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import media from "@/i18n/messages/en/media.json";
 
 /**
  * The group panel shows the fields every selected item has. Each timeline
@@ -11,16 +12,21 @@ import { fileURLToPath } from "node:url";
 const src = readFileSync(fileURLToPath(new URL("./GroupPanel.tsx", import.meta.url)), "utf8");
 const inspector = readFileSync(fileURLToPath(new URL("./Inspector.tsx", import.meta.url)), "utf8");
 
-// A row's label as the source spells it, whether on the row, handed to a
-// helper, or built from a template; the sound quality row is the inspector's
-// own, mounted here.
-const names = (label: string) =>
-  src.includes(`"${label}"`) || src.includes(`\`${label}`) || (label === "Sound quality" && src.includes("<SoundQualityRow"));
+// A row's label is a message in the panel's catalog; the source names it by
+// its key, on the row or handed to a helper. The sound quality row is the
+// inspector's own, mounted here.
+const names = (label: string) => {
+  if (label === "Sound quality") {
+    return src.includes("<SoundQualityRow");
+  }
+  const key = Object.entries(media.groupPanel).find(([, english]) => english === label)?.[0];
+  return !!key && src.includes(`"${key}"`);
+};
 
 const SHARED: Record<string, string[]> = {
   "video clips": ["Speed", "Reverse", "Volume", "Mute audio", "Sound quality", "Framing", "Zoom", "Flip", "Rotation", "Opacity", "Hidden", "Border", "Shadow"],
   "audio clips": ["Speed", "Reverse", "Volume", "Duck others", "Fade in", "Fade out", "Sound quality", "Hidden"],
-  titles: ["Font", "Bold", "Italic", "Align ${a}", "Text size", "Line height", "Letter spacing", "Text box width", "Color", "Outline", "Shadow", "Backdrop", "Position", "Rotation", "Opacity", "Hidden"],
+  titles: ["Font", "Bold", "Italic", "Align left", "Align center", "Align right", "Text size", "Line height", "Letter spacing", "Text box width", "Color", "Outline", "Shadow", "Backdrop", "Position", "Rotation", "Opacity", "Hidden"],
   shapes: ["Fill color", "Corner radius", "Outline", "Position", "Rotation", "Opacity", "Hidden"],
   stickers: ["Sticker size", "Position", "Rotation", "Opacity", "Hidden"],
   effects: ["Effect amount", "Depth", "Zoom speed", "Hidden"],

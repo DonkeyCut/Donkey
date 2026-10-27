@@ -10,9 +10,10 @@ import {
 import { libraryShareAccess, sharedFolderTrail } from "@/cut/server/cloud/libraryShareAccess";
 import { assetView, templateView } from "@/cut/server/cloud/library";
 import { mediaObjectUrl } from "@/cut/server/cloud/mediaCdn";
+import { UserError, errorBody } from "@/cut/lib/userError";
 
 const privateHeaders = { "Cache-Control": "private, no-store", Vary: "Cookie" };
-const err = (error: string, status: number) => Response.json({ error }, { status, headers: privateHeaders });
+const err = (failure: string | UserError, status: number) => Response.json(errorBody(failure, ""), { status, headers: privateHeaders });
 const json = (body: unknown) => Response.json(body, { headers: privateHeaders });
 const tokenSchema = z.string().regex(/^[A-Za-z0-9_-]{32}$/);
 const querySchema = z.object({
@@ -193,7 +194,7 @@ export function createLibrarySharing(
     if (!settings.success || !target.success) return err("Not found.", 404);
     const session = share.access === "public" ? null : await getSession(req.headers);
     const status = libraryShareAccess({ ...settings.data, userId: share.userId }, session?.user ?? null);
-    if (status !== 200) return err(status === 401 ? "Sign in to view this share." : "You don't have access to this share.", status);
+    if (status !== 200) return err(status === 401 ? new UserError("share_sign_in", "Sign in to view this share.") : new UserError("share_no_access", "You don't have access to this share."), status);
     if (!(await ownedTarget(share.userId, target.data))) return err("Not found.", 404);
     return { share, target: target.data };
   }

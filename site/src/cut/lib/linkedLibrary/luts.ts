@@ -20,6 +20,7 @@ import { cloudRequest } from "../backend/cloud";
 import { parseLutBytes } from "../lutParse";
 import { isLutFile, LUT_ACCEPT } from "../media";
 import type { ProjectDoc } from "../types";
+import { UserError } from "../userError";
 import {
   linkedBytes,
   linkId,
@@ -112,7 +113,7 @@ export async function loadLibraryLutFile(id: string): Promise<{ fileName: string
   const builtin = builtinLutOf(id);
   if (builtin) return { fileName: `${builtin.id}.cube`, bytes: new Uint8Array(await builtinBytes(builtin)) };
   const item = listLinked(PREFIX).find((i) => libraryLutId(i.key) === id);
-  if (!item) throw new Error(`The LUT ${id} is not in the library.`);
+  if (!item) throw new UserError("lut_not_in_library", `The LUT ${id} is not in the library.`, { id });
   let lastError: unknown = null;
   for (const copy of item.copies) {
     try {
@@ -122,15 +123,20 @@ export async function loadLibraryLutFile(id: string): Promise<{ fileName: string
       lastError = e; // That shelf isn't answering; another copy may still serve.
     }
   }
-  const why = lastError instanceof Error ? ` ${lastError.message}` : "";
-  throw new Error(`The LUT "${item.label}" could not be read.${why}`);
+  // The shelf's own reason, when it gave one, rides as a value.
+  const label = item.label;
+  if (!(lastError instanceof Error)) {
+    throw new UserError("lut_read_failed", `The LUT "${label}" could not be read.`, { label });
+  }
+  const reason = lastError.message;
+  throw new UserError("lut_read_failed_reason", `The LUT "${label}" could not be read. ${reason}`, { label, reason });
 }
 
 /** A built-in LUT's bytes, off the site: same-origin in the page, the bound
  * session's origin in a headless run. */
 async function builtinBytes(l: BuiltinLut): Promise<ArrayBuffer> {
   const res = await cloudRequest(l.file);
-  if (!res.ok) throw new Error(`The built-in LUT "${l.label}" could not be fetched (${res.status}).`);
+  if (!res.ok) throw new UserError("lut_builtin_fetch_failed", `The built-in LUT "${l.label}" could not be fetched (${res.status}).`, { label: l.label, status: res.status });
   return res.arrayBuffer();
 }
 

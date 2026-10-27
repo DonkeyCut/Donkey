@@ -24,6 +24,7 @@ import { confirmedEngineUser, currentEngineUser } from "./api";
 import type { NoteLocation } from "./noteReference";
 import { backendFor } from "./residency";
 import type { CutNote } from "./notes";
+import { UserError } from "./userError";
 
 /** One note as a write sends it. */
 export interface NoteWrite {
@@ -201,7 +202,7 @@ async function send(note: NoteWrite, updatedAt: number, mode: SendMode): Promise
 export async function sendNoteNow(note: NoteWrite): Promise<CutNote> {
   const sent = await send(note, Date.now(), "now");
   if (sent.kind !== "landed") {
-    throw new Error("Could not save the note.");
+    throw new UserError("note_save_failed", "Could not save the note.");
   }
   return sent.note;
 }
@@ -231,7 +232,7 @@ export async function flushNote(id: string, mode: SendMode = "now"): Promise<Cut
     writePending(account, id, null);
   }
   if (sent.kind === "refused") {
-    throw new Error("Could not save the note.");
+    throw new UserError("note_save_failed", "Could not save the note.");
   }
   retryStep = 0;
   return sent.note;

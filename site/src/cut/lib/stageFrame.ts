@@ -20,6 +20,7 @@
  * using them, so a copy on either side clears the other and ⌘V has one answer.
  */
 
+import { creatorNames } from "./defaultNames";
 import { renderProjectFrame } from "./exportRender";
 import { uploadProjectImage } from "./media";
 import { previewAt } from "./playhead";
@@ -137,7 +138,7 @@ function stillNames(at: number): { fileName: string; name: string } {
   const stamp = stampOf(at);
   return {
     fileName: `frame-${stamp.replace(":", "m")}s-${crypto.randomUUID().slice(0, 4)}.png`,
-    name: `Frame ${stamp}`,
+    name: creatorNames().frame(stamp),
   };
 }
 

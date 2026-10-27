@@ -4,6 +4,7 @@ import type { AssetRef } from "./assetRef";
 import { refToInlineImage } from "./refMedia";
 import { useEditor } from "./store";
 import { formatTime } from "./time";
+import { UserError } from "./userError";
 
 // The chat composer registers itself here so surfaces outside the AI panel —
 // the timeline's "Add video frame to chat" — can land a ref among the open
@@ -20,7 +21,7 @@ interface ChatIntake {
    * and the grab ends before any capture or flight. */
   acceptFrame?: () => boolean;
   /** Say why a grab ended with nothing, in the composer's notice tab. */
-  notice?: (message: string) => void;
+  notice?: (failure: UserError) => void;
 }
 
 let intake: ChatIntake | null = null;
@@ -97,7 +98,7 @@ export async function sendFrameToChat(ref: AssetRef, from: FrameGrabOrigin): Pro
   if (!frame) {
     // The clip itself is a heavier, different thing than the moment that was
     // asked for, so nothing is attached — the grab says why and ends.
-    target.notice?.(`Couldn’t read a frame from “${ref.name}”.`);
+    target.notice?.(new UserError("chat_frame_unreadable", `Couldn’t read a frame from “${ref.name}”.`, { name: ref.name }));
     return;
   }
   const frameRef: AssetRef = {

@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Cloud, Loader2 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
+import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ShareDialog } from "@/cut/components/ShareDialog";
@@ -11,6 +12,7 @@ import { refetchLibrary } from "@/cut/lib/queries";
 import type { LibraryData } from "@/cut/lib/library";
 import type { LibraryShareTarget } from "@/cut/lib/librarySharing";
 import type { Residency } from "@/cut/lib/residency";
+import { useDescribeError } from "@/i18n/describeError";
 
 type Props = {
   target: LibraryShareTarget & { residency: Residency };
@@ -19,6 +21,8 @@ type Props = {
   onCopied: (target: LibraryShareTarget) => void;
 };
 export function LibraryShareDialog({ target, library, onClose, onCopied }: Props) {
+  const t = useTranslations("home.libraryShare");
+  const describeError = useDescribeError();
   const [ready, setReady] = useState<LibraryShareTarget | null>(target.residency === "cloud" ? target : null);
   const [copying, setCopying] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -42,7 +46,7 @@ export function LibraryShareDialog({ target, library, onClose, onCopied }: Props
         onCopied(landed);
       }
     } catch (e) {
-      if (mounted.current) setError(e instanceof Error ? e.message : "Could not copy to Cloud.");
+      if (mounted.current) setError(describeError(e, t("copyFailed")));
     } finally {
       setCopying(false);
       started.current = false;
@@ -51,10 +55,10 @@ export function LibraryShareDialog({ target, library, onClose, onCopied }: Props
   if (ready) return <ShareDialog libraryTarget={ready} onClose={onClose} />;
   return <Dialog open onOpenChange={(open) => { if (!open && !copying) onClose(); }}>
     <DialogContent className="sm:max-w-sm" showCloseButton={!copying}>
-      <DialogHeader><DialogTitle>Share {target.kind}</DialogTitle></DialogHeader>
-      <p className="text-sm text-muted-foreground">Copy this {target.kind} to Cloud so people can open it while your device is offline. Share settings will apply to the cloud copy. Your local files stay here.</p>
+      <DialogHeader><DialogTitle>{t("title", { kind: target.kind })}</DialogTitle></DialogHeader>
+      <p className="text-sm text-muted-foreground">{t("body", { kind: target.kind })}</p>
       {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
-      <Button disabled={copying} onClick={() => void copy()}>{copying ? <Loader2 className="animate-spin" /> : <Cloud />}{copying ? "Copying to Cloud…" : "Copy to Cloud"}</Button>
+      <Button disabled={copying} onClick={() => void copy()}>{copying ? <Loader2 className="animate-spin" /> : <Cloud />}{copying ? t("copying") : t("copy")}</Button>
     </DialogContent>
   </Dialog>;
 }

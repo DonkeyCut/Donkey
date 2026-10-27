@@ -1,5 +1,7 @@
 "use client";
 
+import { useTranslations } from "next-intl";
+import { creatorNames } from "@/cut/lib/defaultNames";
 import { guideSnapLines } from "@/cut/lib/guides";
 import { createContext, Fragment, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
@@ -993,7 +995,9 @@ function OverlayItem({
     if (text !== o.text) {
       const s = useEditor.getState();
       s.pushHistory();
-      s.updateOverlayTransient(o.id, { text: text || "Your text" });
+      // An emptied title falls back to the placeholder in the page's language,
+      // read here in the handler so the per-frame item holds no translator.
+      s.updateOverlayTransient(o.id, { text: text || creatorNames().text });
     }
   };
 
@@ -2211,6 +2215,20 @@ export function MaskGizmoCore({
   writePoints: (points: MaskPoint[]) => void;
   begin: () => void;
 }) {
+  const t = useTranslations("editor.maskGizmo");
+  // The grips' names, resolved once per locale: the gizmo redraws with the
+  // playhead, and a redraw takes no lookups.
+  const titles = useMemo(
+    () => ({
+      moveCorner: t("moveCorner"),
+      addCorner: t("addCorner"),
+      feather: t("feather"),
+      round: t("round"),
+      rotate: t("rotate"),
+      resize: t("resize"),
+    }),
+    [t]
+  );
   const f = maskFrameAt(m, tLocal);
   const pen = m.kind === "pen";
   const drawing = pen && !penClosed(m);
@@ -2654,7 +2672,7 @@ export function MaskGizmoCore({
             return (
               <Fragment key={i}>
                 <span
-                  title="Drag to move the corner; double-click to remove it"
+                  title={titles.moveCorner}
                   onPointerDown={(e) => dragCorner(e, points, i)}
                   onDoubleClick={(e) => {
                     e.stopPropagation();
@@ -2664,7 +2682,7 @@ export function MaskGizmoCore({
                   style={{ left: p.x * w, top: p.y * h, transform: "translate(-50%, -50%)", ...grip }}
                 />
                 <span
-                  title="Drag to add a corner here"
+                  title={titles.addCorner}
                   onPointerDown={(e) => addCorner(e, points, i)}
                   className="pointer-events-auto absolute block size-[7px] cursor-copy rounded-full border-[1.5px] bg-white/70"
                   style={{
@@ -2692,7 +2710,7 @@ export function MaskGizmoCore({
           {/* The grip wears the softness it controls: a ring that blurs
               outward, in the mask's amber like every other mask grip. */}
           <span
-            title="Drag to feather the edge"
+            title={titles.feather}
             onPointerDown={featherMask}
             className="pointer-events-auto block size-[13px] cursor-ns-resize rounded-full border-[2.5px] bg-white"
             style={{
@@ -2719,7 +2737,7 @@ export function MaskGizmoCore({
               </span>
             )}
             <span
-              title="Drag to round the corners"
+              title={titles.round}
               onPointerDown={roundMask}
               className="pointer-events-auto grid size-[16px] cursor-nwse-resize place-items-center rounded-full border-[2.5px] bg-white shadow-[0_1px_4px_rgba(0,0,0,0.4)]"
               style={{ borderColor: "#ff9f0a" }}
@@ -2774,8 +2792,8 @@ export function MaskGizmoCore({
         rotation={rotation + f.rotation}
         angle={spin}
         rotateCursor={rotateCursor(rotation + f.rotation)}
-        rotateTitle="Drag to rotate the mask"
-        resizeTitle="Drag to resize the mask"
+        rotateTitle={titles.rotate}
+        resizeTitle={titles.resize}
         frame={{
           left: `calc(50% + ${cx}px)`,
           top: `calc(50% + ${cy}px)`,

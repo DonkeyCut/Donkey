@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useTranslations } from "next-intl";
 import { PHASE_STEP } from "@/cut/components/AnimationTiles";
 import { SwatchScene, useSwatchClock } from "@/cut/components/EffectsPanel";
 import { SectionTitle } from "@/cut/components/SectionTitle";
@@ -12,9 +13,7 @@ import { getClipSpans, resolveTransitions, useEditor } from "@/cut/lib/store";
 import { usePreviewTimeEvery } from "@/cut/lib/playhead";
 import {
   ANIM_STYLE_IDS,
-  ANIM_STYLE_LABELS,
   TRANSITION_STYLE_GROUPS,
-  TRANSITION_STYLE_LABELS,
   overlayAnimStyle,
   previewUrl,
   transitionStyleOfAnim,
@@ -37,6 +36,7 @@ import { parseNumberInput } from "@/cut/components/ScrubValue";
 import { ValueSlider } from "@/cut/components/ValueSlider";
 import { cn } from "@/lib/utils";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { useLabels } from "@/i18n/labels";
 
 /**
  * The Transitions tab: how one clip hands over to the next, and how a clip
@@ -54,6 +54,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
  * it only picks.
  */
 export function TransitionsPanel() {
+  const t = useTranslations("panels.transitions");
   // The bar the tab is tuned to: a selected bar directly, or the one playing
   // the selected clip's cut.
   const live = useEditor((s) => {
@@ -81,7 +82,7 @@ export function TransitionsPanel() {
         <div onKeyDown={pickGridNav}>
           {TRANSITION_STYLE_GROUPS.map((g) => (
             <section key={g.label} className="mb-3 flex flex-col gap-1.5">
-              <SectionTitle>{g.label}</SectionTitle>
+              <SectionTitle>{t(`groups.${g.label.toLowerCase()}` as Parameters<typeof t>[0])}</SectionTitle>
               <div className="grid grid-cols-2 gap-2">
                 {g.ids.map((id) => (
                   <TransitionTile key={id} style={id} live={live} a={a} b={b} />
@@ -98,6 +99,8 @@ export function TransitionsPanel() {
 /** How soft the selected bar's reveal edge is: 0 is the hard edge, the top
  * of the range a ramp half the frame wide. A drag is one undo step. */
 function SoftnessRow({ bar }: { bar: TimelineTransition }) {
+  const t = useTranslations("panels.transitions");
+  const hard = t("hard");
   const ck = useSliderCheckpoint();
   const write = (v: number) => {
     ck.begin();
@@ -105,18 +108,18 @@ function SoftnessRow({ bar }: { bar: TimelineTransition }) {
   };
   return (
     <div className="mb-3">
-      <Row label="Softness">
+      <Row label={t("softness")}>
         <ValueSlider
-          label="Edge softness"
+          label={t("edgeSoftness")}
           sliderClassName="data-horizontal:w-24"
           valueClassName="w-9 text-muted-foreground"
           value={bar.feather ?? 0}
           min={0}
           max={TRANSITION_FEATHER_MAX}
           step={0.01}
-          format={(v) => (v ? `${Math.round(v * 100)}%` : "Hard")}
+          format={(v) => (v ? `${Math.round(v * 100)}%` : hard)}
           parse={(raw) => {
-            if (raw.trim().toLowerCase() === "hard") {
+            if (raw.trim().toLowerCase() === hard.toLowerCase()) {
               return 0;
             }
             const n = parseNumberInput(raw.replace(/%$/, ""));
@@ -136,6 +139,8 @@ function SoftnessRow({ bar }: { bar: TimelineTransition }) {
 /** How wide the white panel running ahead of the selected wipe's edge is:
  * 0 is none, the top of the range half the frame. A drag is one undo step. */
 function BandRow({ bar }: { bar: TimelineTransition }) {
+  const t = useTranslations("panels.transitions");
+  const none = t("none");
   const ck = useSliderCheckpoint();
   const write = (v: number) => {
     ck.begin();
@@ -143,18 +148,18 @@ function BandRow({ bar }: { bar: TimelineTransition }) {
   };
   return (
     <div className="mb-3">
-      <Row label="White band">
+      <Row label={t("whiteBand")}>
         <ValueSlider
-          label="White band width"
+          label={t("whiteBandWidth")}
           sliderClassName="data-horizontal:w-24"
           valueClassName="w-9 text-muted-foreground"
           value={bar.band ?? 0}
           min={0}
           max={TRANSITION_BAND_MAX}
           step={0.01}
-          format={(v) => (v ? `${Math.round(v * 100)}%` : "None")}
+          format={(v) => (v ? `${Math.round(v * 100)}%` : none)}
           parse={(raw) => {
-            if (raw.trim().toLowerCase() === "none") {
+            if (raw.trim().toLowerCase() === none.toLowerCase()) {
               return 0;
             }
             const n = parseNumberInput(raw.replace(/%$/, ""));
@@ -270,6 +275,7 @@ function TransitionTile({
   a: string | null;
   b: string | null;
 }) {
+  const transitionLabel = useLabels("transition");
   const { picked, pick } = useAssetPick(`transition:${style}`);
   const ref = useRef<HTMLButtonElement>(null);
   const { t, restart } = useHandoverClock(TILE_INDEX.get(style) ?? 0);
@@ -313,7 +319,7 @@ function TransitionTile({
         t={t}
         className={cn("w-full rounded-lg border border-border", marked && PICKED_RING)}
       />
-      <span className="leading-none">{TRANSITION_STYLE_LABELS[style]}</span>
+      <span className="leading-none">{transitionLabel(style)}</span>
     </button>
   );
 }
@@ -355,6 +361,7 @@ export function ClipAnimationTiles({
   value?: AnimStyle;
   onPick: (style: AnimStyle | null) => void;
 }) {
+  const t = useTranslations("panels.transitions");
   const asset = useEditor((s) => s.assets.find((a) => a.id === clip.assetId));
   const frame = useCutFrame(
     `anim-${which}`,
@@ -363,7 +370,7 @@ export function ClipAnimationTiles({
   const ids = clip.track > 0 ? ANIM_STYLE_IDS.filter((s) => overlayAnimStyle(s) === s) : ANIM_STYLE_IDS;
   return (
     <div className="grid grid-cols-2 gap-2" onKeyDown={pickGridNav}>
-      <Tile selected={!value} pickId="anim:none" onClick={() => onPick(null)} label="None" className="p-1">
+      <Tile selected={!value} pickId="anim:none" onClick={() => onPick(null)} label={t("none")} className="p-1">
         <span className="relative block aspect-square w-full overflow-hidden rounded-md bg-black">
           <Layer frame={frame} variant="day" />
         </span>
@@ -398,6 +405,7 @@ function ClipAnimTile({
   selected: boolean;
   onPick: () => void;
 }) {
+  const animLabel = useLabels("anim");
   const { t, restart } = useHandoverClock(index);
   return (
     <Tile
@@ -405,7 +413,7 @@ function ClipAnimTile({
       pickId={`anim:${style}`}
       onClick={onPick}
       onHover={(inside) => inside && restart()}
-      label={ANIM_STYLE_LABELS[style]}
+      label={animLabel(style)}
       className="p-1"
     >
       <TransitionSwatch

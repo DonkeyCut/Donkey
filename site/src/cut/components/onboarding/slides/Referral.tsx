@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { useEffect, useRef, type ReactNode } from "react";
 import { Check, PenLine, Search, Users } from "lucide-react";
 
@@ -36,6 +37,7 @@ export function ReferralSlide({
   otherText,
   onOtherTextChange,
 }: Props) {
+  const t = useTranslations("onboarding.referral");
   const otherActive = selected.includes("other");
   // The field stays mounted so it can unfurl, which rules out autoFocus.
   const otherInput = useRef<HTMLInputElement>(null);
@@ -46,10 +48,10 @@ export function ReferralSlide({
   return (
     <div className="mx-auto w-full max-w-[440px]">
       <h2 className="text-center text-[clamp(24px,3vw,32px)] leading-[1.1] font-semibold tracking-[-0.02em]">
-        How did you hear about us?
+        {t("title")}
       </h2>
       <p className="mt-3 text-center text-[16px] text-foreground/70">
-        Pick as many as apply — it tells us where to show up next.
+        {t("body")}
       </p>
       <div className="mt-8 flex flex-col gap-2">
         {REFERRAL_SOURCES.map((source) => {
@@ -72,7 +74,7 @@ export function ReferralSlide({
                 <span className="grid size-5 shrink-0 place-items-center">
                   {MARKS[source.id]}
                 </span>
-                <span className="flex-1">{source.label}</span>
+                <span className="flex-1">{t(`sources.${source.id}`)}</span>
                 <Check className={cn("size-4", active ? "opacity-100" : "opacity-0")} />
               </button>
               {/* The tray hangs off the row absolutely so opening it moves
@@ -94,7 +96,7 @@ export function ReferralSlide({
                       type="text"
                       value={otherText}
                       onChange={(event) => onOtherTextChange(event.target.value)}
-                      placeholder="Tell us where"
+                      placeholder={t("otherPlaceholder")}
                       maxLength={REFERRAL_OTHER_MAX_LENGTH}
                       tabIndex={active ? 0 : -1}
                       className="w-full rounded-b-xl border border-t-0 border-foreground bg-card px-4 pt-6 pb-3 text-[15px] outline-none placeholder:text-muted-foreground"

@@ -18,6 +18,7 @@ import { matteStage } from "./matteAlpha";
 import { createRasterCanvas, decodeRasterImageUrl, type RasterSurface } from "./raster";
 import { CLIP_MIN_SECONDS, type MediaAsset, type VideoClip } from "./types";
 import { liveReader } from "./liveReader";
+import { UserError } from "./userError";
 
 export interface RemovalPieces {
   rgb: Blob;
@@ -81,7 +82,9 @@ export async function renderRemovalPieces(
   const reader = liveReader(asset);
   try {
     const first = await reader.frameAt(still ? 0 : clip.in);
-    if (first.kind !== "ready") throw new Error("The removal clip's picture could not be read.");
+    if (first.kind !== "ready") {
+      throw new UserError("removal_picture_unreadable", "The removal clip's picture could not be read.");
+    }
     const { w, h } = scaledEvenSize(first.width, first.height, opts.maxShort);
     const px = w * h;
     const rgbOut = await openCanvasVideo({
@@ -104,7 +107,9 @@ export async function renderRemovalPieces(
     const readCtx = readSurface.getContext("2d", {
       willReadFrequently: true,
     }) as CanvasRenderingContext2D | null;
-    if (!readCtx) throw new Error("No drawing surface for the removal layer.");
+    if (!readCtx) {
+      throw new UserError("removal_surface_missing", "No drawing surface for the removal layer.");
+    }
 
     // The compositor renders the layer with the preview's own code; its
     // drawing canvas never draws, the scratches do the work.

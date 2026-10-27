@@ -567,7 +567,7 @@ function describeState(
       name: a.name,
       type: a.type,
       fileName: a.fileName,
-      ...(a.sizeBytes !== undefined ? { sizeBytes: a.sizeBytes, fileSize: formatBytes(a.sizeBytes) } : {}),
+      ...(a.sizeBytes !== undefined ? { sizeBytes: a.sizeBytes, fileSize: formatBytes(a.sizeBytes, "en") } : {}),
       ...(a.width !== undefined ? { width: a.width } : {}),
       ...(a.height !== undefined ? { height: a.height } : {}),
       duration: roundT(a.duration),

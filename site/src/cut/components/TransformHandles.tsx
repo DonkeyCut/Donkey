@@ -1,7 +1,8 @@
 "use client";
 
-import type { CSSProperties } from "react";
+import { useMemo, type CSSProperties } from "react";
 import { RefreshCw } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { cn } from "@/lib/utils";
 
 /**
@@ -57,8 +58,8 @@ export function TransformHandles({
   className,
   rotateGap = 32,
   rotateCursor,
-  resizeTitle = "Drag to resize",
-  rotateTitle = "Drag to rotate",
+  resizeTitle,
+  rotateTitle,
 }: {
   /** Ring color on every grip; the chrome it belongs to picks it. */
   color?: string;
@@ -81,6 +82,10 @@ export function TransformHandles({
   resizeTitle?: string;
   rotateTitle?: string;
 }) {
+  const t = useTranslations("editor.transformHandles");
+  // The default grip names, resolved once per locale: the handles redraw
+  // with every drag step.
+  const fallback = useMemo(() => ({ rotate: t("rotate"), resize: t("resize") }), [t]);
   return (
     <div
       className={cn("pointer-events-none absolute", !frame && "inset-0", className)}
@@ -98,7 +103,7 @@ export function TransformHandles({
               </span>
             )}
             <span
-              title={rotateTitle}
+              title={rotateTitle ?? fallback.rotate}
               onPointerDown={onRotate}
               style={{ cursor: rotateCursor ?? "grab" }}
               className="pointer-events-auto grid size-[22px] place-items-center rounded-full bg-white text-neutral-700 shadow-[0_1px_4px_rgba(0,0,0,0.4)]"
@@ -115,7 +120,7 @@ export function TransformHandles({
           return (
             <span
               key={h}
-              title={resizeTitle}
+              title={resizeTitle ?? fallback.resize}
               onPointerDown={(e) => onResize(h, e)}
               className={cn(
                 "pointer-events-auto absolute rounded-full border-[2.5px] bg-white shadow-[0_1px_4px_rgba(0,0,0,0.4)]",

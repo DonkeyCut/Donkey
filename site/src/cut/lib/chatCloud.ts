@@ -7,6 +7,7 @@ import { cutMode, getBackend, type CutBackend } from "./backend";
 import { cloudBackend } from "./backend/cloud";
 import { compactThreadForCloud } from "./chatCompact";
 import type { SyncPulse } from "./syncCadence";
+import { UserError } from "./userError";
 import {
   chatThreadDeleted,
   cloudThreadSaved,
@@ -42,7 +43,7 @@ export async function fetchCloudThreads(
   // Throws on a failed read rather than reading as "no threads": the seed memo
   // and a project copy both have to tell an empty history from a lost one.
   const res = await backend.fetch(`/api/cut/projects/${projectId}/chats`);
-  if (!res.ok) throw new Error("Could not read the project's chats.");
+  if (!res.ok) throw new UserError("chats_read_failed", "Could not read the project's chats.");
   const body = (await res.json()) as unknown;
   return Array.isArray(body) ? mergeThreads(body.filter(isStoredThread)) : [];
 }
@@ -79,9 +80,11 @@ async function sendCloudThread(backend: CutBackend, projectId: string, thread: u
     throw err;
   }
   if (res.status === 410) { deleteStoredThread(projectId, id); return; }
-  if (res.status === 409) throw new Error("The conversation changed on the server.");
+  if (res.status === 409) throw new UserError("conversation_changed_remotely", "The conversation changed on the server.");
   if (!res.ok) {
-    const err = new Error(`Could not save a chat thread (${res.status}).`);
+    const err = new UserError("chat_thread_save_status_failed", `Could not save a chat thread (${res.status}).`, {
+      status: res.status,
+    });
     cloudThreadSaveFailed(err);
     throw err;
   }
@@ -115,7 +118,7 @@ async function syncThreads(state: NonNullable<typeof syncState>): Promise<SyncPu
   await loadProjectThreads(projectId);
   const path = `/api/cut/projects/${projectId}/chats`;
   const response = await backend.fetch(`${path}?revisions=1`);
-  if (!response.ok) throw new Error("Could not read the project's chats.");
+  if (!response.ok) throw new UserError("chats_read_failed", "Could not read the project's chats.");
   const index = await response.json() as { id: string; revision: string }[];
   const remoteIds = new Set(index.map((row) => row.id));
   let pulse: SyncPulse = "still";
@@ -123,7 +126,7 @@ async function syncThreads(state: NonNullable<typeof syncState>): Promise<SyncPu
     if (versions.get(row.id) === row.revision) continue;
     pulse = "moved";
     const res = await backend.fetch(`${path}?id=${encodeURIComponent(row.id)}&revision=${encodeURIComponent(row.revision)}`);
-    if (!res.ok) throw new Error("Could not read the conversation.");
+    if (!res.ok) throw new UserError("conversation_read_failed", "Could not read the conversation.");
     const remote = (await res.json() as unknown[]).filter(isStoredThread);
     const local = readProjectThreads(projectId);
     const merged = mergeThreads(remote, local);
@@ -150,7 +153,7 @@ async function syncThreads(state: NonNullable<typeof syncState>): Promise<SyncPu
 async function saveCloudThread(backend: CutBackend, projectId: string, thread: StoredThread): Promise<void> {
   if (!thread.deleted) return putCloudThread(backend, projectId, thread);
   const res = await backend.fetch(`/api/cut/projects/${projectId}/chats/${thread.id}`, { method: "DELETE" });
-  if (!res.ok) throw new Error("Could not delete the conversation.");
+  if (!res.ok) throw new UserError("conversation_delete_failed", "Could not delete the conversation.");
 }
 
 // Saves debounce per thread: while a turn streams, the panel re-saves on every

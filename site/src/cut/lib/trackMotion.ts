@@ -26,6 +26,7 @@ import {
 } from "./trackKeys";
 import { trackTargetOf, type TrackTarget, type TrackUse } from "./trackTargets";
 import { clipPoseAt, isEffectOverlay, type MediaAsset, type VideoClip } from "./types";
+import { UserError } from "./userError";
 
 /** The shortest stretch worth a track: a couple of frames. */
 const MIN_TRACK_SECONDS = 0.05;
@@ -54,8 +55,12 @@ export async function trackMotion(req: TrackRequest) {
   const s = useEditor.getState();
   const o = s.overlays.find((x) => x.id === req.id);
   const own = o ? undefined : s.clips.find((c) => c.id === req.id);
-  if (!o && !own) throw new Error("No overlay element or video clip with that id.");
-  if (o && req.use === "mask" && isEffectOverlay(o)) throw new Error("Effect elements have no pixels to mask.");
+  if (!o && !own) {
+    throw new UserError("track_item_missing", "No overlay element or video clip with that id.");
+  }
+  if (o && req.use === "mask" && isEffectOverlay(o)) {
+    throw new UserError("track_effect_mask", "Effect elements have no pixels to mask.");
+  }
 
   // The item's clock as the read starts: keys count from here, so a move
   // during the read cannot slide them off the footage.
@@ -63,15 +68,22 @@ export async function trackMotion(req: TrackRequest) {
   const source = trackSource(s.clips, s.assets, req, own, span);
   const asset = s.assets.find((a) => a.id === source.assetId);
   const picture = asset?.type === "video" && asset.width && asset.height ? { width: asset.width, height: asset.height } : null;
-  if (!asset || !picture) throw new Error("The source clip has no video picture to track.");
+  if (!asset || !picture) {
+    throw new UserError("track_source_no_picture", "The source clip has no video picture to track.");
+  }
 
   // The stretch tracked: where the item and the source overlap, narrowed by
   // from/to, sampled evenly on the timeline's clock.
   const srcEnd = source.start + clipLen(source);
   const a = Math.max(span.start, source.start, req.from ?? -Infinity);
   const b = Math.min(span.end, srcEnd, req.to ?? Infinity);
-  if (b - a < MIN_TRACK_SECONDS)
-    throw new Error(`The item and the source clip share no stretch to track (${round2(source.start)}–${round2(srcEnd)}s holds the footage).`);
+  if (b - a < MIN_TRACK_SECONDS) {
+    throw new UserError(
+      "track_no_overlap",
+      `The item and the source clip share no stretch to track (${round2(source.start)}–${round2(srcEnd)}s holds the footage).`,
+      { from: round2(source.start), to: round2(srcEnd) },
+    );
+  }
   const tune = CUT_TRACKING;
   const fps = Math.min(tune.sampleFps, tune.maxFrames / (b - a));
   const n = Math.max(2, Math.floor((b - a) * fps) + 1);
@@ -99,14 +111,22 @@ export async function trackMotion(req: TrackRequest) {
   };
   if (req.use === "read") return { ...summary, path: trackPath(times, framed) };
   const label = trackTargetOf(req.target).label.toLowerCase();
-  if (found === 0) throw new Error(`No ${label} found in the source between ${round2(a)}s and ${round2(b)}s.`);
+  if (found === 0) {
+    throw new UserError("track_target_not_found", `No ${label} found in the source between ${round2(a)}s and ${round2(b)}s.`, {
+      target: req.target,
+      from: round2(a),
+      to: round2(b),
+    });
+  }
 
   // The item as it stands now: the read took a while, and the person may
   // have moved it meanwhile.
   const now = useEditor.getState();
   const liveO = o && now.overlays.find((x) => x.id === o.id);
   const liveClip = own && now.clips.find((c) => c.id === own.id);
-  if (!liveO && !liveClip) throw new Error("The item was deleted while it was being tracked.");
+  if (!liveO && !liveClip) {
+    throw new UserError("track_item_deleted", "The item was deleted while it was being tracked.");
+  }
   const item: TrackItem = liveO ? { kind: "overlay", overlay: liveO } : { kind: "clip", clip: liveClip! };
   const local = times.map((t) => t - span.start);
 
@@ -145,15 +165,26 @@ function trackSource(
   const isVideo = (c: VideoClip) => assets.find((x) => x.id === c.assetId)?.type === "video";
   if (req.sourceId !== undefined) {
     const named = clips.find((c) => c.id === req.sourceId);
-    if (!named) throw new Error("No video clip with that source_id.");
+    if (!named) {
+      throw new UserError("track_source_missing", "No video clip with that source_id.");
+    }
     if (req.use === "follow" && named.id === own?.id) {
-      throw new Error("A clip cannot follow its own footage — pass the source_id of the clip it should ride.");
+      throw new UserError(
+        "track_follow_self",
+        "A clip cannot follow its own footage — pass the source_id of the clip it should ride.",
+      );
     }
     return named;
   }
   if (own && req.use !== "follow" && isVideo(own)) return own;
   const under = clipUnder(clips, span, req.id, isVideo);
-  if (!under) throw new Error(`No other video clip plays under that ${own ? "clip" : "element"} — pass source_id.`);
+  if (!under) {
+    throw new UserError(
+      "track_source_none_under",
+      `No other video clip plays under that ${own ? "clip" : "element"} — pass source_id.`,
+      { kind: own ? "clip" : "element" },
+    );
+  }
   return under;
 }
 

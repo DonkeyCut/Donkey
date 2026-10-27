@@ -2,9 +2,12 @@ import fsSync from "node:fs";
 import { isDeliveryName } from "../lib/exportDelivery";
 import { cp, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { defaultNames } from "@/cut/lib/defaultNames";
 import { resolveParent, settleParents, subtreeOf } from "@/cut/lib/folderTree";
 import { timelineEnd } from "@/cut/lib/timelineEnd";
 import type { Aspect, ProjectDoc, ProjectFolder, ProjectSummary } from "@/cut/lib/types";
+import { DEFAULT_LOCALE, type Locale } from "@/i18n/locales";
+import { UserError } from "@/cut/lib/userError";
 import { cutDataRoot } from "./dataDir";
 import { assertLocalRuntime } from "./local-only";
 import { exists, uniqueName, writeJsonAtomic } from "./util";
@@ -23,8 +26,8 @@ const ID_RE = /^[a-z0-9][a-z0-9-]{2,40}$/;
 
 /** The Finder-safe folder name for a display name: path-hostile characters
  * become spaces, leading dots go (a hidden project folder helps nobody), and
- * an empty result falls back to Untitled. */
-function dirNameFrom(name: string): string {
+ * an empty result falls back to `fallback`. */
+function dirNameFrom(name: string, fallback: string): string {
   const cleaned = name
     .replace(/[/\\:*?"<>|]/g, " ")
     .replace(/\s+/g, " ")
@@ -32,7 +35,7 @@ function dirNameFrom(name: string): string {
     .replace(/^\.+/, "")
     .slice(0, 60)
     .trim();
-  return cleaned || "Untitled";
+  return cleaned || fallback;
 }
 
 // Names inside projects/ that belong to the app itself, never to a project
@@ -163,7 +166,8 @@ function followName(id: string, name: string) {
   const current = resolveDirName(id);
   if (!current || hasActiveJobs(id)) return;
   const root = projectsRoot();
-  const want = dirNameFrom(name);
+  // A name with nothing Finder can hold leaves the folder where it is.
+  const want = dirNameFrom(name, current);
   if (want.toLowerCase() === current.toLowerCase()) {
     if (want === current) return;
     // Case-only rename: same folder on a case-insensitive disk, so there is
@@ -358,11 +362,13 @@ export async function writeProject(id: string, doc: ProjectDoc) {
 export async function createProject(
   name: string,
   folderId: string | null = null,
-  aspect: Aspect | null = null
+  aspect: Aspect | null = null,
+  locale: Locale = DEFAULT_LOCALE
 ): Promise<ProjectSummary> {
   const id = crypto.randomUUID().slice(0, 10);
-  const displayName = name.trim() || "Untitled";
-  const dirName = await claimDir(dirNameFrom(displayName));
+  const names = await defaultNames(locale);
+  const displayName = name.trim() || names.untitled;
+  const dirName = await claimDir(dirNameFrom(displayName, names.untitled));
   const dir = path.join(projectsRoot(), dirName);
   await mkdir(path.join(dir, "media"), { recursive: true });
   await mkdir(path.join(dir, "exports"), { recursive: true });
@@ -391,12 +397,12 @@ export async function createProject(
 export async function deleteProject(id: string) {
   const dir = projectDir(id);
   const doc = await readProject(id);
-  if (!doc) throw new Error("Project not found.");
+  if (!doc) throw new UserError("project_not_found", "Project not found.");
   // Final backstop before an rm -rf: the folder's own doc must carry the id
   // being deleted, so a mis-resolved folder can never be the one removed.
   if (doc.id !== undefined && doc.id !== id) {
     dirIndex.delete(id);
-    throw new Error("Project not found.");
+    throw new UserError("project_not_found", "Project not found.");
   }
   await rm(dir, { recursive: true, force: true });
   dirIndex.delete(id);
@@ -498,7 +504,7 @@ export async function createProjectFolder(
   parentId: string | null = null
 ): Promise<ProjectFolder> {
   const trimmed = name.trim();
-  if (!trimmed) throw new Error("Folder name required.");
+  if (!trimmed) throw new UserError("folder_name_required", "Folder name required.");
   const id = crypto.randomUUID().slice(0, 8);
   return mutateFolders(({ folders }) => {
     const folder: ProjectFolder = {
@@ -519,10 +525,10 @@ export async function updateProjectFolder(
   patch: { name?: string; parentId?: string | null }
 ): Promise<ProjectFolder> {
   const trimmed = patch.name?.trim();
-  if (patch.name !== undefined && !trimmed) throw new Error("Folder name required.");
+  if (patch.name !== undefined && !trimmed) throw new UserError("folder_name_required", "Folder name required.");
   return mutateFolders(({ folders }) => {
     const folder = folders.find((f) => f.id === id);
-    if (!folder) throw new Error("Folder not found.");
+    if (!folder) throw new UserError("folder_not_found", "Folder not found.");
     if (trimmed) folder.name = trimmed.slice(0, 80);
     if (patch.parentId !== undefined) folder.parentId = resolveParent(folders, id, patch.parentId);
     return folder;
@@ -546,9 +552,9 @@ export async function deleteProjectFolder(id: string) {
 
 export async function moveProjectToFolder(id: string, folderId: string | null) {
   const doc = await readProject(id);
-  if (!doc) throw new Error("Project not found.");
+  if (!doc) throw new UserError("project_not_found", "Project not found.");
   if (folderId && !(await readFolders()).some((f) => f.id === folderId)) {
-    throw new Error("Folder not found.");
+    throw new UserError("folder_not_found", "Folder not found.");
   }
   doc.folderId = folderId;
   await writeProject(id, doc);
@@ -556,12 +562,13 @@ export async function moveProjectToFolder(id: string, folderId: string | null) {
 
 /** Duplicate a project: copy the doc and its media (not its exports) into a
  * fresh project folder. */
-export async function duplicateProject(id: string): Promise<ProjectSummary> {
+export async function duplicateProject(id: string, locale: Locale = DEFAULT_LOCALE): Promise<ProjectSummary> {
   const doc = await readProject(id);
-  if (!doc) throw new Error("Project not found.");
+  if (!doc) throw new UserError("project_not_found", "Project not found.");
   const newId = crypto.randomUUID().slice(0, 10);
-  const name = `${doc.name} copy`;
-  const dirName = await claimDir(dirNameFrom(name));
+  const names = await defaultNames(locale);
+  const name = names.copy(doc.name);
+  const dirName = await claimDir(dirNameFrom(name, names.untitled));
   const dir = path.join(projectsRoot(), dirName);
   await mkdir(path.join(dir, "media"), { recursive: true });
   await mkdir(path.join(dir, "exports"), { recursive: true });

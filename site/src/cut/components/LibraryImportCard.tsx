@@ -2,6 +2,7 @@
 
 import { useCallback, useState } from "react";
 import { File as FileIcon, Loader2, RotateCcw, X } from "lucide-react";
+import { useLocale, useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -24,6 +25,7 @@ import { setLibraryImportShape, type LibraryArrival } from "@/cut/lib/libraryInt
 import { fileKind } from "@/cut/lib/media";
 import { formatBytes } from "@/lib/bytes";
 import { cn } from "@/lib/utils";
+import { useDescribeError } from "@/i18n/describeError";
 
 /** An arriving file wears the tile its asset will, with a spinner in the
  * corner while storage runs; failed imports keep their retry. */
@@ -45,6 +47,9 @@ export function LibraryImportCard({
    * click opens every card, and a double-click in the editor's panel. */
   opensOn?: "click" | "doubleClick";
 }) {
+  const t = useTranslations("home.importCard");
+  const locale = useLocale();
+  const describeError = useDescribeError();
   const elapsed = useElapsed(item.error ? null : item.startedAt);
   const [previewUrl, setPreviewUrl] = useState<string>();
   // The clip's decoded frame and length while its poster holds them.
@@ -103,7 +108,7 @@ export function LibraryImportCard({
       ref={tileRef}
       role={canPreview ? "button" : undefined}
       tabIndex={canPreview ? 0 : undefined}
-      aria-label={canPreview ? `Preview ${item.name}` : undefined}
+      aria-label={canPreview ? t("preview", { name: item.name }) : undefined}
       onClick={canPreview && opensOn === "click" ? openPreview : undefined}
       onDoubleClick={canPreview && opensOn === "doubleClick" ? openPreview : undefined}
       onKeyDown={canPreview ? (event) => {
@@ -135,7 +140,7 @@ export function LibraryImportCard({
             className="w-24 justify-start"
             onClick={onRetry}
           >
-            <RotateCcw data-icon="inline-start" /> Retry
+            <RotateCcw data-icon="inline-start" /> {t("retry")}
           </Button>
           <Button
             variant="outline"
@@ -143,13 +148,13 @@ export function LibraryImportCard({
             className="w-24 justify-start text-destructive hover:text-destructive"
             onClick={onDismiss}
           >
-            <X data-icon="inline-start" /> Cancel
+            <X data-icon="inline-start" /> {t("cancel")}
           </Button>
         </div>
       ) : font ? (
         <LibraryFontFace
           name={item.name}
-          meta={[fileKind(item.name), file && formatBytes(file.size)].filter(Boolean).join(" · ")}
+          meta={[fileKind(item.name), file && formatBytes(file.size, locale)].filter(Boolean).join(" · ")}
           specimen={previewUrl && <FontSpecimen assetId={item.id} src={previewUrl} pad={0} className="size-full" />}
         />
       ) : mediaType === "lut" ? (
@@ -175,7 +180,7 @@ export function LibraryImportCard({
       ) : file && !mediaType ? (
         <div className="flex size-full flex-col items-center justify-center gap-2 text-muted-foreground">
           <FileIcon className="size-8" />
-          <span className="text-xs uppercase">Archive</span>
+          <span className="text-xs uppercase">{t("archive")}</span>
         </div>
       ) : (
         <Skeleton className="size-full rounded-none" />
@@ -212,9 +217,9 @@ export function LibraryImportCard({
                 <span className="absolute top-1.5 right-1.5 rounded-md bg-destructive/90 px-1.5 py-0.5 text-[10px] text-white" />
               }
             >
-              Failed
+              {t("failed")}
             </TooltipTrigger>
-            <TooltipContent className="max-w-xs">{item.error}</TooltipContent>
+            <TooltipContent className="max-w-xs">{describeError(item)}</TooltipContent>
           </Tooltip>
         </TooltipProvider>
       ) : (
@@ -226,7 +231,7 @@ export function LibraryImportCard({
               <TooltipTrigger
                 render={
                   <span
-                    aria-label="Importing"
+                    aria-label={t("importing")}
                     className={cn(
                       "absolute top-1.5 right-1.5 grid size-6 place-items-center rounded-full text-white transition-opacity",
                       font ? "bg-white/10" : "bg-black/40",
@@ -238,7 +243,10 @@ export function LibraryImportCard({
                 <Loader2 className="size-3.5 animate-spin" />
               </TooltipTrigger>
               <TooltipContent>
-                Importing <span className="font-mono tabular-nums">{elapsed}</span>
+                {t.rich("importingFor", {
+                  elapsed: elapsed ?? "",
+                  time: (chunks) => <span className="font-mono tabular-nums">{chunks}</span>,
+                })}
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>

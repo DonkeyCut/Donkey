@@ -23,11 +23,12 @@ import { compatCovers } from "./proxyNames";
 import type { LibraryAsset, LibraryData } from "./library";
 import { useLightbox, lightboxItemFromLibrary } from "./lightbox";
 import { backendFor } from "./residency";
+import { UserError, errorFields, errorFromBody, type ErrorFields } from "./userError";
 
 /** Where an asset's copy stands this session. */
 export type LibraryProxyState =
   | { kind: "making"; progress: number }
-  | { kind: "failed"; error: string };
+  | ({ kind: "failed"; error: string } & ErrorFields);
 
 interface LibraryProxies {
   jobs: Record<string, LibraryProxyState>;
@@ -47,7 +48,7 @@ const setJob = (key: string, state: LibraryProxyState | null) =>
     return { jobs };
   });
 
-const FAILED = "Could not make a playable copy of this video.";
+const FAILED = new UserError("playable_copy_failed", "Could not make a playable copy of this video.");
 /** A cloud build still queued when the poll gives up: the worker keeps going,
  * and the shelf's next listing carries the copy. */
 const STILL_QUEUED = "The playable copy is still being made.";
@@ -78,7 +79,7 @@ export async function ensureLibraryProxy(
   try {
     // A Mac app older than the route has nothing to build the copy with.
     if (a.residency === "local" && !(await engineFeatures()).has("library.proxy")) {
-      throw new Error("Update the Donkey app to play this video here.");
+      throw new UserError("app_update_to_play", "Update the Donkey app to play this video here.");
     }
     const backend = backendFor(a.residency);
     const { proxyMaxHeight, proxyCrf } = CUT_COLOR;
@@ -88,7 +89,7 @@ export async function ensureLibraryProxy(
       body: JSON.stringify({ maxHeight: proxyMaxHeight, crf: proxyCrf, ...(compat ? { compat } : {}) }),
     });
     const body = await apiJson<LibraryAsset | { jobId: string }>(res);
-    if (!res.ok) throw new Error(body.error ?? FAILED);
+    if (!res.ok) throw errorFromBody(body, FAILED);
 
     // The cloud queues the build on its worker; the Mac and the page answer
     // with the asset once the copy is there.
@@ -99,7 +100,7 @@ export async function ensureLibraryProxy(
         })
       : body;
     const proxyFile = landed.proxyFile;
-    if (!proxyFile) throw new Error(FAILED);
+    if (!proxyFile) throw FAILED;
     const updated: LibraryAsset = { ...a, proxyFile };
     patch((d) => ({
       ...d,
@@ -111,8 +112,8 @@ export async function ensureLibraryProxy(
     if (open?.libraryId === a.id) useLightbox.getState().open(lightboxItemFromLibrary(updated, open.bare));
     setJob(key, null);
   } catch (e) {
-    const error = e instanceof Error ? e.message : FAILED;
-    if (error === STILL_QUEUED) return;
-    setJob(key, { kind: "failed", error });
+    const failure = errorFields(e, FAILED);
+    if (failure.error === STILL_QUEUED) return;
+    setJob(key, { kind: "failed", ...failure });
   }
 }

@@ -18,6 +18,7 @@ import type { DocExportAudio } from "../../lib/exportPresets";
 import { compatCoverIn, compatCovers, isLightProxyName, PROXY_SOURCE_FAULT, type CompatCover } from "../../lib/proxyNames";
 import { addUsage, outputByteCeiling, quotaCheck } from "./usage";
 import { caught, err, redirect } from "./util";
+import { errorFields, failureCode, UserError, type ErrorFields } from "@/cut/lib/userError";
 
 const HOUR_MS = 60 * 60 * 1000;
 
@@ -106,15 +107,15 @@ type JobRow = {
 };
 
 /** Why a client-supplied render spec cannot run, or null when it can. */
-function specRefusal(spec: Record<string, unknown>): string | null {
+function specRefusal(spec: Record<string, unknown>): UserError | null {
   const n = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : NaN);
   const inRange = (v: unknown, lo: number, hi: number) => n(v) >= lo && n(v) <= hi;
   if (!inRange(spec.width, 2, MAX_RENDER_EDGE) || !inRange(spec.height, 2, MAX_RENDER_EDGE))
-    return "Render size is out of range.";
-  if (!inRange(spec.fps, 1, MAX_RENDER_FPS)) return "Frame rate is out of range.";
+    return new UserError("render_size_out_of_range", "Render size is out of range.");
+  if (!inRange(spec.fps, 1, MAX_RENDER_FPS)) return new UserError("render_fps_out_of_range", "Frame rate is out of range.");
   if (!(n(spec.duration) > 0) || n(spec.duration) > MAX_RENDER_SECONDS)
-    return "Render length is out of range.";
-  if (Array.isArray(spec.clips) && spec.clips.length > MAX_RENDER_CLIPS) return "Too many clips.";
+    return new UserError("render_length_out_of_range", "Render length is out of range.");
+  if (Array.isArray(spec.clips) && spec.clips.length > MAX_RENDER_CLIPS) return new UserError("render_too_many_clips", "Too many clips.");
   return null;
 }
 
@@ -190,11 +191,36 @@ async function dropUnregisteredExport(
   await del(keys.filter((k) => !kept.has(k)));
 }
 
+const EXPORT_CANCELED = new UserError("export_canceled", "Export canceled.");
+
+type RowFailure = Pick<ErrorFields, "errorCode" | "errorParams">;
+
+/** The code the worker recorded beside a failed row's error (worker/main.ts
+ * keeps it in `result`), so the page words the failure in its language. */
+function rowFailure(result: unknown): RowFailure {
+  const coded = failureCode(result);
+  return coded ? { errorCode: coded.code, errorParams: coded.params } : {};
+}
+
+/** The recorded failure of each failed row among `rows`, read in one query:
+ * only a failed row's result is fetched, and only once it has failed. */
+async function rowFailures(rows: Pick<JobRow, "id" | "state">[]): Promise<Map<string, RowFailure>> {
+  const failed = rows.filter((r) => r.state === "error").map((r) => r.id);
+  if (failed.length === 0) return new Map();
+  const found = await prisma.cutRenderJob.findMany({ where: { id: { in: failed } }, select: { id: true, result: true } });
+  return new Map(found.map((r) => [r.id, rowFailure(r.result)]));
+}
+
 /** Engine job status ("queued" | "running" | "done" | "error") from a row's
  * state; a canceled row reads as the engine's canceled-export error. */
-function engineStatus(row: Pick<JobRow, "state" | "error">): { status: string; error?: string } {
-  if (row.state === "canceled") return { status: "error", error: row.error ?? "Export canceled." };
-  return { status: row.state, error: row.error ?? undefined };
+function engineStatus(
+  row: Pick<JobRow, "state" | "error">,
+  failure: RowFailure = {}
+): { status: string; error?: string } & RowFailure {
+  if (row.state === "canceled") {
+    return row.error ? { status: "error", error: row.error } : { status: "error", ...errorFields(EXPORT_CANCELED, "") };
+  }
+  return { status: row.state, error: row.error ?? undefined, ...(row.error ? failure : {}) };
 }
 
 /** Everything the job routes read except the two big JSON columns. The spec
@@ -272,7 +298,7 @@ export async function queueDocExport(
   audio: DocExportAudio = {}
 ): Promise<{ id: string; outName: string } | Response> {
   const project = await getProject(userId, projectId);
-  if (!project) return err("Project not found.", 404);
+  if (!project) return err(new UserError("project_not_found", "Project not found."), 404);
   const capped = await renderJobCheck(userId);
   if (capped) return capped;
   const over = await quotaCheck(userId, 0, EXPORT_QUOTA_MARGIN);
@@ -311,7 +337,7 @@ export async function queueImportUrl(
   projectId: string,
   opts: { url: string; audio?: boolean; key?: string; name?: string }
 ): Promise<{ id: string } | Response> {
-  if (!(await getProject(userId, projectId))) return err("Project not found.", 404);
+  if (!(await getProject(userId, projectId))) return err(new UserError("project_not_found", "Project not found."), 404);
   const open = await importJobFor(userId, opts.key);
   if (open) return { id: open.id };
   const capped = await renderJobCheck(userId);
@@ -355,7 +381,7 @@ export const jobsCloud = {
         target?: string;
       };
       if (!Array.isArray(files) || files.length === 0) return err("files is required.", 400);
-      if (files.length > MAX_OVERLAY_FILES) return err("Too many overlays.", 400);
+      if (files.length > MAX_OVERLAY_FILES) return err(new UserError("render_too_many_overlays", "Too many overlays."), 400);
       // Retained exports pass their storage and render gates before staging inputs.
       if (target === undefined || target === "export") {
         const capped = await renderJobCheck(userId);
@@ -369,7 +395,7 @@ export const jobsCloud = {
         if (f.bytes! > MAX_OVERLAY_BYTES) return err(`${f.name} is too large to render in the cloud.`, 413);
         total += f.bytes!;
       }
-      if (total > MAX_OVERLAY_BATCH_BYTES) return err("The cut's files are too large to render in the cloud.", 413);
+      if (total > MAX_OVERLAY_BATCH_BYTES) return err(new UserError("render_files_too_large", "The cut's files are too large to render in the cloud."), 413);
       const batchId = crypto.randomUUID().slice(0, 12);
       const out = await Promise.all(
         files.map(async (f) => {
@@ -383,7 +409,7 @@ export const jobsCloud = {
       );
       return Response.json({ files: out });
     } catch (e) {
-      return caught(e, "Could not presign the overlays.");
+      return caught(e, new UserError("render_overlays_presign_failed", "Could not presign the overlays."));
     }
   },
 
@@ -418,7 +444,7 @@ export const jobsCloud = {
         return err("Invalid render revision.", 400);
       const borrowed = body.mediaFrom === "overlays";
       const project = await getProject(userId, projectId);
-      if (!project && !borrowed) return err("Project not found.", 400);
+      if (!project && !borrowed) return err(new UserError("project_not_found", "Project not found."), 400);
       // Overlay keys come from the client; only this user's own overlay
       // uploads are acceptable render inputs — anything else would let a
       // crafted key pull another account's R2 objects into the render.
@@ -527,7 +553,7 @@ export const jobsCloud = {
       wakeRenderWorker();
       return Response.json({ id: row.id });
     } catch (e) {
-      return caught(e, "Export failed to start.");
+      return caught(e, new UserError("export_start_failed", "Export failed to start."));
     }
   },
 
@@ -546,15 +572,15 @@ export const jobsCloud = {
       if (queued instanceof Response) return queued;
       return Response.json(queued);
     } catch (e) {
-      return caught(e, "Export failed to start.");
+      return caught(e, new UserError("export_start_failed", "Export failed to start."));
     }
   },
 
   async exportStatus(userId: string, jobId: string) {
     const row = await findJob(userId, jobId);
-    if (!row) return err("Unknown export.", 404);
+    if (!row) return err(new UserError("export_unknown", "Unknown export."), 404);
     if (needsWorker(row)) wakeRenderWorker();
-    const { status, error } = engineStatus(row);
+    const { status, error, ...failure } = engineStatus(row, (await rowFailures([row])).get(row.id));
     const finished = row.state === "done" && row.outputKey;
     // The artifact names the revision the render was cut from, which only the
     // spec knows. One read, on the poll that ends the wait.
@@ -567,6 +593,7 @@ export const jobsCloud = {
       status,
       progress: row.progress,
       error,
+      ...failure,
       outName: row.outName || undefined,
       artifact: finished ? {
         id: row.id, projectId: row.projectId, kind: row.kind,
@@ -611,7 +638,7 @@ export const jobsCloud = {
       const claim: ExportFiles = body.stems === true ? "fileAndStems" : "file";
       const projectId = body.projectId;
       if (!projectId) return err("projectId is required.", 400);
-      if (!(await getProject(userId, projectId))) return err("Project not found.", 400);
+      if (!(await getProject(userId, projectId))) return err(new UserError("project_not_found", "Project not found."), 400);
       const capped = await renderJobCheck(userId);
       if (capped) return capped;
       // The size the render is heading for, from the same model the export
@@ -659,7 +686,7 @@ export const jobsCloud = {
         ...(stemsUrl ? { stemsUrl } : {}),
       });
     } catch (e) {
-      return caught(e, "Could not start the export.");
+      return caught(e, new UserError("export_could_not_start", "Could not start the export."));
     }
   },
 
@@ -685,13 +712,13 @@ export const jobsCloud = {
         select: { ...jobRowSelect, spec: true },
       });
       if (!row || row.kind !== "export" || !row.projectId || !row.outName) {
-        return err("Export not found.", 400);
+        return err(new UserError("export_not_found", "Export not found."), 400);
       }
-      if (row.state === "canceled") return err("Export canceled.", 400);
+      if (row.state === "canceled") return err(new UserError("export_canceled", "Export canceled."), 400);
       const { projectId, outName } = row;
       const key = projectExportKey(userId, projectId, outName);
       const object = await head(key);
-      if (!object) return err("The export was not uploaded.", 400);
+      if (!object) return err(new UserError("export_not_uploaded", "The export was not uploaded."), 400);
 
       // A render that asked for stems uploaded them before the file. Each file
       // is its own row at its own size, so deleting one frees what it held.
@@ -700,7 +727,7 @@ export const jobsCloud = {
         const stemsName = stemsArchiveName(outName);
         const stemsKey = projectExportKey(userId, projectId, stemsName);
         const stemsObject = await head(stemsKey);
-        if (!stemsObject) return err("The stems were not uploaded.", 400);
+        if (!stemsObject) return err(new UserError("export_stems_not_uploaded", "The stems were not uploaded."), 400);
         files.push({ r2Key: stemsKey, fileName: stemsName, mime: STEMS_MIME, bytes: stemsObject.bytes });
       }
       const bytes = files.reduce((sum, f) => sum + f.bytes, 0);
@@ -737,7 +764,7 @@ export const jobsCloud = {
       });
       return Response.json({ id: row.id, outName });
     } catch (e) {
-      return caught(e, "Could not save the export.");
+      return caught(e, new UserError("export_save_failed", "Could not save the export."));
     }
   },
 
@@ -758,7 +785,7 @@ export const jobsCloud = {
       });
       return Response.json({ ok: true });
     } catch (e) {
-      return caught(e, "Could not record the export's progress.");
+      return caught(e, new UserError("export_progress_failed", "Could not record the export's progress."));
     }
   },
 
@@ -786,7 +813,7 @@ export const jobsCloud = {
       }
       return Response.json({ ok: true });
     } catch (e) {
-      return caught(e, "Could not release the export.");
+      return caught(e, new UserError("export_release_failed", "Could not release the export."));
     }
   },
 
@@ -798,7 +825,7 @@ export const jobsCloud = {
       }
       if (row.kind === "preview" && !row.outputKey.startsWith(overlayPrefix(userId))) {
         const artifact = await prisma.cutMediaObject.findUnique({ where: { r2Key: row.outputKey }, select: { id: true } });
-        if (!artifact) return err("Preview expired. Render it again.", 410);
+        if (!artifact) return err(new UserError("preview_expired", "Preview expired. Render it again."), 410);
       }
       // A finished job's output never changes, so the redirect is cacheable.
       return redirect(
@@ -806,7 +833,7 @@ export const jobsCloud = {
         MEDIA_REDIRECT_HEADERS
       );
     } catch (e) {
-      return caught(e, "Export not ready.");
+      return caught(e, new UserError("export_not_ready", "Export not ready."));
     }
   },
 
@@ -871,9 +898,10 @@ export const jobsCloud = {
         })
       : [];
     const names = new Map(projects.map((p) => [p.id, p.name]));
+    const failures = await rowFailures(live);
     return Response.json(
       live.map((r) => {
-        const { status, error } = engineStatus(r);
+        const { status, error, ...failure } = engineStatus(r, failures.get(r.id));
         return {
           id: r.id,
           projectId: r.projectId ?? "",
@@ -882,6 +910,7 @@ export const jobsCloud = {
           progress: r.progress,
           outName: r.outName || undefined,
           error,
+          ...failure,
           createdAt: r.createdAt.getTime(),
           startedAt: r.claimedAt?.getTime(),
         };
@@ -904,7 +933,7 @@ export const jobsCloud = {
       if (queued instanceof Response) return queued;
       return Response.json({ jobId: queued.id });
     } catch (e) {
-      return caught(e, "Could not import that URL.");
+      return caught(e, new UserError("url_import_failed", "Could not import that URL."));
     }
   },
 
@@ -947,7 +976,7 @@ export const jobsCloud = {
       wakeRenderWorker();
       return Response.json({ jobId: row.id });
     } catch (e) {
-      return caught(e, "Could not import that URL.");
+      return caught(e, new UserError("url_import_failed", "Could not import that URL."));
     }
   },
 
@@ -959,14 +988,14 @@ export const jobsCloud = {
       if (!file) return err("file is required.", 400);
       const mode = convertModeIn(askedMode);
       if (!mode) return err("mode is fit or reencode.", 400);
-      if (!(await getProject(userId, projectId))) return err("Project not found.", 404);
+      if (!(await getProject(userId, projectId))) return err(new UserError("project_not_found", "Project not found."), 404);
       const over = await quotaCheck(userId, 0, EXPORT_QUOTA_MARGIN);
       if (over) return over;
       const source = await prisma.cutMediaObject.findFirst({
         where: { userId, projectId, fileName: file, kind: "media" },
         select: { id: true },
       });
-      if (!source) return err("Media file missing from project.", 404);
+      if (!source) return err(new UserError("media_file_missing", "Media file missing from project."), 404);
       const capped = await renderJobCheck(userId);
       if (capped) return capped;
       const row = await prisma.cutRenderJob.create({
@@ -980,7 +1009,7 @@ export const jobsCloud = {
       wakeRenderWorker();
       return Response.json({ jobId: row.id });
     } catch (e) {
-      return caught(e, "Could not convert that file.");
+      return caught(e, new UserError("convert_failed", "Could not convert that file."));
     }
   },
 
@@ -997,12 +1026,12 @@ export const jobsCloud = {
       const compat = compatCoverIn(askedCompat);
       if (askedCompat !== undefined && !compat) return err("compat is audio or video.", 400);
       const maxHeight = typeof asked === "number" && Number.isFinite(asked) ? Math.round(Math.min(4320, Math.max(360, asked))) : undefined;
-      if (!(await getProject(userId, projectId))) return err("Project not found.", 404);
+      if (!(await getProject(userId, projectId))) return err(new UserError("project_not_found", "Project not found."), 404);
       const source = await prisma.cutMediaObject.findFirst({
         where: { userId, projectId, fileName: file, kind: "media", uploadState: "complete" },
         select: { id: true },
       });
-      if (!source) return err("Media file missing from project.", 404);
+      if (!source) return err(new UserError("media_file_missing", "Media file missing from project."), 404);
       // A heavy video's request (it names a height) wants the light proxy
       // (lib/proxyNames.ts); a full-quality one built earlier doesn't answer it.
       const light = maxHeight !== undefined;
@@ -1033,7 +1062,7 @@ export const jobsCloud = {
         select: { spec: true },
       });
       if (failedRows.some((r) => sameProxyAsk(r.spec, light, compat))) {
-        return err("The preview proxy could not be made from this file lately; the original plays instead.", 409);
+        return err(new UserError("proxy_recently_failed", "The preview proxy could not be made from this file lately; the original plays instead."), 409);
       }
       const capped = await renderJobCheck(userId);
       if (capped) return capped;
@@ -1043,20 +1072,21 @@ export const jobsCloud = {
       wakeRenderWorker();
       return Response.json({ jobId: row.id });
     } catch (e) {
-      return caught(e, "Could not make the preview proxy.");
+      return caught(e, new UserError("proxy_failed", "Could not make the preview proxy."));
     }
   },
 
   /** Generic job poll for non-export kinds (import_url, convert, proxy). */
   async status(userId: string, jobId: string) {
     const row = await findJob(userId, jobId);
-    if (!row) return err("Unknown job.", 404);
+    if (!row) return err(new UserError("job_unknown", "Unknown job."), 404);
     if (needsWorker(row)) wakeRenderWorker();
-    const result =
-      row.state === "done"
+    const settled =
+      row.state === "done" || row.state === "error"
         ? (await prisma.cutRenderJob.findUnique({ where: { id: row.id }, select: { result: true } }))
             ?.result
         : null;
+    const result = row.state === "done" ? settled : null;
     return Response.json({
       id: row.id,
       kind: row.kind,
@@ -1064,6 +1094,7 @@ export const jobsCloud = {
       progress: row.progress,
       result: result ?? undefined,
       error: row.error ?? undefined,
+      ...(row.state === "error" && row.error ? rowFailure(settled) : {}),
     });
   },
 };

@@ -42,7 +42,9 @@ import { STEP_BUDGET, stopText, turnClose, type TurnEnd } from "../../lib/turnBu
 import { pendingAsk } from "../../lib/chatResume";
 import { codexCommand } from "../tool-path";
 import { codexAccountModels, createCodexCatalog } from "../ai/codexModels";
-import { errorMessage } from "../util";
+import { errorMessage, errorReply } from "../util";
+import { UserError } from "../../lib/userError";
+import { DEFAULT_LOCALE, isLocale, type Locale } from "../../../i18n/locales";
 
 /** The one place a Claude chat's WebFetch may go: Pexels' pages, where stock
  * footage is searched by its own search URLs. Every other host is refused. */
@@ -59,6 +61,16 @@ interface ChatBody {
   route?: EngineRoute;
   /** Asks the editor carried out on its own since the provider's last turn. */
   handled?: HandledAsk[];
+  /** The page's interface language; the handler settles it to a supported one. */
+  locale: Locale;
+}
+
+/** A failure the person reads: its code and values first, as a transient
+ * part the panel words in the page's language, then the English error that
+ * ends the stream. */
+function emitFailure(emit: UIChunkWriter["write"], failure: UserError) {
+  emit({ type: "data-failure", data: { message: failure.message, code: failure.code, params: failure.params }, transient: true });
+  emit({ type: "error", errorText: failure.message });
 }
 
 // The steer a Codex turn resumes on once request_tools widened its catalog.
@@ -155,7 +167,7 @@ async function runClaude(
         ...(process.env.DONKEY_CUT_CLAUDE
           ? { pathToClaudeCodeExecutable: process.env.DONKEY_CUT_CLAUDE }
           : {}),
-        systemPrompt: systemPrompt(),
+        systemPrompt: systemPrompt(body.locale),
         // The editor MCP server is the whole surface, but for one built-in:
         // WebFetch, held to Pexels, where a replication's stock footage is
         // searched. Pexels answers a server's own fetch with a challenge, and
@@ -194,7 +206,7 @@ async function runClaude(
         const m = msg as unknown as Record<string, unknown> & { type: string };
         const failure = claudeFailure(m);
         if (failure) {
-          emit({ type: "error", errorText: failure });
+          emitFailure(emit, failure);
           end = "failed";
           break;
         }
@@ -205,7 +217,7 @@ async function runClaude(
           // instead of letting that reach the user.
           const tools = Array.isArray(m.tools) ? (m.tools as unknown[]) : [];
           if (!tools.some((t) => typeof t === "string" && t.startsWith("mcp__cut"))) {
-            emit({ type: "error", errorText: "The editor tools didn't load. Reload the tab and try again." });
+            emitFailure(emit, new UserError("editor_tools_unbound", "The editor tools didn't load. Reload the tab and try again."));
             await q.interrupt().catch(() => {});
             end = "blocked";
             break;
@@ -300,7 +312,7 @@ async function runCodex(
   let session = body.providerSession;
   let ask = prompt;
   for (;;) {
-    const run = await codexRun(emit, ask, body.model, session, base, sessionKey, signal);
+    const run = await codexRun(emit, ask, body.model, body.locale, session, base, sessionKey, signal);
     session = run.thread ?? session;
     if (signal.aborted || !session) return;
     const folds = inbox.take();
@@ -328,6 +340,7 @@ async function codexRun(
   emit: UIChunkWriter["write"],
   prompt: string,
   model: string,
+  locale: Locale,
   session: string | undefined,
   base: string,
   sessionKey: string,
@@ -360,7 +373,7 @@ async function codexRun(
     // 100s, and a listen's words can queue behind a caption run.
     "-c",
     `mcp_servers.cut.tool_timeout_sec=${CODEX_TOOL_TIMEOUT_S}`,
-    session ? prompt : `${systemPrompt()}\n\n${prompt}`
+    session ? prompt : `${systemPrompt(locale)}\n\n${prompt}`
   );
 
   await new Promise<void>((resolve, reject) => {
@@ -570,7 +583,7 @@ export const aiApi = {
       return Response.json({ texts });
     } catch (e) {
       return Response.json(
-        { error: errorMessage(e, "Could not write captions.") },
+        errorReply(e, new UserError("captions_write_failed", "Could not write captions.")),
         { status: 500 }
       );
     }
@@ -592,7 +605,7 @@ export const aiApi = {
       return Response.json({ cues });
     } catch (e) {
       return Response.json(
-        { error: errorMessage(e, "Could not caption the visuals.") },
+        errorReply(e, new UserError("visual_captions_failed", "Could not caption the visuals.")),
         { status: 500 }
       );
     }
@@ -612,6 +625,8 @@ export const aiApi = {
     if (!identity.success) return Response.json({ error: "A project and chat are required." }, { status: 400 });
     const projectId = identity.data.context.project.id;
     const { route, handled = [] } = identity.data;
+    // Replies follow the page's language; a page that sent none reads English.
+    body.locale = isLocale(body.locale) ? body.locale : DEFAULT_LOCALE;
     const base = new URL(req.url).origin;
     const sessionKey = crypto.randomUUID();
     const { text: userText, attachments } = pendingAsk(body.messages);

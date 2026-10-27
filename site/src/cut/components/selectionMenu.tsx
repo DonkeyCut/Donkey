@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
+import { useTranslations } from "next-intl";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -97,47 +98,76 @@ export function SelectionMenu({
   );
 }
 
-/** What a confirm calls a pick: the one thing by name, with what a folder
- * holds counted beside it; or the counts — "2 folders (19 projects) and 3
- * projects". `noun` is the grid's word for an item, singular and plural, the
- * word for what the folders hold too; `held` is how many of those the
- * folders hold between them, however deep. */
-export function pickLabel(
-  folders: readonly { name: string }[],
-  items: readonly { name: string }[],
-  noun: [string, string],
-  held: number,
-): string {
-  const count = (n: number, [one, many]: [string, string]) => `${n} ${n === 1 ? one : many}`;
-  const inside = held > 0 ? ` (${count(held, noun)})` : "";
-  if (folders.length === 1 && items.length === 0)
-    return `“${folders[0].name}”${held > 0 ? ` and its ${count(held, noun)}` : ""}`;
-  if (folders.length === 0 && items.length === 1) return `“${items[0].name}”`;
-  const parts: string[] = [];
-  if (folders.length) parts.push(count(folders.length, ["folder", "folders"]) + inside);
-  if (items.length) parts.push(count(items.length, noun));
-  return parts.join(" and ");
-}
+/** The grid's word for what it holds: the noun a confirm counts items in. */
+export type PickNoun = "project" | "file" | "item" | "clip" | "note";
 
-/** The sentence a confirm opens with while the pick holds folders with
- * something in them: a folder goes with everything inside it. Empty when the
- * folders hold nothing, or there are none. */
-export function foldersGoNote(folders: number, held: number): string {
-  if (folders === 0 || held === 0) return "";
-  return folders === 1
-    ? "Everything inside the folder goes with it. "
-    : "Everything inside the folders goes with them. ";
-}
+/**
+ * The words a delete confirm is built from, in the page's language.
+ *
+ * `pickLabel` calls a pick the one thing by name, with what a folder holds
+ * counted beside it; or the counts — "2 folders (19 projects) and 3
+ * projects". `noun` is the grid's word for an item, the word for what the
+ * folders hold too; `held` is how many of those the folders hold between
+ * them, however deep.
+ *
+ * `foldersGoNote` is the sentence a confirm opens with while the pick holds
+ * folders with something in them: a folder goes with everything inside it.
+ * Empty when the folders hold nothing, or there are none.
+ *
+ * `phoneGoNote` is the sentence a Library confirm adds while what goes
+ * includes items synced from the phone: those leave the phone too. `synced`
+ * counts them among the `total` items going. Empty without one.
+ *
+ * Each sentence ends in a space, so the next one follows straight on.
+ */
+export function usePickWords() {
+  const t = useTranslations("home.pick");
 
-/** The sentence a Library confirm adds while what goes includes items synced
- * from the phone: those leave the phone too. `synced` counts them among the
- * `total` items going. Empty without one. */
-export function phoneGoNote(synced: number, total: number): string {
-  if (synced === 0) return "";
-  if (total === 1) return "It was synced from your phone and is removed there too. ";
-  return synced === 1
-    ? "One of them was synced from your phone and is removed there too. "
-    : `${synced} of them were synced from your phone and are removed there too. `;
+  const pickLabel = (
+    folders: readonly { name: string }[],
+    items: readonly { name: string }[],
+    noun: PickNoun,
+    held: number,
+  ): string => {
+    if (folders.length === 1 && items.length === 0) {
+      const name = folders[0].name;
+      return held > 0 ? t("namedHolding", { name, held: t(noun, { count: held }) }) : t("named", { name });
+    }
+    if (folders.length === 0 && items.length === 1) {
+      return t("named", { name: items[0].name });
+    }
+
+    // Counts: the folders with what they hold, then the items beside them.
+    const folderPart = folders.length
+      ? held > 0
+        ? t("foldersHolding", { folders: t("folder", { count: folders.length }), held: t(noun, { count: held }) })
+        : t("folder", { count: folders.length })
+      : "";
+    const itemPart = items.length ? t(noun, { count: items.length }) : "";
+    if (folderPart && itemPart) {
+      return t("both", { folders: folderPart, items: itemPart });
+    }
+    return folderPart || itemPart;
+  };
+
+  const foldersGoNote = (folders: number, held: number): string => {
+    if (folders === 0 || held === 0) {
+      return "";
+    }
+    return `${t("foldersGo", { count: folders })} `;
+  };
+
+  const phoneGoNote = (synced: number, total: number): string => {
+    if (synced === 0) {
+      return "";
+    }
+    if (total === 1) {
+      return `${t("phoneOnly")} `;
+    }
+    return `${t("phoneSome", { count: synced })} `;
+  };
+
+  return { pickLabel, foldersGoNote, phoneGoNote };
 }
 
 /** The confirm before a pick is deleted. The grid words it: what goes, what
@@ -146,7 +176,7 @@ export function DeleteConfirm({
   open,
   title,
   description,
-  action = "Delete",
+  action,
   busy = false,
   onClose,
   onConfirm,
@@ -159,6 +189,7 @@ export function DeleteConfirm({
   onClose: () => void;
   onConfirm: () => void;
 }) {
+  const t = useTranslations("home.pick");
   return (
     <AlertDialog open={open} onOpenChange={(o) => !o && onClose()}>
       <AlertDialogContent>
@@ -167,7 +198,7 @@ export function DeleteConfirm({
           <AlertDialogDescription>{description}</AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel disabled={busy}>Cancel</AlertDialogCancel>
+          <AlertDialogCancel disabled={busy}>{t("cancel")}</AlertDialogCancel>
           <AlertDialogAction
             disabled={busy}
             className="bg-destructive/10 text-destructive hover:bg-destructive/20"
@@ -176,7 +207,7 @@ export function DeleteConfirm({
               onConfirm();
             }}
           >
-            {action}
+            {action ?? t("delete")}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

@@ -9,6 +9,7 @@ import { projectDocRef } from "./projectLink";
 import { listOwnProjects, setHostDocStore } from "./projectReference";
 import { useEditor } from "./store";
 import type { ProjectSummary } from "./types";
+import { WithIntl } from "@/i18n/testing";
 
 // Another project reaches the assistant two ways: an @ attachment that
 // carries its id, or a title the model looks up with list_projects.
@@ -98,7 +99,11 @@ describe("a project attachment", () => {
   });
 
   test("reads as a pill that opens the project in a new tab", () => {
-    const html = renderToStaticMarkup(<UnmentionedRefPills text="copy its styles" refs={[ref]} />);
+    const html = renderToStaticMarkup(
+      <WithIntl>
+        <UnmentionedRefPills text="copy its styles" refs={[ref]} />
+      </WithIntl>,
+    );
     expect(html).toContain("Projects / Graphics Ref");
     expect(html).toContain("/p/gfx");
     expect(html).toContain("target=\"_blank\"");

@@ -10,7 +10,8 @@ import { mediaPath, readProject } from "./projects";
 import { retimeOf, type SpeedNode } from "@donkeycut/effects-kit";
 import { CLIP_MIN_SECONDS } from "../lib/types";
 import { bakeRetimedAudio, type BakedAudio } from "./retimeAudio";
-import { atempoChain, findOnPath, hasStream, num, round, errorMessage } from "./util";
+import { atempoChain, findOnPath, hasStream, num, round, errorRecord } from "./util";
+import { UserError, type ErrorFields } from "../lib/userError";
 
 /** The audible slice of the cut, in timeline time (mirrors ExportSpec). */
 export interface TranscribeSpec {
@@ -54,12 +55,11 @@ export interface Cue {
   words: Word[];
 }
 
-export interface TranscribeJob {
+export interface TranscribeJob extends ErrorFields {
   id: string;
   projectId: string;
   status: "running" | "done" | "error";
   stage: "audio" | "model" | "transcribe";
-  error?: string;
   cues?: Cue[];
 }
 
@@ -120,7 +120,8 @@ function run(cmd: string, args: string[], notFound?: string, timeoutMs = 600_000
     let err = "";
     const timer = setTimeout(() => {
       p.kill("SIGKILL");
-      reject(new Error(`${cmd} timed out after ${Math.round(timeoutMs / 1000)}s.`));
+      const seconds = Math.round(timeoutMs / 1000);
+      reject(new UserError("tool_timed_out", `${cmd} timed out after ${seconds}s.`, { tool: cmd, seconds }));
     }, timeoutMs);
     timer.unref();
     p.stdout.on("data", (d) => (out += d));
@@ -131,8 +132,13 @@ function run(cmd: string, args: string[], notFound?: string, timeoutMs = 600_000
     });
     p.on("close", (code) => {
       clearTimeout(timer);
-      if (code === 0) resolve(out);
-      else reject(new Error(err.trim().split("\n").slice(-4).join("\n") || `${cmd} exited ${code}`));
+      if (code === 0) {
+        return resolve(out);
+      }
+
+      // The tool's own complaint stays in its words; a silent exit names itself.
+      const tail = err.trim().split("\n").slice(-4).join("\n");
+      reject(tail ? new Error(tail) : new UserError("tool_exited", `${cmd} exited ${code}`, { tool: cmd, code: String(code) }));
     });
   });
 }
@@ -148,7 +154,7 @@ export async function ensureStt(): Promise<string> {
   const prebuilt = await findOnPath("cut-stt");
   if (prebuilt) return prebuilt;
   if (process.env.DONKEY_CUT_ENGINE) {
-    throw new Error("The speech tool is missing. Update Donkey to restore transcription.");
+    throw new UserError("speech_tool_missing", "The speech tool is missing. Update Donkey to restore transcription.");
   }
 
   const src = path.join(process.cwd(), "src", "cut", "server", "native", "cut-stt.swift");
@@ -156,7 +162,7 @@ export async function ensureStt(): Promise<string> {
   const [b, s] = await Promise.all([stat(bin).catch(() => null), stat(src).catch(() => null)]);
   if (b?.isFile() && (!s || b.mtimeMs >= s.mtimeMs)) return bin;
   if (!s) {
-    throw new Error("The speech tool is missing. Update Donkey to restore transcription.");
+    throw new UserError("speech_tool_missing", "The speech tool is missing. Update Donkey to restore transcription.");
   }
   await mkdir(path.dirname(bin), { recursive: true });
   await run(
@@ -164,7 +170,7 @@ export async function ensureStt(): Promise<string> {
     ["-O", "-parse-as-library", src, "-o", bin],
     "Swift compiler not found. Install the Xcode Command Line Tools: xcode-select --install"
   ).catch((e: Error) => {
-    throw new Error(`Could not build the on-device speech engine (needs macOS 26+).\n${e.message}`);
+    throw new UserError("speech_engine_build_failed", `Could not build the on-device speech engine (needs macOS 26+).\n${e.message}`, { reason: e.message });
   });
   return bin;
 }
@@ -290,7 +296,7 @@ export async function createAudioTranscribeJob(
   void inSpeechTurn(() => runAudioTranscribe(job, audio, opts))
     .catch((err: unknown) => {
       job.status = "error";
-      job.error = errorMessage(err, String(err));
+      Object.assign(job, errorRecord(err, String(err)));
     })
     .finally(() => retire(job));
   return job;
@@ -344,19 +350,19 @@ export async function createTranscribeJob(spec: TranscribeSpec): Promise<Transcr
   void inSpeechTurn(() => runTranscribe(job, spec))
     .catch((err: unknown) => {
       job.status = "error";
-      job.error = errorMessage(err, String(err));
+      Object.assign(job, errorRecord(err, String(err)));
     })
     .finally(() => retire(job));
   return job;
 }
 
 async function runTranscribe(job: TranscribeJob, spec: TranscribeSpec) {
-  if (!(await readProject(spec.projectId))) throw new Error("Project not found.");
+  if (!(await readProject(spec.projectId))) throw new UserError("project_not_found", "Project not found.");
   // Video clips or a soundtrack clip are both valid speech sources (the render
   // below mixes either), so an audio-only cut — a voiceover with no video, or a
   // brief-to-video run transcribing its audio spine — transcribes fine.
   if (spec.clips.length === 0 && spec.audio.length === 0)
-    throw new Error("Add audio or video to the timeline first.");
+    throw new UserError("timeline_media_required", "Add audio or video to the timeline first.");
 
   const tmpDir = await mkdtemp(path.join(os.tmpdir(), "veditor-stt-"));
   try {
@@ -372,7 +378,7 @@ async function runTranscribe(job: TranscribeJob, spec: TranscribeSpec) {
     await Promise.all(
       paths.map(async (p, i) => {
         if (!(await stat(p).catch(() => null)))
-          throw new Error(`Media file missing: ${files[i]}`);
+          throw new UserError("media_file_missing_named", `Media file missing: ${files[i]}`, { name: files[i] });
       })
     );
     files.forEach((f, i) => {

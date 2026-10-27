@@ -1,6 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import {
   ChartColumn,
   ChevronRight,
@@ -40,6 +41,7 @@ import { useAccountProfile, visibleName } from "@/queries/accountProfile";
 // the name and picture the provider gave us, and only until the profile —
 // which holds both, and is cached — answers.
 export function NavUser() {
+  const t = useTranslations("home.navUser");
   const router = useRouter();
   const base = useCutBase();
   const user = useEngineUser();
@@ -116,22 +118,22 @@ export function NavUser() {
         </DropdownMenuGroup>
         <DropdownMenuSeparator />
         <DropdownMenuItem onClick={() => router.push(`${base}/settings`)}>
-          <CreditCard /> Billing
+          <CreditCard /> {t("billing")}
         </DropdownMenuItem>
         <DropdownMenuItem onClick={() => router.push(`${base}/settings/usage`)}>
-          <ChartColumn /> Usage
+          <ChartColumn /> {t("usage")}
         </DropdownMenuItem>
         {/* The welcome sequence is a full-window overlay mounted in the app
             shell, so this asks for it rather than routing anywhere. */}
         <DropdownMenuItem onClick={openOnboarding}>
-          <Sparkles /> View onboarding
+          <Sparkles /> {t("onboarding")}
         </DropdownMenuItem>
         <DropdownMenuItem onClick={runLocally}>
-          <MonitorDown /> Run locally on Mac
+          <MonitorDown /> {t("runLocally")}
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem onClick={signOut}>
-          <LogOut /> Log out
+          <LogOut /> {t("logOut")}
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

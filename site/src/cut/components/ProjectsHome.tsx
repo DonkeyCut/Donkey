@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type RefObject } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { useLocale, useTranslations } from "next-intl";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   Cloud,
@@ -44,7 +45,7 @@ import { additiveClick, newTabClick } from "@/cut/lib/hostKeys";
 import { MEDIA_CORS } from "@/cut/lib/mediaCors";
 import { capturePosterWhenReady, readPoster } from "@/cut/lib/posterCache";
 import { apiJson } from "@/cut/lib/api";
-import { quotaErrorMessage } from "@/cut/lib/backend/cloud";
+import { quotaError } from "@/cut/lib/backend/cloud";
 import {
   useCloudUsage,
   useCutMode,
@@ -73,6 +74,7 @@ import { clearProjectThreads } from "@/cut/lib/chatThreads";
 import { useGenerate } from "@/cut/lib/generate";
 import { useGenScene } from "@/cut/lib/genScene";
 import { createProjectFromFile, isMediaFile } from "@/cut/lib/media";
+import { creatorLocale, creatorNames } from "@/cut/lib/defaultNames";
 import { dropLocalProjectCopy, localMediaUrl } from "@/cut/lib/mediaSync";
 import { copyProjectAcross } from "@/cut/lib/projectCopy";
 import { newProjectAllowed } from "@/cut/lib/projectLimit";
@@ -89,6 +91,7 @@ import { setObjectDragImage } from "@/cut/lib/assetDrag";
 import { childrenOf, folderTrail, folderWithin, parentOf, subtreeOf } from "@/cut/lib/folderTree";
 import { PICKED_RING } from "@/cut/lib/assetPick";
 import { projectsHomeView } from "@/cut/lib/projectsHomeView";
+import { errorFromBody } from "@/cut/lib/userError";
 import {
   FolderCrumb,
   FolderMenuItems,
@@ -101,11 +104,11 @@ import {
 import {
   DeleteConfirm,
   SelectionMenu,
-  foldersGoNote,
-  pickLabel,
+  usePickWords,
   useSelectionMenu,
 } from "./selectionMenu";
 import { formatBytes } from "@/lib/bytes";
+import { useDescribeError } from "@/i18n/describeError";
 
 type View = "gallery" | "list";
 const viewListeners = new Set<() => void>();
@@ -150,9 +153,8 @@ const NO_PICK: DeleteSet = { folders: [], projects: [] };
 // MouseEvent.button for the middle (wheel) button.
 const MIDDLE_BUTTON = 1;
 
-// What a shelf's refusal says, when it says anything.
-const errorOf = async (res: Response | null) =>
-  res ? (await apiJson<object>(res)).error : undefined;
+// A shelf's refusal: its reply body, whose code and words the failure keeps.
+const refusalOf = async (res: Response | null) => (res ? await apiJson<object>(res) : null);
 
 // A dragged selection is carried as a JSON array of project ids, so one drag can
 // move a whole marquee-selected collection into a folder.
@@ -164,12 +166,11 @@ const PROJECT_FOLDER_MIME = "application/x-cut-project-folder";
 // than repeating the shelf heading it sits under. A local project the Donkey
 // app isn't answering for says that instead: it is the reason its card can't
 // be renamed or moved.
-const RESIDENCY_HINT: Record<Residency, string> = {
-  local: "This is a local project",
-  cloud: "This is a cloud project",
-  browser: "This is a local project",
-};
-const OFFLINE_HINT = "This is a local project — open the Donkey app to edit it";
+const RESIDENCY_HINT = {
+  local: "badgeLocal",
+  cloud: "badgeCloud",
+  browser: "badgeLocal",
+} as const satisfies Record<Residency, string>;
 
 function ResidencyBadge({
   residency,
@@ -180,6 +181,7 @@ function ResidencyBadge({
   offline?: boolean;
   className?: string;
 }) {
+  const t = useTranslations("home.projects");
   const Icon = residency === "cloud" ? Cloud : Laptop;
   return (
     <TooltipProvider>
@@ -187,7 +189,7 @@ function ResidencyBadge({
         <TooltipTrigger render={<span />} className={className}>
           <Icon className="size-3" />
         </TooltipTrigger>
-        <TooltipContent>{offline ? OFFLINE_HINT : RESIDENCY_HINT[residency]}</TooltipContent>
+        <TooltipContent>{offline ? t("badgeOffline") : t(RESIDENCY_HINT[residency])}</TooltipContent>
       </Tooltip>
     </TooltipProvider>
   );
@@ -196,6 +198,8 @@ function ResidencyBadge({
 /** After a Pro plan ends, an over-cap account has a countdown before the daily
  * sweep reclaims its oldest projects. Say so where the projects are. */
 function GraceBanner({ enabled }: { enabled: boolean }) {
+  const t = useTranslations("home.projects");
+  const locale = useLocale();
   // A deletion deadline moves once a day; one read per visit is plenty.
   const usage = useCloudUsage(enabled, { poll: false });
   const checkout = useStartCheckout();
@@ -213,9 +217,7 @@ function GraceBanner({ enabled }: { enabled: boolean }) {
   return (
     <div className="mb-4 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
       <span className="text-destructive">
-        Your Pro plan ended and you&rsquo;re over the free storage limit. Your oldest cloud projects
-        will be deleted {days === 0 ? "today" : `in ${days} day${days === 1 ? "" : "s"}`} unless you
-        upgrade or free {formatBytes(grace.overBytes)}.
+        {t("grace", { days, size: formatBytes(grace.overBytes, locale) })}
       </span>
       <Button
         variant="link"
@@ -232,13 +234,17 @@ function GraceBanner({ enabled }: { enabled: boolean }) {
           }
         }}
       >
-        Upgrade to Pro
+        {t("upgradeToPro")}
       </Button>
     </div>
   );
 }
 
 export function ProjectsHome() {
+  const t = useTranslations("home");
+  const locale = useLocale();
+  const describeError = useDescribeError();
+  const { pickLabel, foldersGoNote } = usePickWords();
   const router = useRouter();
   const base = useCutBase();
   const mode = useCutMode();
@@ -409,7 +415,7 @@ export function ProjectsHome() {
       .catch(() => null);
     if (!res?.ok) {
       void refresh(r);
-      throw new Error((await errorOf(res)) ?? "Could not delete the folder.");
+      throw errorFromBody(await refusalOf(res), t("projects.deleteFolderFailed"));
     }
     for (const p of held) purgeProject(p.id, r);
   };
@@ -511,7 +517,7 @@ export function ProjectsHome() {
   const create = async (r: Residency) => {
     setBusy(true);
     try {
-      await openNewProject(r, name.trim() || "Untitled", openFolder);
+      await openNewProject(r, name.trim() || creatorNames().untitled, openFolder);
     } finally {
       setBusy(false);
     }
@@ -520,7 +526,7 @@ export function ProjectsHome() {
   // Make a new project in the folder that's open (root when none), then jump
   // straight into it — no naming step.
   const newProjectHere = (r: Residency, folderId: string | null = openFolder) =>
-    openNewProject(r, "Untitled", folderId);
+    openNewProject(r, creatorNames().untitled, folderId);
 
   // Turn a batch of desktop files into projects filed under `folderId`. Each
   // becomes its own project and pops into the grid the moment it's ready.
@@ -577,14 +583,13 @@ export function ProjectsHome() {
     try {
       const res = await backendFor(r).fetch(`/api/cut/projects/${p.id}/duplicate`, {
         method: "POST",
+        body: JSON.stringify({ locale: creatorLocale() }),
       });
       const body = (await res.json().catch(() => null)) as
         | { jobId?: string; error?: string }
         | null;
       if (!res.ok) {
-        throw new Error(
-          quotaErrorMessage(res.status, body) ?? body?.error ?? "Could not duplicate the project."
-        );
+        throw quotaError(res.status, body) ?? errorFromBody(body, t("projects.duplicateFailed"));
       }
       // Cloud duplicates queue (copies drain one at a time); poll until this
       // one lands. The engine answers with the finished summary instead.
@@ -592,19 +597,17 @@ export function ProjectsHome() {
         for (;;) {
           await new Promise((done) => setTimeout(done, 2000));
           const st = await backendFor(r).fetch(`/api/cut/copy-jobs/${body.jobId}`);
-          if (!st.ok) throw new Error("Could not duplicate the project.");
+          if (!st.ok) throw new Error(t("projects.duplicateFailed"));
           const job = (await st.json()) as { state: string; error?: string };
           if (job.state === "done") break;
           if (job.state === "error") {
-            throw new Error(job.error || "Could not duplicate the project.");
+            throw errorFromBody(job, t("projects.duplicateFailed"));
           }
         }
       }
       await refresh(r);
     } catch (e) {
-      setDupError(
-        e instanceof Error && e.message ? e.message : "Could not duplicate the project."
-      );
+      setDupError(describeError(e, t("projects.duplicateFailed")));
     } finally {
       setBusy(false);
     }
@@ -628,7 +631,7 @@ export function ProjectsHome() {
       if (source === "cloud") void dropLocalProjectCopy(p.id);
       await Promise.all([refresh(source), refresh(dest)]);
     } catch (e) {
-      setDupError(e instanceof Error && e.message ? e.message : "Could not move the project.");
+      setDupError(describeError(e, t("projects.moveFailed")));
     } finally {
       setBusy(false);
     }
@@ -649,7 +652,7 @@ export function ProjectsHome() {
 
   const removeOne = async (id: string, residency: Residency) => {
     const res = await backendFor(residency).fetch(`/api/cut/projects/${id}`, { method: "DELETE" });
-    if (!res.ok) throw new Error((await errorOf(res)) ?? "Could not delete the project.");
+    if (!res.ok) throw errorFromBody(await refusalOf(res), t("projects.deleteProjectFailed"));
     purgeProject(id, residency);
     patch(residency, (s) => ({ ...s, projects: s.projects.filter((p) => p.id !== id) }));
   };
@@ -672,7 +675,7 @@ export function ProjectsHome() {
       ]);
       setSelected(new Set());
     } catch (e) {
-      setDupError(e instanceof Error && e.message ? e.message : "Could not delete.");
+      setDupError(describeError(e, t("projects.deleteFailed")));
     } finally {
       setDeleting(null);
       setBusy(false);
@@ -681,7 +684,7 @@ export function ProjectsHome() {
 
   // The way down to the open folder, for the crumb.
   const trail = folderOwner ? folderTrail(data[folderOwner].folders, openFolder) : [];
-  useTabTitle(openFolder ? trail.at(-1)?.name : "Projects");
+  useTabTitle(openFolder ? trail.at(-1)?.name : t("tabs.projects"));
   // A folder pins where a new project lands, but only a shelf that answers can
   // take one: inside a folder on an unreachable shelf, New project goes where
   // the picker points instead.
@@ -921,7 +924,7 @@ export function ProjectsHome() {
             )}
           </div>
           <div className="mt-2 px-0.5 text-xs text-muted-foreground">
-            {formatBytes(p.sizeBytes ?? 0)} · edited {formatDate(p.updatedAt)}
+            {t("projects.cardMeta", { size: formatBytes(p.sizeBytes ?? 0, locale), date: formatDate(p.updatedAt, locale, t("justNow")) })}
           </div>
         </div>
     );
@@ -944,10 +947,10 @@ export function ProjectsHome() {
   const renderList = (shown: { p: ProjectSummary; r: Residency }[]) => (
     <div className="overflow-hidden rounded-xl border border-border bg-card">
       <div className="grid grid-cols-[1fr_90px_70px_110px_40px] items-center gap-3 border-b border-border bg-muted/50 px-4 py-2 text-xs font-medium tracking-wide text-muted-foreground uppercase">
-        <span>Name</span>
-        <span>Length</span>
-        <span>Size</span>
-        <span>Edited</span>
+        <span className="truncate">{t("projects.columnName")}</span>
+        <span className="truncate">{t("projects.columnLength")}</span>
+        <span className="truncate">{t("projects.columnSize")}</span>
+        <span className="truncate">{t("projects.columnEdited")}</span>
         <span />
       </div>
       {shown.map(({ p, r }) => (
@@ -978,10 +981,10 @@ export function ProjectsHome() {
             {formatTime(p.duration)}
           </span>
           <span className="text-xs text-muted-foreground tabular-nums">
-            {formatBytes(p.sizeBytes ?? 0)}
+            {formatBytes(p.sizeBytes ?? 0, locale)}
           </span>
           <span className="text-xs text-muted-foreground">
-            {formatDate(p.updatedAt)}
+            {formatDate(p.updatedAt, locale, t("justNow"))}
           </span>
           {live(r) ? (
             <ProjectMenu
@@ -1005,7 +1008,7 @@ export function ProjectsHome() {
         onClick={() => void newProjectHere(newTarget)}
         className="flex w-full items-center gap-2.5 px-4 py-2.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
       >
-        <Plus className="size-4" /> New project
+        <Plus className="size-4" /> {t("newProject.button")}
       </button>
     </div>
   );
@@ -1061,17 +1064,19 @@ export function ProjectsHome() {
         <div className="pointer-events-none fixed right-6 bottom-6 z-50 flex items-center gap-2 rounded-full bg-foreground/90 px-3.5 py-2.5 text-background shadow-lg">
           <Loader2 className="size-5 animate-spin" />
           <span className="text-xs font-medium">
-            Importing… <LiveElapsed className="tabular-nums" />
+            {t.rich("projects.importing", {
+              elapsed: () => <LiveElapsed className="tabular-nums" />,
+            })}
           </span>
         </div>
       )}
       {showHeader && (
         <div className="mb-5 flex items-center justify-between">
           {openFolder === null ? (
-            <h1 className="text-lg font-semibold tracking-tight">Projects</h1>
+            <h1 className="text-lg font-semibold tracking-tight">{t("tabs.projects")}</h1>
           ) : (
             <FolderCrumb
-              root="Projects"
+              root={t("tabs.projects")}
               trail={trail}
               onRename={folderOwner && live(folderOwner) ? (id, name) => renameFolder(folderOwner, id, name) : undefined}
               mime={PROJECT_MIME}
@@ -1090,7 +1095,7 @@ export function ProjectsHome() {
                 be answering. */}
             {(openFolder === null || pinnedTarget) && (
               <Button variant="outline" onClick={() => setFolderCreating(folderTarget)}>
-                <FolderPlus data-icon="inline-start" /> New folder
+                <FolderPlus data-icon="inline-start" /> {t("projects.newFolder")}
               </Button>
             )}
             <NewProjectButton
@@ -1102,7 +1107,7 @@ export function ProjectsHome() {
                 <Button
                   variant="ghost"
                   size="icon-sm"
-                  aria-label="Gallery view"
+                  aria-label={t("projects.galleryView")}
                   aria-pressed={view === "gallery"}
                   className={cn(view === "gallery" && "bg-muted text-foreground")}
                   onClick={() => switchView("gallery")}
@@ -1112,7 +1117,7 @@ export function ProjectsHome() {
                 <Button
                   variant="ghost"
                   size="icon-sm"
-                  aria-label="List view"
+                  aria-label={t("projects.listView")}
                   aria-pressed={view === "list"}
                   className={cn(view === "list" && "bg-muted text-foreground")}
                   onClick={() => switchView("list")}
@@ -1135,7 +1140,7 @@ export function ProjectsHome() {
         </div>
       ) : homeView === "failed" ? (
         <p className="py-24 text-center text-sm text-muted-foreground">
-          Couldn&rsquo;t load these projects.
+          {t("projects.loadFailed")}
         </p>
       ) : homeView === "empty" ? (
         <div className="grid min-h-[60vh] place-items-center">
@@ -1144,7 +1149,7 @@ export function ProjectsHome() {
               <Film className="size-7 text-muted-foreground" />
             </div>
             <h1 className="text-lg font-semibold tracking-tight">
-              Create a new project to get started
+              {t("projects.emptyTitle")}
             </h1>
             <NewProjectButton
               pinned={pinnedTarget}
@@ -1161,7 +1166,7 @@ export function ProjectsHome() {
             (r) =>
               data[r].error && (
                 <p key={r} className="mb-4 text-sm text-muted-foreground">
-                  Couldn&rsquo;t load {r === "cloud" ? "cloud projects" : "the projects on this Mac"}.
+                  {r === "cloud" ? t("projects.loadFailedCloud") : t("projects.loadFailedLocal")}
                 </p>
               )
           )}
@@ -1173,7 +1178,7 @@ export function ProjectsHome() {
       <Dialog open={createIn !== null} onOpenChange={(o) => !o && setCreateIn(null)}>
         <DialogContent className="sm:max-w-sm">
           <DialogHeader>
-            <DialogTitle>New project</DialogTitle>
+            <DialogTitle>{t("newProject.title")}</DialogTitle>
           </DialogHeader>
           <form
             onSubmit={(e) => {
@@ -1183,14 +1188,14 @@ export function ProjectsHome() {
           >
             <Input
               autoFocus
-              placeholder="Project name"
+              placeholder={t("newProject.placeholder")}
               value={name}
               onChange={(e) => setName(e.target.value)}
             />
             <DialogFooter className="mt-4">
               <Button type="submit" disabled={busy} className="w-full">
                 {busy && <Loader2 className="animate-spin" data-icon="inline-start" />}
-                Create project
+                {t("newProject.create")}
               </Button>
             </DialogFooter>
           </form>
@@ -1200,7 +1205,7 @@ export function ProjectsHome() {
       <Dialog open={!!renaming} onOpenChange={(o) => !o && setRenaming(null)}>
         <DialogContent className="sm:max-w-sm">
           <DialogHeader>
-            <DialogTitle>Rename project</DialogTitle>
+            <DialogTitle>{t("projects.renameTitle")}</DialogTitle>
           </DialogHeader>
           <form
             onSubmit={(e) => {
@@ -1211,7 +1216,7 @@ export function ProjectsHome() {
             <Input autoFocus value={name} onChange={(e) => setName(e.target.value)} />
             <DialogFooter className="mt-4">
               <Button type="submit" disabled={busy} className="w-full">
-                Rename
+                {t("projects.rename")}
               </Button>
             </DialogFooter>
           </form>
@@ -1256,26 +1261,20 @@ export function ProjectsHome() {
         open={!!deleting}
         title={
           deleting
-            ? `Delete ${pickLabel(deleting.folders, deleting.projects.map((x) => x.project), ["project", "projects"], deletingHeld)}?`
+            ? t("projects.deleteTitle", { what: pickLabel(deleting.folders, deleting.projects.map((x) => x.project), "project", deletingHeld) })
             : ""
         }
         description={`${foldersGoNote(deleting?.folders.length ?? 0, deletingHeld)}${
           deletingTotal === 0
-            ? deleting?.folders.length === 1
-              ? "The folder is empty."
-              : "The folders are empty."
-            : deletingTotal === 1
-              ? "This deletes the whole project folder, including its media files and exports."
-              : "This deletes each project’s whole folder, including its media files and exports."
-        } This can’t be undone.`}
+            ? t("projects.foldersEmpty", { count: deleting?.folders.length ?? 0 })
+            : t("projects.deletesFolders", { count: deletingTotal })
+        } ${t("projects.cannotUndo")}`}
         action={
           !deleting || deleting.folders.length === 0
-            ? deleting && deleting.projects.length > 1
-              ? "Delete projects"
-              : "Delete project"
+            ? t("projects.deleteProjects", { count: deleting && deleting.projects.length > 1 ? deleting.projects.length : 1 })
             : deleting.projects.length === 0 && deleting.folders.length === 1
-              ? "Delete folder"
-              : "Delete"
+              ? t("projects.deleteFolder")
+              : t("projects.delete")
         }
         busy={busy}
         onClose={() => setDeleting(null)}
@@ -1448,11 +1447,11 @@ function useCardPoster(
   return poster;
 }
 
-const MOVE_DEST: Record<Residency, { Icon: typeof Cloud; label: string }> = {
-  local: { Icon: Laptop, label: "Move to Local" },
-  cloud: { Icon: Cloud, label: "Move to Cloud" },
-  browser: { Icon: Laptop, label: "Move to Local" },
-};
+const MOVE_DEST = {
+  local: { Icon: Laptop, label: "moveToLocal" },
+  cloud: { Icon: Cloud, label: "moveToCloud" },
+  browser: { Icon: Laptop, label: "moveToLocal" },
+} as const satisfies Record<Residency, { Icon: typeof Cloud; label: string }>;
 
 /** The actions on a project, or on a set of them: Rename and Duplicate take
  * one project, so a set offers only the moves every member can make and
@@ -1469,29 +1468,30 @@ function ProjectMenuItems({
   moveTo?: { target: Residency; run: () => void }[];
   onDelete: () => void;
 }) {
+  const t = useTranslations("home.projects");
   return (
     <>
       {onRename && (
         <DropdownMenuItem onClick={onRename}>
-          <Pencil /> Rename
+          <Pencil /> {t("rename")}
         </DropdownMenuItem>
       )}
       {onDuplicate && (
         <DropdownMenuItem onClick={onDuplicate}>
-          <Copy /> Duplicate
+          <Copy /> {t("duplicate")}
         </DropdownMenuItem>
       )}
       {moveTo?.map(({ target, run }) => {
         const { Icon, label } = MOVE_DEST[target];
         return (
           <DropdownMenuItem key={target} onClick={run}>
-            <Icon /> {label}
+            <Icon /> {t(label)}
           </DropdownMenuItem>
         );
       })}
       {(onRename || onDuplicate || (moveTo?.length ?? 0) > 0) && <DropdownMenuSeparator />}
       <DropdownMenuItem variant="destructive" onClick={onDelete}>
-        <Trash2 /> Delete
+        <Trash2 /> {t("delete")}
       </DropdownMenuItem>
     </>
   );
@@ -1511,6 +1511,7 @@ function ProjectMenu({
   moveTo?: { target: Residency; run: () => void }[];
   onDelete: () => void;
 }) {
+  const t = useTranslations("home.projects");
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
@@ -1518,7 +1519,7 @@ function ProjectMenu({
           <Button
             variant="ghost"
             size="icon-sm"
-            aria-label="Project actions"
+            aria-label={t("actions")}
             className={cn("bg-black/40 text-white hover:bg-black/60 hover:text-white", className)}
             onClick={(e) => e.stopPropagation()}
           />

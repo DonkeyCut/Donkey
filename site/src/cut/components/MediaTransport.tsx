@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 import { Pause, Play, Volume2, VolumeX } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { cn } from "@/lib/utils";
 import { formatElapsed } from "@/cut/lib/time";
 
@@ -38,6 +39,7 @@ export function MediaTransport({
   onSeek: (t: number) => void;
   onToggleMute?: () => void;
 }) {
+  const t = useTranslations("timeline.media");
   const barRef = useRef<HTMLDivElement>(null);
   const [scrubbing, setScrubbing] = useState(false);
   const pct = duration > 0 ? Math.min(1, Math.max(0, time / duration)) * 100 : 0;
@@ -66,8 +68,8 @@ export function MediaTransport({
       <button
         type="button"
         className="grid size-8 shrink-0 place-items-center rounded-full bg-white/15 text-white backdrop-blur-sm transition-colors hover:bg-white/25"
-        aria-label={playing ? "Pause" : "Play"}
-        title={playing ? "Pause" : "Play"}
+        aria-label={playing ? t("pause") : t("play")}
+        title={playing ? t("pause") : t("play")}
         onClick={onToggle}
       >
         {playing ? <Pause className="size-4 fill-white" /> : <Play className="size-4 fill-white" />}
@@ -78,7 +80,7 @@ export function MediaTransport({
         className="relative h-4 flex-1 cursor-pointer touch-none"
         role="slider"
         tabIndex={0}
-        aria-label="Seek"
+        aria-label={t("seek")}
         aria-valuemin={0}
         aria-valuemax={Math.max(0, duration)}
         aria-valuenow={time}
@@ -114,8 +116,8 @@ export function MediaTransport({
         <button
           type="button"
           className="grid size-7 shrink-0 place-items-center rounded-full text-white/85 transition-colors hover:bg-white/15 hover:text-white"
-          aria-label={muted ? "Unmute" : "Mute"}
-          title={muted ? "Unmute" : "Mute"}
+          aria-label={muted ? t("unmute") : t("mute")}
+          title={muted ? t("unmute") : t("mute")}
           onClick={onToggleMute}
         >
           {muted ? <VolumeX className="size-3.5" /> : <Volume2 className="size-3.5" />}

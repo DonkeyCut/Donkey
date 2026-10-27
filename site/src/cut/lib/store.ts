@@ -1,5 +1,6 @@
 "use client";
 import { noteProjectRevision } from "./projectRevision";
+import { creatorNames } from "./defaultNames";
 import { freeItemName } from "./itemName";
 import { clipLen, timelineEnd } from "./timelineEnd";
 
@@ -70,6 +71,7 @@ import type { CameraKey } from "@donkeycut/effects-kit";
 import { mapTimelineItems, pasteTimelineItems, splitTimelineItems, shiftedTimelineItems, timelineCopies, timelinePlacementDelta, timelineRange } from "./timelineItems";
 import { fillSlot } from "./genvideo/fillSlot";
 import { apiFetch, apiJson, getBackend, hasLocalCompute } from "./backend";
+import { errorFields, errorFromBody, replyError, UserError, type ErrorFields } from "./userError";
 import { fetchSignedMediaUrls, pinDocBase } from "./backend/cloud";
 import { cancelRevoke, resolveRegisteredBlob, revokeRegistered } from "./backend/browser/registry";
 import { markSignedBatch } from "./mediaLinks";
@@ -439,6 +441,8 @@ export interface EditorState {
    * from the server is never saved straight back to it. */
   loadEpoch: number;
   loadError: string | null;
+  /** loadError with its code, for the page to word it. */
+  loadFailure: ErrorFields | null;
   saveState: SaveState;
   /** Raised when an open resumed unsaved edits from the dirty disk snapshot:
    * autosave sees it, clears it, and pushes the resumed document up. */
@@ -534,6 +538,8 @@ export interface EditorState {
   subtitles: SubtitlesBlock;
   subtitleStatus: SubtitleStatus;
   subtitleError: string | null;
+  /** subtitleError with its code, for the page to word it. */
+  subtitleFailure: ErrorFields | null;
   /** Epoch ms when the running transcription/translation started — the panel
    * shows a ticking elapsed beside its spinner. */
   subtitleStartedAt: number | null;
@@ -691,8 +697,9 @@ export interface EditorState {
    * owned them) and clear the gen sets, so post-run edits to generated clips
    * undo like any other edit. */
   releaseGenClips: () => void;
-  /** Place a title element; a drop (or the assistant) passes where it landed. */
-  addOverlay: (aim?: { at?: number; lane?: number; seed?: TitleSeed }) => void;
+  /** Place a title element; a drop (or the assistant) passes where it landed,
+   * and the editor passes the placeholder `text` in the page's language. */
+  addOverlay: (aim?: { at?: number; lane?: number; seed?: TitleSeed; text?: string }) => void;
   /** Add a vector shape element on the title lanes at the playhead. */
   /** Place a shape element; a drop passes where it landed. */
   addShape: (shape: ShapeKind, aim?: { at?: number; lane?: number }) => void;
@@ -1407,9 +1414,21 @@ function resizeClipFootprint(clip: VideoClip, patch: Partial<VideoClip>) {
   useEditor.getState().updateClipTransient(clip.id, patch);
   settleClipFootprint(clip.id, patch);
 }
+// A failure as the store keeps it: the English the assistant and logs read,
+// and its code beside it for the page to word.
+const textOf = (failure: unknown) => (failure instanceof Error ? failure.message : String(failure));
+const subtitleFailed = (failure: unknown) => ({
+  subtitleError: textOf(failure),
+  subtitleFailure: errorFields(failure, textOf(failure)),
+});
+const loadFailed = (failure: unknown) => ({
+  loadError: textOf(failure),
+  loadFailure: errorFields(failure, textOf(failure)),
+});
+
 const staleLaneError = {
   subtitleStatus: "error" as const,
-  subtitleError: "Subtitle tracks changed while working — run it again.",
+  ...subtitleFailed(new UserError("subtitle_tracks_changed", "Subtitle tracks changed while working — run it again.")),
 };
 
 /** Earliest start at/after `t` where a `len`-long item fits between the
@@ -1508,7 +1527,7 @@ export async function runTranscription(projectId: string, spec: object): Promise
   if (getBackend().kind !== "local") {
     const s = spec as CloudTranscribeSpec;
     if (s.clips.length === 0 && s.audio.length === 0) {
-      throw new Error("Add audio or video to the timeline first.");
+      throw new UserError("timeline_media_required", "Add audio or video to the timeline first.");
     }
     const stale = () => useEditor.getState().projectId !== projectId;
     const mix = await renderMix(projectId, s, useEditor.getState().assets);
@@ -1538,14 +1557,18 @@ export async function runTranscription(projectId: string, spec: object): Promise
       body: JSON.stringify(spec),
     });
     const body = await apiJson<{ id?: string }>(res);
-    if (!res.ok || !body.id) throw new Error(body.error ?? "Transcription failed to start.");
+    if (!res.ok || !body.id) {
+      throw errorFromBody(body, new UserError("transcription_start_failed", "Transcription failed to start."));
+    }
     for (;;) {
       await new Promise((r) => setTimeout(r, 600));
       if (useEditor.getState().projectId !== projectId) return null;
       const st = await apiFetch(`/api/cut/projects/${projectId}/transcribe?job=${body.id}`);
-      if (!st.ok) throw new Error("The transcription job was lost — try again.");
+      if (!st.ok) throw new UserError("transcription_job_lost", "The transcription job was lost — try again.");
       const status = (await st.json()) as { status: string; error?: string; cues?: SubtitleCue[] };
-      if (status.status === "error") throw new Error(status.error ?? "Transcription failed.");
+      if (status.status === "error") {
+        throw errorFromBody(status, new UserError("transcription_failed", "Transcription failed."));
+      }
       if (status.status === "done") {
         return useEditor.getState().projectId === projectId ? (status.cues ?? []) : null;
       }
@@ -2055,7 +2078,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       set({
         projectId: id,
         loaded: false,
-        loadError: null,
+        loadError: null, loadFailure: null,
         saveState: "saved",
         resumePush: false,
         // A share view is the one that refuses edits, and the surface opening
@@ -2094,7 +2117,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
         subtitles: emptySubtitles(),
         subtitleLane: 0,
         subtitleStatus: "idle",
-        subtitleError: null,
+        subtitleError: null, subtitleFailure: null,
         exportOpen: false,
         genvideo: undefined,
         renders: [],
@@ -2117,7 +2140,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
     projectName: "",
     loaded: false,
     loadEpoch: 0,
-    loadError: null,
+    loadError: null, loadFailure: null,
     saveState: "saved",
     resumePush: false,
     readOnly: false,
@@ -2155,7 +2178,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
     subtitles: emptySubtitles(),
     subtitleLane: 0,
     subtitleStatus: "idle",
-    subtitleError: null,
+    subtitleError: null, subtitleFailure: null,
     subtitleStartedAt: null,
     exportOpen: false,
     dropActive: null,
@@ -2292,10 +2315,10 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
           if ([401, 403, 404].includes(res.status)) {
             pinDocBase(id, null);
             dropCachedDoc(id);
-            set({ loaded: false, loadError: "This project no longer exists.", resumePush: false });
+            set({ loaded: false, ...loadFailed(new UserError("project_gone", "This project no longer exists.")), resumePush: false });
             return;
           }
-          throw new Error("This project could not be loaded.");
+          throw new UserError("project_load_failed", "This project could not be loaded.");
         }
         const doc = (await res.json()) as ProjectDoc;
         if (!current()) return;
@@ -2449,7 +2472,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
         // a version behind at worst, and autosave retries until the link is
         // back.
         if (current() && !paintedFromCache) {
-          set({ loadError: err instanceof Error ? err.message : String(err) });
+          set(loadFailed(err));
         }
       } finally {
         if (current()) hydrating = false;
@@ -2836,7 +2859,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
         aspect: opts?.ownAspect === false ? s.aspect : timelineAspect(s, id),
         subtitleLane: 0,
         subtitleStatus: opened.subtitles.cues.length > 0 ? "ready" : "idle",
-        subtitleError: null,
+        subtitleError: null, subtitleFailure: null,
         selection: null,
         multiSelection: [],
         selectedKey: null,
@@ -3290,7 +3313,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       addElement("text", (start, end, lane) => ({
         id: uid(),
         kind: "text",
-        text: "Your text",
+        text: aim?.text ?? creatorNames().text,
         start,
         end,
         x: 0.5,
@@ -4635,11 +4658,11 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       const lane = s.subtitleLane;
       const spec = cutTranscribeSpec(s, trackLocale(s.subtitles, lane));
       if (!spec) {
-        set({ subtitleStatus: "error", subtitleError: "Add a video to the timeline first." });
+        set({ subtitleStatus: "error", ...subtitleFailed(new UserError("timeline_video_required", "Add a video to the timeline first.")) });
         return;
       }
       const epoch = laneEpoch;
-      set({ subtitleStatus: "running", subtitleError: null, subtitleStartedAt: Date.now() });
+      set({ subtitleStatus: "running", subtitleError: null, subtitleFailure: null, subtitleStartedAt: Date.now() });
       try {
         const heard = await runTranscription(projectId, spec);
         if (heard === null) return; // switched projects mid-run
@@ -4680,27 +4703,31 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
         if (get().projectId !== projectId) return;
         set({
           subtitleStatus: "error",
-          subtitleError: err instanceof Error ? err.message : String(err),
+          ...subtitleFailed(err),
         });
       }
     },
 
     generateClipSubtitles: async (clipId) => {
       const s = get();
-      if (!s.projectId) throw new Error("Open a project first.");
+      if (!s.projectId) throw new UserError("project_open_required", "Open a project first.");
       if (s.subtitleStatus === "running") {
-        throw new Error("Subtitles are already generating — try again in a moment.");
+        throw new UserError("subtitles_busy", "Subtitles are already generating — try again in a moment.");
       }
       const projectId = s.projectId;
       const sp = clipWindow(s.clips, s.assets, clipId);
-      if (!sp) throw new Error("The clip is no longer on the timeline.");
+      if (!sp) throw new UserError("clip_not_on_timeline", "The clip is no longer on the timeline.");
       const src = soundSourceOf(sp.asset, s.assets);
-      if (assetIsSilent(sp.asset) && !src.bound) throw new Error("This clip is a still — it has no sound.");
-      if (sp.clip.reverse) throw new Error("This clip plays backward — its sound is not speech.");
+      if (assetIsSilent(sp.asset) && !src.bound) throw new UserError("clip_has_no_sound", "This clip is a still — it has no sound.");
+      if (sp.clip.reverse) {
+        throw new UserError("clip_plays_backward", "This clip plays backward — its sound is not speech.");
+      }
       // A recording bound to the video is what the clip says; it is read on
       // the video's clock, starting late where it rolled late.
       const heard = src.bound ? soundWindow(sp.clip, src, 0, sp.len) : null;
-      if (src.bound && !heard) throw new Error("The recording bound to this video holds none of this clip.");
+      if (src.bound && !heard) {
+        throw new UserError("bound_recording_misses_clip", "The recording bound to this video holds none of this clip.");
+      }
       const lane = s.subtitleLane;
       const epoch = laneEpoch;
       // The clip's own sound, deliberately unmuted: this transcribes what the
@@ -4735,13 +4762,13 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
             ]
           : [],
       };
-      set({ subtitleStatus: "running", subtitleError: null, subtitleStartedAt: Date.now() });
+      set({ subtitleStatus: "running", subtitleError: null, subtitleFailure: null, subtitleStartedAt: Date.now() });
       try {
         const cues = await runTranscription(projectId, spec);
         if (cues === null) return; // switched projects mid-run
         if (laneEpoch !== epoch) {
           set(staleLaneError);
-          throw new Error(staleLaneError.subtitleError);
+          throw new UserError("subtitle_tracks_changed", staleLaneError.subtitleError);
         }
         // The job timed cues against the lone clip, so shift them (and their
         // word timings) onto the clip's timeline span. New cues replace any
@@ -4779,22 +4806,22 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       const s = get();
       if (!s.projectId || s.subtitleStatus === "running") return;
       if (!getBackend().caps.captionAi) {
-        set({ subtitleStatus: "error", subtitleError: "Not available in cloud mode yet." });
+        set({ subtitleStatus: "error", ...subtitleFailed(new UserError("cloud_mode_unavailable", "Not available in cloud mode yet.")) });
         return;
       }
       const projectId = s.projectId;
       const spans = getClipSpans(s.clips, s.assets);
       if (spans.length === 0) {
-        set({ subtitleStatus: "error", subtitleError: "Add a video to the timeline first." });
+        set({ subtitleStatus: "error", ...subtitleFailed(new UserError("timeline_video_required", "Add a video to the timeline first.")) });
         return;
       }
       const duration = totalDuration(s.clips);
       const lane = s.subtitleLane;
       const epoch = laneEpoch;
-      set({ subtitleStatus: "running", subtitleError: null, subtitleStartedAt: Date.now() });
+      set({ subtitleStatus: "running", subtitleError: null, subtitleFailure: null, subtitleStartedAt: Date.now() });
       try {
         const frames = await captureTimelineFrames(spans);
-        if (frames.length === 0) throw new Error("Could not read any frames from the cut.");
+        if (frames.length === 0) throw new UserError("cut_frames_unreadable", "Could not read any frames from the cut.");
         const res = await apiFetch("/api/cut/ai/visual-subtitles", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -4808,7 +4835,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
           cues?: { start: number; end: number; text: string }[];
         }>(res);
         if (!res.ok || !Array.isArray(body.cues)) {
-          throw new Error(body.error ?? "Captioning failed.");
+          throw replyError(res.status, body, new UserError("captioning_failed", "Captioning failed."));
         }
         if (get().projectId !== projectId) return; // switched projects mid-run
         if (laneEpoch !== epoch) return set(staleLaneError);
@@ -4832,7 +4859,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
         if (get().projectId !== projectId) return;
         set({
           subtitleStatus: "error",
-          subtitleError: err instanceof Error ? err.message : String(err),
+          ...subtitleFailed(err),
         });
       }
     },
@@ -4841,7 +4868,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       const s = get();
       if (!s.projectId || s.subtitleStatus === "running") return;
       if (!getBackend().caps.captionAi) {
-        set({ subtitleStatus: "error", subtitleError: "Not available in cloud mode yet." });
+        set({ subtitleStatus: "error", ...subtitleFailed(new UserError("cloud_mode_unavailable", "Not available in cloud mode yet.")) });
         return;
       }
       const lane = s.subtitleLane;
@@ -4856,7 +4883,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       set((cur) => ({
         subtitles: { ...cur.subtitles, style },
         subtitleStatus: "running",
-        subtitleError: null,
+        subtitleError: null, subtitleFailure: null,
         subtitleStartedAt: Date.now(),
       }));
       // Rewrite only the active track — other languages keep their text.
@@ -4916,7 +4943,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
         if (get().projectId !== projectId) return;
         set({
           subtitleStatus: "ready",
-          subtitleError: err instanceof Error ? err.message : String(err),
+          ...subtitleFailed(err),
         });
       }
     },
@@ -4926,7 +4953,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       const lane = s.subtitleLane;
       if (!s.projectId || s.subtitleStatus === "running" || fromLane === lane) return;
       if (!getBackend().caps.captionAi) {
-        set({ subtitleStatus: "error", subtitleError: "Not available in cloud mode yet." });
+        set({ subtitleStatus: "error", ...subtitleFailed(new UserError("cloud_mode_unavailable", "Not available in cloud mode yet.")) });
         return;
       }
       const laneOf = (c: SubtitleCue) => c.lane ?? 0;
@@ -4935,7 +4962,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       const locale = trackLocale(s.subtitles, lane);
       const projectId = s.projectId;
       const epoch = laneEpoch;
-      set({ subtitleStatus: "running", subtitleError: null, subtitleStartedAt: Date.now() });
+      set({ subtitleStatus: "running", subtitleError: null, subtitleFailure: null, subtitleStartedAt: Date.now() });
       try {
         const res = await apiFetch("/api/cut/ai/captions", {
           method: "POST",
@@ -4948,7 +4975,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
         const body = await apiJson<{ texts?: string[]; error?: string }>(res);
         if (get().projectId !== projectId) return;
         if (!res.ok || !Array.isArray(body.texts) || body.texts.length !== source.length) {
-          throw new Error(body.error || "Could not translate the captions.");
+          throw replyError(res.status, body, new UserError("captions_translate_failed", "Could not translate the captions."));
         }
         if (laneEpoch !== epoch) return set(staleLaneError);
         push();
@@ -4976,7 +5003,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
         if (get().projectId !== projectId) return;
         set({
           subtitleStatus: "error",
-          subtitleError: err instanceof Error ? err.message : String(err),
+          ...subtitleFailed(err),
         });
       }
     },

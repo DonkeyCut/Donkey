@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useTranslations } from "next-intl";
 import { ChevronRight, Maximize2, Search } from "lucide-react";
 import { clearRefDrag, refFromStockVideo, setRefDragData } from "@/cut/lib/assetRef";
 import { useRefCopy } from "@/cut/lib/refCopy";
@@ -46,6 +47,7 @@ const chip = (active: boolean) =>
   );
 
 export function StockVideosPanel() {
+  const t = useTranslations("media");
   const [view, setView] = useState<View>("root");
   const [cat, setCat] = useState<"all" | StockCategory>("all");
   const [query, setQuery] = useState("");
@@ -75,7 +77,7 @@ export function StockVideosPanel() {
     !q ||
     item.prompt.toLowerCase().includes(q) ||
     item.category.toLowerCase().includes(q) ||
-    item.tags.some((t) => t.includes(q));
+    item.tags.some((tag) => tag.includes(q));
 
   // The root shows every section unfiltered; the query and category chips
   // apply once drilled in.
@@ -88,11 +90,11 @@ export function StockVideosPanel() {
   const chips = (
     <div className="flex min-w-0 flex-wrap gap-1">
       <button className={chip(cat === "all")} onClick={() => setCat("all")}>
-        All
+        {t("stockVideos.all")}
       </button>
       {FOOTAGE_CATEGORIES.map((c) => (
         <button key={c} className={chip(cat === c)} onClick={() => setCat(c)}>
-          {c}
+          {t(`stockCategory.${c}`)}
         </button>
       ))}
     </div>
@@ -102,14 +104,14 @@ export function StockVideosPanel() {
     <ScrollArea className="min-h-0 flex-1" contentClassName="flex flex-col gap-3 px-3.5 pt-3 pb-4">
       {STOCK_VIDEOS.length === 0 ? (
         <p className="text-[11px] leading-relaxed text-muted-foreground">
-          No stock videos are bundled yet.
+          {t("stockVideos.empty")}
         </p>
       ) : view === "root" ? (
         <>
           {characters.length > 0 && (
             <section className="shrink-0">
               <SectionHead
-                title="Talking Characters"
+                title={t("stockVideos.characters")}
                 onViewAll={
                   characters.length > SECTION_PREVIEW ? () => go("characters") : undefined
                 }
@@ -119,7 +121,7 @@ export function StockVideosPanel() {
           )}
           <section className="mt-3 shrink-0">
             <SectionHead
-              title="Stock Videos"
+              title={t("stockVideos.videos")}
               onViewAll={footage.length > SECTION_PREVIEW ? () => go("videos") : undefined}
             />
             {footage.length > 0 ? (
@@ -132,14 +134,16 @@ export function StockVideosPanel() {
       ) : (
         <>
           <Crumb
-            title={view === "characters" ? "Talking Characters" : "Stock Videos"}
+            title={view === "characters" ? t("stockVideos.characters") : t("stockVideos.videos")}
             onBack={() => go("root")}
           />
           <label className="flex shrink-0 items-center gap-2 rounded-lg border border-input px-2.5 py-1.5 focus-within:border-ring">
             <Search className="size-3.5 shrink-0 text-muted-foreground" />
             <input
               className="w-full bg-transparent text-[12px] outline-none placeholder:text-muted-foreground"
-              placeholder={view === "characters" ? "Search characters…" : "Search videos…"}
+              placeholder={
+                view === "characters" ? t("stockVideos.searchCharacters") : t("stockVideos.searchVideos")
+              }
               value={query}
               onChange={(e) => setQuery(e.target.value)}
             />
@@ -158,10 +162,11 @@ export function StockVideosPanel() {
 
 /** Drilled-section header: a breadcrumb back to the root plus the title. */
 function Crumb({ title, onBack }: { title: string; onBack: () => void }) {
+  const t = useTranslations("media.stockVideos");
   return (
     <div className="flex shrink-0 items-center gap-1 text-[12px]">
       <button className="text-muted-foreground transition-colors hover:text-foreground" onClick={onBack}>
-        All
+        {t("all")}
       </button>
       <ChevronRight className="size-3 text-muted-foreground" />
       <span className="font-semibold">{title}</span>
@@ -187,12 +192,13 @@ function SectionHead({
 }
 
 function ViewAllButton({ onClick }: { onClick: () => void }) {
+  const t = useTranslations("media.stockVideos");
   return (
     <button
       className="flex shrink-0 items-center gap-0.5 text-[11px] text-muted-foreground hover:text-foreground"
       onClick={onClick}
     >
-      View all
+      {t("viewAll")}
       <ChevronRight className="size-3" />
     </button>
   );
@@ -214,6 +220,7 @@ function Grid({ items }: { items: StockVideo[] }) {
 function StockTile({ item }: { item: StockVideo }) {
   const { ref: videoRef, handlers: hoverPlay } = useHoverPlay(0);
   const { flash, attachReveal } = useRevealFlash("stock", item.id);
+  const t = useTranslations("media.stockVideos");
   const copyRef = useRefCopy(() => [refFromStockVideo(item)]);
   return (
     <div
@@ -254,7 +261,7 @@ function StockTile({ item }: { item: StockVideo }) {
       </button>
       {/* Clip lengths are single-digit seconds; "8s" reads better than "0:08". */}
       <span className="pointer-events-none absolute right-1 bottom-1 rounded-[5px] bg-black/65 px-1 py-px font-mono text-[9.5px] text-white tabular-nums">
-        {Math.round(item.duration)}s
+        {t("seconds", { count: Math.round(item.duration) })}
       </span>
       <RefHandlePill
         token={`@${item.id}`}
@@ -262,7 +269,7 @@ function StockTile({ item }: { item: StockVideo }) {
       />
       <div className="absolute top-1 right-1 flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
         <button
-          title="Expand"
+          title={t("expand")}
           className="grid size-5 place-items-center rounded-full bg-black/45 text-white hover:bg-black/65"
           onClick={() =>
             useLightbox.getState().open({
@@ -285,5 +292,6 @@ function StockTile({ item }: { item: StockVideo }) {
 }
 
 function Empty() {
-  return <p className="text-[11px] text-muted-foreground">No matches.</p>;
+  const t = useTranslations("media.stockVideos");
+  return <p className="text-[11px] text-muted-foreground">{t("noMatches")}</p>;
 }

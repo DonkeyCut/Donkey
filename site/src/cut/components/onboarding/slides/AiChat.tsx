@@ -1,7 +1,8 @@
 "use client";
 
+import { useTranslations } from "next-intl";
+
 import { EditorMock } from "@/cut/components/editor-mock/EditorMock";
-import { ONBOARDING_PROJECT } from "@/cut/components/editor-mock/mockData";
 
 // The one slide that uses the whole window rather than the sequence's reading
 // column. The editor is the layout — the slide is exactly as tall as the mock,
@@ -24,7 +25,7 @@ export function AiChatSlide() {
         <div className="relative mx-auto w-[min(100%,86vh)]">
           <div className="pointer-events-none [mask-image:linear-gradient(to_right,transparent_10%,black_70%)] [-webkit-mask-image:linear-gradient(to_right,transparent_10%,black_70%)]">
             <EditorMock
-              project={ONBOARDING_PROJECT}
+              project="onboarding"
               view="ai"
               showSwitcher={false}
               frame="flat"
@@ -54,19 +55,17 @@ export function AiChatSlide() {
 }
 
 function Copy() {
+  const t = useTranslations("onboarding.aiChat");
   return (
     <div className="max-w-[620px]">
       <h2 className="text-[clamp(26px,3.2vw,38px)] leading-[1.05] font-semibold tracking-[-0.02em]">
-        Chat with your editor.
+        {t("title")}
       </h2>
       <p className="mt-5 text-[16.5px] leading-[1.55] text-foreground/70">
-        The AI has access to your entire project. Ask it to trim clips, generate
-        missing shots, write subtitles, add voiceovers, rearrange your timeline,
-        or answer questions about your footage.
+        {t("body")}
       </p>
       <p className="mt-4 text-[16.5px] leading-[1.55] text-foreground/70">
-        Works out of the box with Gemini, or use your own Claude or Codex
-        subscription.
+        {t("models")}
       </p>
     </div>
   );

@@ -3,6 +3,7 @@ import { h264Encoder, runFfmpeg, vtQuality, type RenderHandle } from "./exportPi
 import { assertGraphSafe } from "./filterGraph";
 import type { ConvertMode } from "../lib/convertMode";
 import { videoDimensions } from "./util";
+import { UserError } from "../lib/userError";
 
 /**
  * Re-wrapping one media file as an MP4 every player and every browser opens.
@@ -75,8 +76,8 @@ export function selectConversionStreams(streams: MediaStream[], formatName = "")
   const audioTracks = streams.filter((s) => s.codec_type === "audio");
   const knownAudio = audioTracks.filter((s) => s.codec_name && s.codec_name !== "unknown" && s.codec_tag_string !== "apac");
   const audio = knownAudio.find((s) => s.disposition?.default) ?? knownAudio[0];
-  if (audioTracks.length && !audio) throw new Error("This file has no supported audio track for conversion.");
-  if (video && (!video.codec_name || video.codec_name === "unknown")) throw new Error("This file has no supported video track for conversion.");
+  if (audioTracks.length && !audio) throw new UserError("convert_no_audio_track", "This file has no supported audio track for conversion.");
+  if (video && (!video.codec_name || video.codec_name === "unknown")) throw new UserError("convert_no_video_track", "This file has no supported video track for conversion.");
   return {
     video: video?.codec_name,
     audio: audio?.codec_name,
@@ -101,13 +102,13 @@ export function streamCodecs(file: string): Promise<ReturnType<typeof selectConv
     let out = "";
     const timer = setTimeout(() => {
       p.kill("SIGKILL");
-      reject(new Error("Media inspection timed out."));
+      reject(new UserError("media_inspect_timed_out", "Media inspection timed out."));
     }, 30_000);
     timer.unref();
     p.stdout.on("data", (d) => (out += d));
     p.on("close", (code) => {
       clearTimeout(timer);
-      if (code !== 0) return reject(new Error("Could not inspect this media file."));
+      if (code !== 0) return reject(new UserError("media_inspect_failed", "Could not inspect this media file."));
       try {
         const probe = JSON.parse(out) as { streams?: MediaStream[]; format?: { format_name?: string } };
         resolve(selectConversionStreams(probe.streams ?? [], probe.format?.format_name));
@@ -129,7 +130,7 @@ export async function convertToMp4(
   opts: { maxHeight?: number; mode?: ConvertMode; onProgress?: (seconds: number) => void } = {}
 ): Promise<ConvertOutcome> {
   const [codecs, dims] = await Promise.all([streamCodecs(src), videoDimensions(src)]);
-  if (!codecs.video && !codecs.audio) throw new Error("That file carries no video or audio.");
+  if (!codecs.video && !codecs.audio) throw new UserError("media_no_streams", "That file carries no video or audio.");
 
   const cap = opts.maxHeight && opts.maxHeight > 0 ? Math.round(opts.maxHeight) : 0;
   const shrink = !!(cap && dims && dims.height > cap);

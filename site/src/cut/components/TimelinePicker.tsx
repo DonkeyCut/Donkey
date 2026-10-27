@@ -1,6 +1,7 @@
 "use client";
 
 import { ChevronDown } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -14,12 +15,15 @@ import {
 import { useEditor } from "@/cut/lib/store";
 import { timelineEnd } from "@/cut/lib/timelineEnd";
 import { switchTimeline, useTimelinePicker } from "@/cut/lib/timelineSwitch";
-import { isTimelineId, TIMELINE_IDS, TIMELINE_LABELS, type TimelineBody } from "@/cut/lib/types";
+import { isTimelineId, TIMELINE_IDS, type TimelineBody } from "@/cut/lib/types";
+import { useLabels } from "@/i18n/labels";
 
 /** The timeline picker at the head of the toolbar: the open timeline's name,
  * and the project's others under it. Held while work is still landing on the
  * open one. */
 export function TimelinePicker() {
+  const t = useTranslations("timeline.picker");
+  const timelineLabel = useLabels("timeline");
   const timeline = useEditor((s) => s.timeline);
   const readOnly = useEditor((s) => s.readOnly);
   const { supported, blocked } = useTimelinePicker();
@@ -29,14 +33,14 @@ export function TimelinePicker() {
     <DropdownMenu>
       <DropdownMenuTrigger
         disabled={blocked}
-        render={<Button variant="ghost" size="sm" className="shrink-0 gap-1 px-2" aria-label="Timeline" />}
+        render={<Button variant="ghost" size="sm" className="shrink-0 gap-1 px-2" aria-label={t("label")} />}
       >
-        {TIMELINE_LABELS[timeline]}
+        {timelineLabel(timeline)}
         <ChevronDown className="size-3.5 text-muted-foreground" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-40">
         <DropdownMenuGroup>
-          <DropdownMenuLabel>Timelines</DropdownMenuLabel>
+          <DropdownMenuLabel>{t("heading")}</DropdownMenuLabel>
           <DropdownMenuRadioGroup
             value={timeline}
             onValueChange={(id) => {
@@ -45,7 +49,7 @@ export function TimelinePicker() {
           >
             {TIMELINE_IDS.map((id) => (
               <DropdownMenuRadioItem key={id} value={id}>
-                {TIMELINE_LABELS[id]}
+                {timelineLabel(id)}
               </DropdownMenuRadioItem>
             ))}
           </DropdownMenuRadioGroup>
@@ -76,6 +80,8 @@ function holdsItems(b: Partial<TimelineBody> | undefined): boolean {
 /** The note an empty timeline shows when another of the project's timelines
  * holds the edit, so opening an empty one never reads as the edit gone. */
 export function EmptyTimelineNote() {
+  const t = useTranslations("timeline.picker");
+  const timelineLabel = useLabels("timeline");
   const timeline = useEditor((s) => s.timeline);
   const readOnly = useEditor((s) => s.readOnly);
   const other = useEditor((s) => TIMELINE_IDS.find((id) => id !== s.timeline && holdsItems(s.timelines[id])));
@@ -90,7 +96,7 @@ export function EmptyTimelineNote() {
     <div className="pointer-events-none absolute inset-0 z-30 grid place-items-center">
       <div className="flex items-center gap-2 text-sm text-muted-foreground">
         <span>
-          {TIMELINE_LABELS[timeline]} is empty. Your edit is on {TIMELINE_LABELS[other]}.
+          {t("emptyNote", { current: timelineLabel(timeline), other: timelineLabel(other) })}
         </span>
         <Button
           variant="outline"
@@ -99,7 +105,7 @@ export function EmptyTimelineNote() {
           disabled={blocked}
           onClick={() => void switchTimeline(other)}
         >
-          Open {TIMELINE_LABELS[other]}
+          {t("open", { name: timelineLabel(other) })}
         </Button>
       </div>
     </div>

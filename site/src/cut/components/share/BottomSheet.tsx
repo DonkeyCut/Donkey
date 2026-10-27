@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import { X } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 
 /**
@@ -26,6 +27,7 @@ export function BottomSheet({
   onClose: () => void;
   children: React.ReactNode;
 }) {
+  const t = useTranslations("editor.bottomSheet");
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -41,7 +43,7 @@ export function BottomSheet({
     <div className="fixed inset-0 z-50 flex flex-col justify-end">
       <button
         type="button"
-        aria-label="Close"
+        aria-label={t("close")}
         className="absolute inset-0 bg-black/50"
         onClick={onClose}
       />
@@ -58,7 +60,7 @@ export function BottomSheet({
         </div>
         <div className="flex items-center justify-between px-4 pb-2">
           <h2 className="text-sm font-medium">{title}</h2>
-          <Button variant="ghost" size="icon-sm" aria-label="Close" onClick={onClose}>
+          <Button variant="ghost" size="icon-sm" aria-label={t("close")} onClick={onClose}>
             <X />
           </Button>
         </div>

@@ -6,12 +6,13 @@
  */
 
 import { obj, type AiToolDef } from "@/cut/lib/aiToolDef";
+import { DEFAULT_LOCALE } from "@/i18n/locales";
 import { creditCountLabel, creditsPerDollar } from "@/lib/credits/format-credits";
 
 export const CREDIT_TOOLS = [
   {
     name: "credit_prices",
-    description: `What each hosted generation costs right now, in credits (${creditCountLabel(creditsPerDollar)} = $1): a video by resolution and length in seconds ("auto" is the model's own length), one image, a music track by length, and a minute of voiceover; plus the account's credit balance. Call it before quoting a price or when the user asks what something costs or how much they have left. Chat and edits bill by use and have no set price. Needs the user signed in to Donkey.`,
+    description: `What each hosted generation costs right now, in credits (${creditCountLabel(creditsPerDollar, DEFAULT_LOCALE)} = $1): a video by resolution and length in seconds ("auto" is the model's own length), one image, a music track by length, and a minute of voiceover; plus the account's credit balance. Call it before quoting a price or when the user asks what something costs or how much they have left. Chat and edits bill by use and have no set price. Needs the user signed in to Donkey.`,
     inputSchema: obj({}),
   },
 ] as const satisfies readonly AiToolDef[];

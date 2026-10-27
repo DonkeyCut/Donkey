@@ -8,6 +8,7 @@ import type { ConvertMode } from "@/cut/lib/convertMode";
 import type { CompatCover } from "@/cut/lib/proxyNames";
 import type { LibraryAsset, LibrarySource } from "@/cut/lib/library";
 import type { LibraryUploadStage, LibraryUploadState } from "@/cut/lib/libraryUpload";
+import { UserError, errorFromBody, replyError } from "@/cut/lib/userError";
 
 export type CloudUploadOptions = {
   name?: string;
@@ -39,13 +40,13 @@ export async function uploadCloudLibraryMedia(file: File, options: CloudUploadOp
     }),
   });
   const body = await apiJson<LibraryAsset | { jobId: string }>(res);
-  if (!res.ok) throw new Error(body.error ?? "Could not prepare this upload.");
+  if (!res.ok) throw replyError(res.status, body, new UserError("upload_prepare_failed", "Could not prepare this upload."));
   const asset = "jobId" in body ? await pollCloudJob<LibraryAsset>(body.jobId, cloudBackend,
-    "Could not prepare this upload.", {
-      timedOut: "This file is still being prepared. Retry to check its progress.",
+    new UserError("upload_prepare_failed", "Could not prepare this upload."), {
+      timedOut: new UserError("upload_still_preparing", "This file is still being prepared. Retry to check its progress."),
       onState: (status) => options.onStage?.(status === "queued" ? "queued" : "preparing"),
     }) : body;
-  if (!asset.id || !asset.fileName) throw new Error("The import returned no media.");
+  if (!asset.id || !asset.fileName) throw new UserError("import_no_media", "The import returned no media.");
   return { ...asset, residency: "cloud" };
 }
 
@@ -53,7 +54,7 @@ export async function uploadCloudLibraryMedia(file: File, options: CloudUploadOp
  * cloud worker: the file stages on the cloud shelf, the proxy comes back,
  * and both leave the shelf. */
 export async function compatInTheCloud(file: File, cover: CompatCover, onProgress?: (p: number) => void): Promise<Blob> {
-  const failed = "Could not make the preview proxy.";
+  const failed = new UserError("proxy_failed", "Could not make the preview proxy.");
   const asset = await uploadCloudLibraryMedia(file, { name: file.name });
   try {
     const res = await cloudBackend.fetch(`/api/cut/library/${encodeURIComponent(asset.id)}/proxy`, {
@@ -62,13 +63,13 @@ export async function compatInTheCloud(file: File, cover: CompatCover, onProgres
       body: JSON.stringify({ compat: cover }),
     });
     const body = await apiJson<LibraryAsset | { jobId: string }>(res);
-    if (!res.ok) throw new Error(body.error ?? failed);
+    if (!res.ok) throw errorFromBody(body, failed);
     const landed = "jobId" in body
-      ? await pollCloudJob<LibraryAsset>(body.jobId, cloudBackend, failed, { timedOut: "The preview proxy took too long.", onProgress })
+      ? await pollCloudJob<LibraryAsset>(body.jobId, cloudBackend, failed, { timedOut: new UserError("proxy_too_slow", "The preview proxy took too long."), onProgress })
       : body;
-    if (!landed.proxyFile) throw new Error(failed);
+    if (!landed.proxyFile) throw failed;
     const media = await cloudBackend.fetch(`/api/cut/library/media/${encodeURIComponent(landed.proxyFile)}`);
-    if (!media.ok) throw new Error(failed);
+    if (!media.ok) throw failed;
     return await media.blob();
   } finally {
     await cloudBackend.fetch(`/api/cut/library/${encodeURIComponent(asset.id)}`, { method: "DELETE" }).catch(() => {});
@@ -85,12 +86,12 @@ export async function withCloudPreparedMedia<T>(
   let prepared: File;
   try {
     const response = await cloudBackend.fetch(`/api/cut/library/media/${encodeURIComponent(asset.fileName)}`);
-    if (!response.ok) throw new Error("Could not read the prepared media.");
+    if (!response.ok) throw new UserError("prepared_media_read_failed", "Could not read the prepared media.");
     const blob = await response.blob();
     prepared = new File([blob], asset.fileName, { type: blob.type });
   } finally {
     const removed = await cloudBackend.fetch(`/api/cut/library/${encodeURIComponent(asset.id)}`, { method: "DELETE" });
-    if (!removed.ok) throw new Error("Could not remove the temporary cloud import.");
+    if (!removed.ok) throw new UserError("temp_import_remove_failed", "Could not remove the temporary cloud import.");
     if (options.state) delete options.state.key;
   }
   // Finish staging cleanup before adoption so a cleanup retry cannot import twice.

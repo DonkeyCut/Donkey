@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useTranslations } from "next-intl";
 import { Loader2 } from "lucide-react";
 import {
   Select,
@@ -33,7 +34,6 @@ import {
 import {
   removalActive,
   removalFingerprint,
-  STROKE_STYLE_LABELS,
   STROKE_STYLES,
   type ClipRemoval,
   type StrokeStyleId,
@@ -47,6 +47,7 @@ import { parseNumberInput } from "@/cut/components/ScrubValue";
 import { ValueSlider } from "@/cut/components/ValueSlider";
 import { cn } from "@/lib/utils";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { useLabels } from "@/i18n/labels";
 
 /**
  * The clip panel's Cutout view: one flat pane. A segmented Remove control
@@ -64,13 +65,8 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 /** The one choice: what goes, and how the selection is found. Background and
  * Subject share the person matte and differ only in direction; Custom is the
  * brush flow, where the paint marks what stays. */
-const TARGETS = [
-  { id: "off", label: "Off" },
-  { id: "background", label: "Background" },
-  { id: "subject", label: "Subject" },
-  { id: "custom", label: "Custom" },
-] as const;
-type Target = (typeof TARGETS)[number]["id"];
+const TARGETS = ["off", "background", "subject", "custom"] as const;
+type Target = (typeof TARGETS)[number];
 
 /** Shared write path: transiently while a gesture is live, committed at its
  * end, one checkpoint per gesture. */
@@ -88,6 +84,7 @@ function useRemovalWriter(clip: VideoClip) {
 }
 
 export function RemovalPanel({ clip }: { clip: VideoClip }) {
+  const t = useTranslations("panels.removal");
   const scroll = useRememberedScroll(clip.id, "cutout");
   const removal = clip.removal;
   const { commit } = useRemovalWriter(clip);
@@ -125,7 +122,7 @@ export function RemovalPanel({ clip }: { clip: VideoClip }) {
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="shrink-0 bg-card pb-2">
         <div className="flex h-10 shrink-0 items-center px-3.5 text-sm font-semibold tracking-tight">
-          Cutout
+          {t("title")}
         </div>
       </div>
       <ScrollArea
@@ -136,7 +133,7 @@ export function RemovalPanel({ clip }: { clip: VideoClip }) {
       >
         <RemovalView clip={clip} />
         {removalActive(removal) && (
-          <Row label="Original">
+          <Row label={t("original")}>
             <button
               type="button"
               aria-pressed={peeking}
@@ -148,7 +145,7 @@ export function RemovalPanel({ clip }: { clip: VideoClip }) {
               )}
               onClick={() => useEditor.setState({ removalPeek: peeking ? null : clip.id })}
             >
-              {peeking ? "Hide" : "Show"}
+              {peeking ? t("hide") : t("show")}
             </button>
           </Row>
         )}
@@ -156,8 +153,8 @@ export function RemovalPanel({ clip }: { clip: VideoClip }) {
         {removal && removalActive(removal) && (
           <>
             <Section
-              title="Stroke"
-              info="Ink drawn around the cutout's silhouette — pick a style, color, and width."
+              title={t("stroke")}
+              info={t("strokeInfo")}
               enabled={!!removal.stroke}
               onEnabledChange={(v) =>
                 commit({ ...removal, stroke: v ? { style: "solid", color: "#ffffff" } : undefined })
@@ -166,8 +163,8 @@ export function RemovalPanel({ clip }: { clip: VideoClip }) {
               <StrokeView clip={clip} />
             </Section>
             <Section
-              title="Fill"
-              info="A color or image painted into the removed area, inside the clip's own frame."
+              title={t("fill")}
+              info={t("fillInfo")}
               enabled={!!removal.backdrop && removal.backdrop.kind !== "none"}
               onEnabledChange={(v) =>
                 commit({ ...removal, backdrop: v ? { kind: "color", color: "#101014" } : undefined })
@@ -192,6 +189,7 @@ export function RemovalPanel({ clip }: { clip: VideoClip }) {
  * direction and a baked matte carries over. Custom opens the brush flow,
  * where the paint marks what stays. */
 function ModePicker({ clip }: { clip: VideoClip }) {
+  const t = useTranslations("panels.removal");
   const { commit } = useRemovalWriter(clip);
   const removal = clip.removal;
   // One job at a time: while a bake runs, the other choices wait — Cancel is
@@ -228,30 +226,30 @@ function ModePicker({ clip }: { clip: VideoClip }) {
 
   return (
     <div className="pb-1">
-      <div className="pb-1.5 text-[13px] text-muted-foreground">Remove</div>
+      <div className="pb-1.5 text-[13px] text-muted-foreground">{t("remove")}</div>
       <div className="clip-removal-target flex shrink-0 rounded-lg bg-muted p-0.5 text-[11.5px] font-medium">
-        {TARGETS.map((o) => (
+        {TARGETS.map((id) => (
           <button
-            key={o.id}
+            key={id}
             type="button"
-            aria-pressed={target === o.id}
-            disabled={running && target !== o.id}
+            aria-pressed={target === id}
+            disabled={running && target !== id}
             className={cn(
-              `clip-removal-target-${o.id} whitespace-nowrap rounded-md px-2 py-1 transition-colors`,
+              `clip-removal-target-${id} whitespace-nowrap rounded-md px-2 py-1 transition-colors`,
               // Every label carries the same padding, sized so all four fit
               // the pane at their natural width — a squeezed row would shrink
               // the last segment's padding. The real options grow from their
               // own width, so leftover space spreads evenly and Off stays at
               // its size.
-              o.id !== "off" && "grow",
-              target === o.id
+              id !== "off" && "grow",
+              target === id
                 ? "bg-neutral-900 text-white"
                 : "text-muted-foreground hover:text-foreground",
               "disabled:pointer-events-none disabled:opacity-40"
             )}
-            onClick={() => pick(o.id)}
+            onClick={() => pick(id)}
           >
-            {o.label}
+            {t(`targets.${id}`)}
           </button>
         ))}
       </div>
@@ -281,19 +279,20 @@ function BakeStatus({
   label: string;
   onCancel?: () => void;
 }) {
+  const t = useTranslations("panels.removal");
   if (!job) return null;
   if (job.status === "error")
     return (
       <div className="flex items-start justify-between gap-2 pt-1 text-[11.5px] text-muted-foreground">
         <span className="min-w-0">
-          <HostedErrorText error={job.error ?? "The cutout could not be prepared."} />
+          <HostedErrorText error={job} fallback={t("prepareFailed")} />
         </span>
         <button
           type="button"
           className="clip-removal-retry shrink-0 rounded-md border border-input px-2 py-0.5 font-medium transition-colors hover:text-foreground"
           onClick={() => retryMatteBake(clipId)}
         >
-          Retry
+          {t("retry")}
         </button>
       </div>
     );
@@ -310,7 +309,7 @@ function BakeStatus({
             className="clip-removal-cancel rounded-md border border-input px-2 py-0.5 font-medium transition-colors hover:text-foreground"
             onClick={onCancel}
           >
-            Cancel
+            {t("cancel")}
           </button>
         )}
         <span className="font-mono tabular-nums">
@@ -351,6 +350,7 @@ function TickingEta({ secondsLeft, etaAt }: { secondsLeft: number; etaAt: number
 }
 
 function CustomControls({ clip }: { clip: VideoClip }) {
+  const t = useTranslations("panels.removal");
   const tool = useBrushUi((s) => s.tool);
   const size = useBrushUi((s) => s.size);
   const erasing = tool === "erase";
@@ -361,13 +361,13 @@ function CustomControls({ clip }: { clip: VideoClip }) {
   // frame the clip no longer plays would land off the clip.
   const seeds = clip.removal?.seeds;
   const strokeTimes = Array.from(new Set((seeds?.paint ?? []).map((s) => s.t)))
-    .filter((t) => t >= clip.in - 0.05 && t <= clip.out + 0.05)
+    .filter((at) => at >= clip.in - 0.05 && at <= clip.out + 0.05)
     .sort((a, b) => a - b);
   const showStrokes = () => {
     if (!strokeTimes.length) return;
     const rt = retimeOf(clip);
     const srcNow = rt.srcAt(Math.max(0, playheadAt() - clip.start));
-    const next = strokeTimes.find((t) => t > srcNow + 0.05) ?? strokeTimes[0];
+    const next = strokeTimes.find((at) => at > srcNow + 0.05) ?? strokeTimes[0];
     const end = clip.start + rt.len;
     useEditor
       .getState()
@@ -376,8 +376,8 @@ function CustomControls({ clip }: { clip: VideoClip }) {
   return (
     <>
       <Row
-        label="Tool"
-        info={clip.removal?.invert ? "Paint to pick what goes" : "Paint to pick what stays"}
+        label={t("tool")}
+        info={clip.removal?.invert ? t("paintGoes") : t("paintStays")}
       >
         <div className="clip-brush-tool flex rounded-lg border border-input p-0.5">
           {([false, true] as const).map((erase) => (
@@ -397,15 +397,15 @@ function CustomControls({ clip }: { clip: VideoClip }) {
                 useBrushUi.getState().setTool(tool);
               }}
             >
-              {erase ? "Erase" : "Brush"}
+              {erase ? t("erase") : t("brush")}
             </button>
           ))}
         </div>
       </Row>
       <div className="clip-brush-size-row">
-        <Row label="Size">
+        <Row label={t("size")}>
           <ValueSlider
-            label="Size"
+            label={t("size")}
             sliderClassName="clip-brush-size data-horizontal:w-24"
             valueClassName="w-12 text-muted-foreground"
             value={Math.round(size * 1080)}
@@ -420,13 +420,13 @@ function CustomControls({ clip }: { clip: VideoClip }) {
         </Row>
       </div>
       {strokeTimes.length > 0 && (
-        <Row label="Strokes">
+        <Row label={t("strokes")}>
           <button
             type="button"
             className="clip-brush-strokes rounded-md border border-input px-2 py-0.5 text-[11.5px] font-medium text-muted-foreground transition-colors hover:text-foreground"
             onClick={showStrokes}
           >
-            Show
+            {t("show")}
           </button>
         </Row>
       )}
@@ -438,6 +438,7 @@ function CustomControls({ clip }: { clip: VideoClip }) {
  * on its own — Apply starts each rung: auto's free person matte, then the
  * hosted quality pass; custom's tracked bake for the painted selection. */
 function RemovalActions({ clip }: { clip: VideoClip }) {
+  const t = useTranslations("panels.removal");
   const job = useMatteBakes((s) => s.jobs[clip.id]);
   const { commit } = useRemovalWriter(clip);
   const r = clip.removal;
@@ -445,7 +446,7 @@ function RemovalActions({ clip }: { clip: VideoClip }) {
   const custom = r.mode === "custom";
   // Paint outside the clip's current trim can't seed this bake (the tracker
   // drops it), so it doesn't count as a selection.
-  const inTrim = (t: number) => t >= clip.in - 0.05 && t <= clip.out + 0.05;
+  const inTrim = (at: number) => at >= clip.in - 0.05 && at <= clip.out + 0.05;
   const hasSelection =
     custom &&
     !!(
@@ -490,10 +491,10 @@ function RemovalActions({ clip }: { clip: VideoClip }) {
         job={job}
         label={
           custom
-            ? "Tracking the selection…"
+            ? t("tracking")
             : job?.quality === "hq"
-              ? "Refining the person matte…"
-              : "Finding the person…"
+              ? t("refining")
+              : t("finding")
         }
         onCancel={cancel}
       />
@@ -512,7 +513,7 @@ function RemovalActions({ clip }: { clip: VideoClip }) {
                 })
               }
             >
-              Reset
+              {t("reset")}
             </button>
           )}
           <button
@@ -523,7 +524,7 @@ function RemovalActions({ clip }: { clip: VideoClip }) {
             )}
             onClick={start}
           >
-            Apply
+            {t("apply")}
           </button>
         </div>
       )}
@@ -567,6 +568,7 @@ function StrokeTile({
   selected: boolean;
   onPick: () => void;
 }) {
+  const strokeStyleLabel = useLabels("strokeStyle");
   const ref = useRef<HTMLCanvasElement | null>(null);
   useEffect(() => {
     const canvas = ref.current;
@@ -612,13 +614,14 @@ function StrokeTile({
           selected && PICKED_RING
         )}
       />
-      <span className="leading-none">{STROKE_STYLE_LABELS[style]}</span>
+      <span className="leading-none">{strokeStyleLabel(style)}</span>
     </button>
   );
 }
 
 /** The Stroke section, rendered only under an active cutout. */
 function StrokeView({ clip }: { clip: VideoClip }) {
+  const t = useTranslations("panels.removal");
   const { draft, commit } = useRemovalWriter(clip);
   const removal = clip.removal;
   if (!removal) return null;
@@ -644,7 +647,7 @@ function StrokeView({ clip }: { clip: VideoClip }) {
       </div>
       {stroke && (
         <>
-          <Row label="Color">
+          <Row label={t("color")}>
             <ColorField
               value={color}
               onBegin={() => {}}
@@ -652,9 +655,9 @@ function StrokeView({ clip }: { clip: VideoClip }) {
               onCommit={(hex) => setStroke({ color: hex })}
             />
           </Row>
-          <Row label="Width">
+          <Row label={t("width")}>
             <ValueSlider
-              label="Width"
+              label={t("width")}
               sliderClassName="clip-stroke-width data-horizontal:w-24"
               valueClassName="w-9 text-muted-foreground"
               value={stroke.width ?? STROKE_DEFAULT_WIDTH}
@@ -667,9 +670,9 @@ function StrokeView({ clip }: { clip: VideoClip }) {
               onCommit={(v) => setStroke({ width: v })}
             />
           </Row>
-          <Row label="Feather">
+          <Row label={t("feather")}>
             <ValueSlider
-              label="Feather"
+              label={t("feather")}
               sliderClassName="clip-stroke-feather data-horizontal:w-24"
               valueClassName="w-9 text-muted-foreground"
               value={stroke.feather ?? 0}
@@ -685,9 +688,9 @@ function StrokeView({ clip }: { clip: VideoClip }) {
           </Row>
           {stroke.style === "offset" && (
             <>
-              <Row label="Horizontal">
+              <Row label={t("horizontal")}>
                 <ValueSlider
-                  label="Horizontal"
+                  label={t("horizontal")}
                   sliderClassName="clip-stroke-offset-x data-horizontal:w-24"
                   valueClassName="w-9 text-muted-foreground"
                   value={stroke.offsetX ?? 0}
@@ -701,9 +704,9 @@ function StrokeView({ clip }: { clip: VideoClip }) {
                   onCommit={(v) => setStroke({ offsetX: v || undefined })}
                 />
               </Row>
-              <Row label="Vertical">
+              <Row label={t("vertical")}>
                 <ValueSlider
-                  label="Vertical"
+                  label={t("vertical")}
                   sliderClassName="clip-stroke-offset-y data-horizontal:w-24"
                   valueClassName="w-9 text-muted-foreground"
                   value={stroke.offsetY ?? 0}
@@ -747,6 +750,7 @@ function BackdropImageOption({ asset, thumb }: { asset: MediaAsset; thumb: strin
 
 /** The Fill section, rendered only under an active cutout. */
 function BackgroundView({ clip }: { clip: VideoClip }) {
+  const t = useTranslations("panels.removal");
   const { draft, commit } = useRemovalWriter(clip);
   const removal = clip.removal;
   const assets = useEditor((s) => s.assets);
@@ -778,11 +782,11 @@ function BackgroundView({ clip }: { clip: VideoClip }) {
   return (
     <>
       <div className="flex shrink-0 rounded-lg bg-muted p-0.5 text-[11.5px] font-medium">
-        {pill("color", "Color")}
-        {pill("image", "Image")}
+        {pill("color", t("color"))}
+        {pill("image", t("image"))}
       </div>
       {kind === "color" && (
-        <Row label="Color">
+        <Row label={t("color")}>
           <ColorField
             value={backdrop?.color ?? "#101014"}
             onBegin={() => {}}
@@ -794,10 +798,10 @@ function BackgroundView({ clip }: { clip: VideoClip }) {
       {kind === "image" &&
         (images.length === 0 ? (
           <p className="pt-2 text-[12px] text-muted-foreground">
-            Import an image into Media to use it as the background.
+            {t("importImage")}
           </p>
         ) : (
-          <Row label="Image">
+          <Row label={t("image")}>
             <Select
               value={backdrop?.assetId ?? images[0].id}
               onValueChange={(id) => setBackdrop({ kind: "image", assetId: id as string })}

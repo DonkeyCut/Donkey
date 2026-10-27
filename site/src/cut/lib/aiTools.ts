@@ -130,7 +130,9 @@ import {
   type FlashRhythm,
   type TextWeight,
 } from "@donkeycut/effects-kit";
-import type { AiPanelToolName } from "@/cut/components/AiPanel.tools";
+import { INTERFACE_LANGUAGE_LIST, languageName, type AiPanelToolName } from "@/cut/components/AiPanel.tools";
+import { isLocale } from "@/i18n/locales";
+import { changeInterfaceLanguage } from "./interfaceLanguage";
 import { beatSwitches, clipBeatTimes, switchProblem, tidySwitches, timedFontCycle, validBeatStep } from "./fontCycleTiming";
 import { LOOP_SPEED_MAX, LOOP_SPEED_MIN, type OverlayAnimationToolName } from "@/cut/components/AnimationTiles.tools";
 import type { AudioToolName } from "@/cut/components/AudioPanel.tools";
@@ -300,7 +302,8 @@ import { composeMusicPrompt } from "./composeGen";
 import { stockAssetInDoc } from "./genvideo/docWriter";
 import { resolveVoiceAsk, synthesizeSpeech, SPEECH_VOICES } from "./tts";
 import { hostedFetch, hostedPost } from "./hosted";
-import { readHostedError } from "./hostedError";
+import { readHostedFailure } from "./hostedError";
+import { UserError } from "./userError";
 import { creditPriceQuote, type CreditPriceSheet } from "@/lib/credits/price-sheet";
 import { creditsFromDollars } from "@/lib/credits/format-credits";
 import { BLOCK_MAX_SECONDS, BLOCK_MIN_SECONDS, BLOCKOUT_MAX, blockAsset } from "./blockSource";
@@ -1636,7 +1639,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
     const sizeBytes = asset.sizeBytes ?? await readMediaFileSize(asset.url);
     return {
       id: asset.id, name: asset.name, fileName: asset.fileName, kind: asset.type,
-      sizeBytes, fileSize: formatBytes(sizeBytes), duration: roundT(asset.duration), width: asset.width, height: asset.height,
+      sizeBytes, fileSize: formatBytes(sizeBytes, "en"), duration: roundT(asset.duration), width: asset.width, height: asset.height,
     };
   },
 
@@ -4726,6 +4729,20 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
     return { queued: true, note: "It runs as its own turn after this one finishes." };
   },
 
+  set_interface_language: async (_s, input) => {
+    const locale = input.locale;
+    if (!isLocale(locale)) {
+      throw new ToolError(`Unknown interface language ${String(locale)} — pick from ${INTERFACE_LANGUAGE_LIST}.`);
+    }
+    const language = languageName(locale);
+    const where = await changeInterfaceLanguage(locale).catch((err: unknown) => {
+      throw new ToolError(err instanceof Error ? err.message : String(err), { cause: err });
+    });
+    return where === "page"
+      ? { locale, language, saved: "account", note: `The editor reloads in ${language} as this reply finishes, and the account keeps it.` }
+      : { locale, language, saved: "account", note: `No editor page is open in this session, so the account's language is saved; Donkey Cut opens in ${language} the next time it loads.` };
+  },
+
   wait_for_renders: async (s) => {
       const projectId = s.projectId;
       if (!projectId) throw new ToolError("No project open.");
@@ -5964,7 +5981,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       ]);
       for (const res of [prices, balance]) {
         if (!res.ok) {
-          throw new ToolError(await readHostedError(res, "Sign in to Donkey to see credit prices.", "Could not read credit prices."));
+          throw new ToolError((await readHostedFailure(res, new UserError("sign_in_to_see_prices", "Sign in to Donkey to see credit prices."), new UserError("credit_prices_read_failed", "Could not read credit prices."))).message);
         }
       }
       const sheet = (await prices.json()) as CreditPriceSheet;

@@ -32,6 +32,7 @@ import { removalFingerprint, type ClipRemoval, type VideoClip } from "../types";
 import { useBrushUi } from "./brushUi";
 import { hostedBakeMatte, type HostedBakeTicket } from "./hostedBake";
 import { localBakeMatte, MatteBakeCancelled } from "./localBake";
+import { UserError, errorFields, type UserErrorParams } from "../userError";
 
 type MatteQuality = "local" | "hq";
 
@@ -77,6 +78,8 @@ export interface MatteBakeJob {
    * estimate has nothing to stand on yet. */
   startedAt?: number;
   error?: string;
+  errorCode?: string;
+  errorParams?: UserErrorParams;
 }
 
 interface MatteBakes {
@@ -366,7 +369,7 @@ function ensureBake(clipId: string, slot: MatteSlot, opts: { whileBrushing?: boo
       quality: want,
       status: "error",
       progress: 0,
-      error: e instanceof Error ? e.message : "The matte could not be baked.",
+      ...errorFields(e instanceof Error ? e : null, new UserError("matte_bake_failed", "The matte could not be baked.")),
     });
   });
 }
@@ -442,7 +445,9 @@ async function runBakeNow(
 
   const file = new File([baked.blob], `matte-${quality}-${fp}.mp4`, { type: "video/mp4" });
   const matteAsset = await importFileToProject(state.projectId, file);
-  if (!matteAsset) throw new Error("The matte could not be saved into the project.");
+  if (!matteAsset) {
+    throw new UserError("matte_save_failed", "The matte could not be saved into the project.");
+  }
   matteAsset.name = `${asset.name} matte`;
   matteAsset.origin = "matte";
 

@@ -2,6 +2,7 @@ import { getBackend, type CutBackend, type CutCaps, type CutMode } from "@/cut/l
 import { captureCloudBackend, cloudBackend, knownDocVersion } from "@/cut/lib/backend/cloud";
 import { captureLocalBackend, localBackend } from "@/cut/lib/backend/local";
 import { projectRevision } from "@/cut/lib/projectRevision";
+import { UserError } from "@/cut/lib/userError";
 
 /** Execution context captured before asynchronous work starts. Server routes
  * remain responsible for authenticating and authorizing every request. */
@@ -14,7 +15,7 @@ export type ProjectOperation = {
 };
 
 export function projectOperation(projectId: string, backend = getBackend()): ProjectOperation {
-  if (backend.kind === "shared") throw new Error("A shared project is read-only.");
+  if (backend.kind === "shared") throw new UserError("project_read_only", "A shared project is read-only.");
   const captured = backend === cloudBackend ? captureCloudBackend() : backend === localBackend ? captureLocalBackend() : backend;
   return {
     projectId, backend: captured, residency: captured.kind,

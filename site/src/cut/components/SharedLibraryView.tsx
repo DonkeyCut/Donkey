@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import { Download, Folder, Loader2 } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { buttonVariants } from "@/components/ui/button";
 import { useSharedLibrary } from "@/queries/sharing";
 import { ApiError } from "@/queries/apiClient";
@@ -25,6 +26,7 @@ function Asset({ asset, token }: { asset: SharedLibraryAsset; token: string }) {
 }
 
 export function SharedLibraryView() {
+  const t = useTranslations("home.sharedLibrary");
   const { token } = useParams<{ token: string }>();
   const params = useSearchParams();
   const folder = params.get("folder");
@@ -45,16 +47,16 @@ export function SharedLibraryView() {
     <div className="mx-auto max-w-6xl px-5 py-9 sm:px-10">
       <header className="mb-8 flex items-center justify-between gap-4">
         <Link href={base} className="text-lg font-semibold">Donkey Cut</Link>
-        <span className="text-xs text-muted-foreground">Shared library · View only</span>
+        <span className="text-xs text-muted-foreground">{t("viewOnly")}</span>
       </header>
-      {query.isPending ? <div role="status" className="grid min-h-64 place-items-center"><Loader2 aria-label="Loading shared library" className="size-5 animate-spin" /></div>
+      {query.isPending ? <div role="status" className="grid min-h-64 place-items-center"><Loader2 aria-label={t("loading")} className="size-5 animate-spin" /></div>
         : query.isError ? <div className="flex min-h-64 flex-col items-center justify-center gap-4 text-center">
-          <p role="alert" className="text-sm text-muted-foreground">{status === 401 ? "Sign in to view this share." : status === 403 ? "You don’t have access to this share. Ask the owner to invite you." : status === 404 ? "This share link is no longer available." : "Could not load this share."}</p>
+          <p role="alert" className="text-sm text-muted-foreground">{status === 401 ? t("signInToView") : status === 403 ? t("noAccess") : status === 404 ? t("gone") : t("loadFailed")}</p>
           {status === 401 || status === 403
-            ? <Link href={authHrefFor("/sign-in", href(folder, offset))} className={buttonVariants()}>Sign in</Link>
-            : status !== 404 && <button onClick={() => void query.refetch()} className={buttonVariants({ variant: "outline" })}>Try again</button>}
+            ? <Link href={authHrefFor("/sign-in", href(folder, offset))} className={buttonVariants()}>{t("signIn")}</Link>
+            : status !== 404 && <button onClick={() => void query.refetch()} className={buttonVariants({ variant: "outline" })}>{t("tryAgain")}</button>}
         </div> : data && <>
-          <nav aria-label="Folder breadcrumb" className="mb-5 flex flex-wrap items-center gap-2 text-lg font-semibold">
+          <nav aria-label={t("breadcrumb")} className="mb-5 flex flex-wrap items-center gap-2 text-lg font-semibold">
             {data.trail.length ? data.trail.map((f, i) => <span key={f.id} className="flex items-center gap-2">
               {i > 0 && <span className="text-muted-foreground">/</span>}
               {i === data.trail.length - 1 ? <span>{f.name}</span> : <Link href={href(f.id)} className="text-muted-foreground hover:text-foreground">{f.name}</Link>}
@@ -68,15 +70,15 @@ export function SharedLibraryView() {
           <div className="flex flex-wrap items-start gap-4">
             {data.assets.map((asset) => <Asset key={asset.id} asset={asset} token={token} />)}
           </div>
-          {data.templates.map((t) => <section key={t.id} className="mt-5 rounded-xl border p-4">
-            <h2 className="mb-2 text-sm font-medium">{t.name}</h2>
-            <p className="mb-2 text-xs text-muted-foreground">Template media</p>
-            {t.files.map((f, i) => <a key={i} className="flex items-center gap-2 py-1 text-sm hover:underline" href={`/api/cut-shared/library/${encodeURIComponent(token)}/media/${encodeURIComponent(t.id)}?${new URLSearchParams({ template: t.id, file: f.fileName, download: "1" })}`}><Download className="size-3" />{f.name}</a>)}
+          {data.templates.map((tpl) => <section key={tpl.id} className="mt-5 rounded-xl border p-4">
+            <h2 className="mb-2 text-sm font-medium">{tpl.name}</h2>
+            <p className="mb-2 text-xs text-muted-foreground">{t("templateMedia")}</p>
+            {tpl.files.map((f, i) => <a key={i} className="flex items-center gap-2 py-1 text-sm hover:underline" href={`/api/cut-shared/library/${encodeURIComponent(token)}/media/${encodeURIComponent(tpl.id)}?${new URLSearchParams({ template: tpl.id, file: f.fileName, download: "1" })}`}><Download className="size-3" />{f.name}</a>)}
           </section>)}
-          {!data.folders.length && !data.assets.length && !data.templates.length && <p className="py-16 text-center text-sm text-muted-foreground">This folder is empty.</p>}
-          <nav aria-label="Pages" className="mt-6 flex justify-between">
-            {offset > 0 ? <Link href={href(folder)} className={buttonVariants({ variant: "outline" })}>First page</Link> : <span />}
-            {data.next !== null && <Link href={href(folder, data.next)} className={buttonVariants({ variant: "outline" })}>Next page</Link>}
+          {!data.folders.length && !data.assets.length && !data.templates.length && <p className="py-16 text-center text-sm text-muted-foreground">{t("emptyFolder")}</p>}
+          <nav aria-label={t("pages")} className="mt-6 flex justify-between">
+            {offset > 0 ? <Link href={href(folder)} className={buttonVariants({ variant: "outline" })}>{t("firstPage")}</Link> : <span />}
+            {data.next !== null && <Link href={href(folder, data.next)} className={buttonVariants({ variant: "outline" })}>{t("nextPage")}</Link>}
           </nav>
         </>}
     </div>

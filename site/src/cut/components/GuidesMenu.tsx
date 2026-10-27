@@ -1,6 +1,7 @@
 "use client";
 
 import { ChevronDown, Grid3x3 } from "lucide-react";
+import { useFormatter, useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -12,7 +13,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { GUIDE_PRESETS, guideFits } from "@/cut/lib/guides";
+import { GUIDE_PRESETS, guideFits, MARGIN_INSET, type GuideId } from "@/cut/lib/guides";
 import { useEditor } from "@/cut/lib/store";
 import { cn } from "@/lib/utils";
 
@@ -21,18 +22,32 @@ import { cn } from "@/lib/utils";
  * first press with nothing picked turns on the safe margins. The icon lights
  * while any guide is showing. */
 export function GuidesMenu() {
+  const t = useTranslations("timeline.guides");
+  const format = useFormatter();
   const aspect = useEditor((s) => s.aspect);
   const guides = useEditor((s) => s.guides);
   const guidesHidden = useEditor((s) => s.guidesHidden);
   const showing = guides.length > 0 && !guidesHidden;
   const toggle = () => useEditor.getState().toggleGuidesShown();
+
+  // A preset's second line, for the presets that carry one: the margins name
+  // their inset, e.g. "5% inset".
+  const sublabel = (id: GuideId) => {
+    if (id === "margins") {
+      return t("sublabels.margins", { inset: format.number(MARGIN_INSET, { style: "percent" }) });
+    }
+    if (id === "shortform" || id === "custom") {
+      return t(`sublabels.${id}`);
+    }
+    return null;
+  };
   return (
     <div className="mr-2 flex items-center overflow-hidden rounded-md border border-border">
       <Button
         variant="ghost"
         size="icon-xs"
-        aria-label={showing ? "Hide guides" : "Show guides"}
-        title={showing ? "Hide guides (⌘;)" : "Show guides (⌘;)"}
+        aria-label={showing ? t("hide") : t("show")}
+        title={showing ? t("hideTitle", { key: "⌘;" }) : t("showTitle", { key: "⌘;" })}
         aria-pressed={showing}
         className="rounded-r-none"
         onClick={toggle}
@@ -45,8 +60,8 @@ export function GuidesMenu() {
             <Button
               variant="ghost"
               size="icon-xs"
-              aria-label="Guide presets"
-              title="Guide presets"
+              aria-label={t("presetsLabel")}
+              title={t("presetsLabel")}
               className="w-4 rounded-l-none"
             />
           }
@@ -55,9 +70,10 @@ export function GuidesMenu() {
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-52">
           <DropdownMenuGroup>
-            <DropdownMenuLabel>Guides</DropdownMenuLabel>
+            <DropdownMenuLabel>{t("heading")}</DropdownMenuLabel>
             {GUIDE_PRESETS.map((g) => {
               const fits = guideFits(g.id, aspect);
+              const sub = sublabel(g.id);
               return (
                 <DropdownMenuCheckboxItem
                   key={g.id}
@@ -67,10 +83,10 @@ export function GuidesMenu() {
                   onCheckedChange={() => useEditor.getState().toggleGuide(g.id)}
                 >
                   <span className="flex-1">
-                    {g.name}
-                    {g.sublabel && (
+                    {t(`presets.${g.id}`)}
+                    {sub && (
                       <span className="block text-[10.5px] text-muted-foreground">
-                        {fits ? g.sublabel : "Portrait frames"}
+                        {fits ? sub : t("portraitOnly")}
                       </span>
                     )}
                   </span>
@@ -80,10 +96,10 @@ export function GuidesMenu() {
           </DropdownMenuGroup>
           <DropdownMenuSeparator />
           <DropdownMenuItem closeOnClick={false} onClick={() => useEditor.getState().addGuideLine("v")}>
-            Add vertical line
+            {t("addVertical")}
           </DropdownMenuItem>
           <DropdownMenuItem closeOnClick={false} onClick={() => useEditor.getState().addGuideLine("h")}>
-            Add horizontal line
+            {t("addHorizontal")}
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>

@@ -2,6 +2,7 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import type React from "react";
+import { useTranslations } from "next-intl";
 import { Copy, ExternalLink, FileText, Film, Loader2, Maximize2, Plus } from "lucide-react";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { MEDIA_CORS } from "@/cut/lib/mediaCors";
@@ -132,6 +133,7 @@ type RenderView = Pick<GenerateJob, "status" | "prompt" | "startedAt" | "error" 
  * job store covers this browser; the doc-mirrored record carries the same
  * card to every other browser and machine. */
 export function ChatVideoJobCard({ jobId }: { jobId: string }) {
+  const t = useTranslations("chat.chatAssets");
   const job = useGenerate((s) => s.jobs.find((j) => j.id === jobId));
   const record = useEditor((s) => s.renders.find((r) => r.id === jobId));
   const readOnly = useEditor((s) => s.readOnly);
@@ -142,7 +144,7 @@ export function ChatVideoJobCard({ jobId }: { jobId: string }) {
     job ??
     (record &&
       (record.status === "running" && now - record.startedAt > RECORD_RUNNING_TTL_MS
-        ? { ...record, status: "error" as const, error: "The render was interrupted." }
+        ? { ...record, status: "error" as const, error: t("renderInterrupted") }
         : record));
   const elapsed = useElapsed(view?.status === "running" ? view.startedAt : null);
   if (!view) return null;
@@ -167,11 +169,11 @@ export function ChatVideoJobCard({ jobId }: { jobId: string }) {
       >
         {view.status === "running" ? (
           <>
-            Rendering…{" "}
+            {t("rendering")}{" "}
             {elapsed && <span className="tabular-nums text-muted-foreground/80">{elapsed}</span>}
           </>
         ) : (
-          <HostedErrorText error={view.error} link={false} />
+          <HostedErrorText error={view} link={false} />
         )}
       </div>
       {/* Retry needs the job's stored ladder, which lives in this browser's
@@ -183,7 +185,7 @@ export function ChatVideoJobCard({ jobId }: { jobId: string }) {
           className="self-start text-[10.5px] font-medium underline underline-offset-2 hover:no-underline"
           onClick={() => useGenerate.getState().retry(job.id)}
         >
-          Retry
+          {t("retry")}
         </button>
       )}
     </div>
@@ -215,6 +217,7 @@ const dragProps = (item: AssetRef, asset?: MediaAsset) => ({
 /** The chat card's "…" menu: timeline/expand/reference actions around the
  * shared move-to-Media/Library pair. Project assets only. */
 function ChatCardMenu({ asset, triggerClassName }: { asset: MediaAsset; triggerClassName: string }) {
+  const t = useTranslations("chat.chatAssets");
   const projectId = useEditor((s) => s.projectId);
   if (!projectId) return null;
   return (
@@ -227,21 +230,21 @@ function ChatCardMenu({ asset, triggerClassName }: { asset: MediaAsset; triggerC
           <DropdownMenuItem
             onClick={() => useEditor.getState().addAssetAtPlayhead(asset.id)}
           >
-            <Plus /> Add to timeline
+            <Plus /> {t("addToTimeline")}
           </DropdownMenuItem>
           <DropdownMenuItem onClick={() => expandRef(refFromAsset(asset))}>
-            <Maximize2 /> Expand
+            <Maximize2 /> {t("expand")}
           </DropdownMenuItem>
           <DropdownMenuItem
             onClick={() => copyRefs([refFromAsset(asset)])}
           >
-            <Copy /> Copy reference
+            <Copy /> {t("copyReference")}
           </DropdownMenuItem>
         </>
       }
       after={
         <DropdownMenuItem onClick={() => window.open(asset.url, "_blank", "noopener")}>
-          <ExternalLink /> Open file
+          <ExternalLink /> {t("openFile")}
         </DropdownMenuItem>
       }
     />
@@ -253,6 +256,7 @@ const scrimButton = scrimIconButton;
 /** Image / video tile: the preview fills the card at the media's own aspect,
  * sized so portrait and landscape both sit comfortably in the chat column. */
 function MediaCard({ item, asset }: ChatCardProps) {
+  const t = useTranslations("chat.chatAssets");
   const { ref: videoRef, handlers: hoverPlay } = useHoverPlay();
   // Chat scrollback holds every card ever made; media loads only once the
   // card actually scrolls into view.
@@ -278,7 +282,7 @@ function MediaCard({ item, asset }: ChatCardProps) {
       onClick={(e) => {
         if (!(e.target as Element).closest("button")) pick();
       }}
-      title={`${ref.name} — double-click to expand · drag to the timeline`}
+      title={t("mediaHint", { name: ref.name })}
       {...dragProps(item, asset)}
       onDoubleClick={() => expandRef(item, asset)}
       {...(item.kind === "video" ? hoverPlay : {})}
@@ -307,7 +311,7 @@ function MediaCard({ item, asset }: ChatCardProps) {
         <span className="block truncate text-[10.5px] font-medium text-white">{ref.name}</span>
       </div>
       <div className="absolute top-1 right-1 flex gap-1 opacity-0 transition-opacity group-hover/card:opacity-100 has-data-popup-open:opacity-100">
-        <button title="Expand" className={scrimButton} onClick={() => expandRef(item, asset)}>
+        <button title={t("expand")} className={scrimButton} onClick={() => expandRef(item, asset)}>
           <Maximize2 className="size-3" />
         </button>
         {asset && <ChatCardMenu asset={asset} triggerClassName={scrimButton} />}
@@ -361,6 +365,7 @@ const DOC_PREVIEW_CHARS = 1200;
 
 /** A text file (markdown, CSV, plain) as a clipped document card. */
 function DocCard({ item, asset }: ChatCardProps) {
+  const t = useTranslations("chat.chatAssets");
   const { text, failed } = useDocText(item.url);
   const clipped = text !== null && text.length > DOC_PREVIEW_CHARS;
   const { picked, pick } = useAssetPick(item.id);
@@ -375,7 +380,7 @@ function DocCard({ item, asset }: ChatCardProps) {
       onClick={(e) => {
         if (!(e.target as Element).closest("button")) pick();
       }}
-      title={`${item.name} — double-click to expand`}
+      title={t("docHint", { name: item.name })}
       {...dragProps(item, asset)}
       onDoubleClick={() => expandRef(item, asset)}
     >
@@ -383,7 +388,7 @@ function DocCard({ item, asset }: ChatCardProps) {
         <FileText className="size-3.5 shrink-0 text-muted-foreground" />
         <span className="min-w-0 flex-1 truncate text-[11px] font-medium">{item.name}</span>
         <button
-          title="Expand"
+          title={t("expand")}
           className={cn(scrimButton, "opacity-0 transition-opacity group-hover/card:opacity-100")}
           onClick={() => expandRef(item, asset)}
         >
@@ -392,7 +397,7 @@ function DocCard({ item, asset }: ChatCardProps) {
       </div>
       <div className="relative max-h-44 overflow-hidden px-2.5 py-2 text-[11px] leading-relaxed">
         {failed ? (
-          <p className="text-muted-foreground">Could not read the file.</p>
+          <p className="text-muted-foreground">{t("readFailed")}</p>
         ) : text === null ? (
           <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
         ) : (

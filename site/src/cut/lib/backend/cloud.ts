@@ -4,6 +4,7 @@
 // Media bytes ride presigned R2 URLs minted by those routes, not this
 // transport.
 import { observeOperationResponse, operationFailure } from "../operationFailure";
+import { UserError } from "../userError";
 import { DOC_SEQ_HEADER, DOC_WRITER_HEADER, HTTP_CONFLICT, type CutBackend, type CutRequestInit } from "./types";
 
 const cloudPath = (path: string) => path.replace(/^\/api\/cut\//, "/api/cut-cloud/");
@@ -217,13 +218,16 @@ export async function fetchSignedMediaUrls(
   return out;
 }
 
-/** Pure message formatting; the host decides how a quota failure is presented. */
-export function quotaErrorMessage(
-  status: number,
-  body: { error?: string; bytes?: number; quotaBytes?: number } | null | undefined
-): string | null {
+type QuotaBody = { error?: string; bytes?: number; quotaBytes?: number } | null | undefined;
+
+/** The storage wall a reply is, coded so the page words it; null for any
+ * other reply. The host decides how a quota failure is presented.
+ *
+ *   throw quotaError(res.status, body) ?? errorFromBody(body, new UserError("upload_failed", "Upload failed."));
+ */
+export function quotaError(status: number, body: QuotaBody): UserError | null {
   const failure = operationFailure(status, body);
-  return failure?.code === "storage_quota_exceeded" ? failure.message : null;
+  return failure?.code === "storage_quota_exceeded" ? new UserError(failure.code, failure.message) : null;
 }
 
 export const cloudBackend: CutBackend = {

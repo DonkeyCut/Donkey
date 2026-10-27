@@ -3,6 +3,8 @@
 import { DonkeyMark } from "@/components/DonkeyMark";
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { useTranslations } from "next-intl";
+import { creatorNames } from "@/cut/lib/defaultNames";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { Camera, Clapperboard, FolderOpen, Loader2, StickyNote } from "lucide-react";
@@ -27,18 +29,22 @@ import type { ProjectSummary } from "@/cut/lib/types";
 import { newProjectAllowed } from "@/cut/lib/projectLimit";
 import { cn } from "@/lib/utils";
 
-const NAV: { tab: CutTab; label: string; icon: typeof Clapperboard }[] = [
-  { tab: "projects", label: "Projects", icon: Clapperboard },
-  { tab: "library", label: "Library", icon: FolderOpen },
-  { tab: "notes", label: "Notes", icon: StickyNote },
+// Each tab's name is its key in the home catalog's tab names.
+type NavEntry = { tab: CutTab; label: "projects" | "library" | "notes" | "cameraRoll"; icon: typeof Clapperboard };
+
+const NAV: NavEntry[] = [
+  { tab: "projects", label: "projects", icon: Clapperboard },
+  { tab: "library", label: "library", icon: FolderOpen },
+  { tab: "notes", label: "notes", icon: StickyNote },
 ];
 
 // Surfaces fed by the iOS app, listed only for accounts that use it.
-const PHONE_NAV: { tab: CutTab; label: string; icon: typeof Clapperboard }[] = [
-  { tab: "camera-roll", label: "Camera Roll", icon: Camera },
+const PHONE_NAV: NavEntry[] = [
+  { tab: "camera-roll", label: "cameraRoll", icon: Camera },
 ];
 
 export function AppSidebar() {
+  const t = useTranslations("home");
   const pathname = usePathname();
   const router = useRouter();
   const base = useCutBase();
@@ -60,7 +66,7 @@ export function AppSidebar() {
       const res = await backendFor(r).fetch("/api/cut/projects", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: name.trim() || "Untitled" }),
+        body: JSON.stringify({ name: name.trim() || creatorNames().untitled }),
       });
       const project = (await res.json()) as ProjectSummary;
       patchProjects(client, r, (s) => ({
@@ -117,7 +123,7 @@ export function AppSidebar() {
               )}
             >
               <Icon className="size-4" />
-              {label}
+              <span className="truncate">{t(`tabs.${label}`)}</span>
             </Link>
           );
         })}
@@ -129,7 +135,7 @@ export function AppSidebar() {
       <Dialog open={createIn !== null} onOpenChange={(o) => !o && setCreateIn(null)}>
         <DialogContent className="sm:max-w-sm">
           <DialogHeader>
-            <DialogTitle>New project</DialogTitle>
+            <DialogTitle>{t("newProject.title")}</DialogTitle>
           </DialogHeader>
           <form
             onSubmit={(e) => {
@@ -139,14 +145,14 @@ export function AppSidebar() {
           >
             <Input
               autoFocus
-              placeholder="Project name"
+              placeholder={t("newProject.placeholder")}
               value={name}
               onChange={(e) => setName(e.target.value)}
             />
             <DialogFooter className="mt-4">
               <Button type="submit" disabled={busy} className="w-full">
                 {busy && <Loader2 className="animate-spin" data-icon="inline-start" />}
-                Create project
+                {t("newProject.create")}
               </Button>
             </DialogFooter>
           </form>

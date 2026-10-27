@@ -1,7 +1,8 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
-import { isCurrentSpecimen, SPECIMEN_TEXT } from "@/cut/lib/fontSpecimen";
+import { isCurrentSpecimen } from "@/cut/lib/fontSpecimen";
 import { linkIdForAsset, onLinkedChanged } from "@/cut/lib/linkedLibrary";
 import { MEDIA_CORS } from "@/cut/lib/mediaCors";
 import { fontStack, hasFont, onFontsChanged } from "@/cut/lib/types";
@@ -46,6 +47,8 @@ export function FontSpecimen({
   pad?: number;
   className?: string;
 }) {
+  const t = useTranslations("inspector.fontSpecimen");
+  const specimen = t("pangram");
   const [gen, bump] = useState(0);
   const [broken, setBroken] = useState(false);
   const again = () => bump((n) => n + 1);
@@ -109,7 +112,7 @@ export function FontSpecimen({
       ro.disconnect();
       fonts?.removeEventListener?.("loadingdone", fit);
     };
-  }, [family, gen, pad]);
+  }, [family, gen, pad, specimen]);
   if (poster && isCurrentSpecimen(poster) && !broken && !installed)
     return (
       // eslint-disable-next-line @next/next/no-img-element -- library media file, not Next-optimizable
@@ -133,7 +136,7 @@ export function FontSpecimen({
         aria-hidden
         className="pointer-events-none invisible fixed top-0 left-0 leading-[1.2]"
       >
-        {SPECIMEN_TEXT}
+        {specimen}
       </span>
       <span
         className="leading-[1.2]"
@@ -141,7 +144,7 @@ export function FontSpecimen({
         // sheet stays blank until the face itself is in.
         style={{ fontSize: size || undefined, opacity: size && installed ? 1 : 0, paddingInline: pad }}
       >
-        {SPECIMEN_TEXT}
+        {specimen}
       </span>
       {!installed && (
         // Lines of type-shaped shimmer while the face loads.

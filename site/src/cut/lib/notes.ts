@@ -13,9 +13,11 @@
  */
 
 import { noteReadSchema, noteSaveSchema, parseNoteLink, type NoteLocation } from "@/cut/lib/noteReference";
+import { creatorNames } from "./defaultNames";
 import { settleParents } from "./folderTree";
 import { dropPendingNote, flushNote, sendNoteNow, stageNote, withPendingNotes, type NoteWrite } from "./noteOutbox";
 import { backendFor } from "./residency";
+import { UserError } from "./userError";
 
 export { folderTrail, folderWithin, subtreeOf } from "./folderTree";
 
@@ -84,7 +86,7 @@ const json = (body: unknown): RequestInit => ({
  * off a folder nobody can open. */
 export async function fetchNotes(): Promise<NotesData> {
   const res = await notesFetch("/api/cut/notes");
-  if (!res.ok) throw new Error("Could not load notes.");
+  if (!res.ok) throw new UserError("notes_load_failed", "Could not load notes.");
   const body = (await res.json()) as Partial<NotesData>;
   return {
     notes: withPendingNotes(body.notes ?? []).filter((n) => n.deletedAt === null),
@@ -107,7 +109,7 @@ export async function writeNoteFromTool(raw: unknown): Promise<CutNote> {
   const { id, ...changes } = input;
   const prior = id ? await readNote({ id }) : null;
   if (!prior && !input.title?.trim() && !input.body?.trim()) throw new Error("A new note needs a title or body.");
-  return saveNote({ id: prior?.id ?? crypto.randomUUID(), title: prior?.title ?? "Untitled", body: prior?.body ?? "",
+  return saveNote({ id: prior?.id ?? crypto.randomUUID(), title: prior?.title ?? creatorNames().untitled, body: prior?.body ?? "",
     colorIndex: prior?.colorIndex ?? 0, folderId: prior?.folderId ?? null, labelIds: prior?.labelIds ?? [],
     ...(prior ? {} : { libraryLocation: null }), ...changes });
 }
@@ -121,7 +123,7 @@ export async function saveNote(note: NoteWrite): Promise<CutNote> {
     return sendNoteNow(note);
   }
   const saved = await flushNote(note.id);
-  if (!saved) throw new Error("Could not save the note.");
+  if (!saved) throw new UserError("note_save_failed", "Could not save the note.");
   return saved;
 }
 
@@ -130,7 +132,7 @@ export async function deleteNote(id: string): Promise<void> {
   const res = await notesFetch(`/api/cut/notes/${encodeURIComponent(id)}`, {
     method: "DELETE",
   });
-  if (!res.ok) throw new Error("Could not delete the note.");
+  if (!res.ok) throw new UserError("note_delete_failed", "Could not delete the note.");
 }
 
 /** Create, rename or move a folder under `id`. A create mints the id here so
@@ -145,7 +147,7 @@ export async function saveNoteFolder(
     `/api/cut/notes/folders/${encodeURIComponent(id)}`,
     json(folder),
   );
-  if (!res.ok) throw new Error("Could not save the folder.");
+  if (!res.ok) throw new UserError("note_folder_save_failed", "Could not save the folder.");
   return (await res.json()) as CutNoteFolder;
 }
 
@@ -156,7 +158,7 @@ export async function deleteLibraryFolderNotes(residency: "browser" | "local", f
     ...json({ residency, folderIds }),
     method: "POST",
   });
-  if (!res.ok) throw new Error("Could not delete the folder’s notes.");
+  if (!res.ok) throw new UserError("note_folder_notes_delete_failed", "Could not delete the folder’s notes.");
 }
 
 /** Delete a folder and everything under it: its folders and their notes. */
@@ -164,7 +166,7 @@ export async function deleteNoteFolder(id: string): Promise<void> {
   const res = await notesFetch(`/api/cut/notes/folders/${encodeURIComponent(id)}`, {
     method: "DELETE",
   });
-  if (!res.ok) throw new Error("Could not delete the folder.");
+  if (!res.ok) throw new UserError("note_folder_delete_failed", "Could not delete the folder.");
 }
 
 /** Create or rename a label under `id`. A create mints the id here so the
@@ -174,7 +176,7 @@ export async function saveNoteLabel(id: string, name: string): Promise<CutNoteLa
     `/api/cut/notes/labels/${encodeURIComponent(id)}`,
     json({ name }),
   );
-  if (!res.ok) throw new Error("Could not save the label.");
+  if (!res.ok) throw new UserError("label_save_failed", "Could not save the label.");
   return (await res.json()) as CutNoteLabel;
 }
 
@@ -183,5 +185,5 @@ export async function deleteNoteLabel(id: string): Promise<void> {
   const res = await notesFetch(`/api/cut/notes/labels/${encodeURIComponent(id)}`, {
     method: "DELETE",
   });
-  if (!res.ok) throw new Error("Could not delete the label.");
+  if (!res.ok) throw new UserError("label_delete_failed", "Could not delete the label.");
 }

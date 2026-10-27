@@ -4,6 +4,8 @@ import { type ReactElement, useMemo, useRef, useState } from "react";
 import { Search } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Input } from "@/components/ui/input";
+import { useTranslations } from "next-intl";
+import type { Messages } from "@/i18n/namespaces";
 import { EMOJI_CATEGORIES, type EmojiEntry } from "@/cut/lib/emoji";
 
 // One glyph per category for the jump bar along the bottom.
@@ -18,6 +20,10 @@ const CATEGORY_GLYPH: Record<string, string> = {
   Flags: "🏳️",
 };
 
+// The catalog key that names a category in the page's language; the category
+// names are the Unicode groups, e.g. "Food & Drink".
+type CategoryKey = keyof Messages["media"]["emoji"]["category"];
+
 /**
  * iPhone-style emoji picker: a search field over the full Unicode set, category
  * sections you can jump between, and a scrolling grid. Picking inserts without
@@ -30,6 +36,7 @@ export function EmojiPicker({
   trigger: ReactElement;
   onPick: (emoji: string) => void;
 }) {
+  const t = useTranslations("media.emoji");
   const [query, setQuery] = useState("");
   const sections = useRef<Record<string, HTMLDivElement | null>>({});
 
@@ -60,7 +67,7 @@ export function EmojiPicker({
               autoFocus
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search emoji"
+              placeholder={t("search")}
               className="h-8 pl-8"
             />
           </div>
@@ -72,7 +79,7 @@ export function EmojiPicker({
               <Grid emoji={results} onPick={onPick} />
             ) : (
               <p className="py-10 text-center text-sm text-muted-foreground">
-                No emoji found
+                {t("noResults")}
               </p>
             )
           ) : (
@@ -85,7 +92,7 @@ export function EmojiPicker({
                 style={{ contentVisibility: "auto", containIntrinsicSize: "auto 260px" }}
               >
                 <div className="sticky top-0 z-10 bg-popover/95 py-1 text-xs font-medium text-muted-foreground backdrop-blur-sm">
-                  {cat.name}
+                  {t(`category.${cat.name as CategoryKey}`)}
                 </div>
                 <Grid emoji={cat.emoji} onPick={onPick} />
               </div>
@@ -99,8 +106,8 @@ export function EmojiPicker({
               <button
                 key={cat.name}
                 type="button"
-                title={cat.name}
-                aria-label={cat.name}
+                title={t(`category.${cat.name as CategoryKey}`)}
+                aria-label={t(`category.${cat.name as CategoryKey}`)}
                 className="grid size-7 place-items-center rounded text-base hover:bg-accent"
                 onClick={() =>
                   sections.current[cat.name]?.scrollIntoView({ block: "start" })

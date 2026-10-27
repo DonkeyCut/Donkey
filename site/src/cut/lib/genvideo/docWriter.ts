@@ -21,6 +21,7 @@ import { storedMediaUrl } from "../mediaSync";
 import { projectBackend } from "../residency";
 import { footprints, nextFreeStart, placeInRun, RENDERS_CAP, storedAssets, useEditor } from "../store";
 import { SPEED_MIN } from "../types";
+import { UserError, errorFromBody } from "../userError";
 import type { AudioClip, MediaAsset, ProjectDoc, RenderRecord, VideoClip } from "../types";
 import { fillSlot } from "./fillSlot";
 
@@ -43,14 +44,18 @@ export function withProjectDoc(
     const owner = backend ?? await projectBackend(projectId);
     const res = await owner.fetch(`/api/cut/projects/${projectId}`);
     const doc = await apiJson<ProjectDoc>(res);
-    if (!res.ok) throw new Error(doc?.error ?? "Could not read the project.");
+    if (!res.ok) {
+      throw errorFromBody(doc, new UserError("project_read_failed", "Could not read the project."));
+    }
     mutate(doc);
     const put = await owner.fetch(`/api/cut/projects/${projectId}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(doc),
     });
-    if (!put.ok) throw new Error("Could not save the project in the background.");
+    if (!put.ok) {
+      throw new UserError("project_background_save_failed", "Could not save the project in the background.");
+    }
   });
   chains.set(projectId, next.catch(() => {}));
   return next;

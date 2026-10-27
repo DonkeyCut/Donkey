@@ -4,6 +4,7 @@ import { captureRenderSnapshot, renderDoc, type ExportDoc, type RenderSnapshot }
 import { sourceExportPlan, sourceSequence } from "@/cut/lib/sourceExportPlan";
 import { DELIVERY_DEFAULTS, EXPORT_PRESETS, EXPORT_RESOLUTIONS } from "./exportPresets";
 import { operationFailure, type OperationFailure } from "./operationFailure";
+import { UserError, errorFromBody, type UserErrorParams } from "./userError";
 import { projectOperation } from "./projectOperation";
 
 import { apiFetch, apiJson, getBackend, type CutBackend } from "./backend";
@@ -411,13 +412,16 @@ export function audioBitrate(settings: Pick<ExportSettings, "audioCodec" | "audi
   return settings.audioCodec === "pcm" ? (settings.audioSampleRate ?? 48_000) * 16 * (settings.audioChannels ?? 2) : settings.audioBitrate ?? 192_000;
 }
 
-/** Human-readable size estimate matching the finished-export MB display. */
-export function formatSizeEstimate(bytes: number): string {
+/** Human-readable size estimate matching the finished-export MB display,
+ * with the number and unit in the reader's locale ("~1.4 MB", "~1,4 Mo"). */
+export function formatSizeEstimate(bytes: number, locale: string): string {
   if (bytes <= 0) return "";
   const mb = bytes / (1024 * 1024);
-  if (mb < 1) return "~1 MB";
-  if (mb < 1000) return `~${mb < 10 ? mb.toFixed(1) : Math.round(mb)} MB`;
-  return `~${(mb / 1024).toFixed(1)} GB`;
+  const size = (value: number, unit: "megabyte" | "gigabyte", digits: number) =>
+    `~${new Intl.NumberFormat(locale, { style: "unit", unit, minimumFractionDigits: digits, maximumFractionDigits: digits }).format(value)}`;
+  if (mb < 1) return size(1, "megabyte", 0);
+  if (mb < 1000) return mb < 10 ? size(mb, "megabyte", 1) : size(Math.round(mb), "megabyte", 0);
+  return size(mb / 1024, "gigabyte", 1);
 }
 
 /** Reveal a rendered export in Finder (local engine only). */
@@ -461,7 +465,7 @@ export async function deleteExport(projectId: string, file: string) {
   );
   if (!res.ok) {
     const body = (await res.json().catch(() => ({}))) as { error?: string };
-    throw new Error(body.error ?? "Could not delete the export.");
+    throw errorFromBody(body, new UserError("export_delete_failed", "Could not delete the export."));
   }
 }
 
@@ -849,7 +853,9 @@ export function specColor(
   if (!asset || asset.type === "image") return { profile: "srgb", matrix: "bt709", fullRange: true };
   if (asset.block) return { profile: "rec709", matrix: "bt709", fullRange: false };
   const c = asset.color;
-  if (!c) throw new Error(`The color of ${asset.fileName} was never read.`);
+  if (!c) {
+    throw new UserError("asset_color_unread", `The color of ${asset.fileName} was never read.`, { file: asset.fileName });
+  }
   return { profile: asset.colorProfile ?? c.detected, matrix: c.matrix, fullRange: c.fullRange };
 }
 
@@ -885,7 +891,7 @@ export async function buildExportPayload(
 ): Promise<ExportPayload> {
   // H.264 is an 8-bit delivery; an HDR picture takes HEVC Main 10 or ProRes.
   if ((doc.colorSpace ?? "sdr") !== "sdr" && settings.codec === "h264" && target === "export") {
-    throw new Error("H.264 is 8-bit. Export HDR as HEVC or ProRes.");
+    throw new UserError("export_h264_hdr", "H.264 is 8-bit. Export HDR as HEVC or ProRes.");
   }
   // Every video's color is read before the spec is: footage the lazy fill
   // has not reached would otherwise go out as Rec.709.
@@ -903,7 +909,7 @@ export async function buildExportPayload(
   // whole length. Anything on any row gives the project a duration, so having
   // one is the same question as having something to render.
   if (!(duration > 0)) {
-    throw new Error("Add something to the timeline first.");
+    throw new UserError("export_timeline_empty", "Add something to the timeline first.");
   }
 
   // The person matte renders first, so the loops below attach subject fields
@@ -1545,9 +1551,14 @@ export async function buildExportPayload(
  * its render cap. The worker would say the same, so the export ends here with
  * the gate's own words.
  */
-export class ExportRefusedError extends Error {
-  constructor(message: string, readonly failure?: OperationFailure) { super(message); }
+export class ExportRefusedError extends UserError {
+  constructor(code: string, message: string, params: UserErrorParams = {}, readonly failure?: OperationFailure) {
+    super(code, message, params);
+  }
 }
+
+const startFailed = () => new UserError("export_start_failed", "Export failed to start.");
+const saveFailed = () => new UserError("export_save_failed", "Could not save the export.");
 
 /** Concurrent PUTs a cloud export's inputs go up on. */
 const UPLOAD_LANES = 4;
@@ -1555,9 +1566,18 @@ const UPLOAD_LANES = 4;
 function cloudRefusal(res: Response, body: { error?: string; bytes?: number; quotaBytes?: number } | null | undefined): ExportRefusedError | null {
   if (res.ok) return null;
   const failure = operationFailure(res.status, body);
-  if (failure) return new ExportRefusedError(failure.message, failure);
-  if (res.status === 429 || res.status === 413) return new ExportRefusedError(body?.error ?? "Export failed to start.");
-  return null;
+  if (failure) {
+    return new ExportRefusedError(failure.code, failure.message, {}, failure);
+  }
+  if (res.status !== 429 && res.status !== 413) {
+    return null;
+  }
+
+  // The gate's own words keep their code; uncoded words read as they came.
+  const reason = errorFromBody(body, startFailed());
+  return reason instanceof UserError
+    ? new ExportRefusedError(reason.code, reason.message, reason.params)
+    : new ExportRefusedError("export_refused", reason.message, { reason: reason.message });
 }
 
 /** Serialize a payload to the engine's multipart form: PNGs in render order,
@@ -1600,7 +1620,7 @@ async function postExport(
     const preBody =
       await apiJson<{ files?: { name: string; key: string; type?: string; url: string }[] }>(pre);
     if (!pre.ok || !preBody.files) {
-      throw cloudRefusal(pre, preBody) ?? new Error(preBody.error ?? "Export failed to start.");
+      throw cloudRefusal(pre, preBody) ?? errorFromBody(preBody, startFailed());
     }
     const byName = new Map(preBody.files.map((f) => [f.name, f]));
     // The list carries a borrowed render's whole media set, so the PUTs go a
@@ -1610,7 +1630,9 @@ async function postExport(
       Array.from({ length: Math.min(UPLOAD_LANES, queue.length) }, async () => {
         for (let p = queue.shift(); p; p = queue.shift()) {
           const target = byName.get(p.name);
-          if (!target) throw new Error("Export failed to start.");
+          if (!target) {
+            throw startFailed();
+          }
           // The content type the URL was signed with: it is the one the
           // signature covers, and for a video it differs from the blob's.
           await putSigned(target.url, p.blob, target.type || "image/png", { signal });
@@ -1631,7 +1653,9 @@ async function postExport(
  * asking for them is refused before anything renders. */
 function stemsFor(doc: ExportDoc): StemDef[] {
   const stems = planStems(doc);
-  if (stems.length === 0) throw new ExportRefusedError("Nothing in this cut makes a sound to split into stems.");
+  if (stems.length === 0) {
+    throw new ExportRefusedError("export_stems_silent", "Nothing in this cut makes a sound to split into stems.");
+  }
   return stems;
 }
 
@@ -1671,7 +1695,9 @@ export async function pollExport(
   backend: CutBackend = getBackend()
 ): Promise<string> {
   for (;;) {
-    if (isCanceled()) throw new Error("Export canceled.");
+    if (isCanceled()) {
+      throw new UserError("export_canceled", "Export canceled.");
+    }
     await new Promise((r) => setTimeout(r, 400));
     const st = await backend.fetch(`/api/cut/export/${jobId}`);
     const status = await apiJson<{
@@ -1679,7 +1705,9 @@ export async function pollExport(
       progress?: number;
       outName?: string;
     }>(st);
-    if (!st.ok || status.status === "error" || status.status === "canceled") throw new Error(status.error ?? "Export failed.");
+    if (!st.ok || status.status === "error" || status.status === "canceled") {
+      throw errorFromBody(status, new UserError("export_failed", "Export failed."));
+    }
     onProgress("Rendering", status.progress ?? 0);
     if (status.status === "done") return status.outName ?? "export.mp4";
   }
@@ -1740,7 +1768,10 @@ async function assertEngineCarries(
   const has = await engineFeatures();
   for (const [feature, wanted, what] of wants) {
     if (wanted && !has.has(feature)) {
-      throw new ExportRefusedError(`Update the Donkey app to ${what}.`);
+      throw new ExportRefusedError("app_update_required", `Update the Donkey app to ${what}.`, {
+        feature: feature.replace(".", "_"),
+        what,
+      });
     }
   }
 }
@@ -1761,7 +1792,7 @@ export async function createExportJob(
   const res = await postExport(projectId, payload, outName, backend);
   const body = await apiJson<{ id?: string }>(res);
   if (!res.ok || !body.id) {
-    throw cloudRefusal(res, body) ?? new Error(body.error ?? "Export failed to start.");
+    throw cloudRefusal(res, body) ?? errorFromBody(body, startFailed());
   }
   return body.id;
 }
@@ -1823,10 +1854,10 @@ export async function runBrowserExport(
   });
   const claimed = await apiJson<{ jobId?: string; url?: string; outName?: string; type?: string; stemsUrl?: string }>(claim);
   if (!claim.ok || !claimed.jobId || !claimed.url) {
-    throw cloudRefusal(claim, claimed) ?? new Error(claimed.error ?? "Export failed to start.");
+    throw cloudRefusal(claim, claimed) ?? errorFromBody(claimed, startFailed());
   }
   if (settings.stems && !claimed.stemsUrl) {
-    throw new Error("The cloud did not hold a place for the stems.");
+    throw new UserError("cloud_stems_slot_missing", "The cloud did not hold a place for the stems.");
   }
   const jobId = claimed.jobId;
   opts.onClaimed?.(jobId);
@@ -1889,7 +1920,7 @@ export async function runBrowserExport(
     });
     const body = await apiJson<{ id?: string }>(done);
     if (!done.ok || !body.id) {
-      throw cloudRefusal(done, body) ?? new Error(body.error ?? "Could not save the export.");
+      throw cloudRefusal(done, body) ?? errorFromBody(body, saveFailed());
     }
     return body.id;
   } catch (err) {
@@ -1937,7 +1968,9 @@ async function runEngineExport(
     }),
   });
   const claimed = await apiJson<{ id?: string; outName?: string }>(claim);
-  if (!claim.ok || !claimed.id) throw new Error(claimed.error ?? "Export failed to start.");
+  if (!claim.ok || !claimed.id) {
+    throw errorFromBody(claimed, startFailed());
+  }
   const jobId = claimed.id;
   opts.onClaimed?.(jobId);
   // The engine's feed carries the progress to every other tab's dock; a
@@ -1987,7 +2020,12 @@ async function runEngineExport(
         void stems.discard();
       }
       if (landed.status === 409) throw new DOMException("Export canceled.", "AbortError");
-      if (!landed.ok) throw new Error((await apiJson<object>(landed)).error ?? "Could not save the stems.");
+      if (!landed.ok) {
+        throw errorFromBody(
+          await apiJson<object>(landed),
+          new UserError("export_stems_save_failed", "Could not save the stems."),
+        );
+      }
     }
     let done: Response;
     try {
@@ -2007,7 +2045,9 @@ async function runEngineExport(
     // ends here the way a cancel in this tab does.
     if (done.status === 409) throw new DOMException("Export canceled.", "AbortError");
     const body = await apiJson<{ id?: string }>(done);
-    if (!done.ok || !body.id) throw new Error(body.error ?? "Could not save the export.");
+    if (!done.ok || !body.id) {
+      throw errorFromBody(body, saveFailed());
+    }
     opts.onProgress?.(1);
     return body.id;
   } catch (err) {
@@ -2050,7 +2090,8 @@ async function saveStems(
     await dropStoredExport(projectId, videoName);
     if (err instanceof DOMException && err.name === "AbortError") throw err;
     if (err instanceof ExportRefusedError) throw err;
-    throw new ExportRefusedError(`The stems could not be saved: ${err instanceof Error ? err.message : String(err)}`);
+    const reason = err instanceof Error ? err.message : String(err);
+    throw new ExportRefusedError("stems_save_failed", `The stems could not be saved: ${reason}`, { reason });
   } finally {
     releaseRegistered(`/api/cut/projects/${projectId}/`);
   }
@@ -2138,18 +2179,24 @@ async function renderBorrowedFile(
       const asset = doc.assets.find((a) => a.fileName === name);
       const url = asset ? renderAssetUrl(projectId, asset) : null;
       const blob = url ? resolveRegisteredBlob(url) : null;
-      if (!blob) throw new Error(`${name} is not in this browser's storage.`);
+      if (!blob) {
+        throw new UserError("export_media_not_stored", `${name} is not in this browser's storage.`, { name });
+      }
       payload.pngs.push({ name, blob });
     }
     const res = await postExport(projectId, payload, requestedName, backend, { mediaFrom: "overlays" }, opts.signal);
     const body = await apiJson<{ id?: string }>(res);
-    if (!res.ok || !body.id) throw cloudRefusal(res, body) ?? new Error(body.error ?? "Render failed to start.");
+    if (!res.ok || !body.id) {
+      throw cloudRefusal(res, body) ?? errorFromBody(body, new UserError("render_start_failed", "Render failed to start."));
+    }
     cloudJobId = body.id;
     opts.onClaimed?.(cloudJobId);
     const outName = await pollExport(cloudJobId, (_stage, ratio) => opts.onProgress?.(ratio * 0.95), () => !!opts.signal?.aborted, backend);
     stop();
     const fileRes = await backend.fetch(`/api/cut/export/${cloudJobId}/file`, { signal: opts.signal });
-    if (!fileRes.ok) throw new Error("Could not fetch the rendered file.");
+    if (!fileRes.ok) {
+      throw new UserError("render_fetch_failed", "Could not fetch the rendered file.");
+    }
     const file = new File([await fileRes.blob()], outName, { type: deliveryContainer(settings.container).mime });
     stop();
     return file;
@@ -2271,7 +2318,9 @@ export async function submitPreviewSnapshot(
   const settings = previewSettings(doc.aspect);
   if (backend.kind === "browser") {
     const directory = await projectDir(projectId);
-    if (!directory) throw new Error("Project not found in browser storage.");
+    if (!directory) {
+      throw new UserError("project_not_in_browser", "Project not found in browser storage.");
+    }
     holdRegistered(`/api/cut/projects/${projectId}/`);
     try {
       // The hover preview is an SDR web picture whatever the project delivers.
@@ -2290,7 +2339,9 @@ export async function submitPreviewSnapshot(
         signal?.throwIfAborted();
         await writeFileAt(directory, "preview.mp4", rendered.file);
         const file = await readFileAt(directory, "preview.mp4");
-        if (!file) throw new Error("Could not read the rendered preview.");
+        if (!file) {
+          throw new UserError("preview_read_failed", "Could not read the rendered preview.");
+        }
         const url = registerBlobFile(`/api/cut/projects/${projectId}/preview`, file);
         return { id: revision, projectId, revision, url, status: "done" };
       } finally {
@@ -2304,7 +2355,9 @@ export async function submitPreviewSnapshot(
   signal?.throwIfAborted();
   const res = await postExport(projectId, payload, "preview.mp4", backend, { revision }, signal);
   const body = await apiJson<{ id?: string }>(res);
-  if (!res.ok || !body.id) throw cloudRefusal(res, body) ?? new Error(body.error ?? "Preview failed to start.");
+  if (!res.ok || !body.id) {
+    throw cloudRefusal(res, body) ?? errorFromBody(body, new UserError("preview_start_failed", "Preview failed to start."));
+  }
   if (signal?.aborted) {
     cancelExportJob(body.id, backend);
     signal.throwIfAborted();
@@ -2332,7 +2385,9 @@ export async function renderPreviewSnapshot(
     if (backend.kind === "cloud") {
       const response = await backend.fetch(`/api/cut/export/${job.id}`);
       const body = await apiJson<{ artifact?: { url: string; expiresIn: number } }>(response);
-      if (!response.ok || !body.artifact) throw new Error(body.error ?? "Preview is unavailable.");
+      if (!response.ok || !body.artifact) {
+        throw errorFromBody(body, new UserError("preview_unavailable", "Preview is unavailable."));
+      }
       return { id: job.id, projectId: job.projectId, revision: job.revision, url: body.artifact.url,
         expiresAt: Date.now() + body.artifact.expiresIn * 1000 };
     }

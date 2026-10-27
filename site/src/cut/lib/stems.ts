@@ -13,6 +13,7 @@
  */
 
 import { assetIsSilent, type AudioClip, type MediaAsset, type VideoClip } from "./types";
+import { UserError } from "./userError";
 import { wavHeader } from "./wav";
 
 /** One stem: what it is called, the file it lands in, and what it carries —
@@ -298,7 +299,7 @@ export async function writeStoredZip(
       crc = crc32(b, crc);
       size += b.length;
     }
-    if (size !== e.size) throw new Error(`${e.name} changed size while it was being packed.`);
+    if (size !== e.size) throw new UserError("stem_changed_while_packing", `${e.name} changed size while it was being packed.`, { name: e.name });
     const entry = { name: e.name, size, crc };
     offsets.push(at);
     await put(zipLocalHeader(entry));

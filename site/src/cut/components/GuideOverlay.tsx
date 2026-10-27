@@ -1,6 +1,7 @@
 "use client";
 
 import type React from "react";
+import { useTranslations } from "next-intl";
 import { startDrag } from "@/cut/lib/drag";
 import { useEditor } from "@/cut/lib/store";
 import { guideGeometry, type GuideGeometry } from "@/cut/lib/guides";
@@ -109,6 +110,7 @@ export function GuideHandles({ stage }: { stage: { w: number; h: number } }) {
  * Custom lines draw in blue; GuideHandles, inside the stage, moves them.
  */
 export function GuideOverlay({ stage }: { stage: { w: number; h: number } }) {
+  const t = useTranslations("timeline.guides");
   const geo = useGuideGeometry();
   if (!geo) return null;
   const { w, h } = stage;
@@ -164,7 +166,7 @@ export function GuideOverlay({ stage }: { stage: { w: number; h: number } }) {
                 paintOrder="stroke"
                 style={{ fontFamily: "ui-sans-serif, system-ui, sans-serif" }}
               >
-                {b.label}
+                {t(`regions.${b.region}`)}
               </text>
             )}
           </g>

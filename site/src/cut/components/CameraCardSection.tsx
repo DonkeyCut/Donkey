@@ -1,5 +1,7 @@
 "use client";
 
+import { useTranslations } from "next-intl";
+
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -28,10 +30,10 @@ import { frameOf, rectOf, type VideoClip } from "@/cut/lib/types";
 import { ResetButton, Row, Section, useSliderCheckpoint } from "@/cut/components/panelBits";
 import { parseNumberInput, parsePercentInput, ScrubValue } from "@/cut/components/ScrubValue";
 import { ValueSlider } from "@/cut/components/ValueSlider";
+import { useDescribeError } from "@/i18n/describeError";
 
 const formatPercent = (v: number) => `${Math.round(v * 100)}%`;
 const formatPx = (v: number) => String(Math.round(v));
-const SIDE_LABELS: Record<CardSide, string> = { bottom: "Bottom", left: "Left", right: "Right" };
 
 /**
  * The camera card: the talking-head split layout on one clip, in any frame
@@ -43,6 +45,8 @@ const SIDE_LABELS: Record<CardSide, string> = { bottom: "Bottom", left: "Left", 
  * through the transient updater under one checkpoint per gesture.
  */
 export function CameraCardSection({ clip }: { clip: VideoClip }) {
+  const t = useTranslations("editor.cameraCard");
+  const describeError = useDescribeError();
   const card = clip.card;
   const st = () => useEditor.getState();
   const ck = useSliderCheckpoint();
@@ -68,10 +72,10 @@ export function CameraCardSection({ clip }: { clip: VideoClip }) {
     min: number,
     max: number,
     snap?: number[],
-    reset?: { show: boolean; onClick: () => void }
+    reset?: { show: boolean; onClick: () => void; title: string }
   ) => (
     <Row label={label}>
-      {reset && <ResetButton title={`Reset ${label.toLowerCase()}`} show={reset.show} onClick={reset.onClick} />}
+      {reset && <ResetButton title={reset.title} show={reset.show} onClick={reset.onClick} />}
       <ValueSlider
         label={label}
         sliderClassName="data-horizontal:w-24"
@@ -117,31 +121,37 @@ export function CameraCardSection({ clip }: { clip: VideoClip }) {
   const shape = card
     ? resolveCardShape(card, rect.w * fr.w, rect.h * fr.h, asset?.width ?? 0, asset?.height ?? 0)
     : null;
+  // The side names, keyed by side; auto names the side it resolved to.
+  const sideLabels: Record<CardSide, string> = {
+    bottom: t("side.bottom"),
+    left: t("side.left"),
+    right: t("side.right"),
+  };
   const sideItems = {
-    auto: `Auto (${SIDE_LABELS[shape?.side ?? "bottom"]})`,
-    ...SIDE_LABELS,
+    auto: t("side.auto", { side: sideLabels[shape?.side ?? "bottom"] }),
+    ...sideLabels,
   };
 
   const matteLine = !card?.popOut
     ? null
     : card.matte
-      ? "Person matte ready"
+      ? t("matteReady")
       : job?.status === "running"
-        ? `Person matte baking ${Math.round(job.progress * 100)}%`
+        ? t("matteBaking", { progress: job.progress })
         : job?.status === "error"
-          ? (job.error ?? "The person matte could not be baked.")
-          : "Person matte starting";
+          ? describeError(job, t("matteFailed"))
+          : t("matteStarting");
 
   return (
     <Section
-      title="Camera card"
-      info="The speaker shows through a rounded card at the edge of the frame, and their head pops out above it. Auto puts the card across the bottom of a portrait frame and up the right side of a square or landscape one. Put the graphic on a lower track. The card places the footage and draws its own corners and shadow, so framing zoom, pan, border and shadow stand aside while it is on. Lengths are design pixels."
+      title={t("title")}
+      info={t("info")}
       enabled={!!card}
       onEnabledChange={(v) => st().updateClip(clip.id, { card: v ? newCard() : undefined })}
     >
       {card && shape && (
         <>
-          <Row label="Side">
+          <Row label={t("sideLabel")}>
             <Select
               value={card.side ?? "auto"}
               items={sideItems}
@@ -168,32 +178,34 @@ export function CameraCardSection({ clip }: { clip: VideoClip }) {
               </SelectContent>
             </Select>
           </Row>
-          {slider("Top", "top", shape.top, CARD_TOP_MIN, CARD_TOP_MAX, undefined, {
+          {slider(t("top"), "top", shape.top, CARD_TOP_MIN, CARD_TOP_MAX, undefined, {
+            title: t("resetTop"),
             show: card.top !== undefined,
             onClick: () => st().updateClip(clip.id, { card: { ...card, top: undefined } }),
           })}
           {shape.side !== "bottom" &&
-            slider("Width", "width", shape.width, CARD_WIDTH_MIN, CARD_WIDTH_MAX, undefined, {
+            slider(t("width"), "width", shape.width, CARD_WIDTH_MIN, CARD_WIDTH_MAX, undefined, {
+              title: t("resetWidth"),
               show: card.width !== undefined,
               onClick: () => st().updateClip(clip.id, { card: { ...card, width: undefined } }),
             })}
-          <Row label="Radius">
-            {scrub("Card radius", "radius", card.radius, 0, CARD_RADIUS_MAX, 1, formatPx, parseNumberInput)}
+          <Row label={t("radius")}>
+            {scrub(t("cardRadius"), "radius", card.radius, 0, CARD_RADIUS_MAX, 1, formatPx, parseNumberInput)}
           </Row>
-          <Row label="Side bleed">
-            {scrub("Card side bleed", "sideBleed", card.sideBleed, 0, CARD_BLEED_MAX, 1, formatPx, parseNumberInput)}
+          <Row label={t("sideBleed")}>
+            {scrub(t("cardSideBleed"), "sideBleed", card.sideBleed, 0, CARD_BLEED_MAX, 1, formatPx, parseNumberInput)}
           </Row>
-          {slider("Shadow", "shadow", card.shadow, 0, 1)}
-          <Row label="Pop out">
+          {slider(t("shadow"), "shadow", card.shadow, 0, 1)}
+          <Row label={t("popOut")}>
             <Switch
-              aria-label="Pop out"
+              aria-label={t("popOut")}
               checked={card.popOut}
               onCheckedChange={(popOut) => st().updateClip(clip.id, { card: { ...card, popOut } })}
             />
           </Row>
           {card.popOut && (
-            <Row label="Feather">
-              {scrub("Pop out feather", "feather", card.feather, 0, CARD_FEATHER_MAX, 1, formatPx, parseNumberInput)}
+            <Row label={t("feather")}>
+              {scrub(t("popOutFeather"), "feather", card.feather, 0, CARD_FEATHER_MAX, 1, formatPx, parseNumberInput)}
             </Row>
           )}
           {matteLine && (
@@ -201,13 +213,13 @@ export function CameraCardSection({ clip }: { clip: VideoClip }) {
               <span className="truncate">{matteLine}</span>
               {job?.status === "error" && (
                 <Button size="sm" variant="outline" onClick={() => retryCardMatte(clip.id)}>
-                  Retry
+                  {t("retry")}
                 </Button>
               )}
             </div>
           )}
-          {slider("Footage size", "scale", card.scale ?? 1, CARD_SCALE_MIN, CARD_SCALE_MAX, [1])}
-          <Row label="Footage offset">
+          {slider(t("footageSize"), "scale", card.scale ?? 1, CARD_SCALE_MIN, CARD_SCALE_MAX, [1])}
+          <Row label={t("footageOffset")}>
             {(
               [
                 ["X", "offsetX", card.offsetX ?? 0],
@@ -216,7 +228,7 @@ export function CameraCardSection({ clip }: { clip: VideoClip }) {
             ).map(([axis, key, value]) => (
               <span key={axis} className="flex items-center gap-1">
                 <span className="text-[11px] text-muted-foreground/70 uppercase">{axis}</span>
-                {scrub(`Footage ${axis} offset`, key, value, -CARD_OFFSET_MAX, CARD_OFFSET_MAX, 0.01, formatPercent, parsePercentInput)}
+                {scrub(t("footageAxisOffset", { axis }), key, value, -CARD_OFFSET_MAX, CARD_OFFSET_MAX, 0.01, formatPercent, parsePercentInput)}
               </span>
             ))}
           </Row>

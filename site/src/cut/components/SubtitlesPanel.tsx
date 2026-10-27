@@ -1,6 +1,7 @@
 "use client";
 
-import React, { memo, useEffect, useRef, useState } from "react";
+import React, { memo, useEffect, useMemo, useRef, useState } from "react";
+import { useLocale, useTranslations } from "next-intl";
 import { AlertCircle, Captions, ChevronDown, Languages, Loader2, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -56,20 +57,36 @@ import {
   WORD_SWELL_MAX,
   WORD_SWELL_MIN,
 } from "@donkeycut/effects-kit";
+import { useDescribeError } from "@/i18n/describeError";
+import type { ErrorFields } from "@/cut/lib/userError";
+import { useLabels } from "@/i18n/labels";
 
+// The languages a caption track can be transcribed in, in picker order. Each
+// is named in the page's language (useLanguageName).
 const LOCALES = [
-  ["en-US", "English (US)"],
-  ["en-GB", "English (UK)"],
-  ["es-ES", "Español"],
-  ["fr-FR", "Français"],
-  ["de-DE", "Deutsch"],
-  ["it-IT", "Italiano"],
-  ["pt-BR", "Português (BR)"],
-  ["ja-JP", "日本語"],
-  ["ko-KR", "한국어"],
-  ["zh-CN", "中文"],
-  ["vi-VN", "Tiếng Việt"],
+  "en-US",
+  "en-GB",
+  "es-ES",
+  "fr-FR",
+  "de-DE",
+  "it-IT",
+  "pt-BR",
+  "ja-JP",
+  "ko-KR",
+  "zh-CN",
+  "vi-VN",
 ] as const;
+
+/** Names a language code in the page's language: "en-GB" reads "English
+ * (UK)" on an English page and "Englisch (UK)" on a German one. */
+function useLanguageName(): (code: string) => string {
+  const uiLocale = useLocale();
+  const names = useMemo(
+    () => new Intl.DisplayNames([uiLocale], { type: "language", languageDisplay: "standard", style: "short" }),
+    [uiLocale]
+  );
+  return (code) => names.of(code) ?? code;
+}
 
 /** Give the cue track room when it appears. */
 const TIMELINE_H_WITH_SUBS = Math.max(TIMELINE_H_MIN, 276);
@@ -86,18 +103,24 @@ function laneLabel(subs: SubtitlesBlock, lane: number): string {
   return trackLocale(subs, lane).split("-")[0].toUpperCase();
 }
 
-/** A track's language name from the locale picker list, else its short code. */
-function laneLanguage(subs: SubtitlesBlock, lane: number): string {
-  return LOCALES.find(([id]) => id === trackLocale(subs, lane))?.[1] ?? laneLabel(subs, lane);
+/** A track's language name when the locale picker lists it, else its short code. */
+function laneLanguage(subs: SubtitlesBlock, lane: number, languageName: (code: string) => string): string {
+  const locale = trackLocale(subs, lane);
+  if (!(LOCALES as readonly string[]).includes(locale)) {
+    return laneLabel(subs, lane);
+  }
+  return languageName(locale);
 }
 
 export function SubtitlesPanel() {
+  const t = useTranslations("panels.subtitles");
+  const describeError = useDescribeError();
   const caps = useCutCaps();
   const readOnly = useEditor((s) => s.readOnly);
   const subtitles = useEditor((s) => s.subtitles);
   const lane = useEditor((s) => s.subtitleLane);
   const status = useEditor((s) => s.subtitleStatus);
-  const error = useEditor((s) => s.subtitleError);
+  const error = useEditor((s) => s.subtitleFailure ?? s.subtitleError);
   const activeCues = laneCues(subtitles, lane);
   const hasCues = activeCues.length > 0;
   // The open tab holds for the session, so leaving the panel and coming back
@@ -137,13 +160,13 @@ export function SubtitlesPanel() {
     return (
       <>
         <div className="flex h-12 shrink-0 items-center pl-4">
-          <span className="text-sm font-semibold tracking-tight">Subtitles</span>
+          <span className="text-sm font-semibold tracking-tight">{t("title")}</span>
         </div>
         {hasCues ? (
           <Transcript cues={activeCues} />
         ) : (
           <p className="px-4 text-[11px] leading-relaxed text-muted-foreground">
-            No subtitles yet.
+            {t("noSubtitles")}
           </p>
         )}
       </>
@@ -157,9 +180,9 @@ export function SubtitlesPanel() {
           <div className="sub-tabs flex items-center gap-3.5">
             {(
               [
-                ["content", "Content"],
-                ["styles", "Styles"],
-                ["options", "Options"],
+                ["content", t("tabs.content")],
+                ["styles", t("tabs.styles")],
+                ["options", t("tabs.options")],
               ] as const
             ).map(([id, label], i) => (
               <React.Fragment key={id}>
@@ -178,7 +201,7 @@ export function SubtitlesPanel() {
             ))}
           </div>
         ) : (
-          <span className="text-sm font-semibold tracking-tight">Subtitles</span>
+          <span className="text-sm font-semibold tracking-tight">{t("title")}</span>
         )}
       </div>
 
@@ -192,7 +215,7 @@ export function SubtitlesPanel() {
                 variant="ghost"
                 size="sm"
                 className="sub-regenerate"
-                title="Transcribe the cut again (replaces these captions — undoable)"
+                title={t("regenerateHint")}
                 disabled={status === "running"}
                 onClick={generate}
               >
@@ -201,14 +224,14 @@ export function SubtitlesPanel() {
                 ) : (
                   <RefreshCw />
                 )}
-                Regenerate
+                {t("regenerate")}
               </Button>
             </div>
           )}
           <Transcript cues={activeCues} />
           {status === "error" && error && (
             <p className="sub-error shrink-0 border-t border-border px-4 py-2.5 text-[11px] leading-relaxed text-red-600">
-              {error}
+              {describeError(error)}
             </p>
           )}
         </>
@@ -225,11 +248,13 @@ export function SubtitlesPanel() {
  * its color, position reset for a dragged caption, and the subtitle-voiceover
  * generator. */
 function OptionsTab() {
+  const t = useTranslations("panels.subtitles");
+  const wordEffectLabel = useLabels("wordEffect");
   const subtitles = useEditor((s) => s.subtitles);
   const moved =
     subtitles.x !== undefined ||
     subtitles.y !== undefined ||
-    !!subtitles.tracks?.some((t) => t.x !== undefined || t.y !== undefined);
+    !!subtitles.tracks?.some((track) => track.x !== undefined || track.y !== undefined);
   // Effective word effect: the caption style's defaults with the user's
   // overrides on top, so the controls always show what's on the video.
   const words = captionWords(captionStyle(subtitles.style), subtitles);
@@ -248,7 +273,7 @@ function OptionsTab() {
         <GenerateSubtitlesAudio />
       </div>
       <label className="flex min-h-8 items-center justify-between text-xs font-medium">
-        Show subtitles
+        {t("showSubtitles")}
         <Switch
           className="sub-show"
           checked={subtitles.showOnVideo || subtitles.showOnTimeline}
@@ -260,7 +285,7 @@ function OptionsTab() {
         />
       </label>
       <div className="flex min-h-8 items-center justify-between text-xs font-medium">
-        Font
+        {t("font")}
         <FontPicker
           className="sub-font w-28"
           value={subtitles.font ?? captionStyle(subtitles.style).font}
@@ -268,10 +293,10 @@ function OptionsTab() {
         />
       </div>
       <div className="flex min-h-8 items-center justify-between text-xs font-medium">
-        Size
+        {t("size")}
         <div className="sub-size flex items-center gap-2">
           <ValueSlider
-            label="Caption size"
+            label={t("captionSize")}
             sliderClassName="data-horizontal:w-24"
             valueClassName="w-7 text-muted-foreground"
             value={subtitles.size ?? captionStyle(subtitles.style).size}
@@ -288,15 +313,15 @@ function OptionsTab() {
       </div>
       <WordsPerCueRow />
       <div className="flex min-h-8 items-center justify-between text-xs font-medium">
-        Word effect
+        {t("wordEffect")}
         <PillSelect
           className="sub-word-highlight w-36"
-          title="Word effect"
+          title={t("wordEffect")}
           value={on ? words.style : "none"}
-          display={on ? wordEffect(words.style).label : "None"}
+          display={on ? wordEffectLabel(WORD_EFFECT_MENU.find((m) => m.id === words.style)?.id ?? "color") : t("none")}
           options={[
-            { value: "none", label: "None" },
-            ...WORD_EFFECT_MENU.map((m) => ({ value: m.id, label: m.label })),
+            { value: "none", label: t("none") },
+            ...WORD_EFFECT_MENU.map((m) => ({ value: m.id, label: wordEffectLabel(m.id) })),
           ]}
           onChange={(v) =>
             useEditor.getState().setSubtitlesView(
@@ -309,10 +334,10 @@ function OptionsTab() {
       </div>
       {on && knobs.size && (
         <div className="flex min-h-8 items-center justify-between text-xs font-medium">
-          Word size
+          {t("wordSize")}
           <div className="sub-accent-scale flex items-center gap-2">
             <ValueSlider
-              label="Word size"
+              label={t("wordSize")}
               sliderClassName="data-horizontal:w-24"
               valueClassName="w-9 text-muted-foreground"
               value={wordSwell(words)}
@@ -330,10 +355,10 @@ function OptionsTab() {
       )}
       {on && knobs.dim && (
         <div className="flex min-h-8 items-center justify-between text-xs font-medium">
-          Faded to
+          {t("fadedTo")}
           <div className="sub-accent-dim flex items-center gap-2">
             <ValueSlider
-              label="Faded to"
+              label={t("fadedTo")}
               sliderClassName="data-horizontal:w-24"
               valueClassName="w-9 text-muted-foreground"
               value={wordDim(words)}
@@ -351,11 +376,11 @@ function OptionsTab() {
       )}
       {on && knobs.color && (
         <div className="flex min-h-8 items-center justify-between text-xs font-medium">
-          Word color
+          {t("wordColor")}
           <div className="sub-accent-color flex items-center">
             <ColorField
               value={wordAccent(words, captionStyle(subtitles.style).color)}
-              label="Word color"
+              label={t("wordColor")}
               onBegin={() => useEditor.getState().pushHistory()}
               onLive={(c) => useEditor.getState().setSubtitlesView({ accentColor: c })}
               onCommit={(c) => useEditor.getState().setSubtitlesView({ accentColor: c })}
@@ -365,7 +390,7 @@ function OptionsTab() {
       )}
       <EmphasisRows />
       <div className="flex min-h-8 items-center justify-between text-xs font-medium">
-        Position
+        {t("position")}
         <Button
           variant="outline"
           size="sm"
@@ -379,11 +404,11 @@ function OptionsTab() {
             );
           }}
         >
-          Reset
+          {t("reset")}
         </Button>
       </div>
       <p className="sub-position-hint -mt-1 text-[11px] leading-relaxed text-muted-foreground">
-        Drag the caption on the video to reposition every subtitle.
+        {t("positionHint")}
       </p>
     </ScrollArea>
   );
@@ -392,6 +417,7 @@ function OptionsTab() {
 /** The emphasis style: how the words set apart in the transcript look on the
  * video. The words themselves are picked in the Content tab. */
 function EmphasisRows() {
+  const t = useTranslations("panels.subtitles");
   const subtitles = useEditor((s) => s.subtitles);
   const em = captionEmphasis(subtitles);
   const set = (patch: Parameters<ReturnType<typeof useEditor.getState>["setSubtitlesView"]>[0]) =>
@@ -399,7 +425,7 @@ function EmphasisRows() {
   return (
     <div className="sub-emphasis mt-1 flex flex-col gap-2.5 border-t border-border pt-3">
       <div className="flex min-h-8 items-center justify-between text-xs font-medium">
-        Emphasis font
+        {t("emphasisFont")}
         <FontPicker
           className="sub-emphasis-font w-28"
           value={em.font}
@@ -410,11 +436,11 @@ function EmphasisRows() {
         />
       </div>
       <div className="flex min-h-8 items-center justify-between text-xs font-medium">
-        Emphasis color
+        {t("emphasisColor")}
         <div className="sub-emphasis-color flex items-center">
           <ColorField
             value={em.color}
-            label="Emphasis color"
+            label={t("emphasisColor")}
             onBegin={() => useEditor.getState().pushHistory()}
             onLive={(c) => set({ emphasisColor: c })}
             onCommit={(c) => set({ emphasisColor: c })}
@@ -422,7 +448,7 @@ function EmphasisRows() {
         </div>
       </div>
       <label className="flex min-h-8 items-center justify-between text-xs font-medium">
-        Italic
+        {t("italic")}
         <Switch
           className="sub-emphasis-italic"
           checked={em.italic}
@@ -433,7 +459,7 @@ function EmphasisRows() {
         />
       </label>
       <label className="flex min-h-8 items-center justify-between text-xs font-medium">
-        Bold
+        {t("bold")}
         <Switch
           className="sub-emphasis-weight"
           checked={em.weight >= 700}
@@ -444,10 +470,10 @@ function EmphasisRows() {
         />
       </label>
       <div className="flex min-h-8 items-center justify-between text-xs font-medium">
-        Emphasis size
+        {t("emphasisSize")}
         <div className="sub-emphasis-scale flex items-center gap-2">
           <ValueSlider
-            label="Emphasis size"
+            label={t("emphasisSize")}
             sliderClassName="data-horizontal:w-24"
             valueClassName="w-9 text-muted-foreground"
             value={em.scale}
@@ -463,8 +489,7 @@ function EmphasisRows() {
         </div>
       </div>
       <p className="-mt-1 text-[11px] leading-relaxed text-muted-foreground">
-        Right-click a word in the transcript, or put the cursor on it and press ⌘B, to set it
-        apart in this style.
+        {t("emphasisHint", { key: "⌘B" })}
       </p>
     </div>
   );
@@ -475,17 +500,18 @@ function EmphasisRows() {
  * takes a moment on a long project — the slider shows the drag, the track is
  * re-cut once on release. */
 function WordsPerCueRow() {
+  const t = useTranslations("panels.subtitles");
   const subtitles = useEditor((s) => s.subtitles);
   const [draft, setDraft] = useState<number | null>(null);
   const [working, setWorking] = useState(false);
   const value = draft ?? cueWordCount(subtitles);
   return (
     <div className="flex min-h-8 items-center justify-between text-xs font-medium">
-      Words at a time
+      {t("wordsAtATime")}
       <div className="sub-words-per-cue flex items-center gap-2">
         {working && <Loader2 className="size-3 animate-spin text-muted-foreground" />}
         <ValueSlider
-          label="Words at a time"
+          label={t("wordsAtATime")}
           sliderClassName="data-horizontal:w-24"
           valueClassName="w-7 text-muted-foreground"
           value={value}
@@ -516,6 +542,7 @@ function WordsPerCueRow() {
 /** The Styles tab: the caption style list, each option rendered as a live
  * preview of that look. */
 function StylesTab() {
+  const t = useTranslations("panels.subtitles");
   const subtitles = useEditor((s) => s.subtitles);
   const style = subtitles.style ?? "clean";
 
@@ -555,10 +582,10 @@ function StylesTab() {
                   borderRadius: cs.plate ? `${PLATE_RADIUS}em` : undefined,
                 }}
               >
-                Your caption
+                {t("sampleCaption")}
               </span>
             </div>
-            <div className="px-1 pt-1 pb-0.5 text-[11px] font-medium">{cs.label}</div>
+            <div className="px-1 pt-1 pb-0.5 text-[11px] font-medium">{t(`captionStyles.${cs.id}`)}</div>
           </button>
         ))}
       </div>
@@ -573,10 +600,13 @@ function EmptyState({
   onTranslate,
 }: {
   status: string;
-  error: string | null;
+  error: ErrorFields | string | null;
   onGenerate: () => void;
   onTranslate: (fromLane: number) => void;
 }) {
+  const t = useTranslations("panels.subtitles");
+  const describeError = useDescribeError();
+  const languageName = useLanguageName();
   const caps = useCutCaps();
   const subtitles = useEditor((s) => s.subtitles);
   const lane = useEditor((s) => s.subtitleLane);
@@ -594,12 +624,11 @@ function EmptyState({
       <div className="sub-generating flex flex-col items-center gap-3 px-6 pt-10 text-center">
         <Loader2 className="size-5 animate-spin text-muted-foreground" />
         <p className="text-[13px] font-medium">
-          {translating ? "Translating your captions…" : "Transcribing…"}{" "}
+          {translating ? t("translating") : t("transcribing")}{" "}
           <SubtitleElapsed />
         </p>
         <p className="text-[11.5px] leading-relaxed text-muted-foreground">
-          Runs in the background — keep editing. Captions appear here when
-          it finishes.
+          {t("runsInBackground")}
         </p>
       </div>
     );
@@ -609,14 +638,13 @@ function EmptyState({
     <div className="flex flex-col gap-3 px-3.5">
       {status === "empty" && (
         <p className="sub-empty pt-1 text-[11.5px] leading-relaxed text-muted-foreground">
-          No speech was found in this cut, so no subtitles were added to the
-          video.
+          {t("noSpeech")}
         </p>
       )}
       {status === "error" && error && (
         <div className="sub-error flex items-start gap-2 rounded-lg bg-red-50 px-3 py-2.5 text-[11.5px] leading-relaxed text-red-700">
           <AlertCircle className="mt-0.5 size-3.5 shrink-0" />
-          {error}
+          {describeError(error)}
         </div>
       )}
       <div className="relative">
@@ -628,9 +656,9 @@ function EmptyState({
             s.setSubtitleTrackMeta(s.subtitleLane, { locale: e.target.value });
           }}
         >
-          {LOCALES.map(([id, label]) => (
+          {LOCALES.map((id) => (
             <option key={id} value={id}>
-              {label}
+              {languageName(id)}
             </option>
           ))}
         </select>
@@ -640,10 +668,10 @@ function EmptyState({
         <Button
           className="sub-generate w-full"
           onClick={onGenerate}
-          title="Transcribe your audio into plain captions, word for word"
+          title={t("generateHint")}
         >
           <Captions data-icon="inline-start" />
-          {status === "empty" || status === "error" ? "Try again" : "Generate subtitles"}
+          {status === "empty" || status === "error" ? t("tryAgain") : t("generate")}
         </Button>
       )}
       {caps.captionAi &&
@@ -652,13 +680,14 @@ function EmptyState({
             key={i}
             variant="outline"
             className="sub-translate w-full"
-            title={`Write this track by translating the ${laneLanguage(subtitles, i)} captions into ${
-              LOCALES.find(([id]) => id === locale)?.[1] ?? locale
-            }`}
+            title={t("translateHint", {
+              from: laneLanguage(subtitles, i, languageName),
+              to: (LOCALES as readonly string[]).includes(locale) ? languageName(locale) : locale,
+            })}
             onClick={() => onTranslate(i)}
           >
             <Languages data-icon="inline-start" />
-            Translate from {laneLanguage(subtitles, i)}
+            {t("translateFrom", { language: laneLanguage(subtitles, i, languageName) })}
           </Button>
         ))}
     </div>
@@ -773,7 +802,8 @@ function caretOffset(el: HTMLElement): number {
 }
 
 const CueSpan = memo(function CueSpan({ cue, gap }: { cue: SubtitleCue; gap: number }) {
-  const active = usePreviewSelector((t) => t >= cue.start && t < cue.end);
+  const t = useTranslations("panels.subtitles");
+  const active = usePreviewSelector((at) => at >= cue.start && at < cue.end);
   const readOnly = useEditor((s) => s.readOnly);
   const ref = useRef<HTMLSpanElement>(null);
   const [focused, setFocused] = useState(false);
@@ -838,9 +868,9 @@ const CueSpan = memo(function CueSpan({ cue, gap }: { cue: SubtitleCue; gap: num
       {gap > 0.5 && (
         <span
           className="sub-gap mx-0.5 inline-block rounded-md bg-muted px-1.5 py-px align-baseline font-mono text-[10px] text-muted-foreground/80"
-          title={`${gap.toFixed(1)}s pause`}
+          title={t("pause", { seconds: gap.toFixed(1) })}
         >
-          ·&thinsp;{gap.toFixed(1)}s&thinsp;·
+          {`·\u2009${gap.toFixed(1)}s\u2009·`}
         </span>
       )}
       <button
@@ -848,7 +878,7 @@ const CueSpan = memo(function CueSpan({ cue, gap }: { cue: SubtitleCue; gap: num
           "sub-time mr-1 inline-block cursor-pointer rounded-md bg-muted px-1.5 py-px align-baseline font-mono text-[10px] tabular-nums text-muted-foreground transition-colors hover:bg-[#0a84ff]/15 hover:text-[#0a84ff]",
           active && "bg-[#0a84ff] text-white hover:bg-[#0a84ff] hover:text-white"
         )}
-        title="Jump here"
+        title={t("jumpHere")}
         tabIndex={-1}
         onClick={() => useEditor.getState().seek(cue.start + 0.001)}
       >
@@ -929,7 +959,7 @@ const CueSpan = memo(function CueSpan({ cue, gap }: { cue: SubtitleCue; gap: num
               }}
             >
               <span className="truncate">
-                {menu.on ? `Emphasize “${menu.label}”` : `Remove emphasis from “${menu.label}”`}
+                {menu.on ? t("emphasize", { words: menu.label }) : t("removeEmphasis", { words: menu.label })}
               </span>
             </DropdownMenuItem>
           </DropdownMenuContent>

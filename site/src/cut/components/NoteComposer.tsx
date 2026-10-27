@@ -5,6 +5,7 @@ import type React from "react";
 import type { NoteLocation } from "@/cut/lib/noteReference";
 import { createPortal } from "react-dom";
 import dynamic from "next/dynamic";
+import { useTranslations } from "next-intl";
 import type { Editor } from "@tiptap/react";
 import { ArrowLeft, Check, ChevronDown, Pencil, Plus, Tag, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -25,6 +26,10 @@ const NOTE_INK = "#201a0d";
 // The rich text editor loads with the first note opened, off the list's own
 // bundle.
 const NoteBodyEditor = dynamic(() => import("./NoteBodyEditor"), { ssr: false });
+
+/** A paper color's name as a key in the home catalog's color names. */
+const colorKey = (name: (typeof NOTE_COLORS)[number]["name"]) =>
+  `colors.${name.toLowerCase() as Lowercase<typeof name>}` as const;
 
 export interface NoteDraft {
   libraryLocation?: NoteLocation | null;
@@ -140,6 +145,7 @@ export function NoteComposer({
   onRenameLabel: (id: string, name: string) => void;
   onDeleteLabel: (id: string) => void;
 }) {
+  const t = useTranslations("home.composer");
   const paper = noteColor(draft.colorIndex);
   const titleRef = useAutoGrow(draft.title);
   const body = useRef<Editor | null>(null);
@@ -198,7 +204,7 @@ export function NoteComposer({
     <div
       role="dialog"
       aria-modal="true"
-      aria-label={draft.title.trim() || "Untitled note"}
+      aria-label={draft.title.trim() || t("untitledNote")}
       {...KEEP_EVENTS}
       // `light` keeps the paper, its controls and its menus light in dark mode.
       className="light fixed inset-0 z-50 flex flex-col font-system antialiased"
@@ -223,7 +229,7 @@ export function NoteComposer({
             render={
               <Button
                 variant="ghost"
-                aria-label="Note color"
+                aria-label={t("noteColor")}
                 className="hover:bg-black/5 hover:text-current"
                 style={{ color: NOTE_INK }}
               />
@@ -233,7 +239,7 @@ export function NoteComposer({
               className="size-3.5 rounded-full border border-black/10"
               style={{ backgroundColor: paper.accent }}
             />
-            {paper.name}
+            {t(colorKey(paper.name))}
             <ChevronDown className="size-3.5 opacity-60" />
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="light w-40">
@@ -247,7 +253,7 @@ export function NoteComposer({
                   className="size-3.5 rounded-full border border-black/10"
                   style={{ backgroundColor: c.accent }}
                 />
-                <span className="flex-1">{c.name}</span>
+                <span className="flex-1">{t(colorKey(c.name))}</span>
                 {i === draft.colorIndex && <Check className="size-4 opacity-70" />}
               </DropdownMenuItem>
             ))}
@@ -255,11 +261,11 @@ export function NoteComposer({
         </DropdownMenu>
         <Button
           variant="ghost"
-          aria-label="Delete note"
+          aria-label={t("deleteNote")}
           className="text-destructive hover:bg-black/5 hover:text-destructive"
           onClick={onDelete}
         >
-          <Trash2 data-icon="inline-start" /> Delete
+          <Trash2 data-icon="inline-start" /> {t("delete")}
         </Button>
       </header>
 
@@ -273,7 +279,7 @@ export function NoteComposer({
           autoFocus
           rows={1}
           value={draft.title}
-          placeholder="Untitled"
+          placeholder={t("titlePlaceholder")}
           className="resize-none overflow-hidden bg-transparent text-4xl leading-tight font-semibold tracking-tight outline-none placeholder:opacity-30"
           style={{ color: NOTE_INK }}
           onChange={(e) => onChange({ ...draft, title: e.target.value.replace(/\n/g, "") })}
@@ -291,7 +297,7 @@ export function NoteComposer({
             <button
               key={l.id}
               className="group flex cursor-pointer items-center gap-1 rounded-full bg-black/10 px-2.5 py-1 text-xs font-medium hover:bg-black/15"
-              aria-label={`Remove label ${l.name}`}
+              aria-label={t("removeLabel", { name: l.name })}
               onClick={() => toggleLabel(l.id)}
             >
               {l.name}
@@ -303,12 +309,12 @@ export function NoteComposer({
               render={
                 <button
                   className="flex cursor-pointer items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium opacity-50 hover:bg-black/10 hover:opacity-80"
-                  aria-label="Add label"
+                  aria-label={t("addLabel")}
                 />
               }
             >
               {worn.length === 0 ? <Tag className="size-3.5" /> : <Plus className="size-3.5" />}
-              {worn.length === 0 ? "Add label" : "Label"}
+              {worn.length === 0 ? t("addLabel") : t("label")}
             </PopoverTrigger>
             <PopoverContent align="start" className="light w-64">
               <LabelPicker
@@ -354,6 +360,7 @@ function LabelPicker({
   onRename: (id: string, name: string) => void;
   onDelete: (id: string) => void;
 }) {
+  const t = useTranslations("home.labelPicker");
   const [query, setQuery] = useState("");
   const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
   const typed = query.trim();
@@ -386,7 +393,7 @@ function LabelPicker({
       <input
         autoFocus
         value={query}
-        placeholder={labels.length === 0 ? "New label…" : "Find or create…"}
+        placeholder={labels.length === 0 ? t("newLabel") : t("findOrCreate")}
         className="border-b border-foreground/10 px-3 py-2.5 text-sm outline-none placeholder:text-muted-foreground"
         onChange={(e) => setQuery(e.target.value)}
         onKeyDown={(e) => {
@@ -442,14 +449,14 @@ function LabelPicker({
               </button>
               <button
                 className="hidden shrink-0 cursor-pointer rounded p-1 text-muted-foreground group-hover:block hover:text-foreground"
-                aria-label={`Rename label ${l.name}`}
+                aria-label={t("renameLabel", { name: l.name })}
                 onClick={() => setRenaming({ id: l.id, name: l.name })}
               >
                 <Pencil className="size-3.5" />
               </button>
               <button
                 className="hidden shrink-0 cursor-pointer rounded p-1 pr-2 text-muted-foreground group-hover:block hover:text-destructive"
-                aria-label={`Delete label ${l.name}`}
+                aria-label={t("deleteLabel", { name: l.name })}
                 onClick={() => onDelete(l.id)}
               >
                 <Trash2 className="size-3.5" />
@@ -463,17 +470,17 @@ function LabelPicker({
             onClick={commitTyped}
           >
             <Plus className="size-4 shrink-0 opacity-70" />
-            <span className="min-w-0 flex-1 truncate">Create “{typed}”</span>
+            <span className="min-w-0 flex-1 truncate">{t("create", { name: typed })}</span>
           </button>
         )}
         {full && (
           <div className="px-2.5 py-2 text-sm text-muted-foreground">
-            A note holds {NOTE_LABELS_MAX} labels. Take one off to add another.
+            {t("full", { max: NOTE_LABELS_MAX })}
           </div>
         )}
         {labels.length === 0 && !typed && (
           <div className="px-2.5 py-2 text-sm text-muted-foreground">
-            Type a name to make your first label.
+            {t("firstLabel")}
           </div>
         )}
       </div>

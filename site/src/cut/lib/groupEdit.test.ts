@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { selectionCenter, selectionSummary, selectionTranslation, sharedNumber, sharedValue } from "./groupEdit";
+import { selectionCenter, selectionCounts, selectionTranslation, sharedNumber, sharedValue } from "./groupEdit";
 import type { Overlay } from "./types";
 
 describe("groupEdit", () => {
@@ -39,6 +39,6 @@ describe("groupEdit", () => {
     const overlays = [
       { kind: "shape" } as Overlay, { kind: "shape" } as Overlay, { text: "hi" } as Overlay,
     ];
-    expect(selectionSummary({ overlays, clips: [], audios: [] })).toBe("2 shapes · 1 title");
+    expect(selectionCounts({ overlays, clips: [], audios: [] })).toEqual([["shape", 2], ["title", 1]]);
   });
 });

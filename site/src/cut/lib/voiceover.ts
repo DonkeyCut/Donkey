@@ -1,6 +1,7 @@
 import { enrichAsset } from "@/cut/lib/media";
 import { useEditor } from "@/cut/lib/store";
 import { renderSpeechClip, speechClipToAsset, type SpeechLayout } from "@/cut/lib/tts";
+import { UserError } from "@/cut/lib/userError";
 
 /** Default duck: everything else drops to 40% while a voiceover speaks. */
 export const DUCK_DEFAULT = 0.4;
@@ -70,9 +71,13 @@ export async function generateSubtitlesReadout(
   opts?: { cueIds?: string[]; direction?: string; language?: string; duck?: number }
 ) {
   const projectId = useEditor.getState().projectId;
-  if (!projectId) throw new Error("Open a project first.");
+  if (!projectId) {
+    throw new UserError("project_open_required", "Open a project first.");
+  }
   const cues = readoutCues(opts?.cueIds);
-  if (cues.length === 0) throw new Error("No subtitles to read.");
+  if (cues.length === 0) {
+    throw new UserError("subtitles_none_to_read", "No subtitles to read.");
+  }
 
   const { blob, offset, layout, language } = await renderReadout(voice, cues, opts);
   const asset = await speechClipToAsset(projectId, blob, "Subtitles readout", language);

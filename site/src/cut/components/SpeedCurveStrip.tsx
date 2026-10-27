@@ -2,6 +2,7 @@
 
 import { Menu as MenuPrimitive } from "@base-ui/react/menu";
 import { ChevronDown, Minus, Plus, RotateCcw, X } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   flatSpeedCurve,
@@ -92,6 +93,11 @@ export function SpeedCurveStrip() {
 }
 
 function Strip({ clip }: { clip: VideoClip }) {
+  const t = useTranslations("timeline.speedCurve");
+  // A preset's name and hint by its id; the kit's list keeps its English for
+  // the model.
+  const presetText = (id: string, part: "label" | "hint") =>
+    t(`presets.${id}.${part}` as Parameters<typeof t>[0]);
   const asset = useEditor((s) => s.assets.find((a) => a.id === clip.assetId));
   const picked = useEditor((s) =>
     s.selectedKey?.track === "speed" && s.selectedKey.id === clip.id
@@ -458,7 +464,7 @@ function Strip({ clip }: { clip: VideoClip }) {
       >
         {pickedRate != null && (
           <span className="tabular-nums text-foreground/70">
-            node {fmtRate(pickedRate)} at {fmtSec(rt.tAt(picked!))}
+            {t("node", { rate: fmtRate(pickedRate), time: fmtSec(rt.tAt(picked!)) })}
           </span>
         )}
         <span className="flex-1" />
@@ -468,13 +474,13 @@ function Strip({ clip }: { clip: VideoClip }) {
               <Button
                 variant="outline"
                 size="xs"
-                title={preset?.hint ?? "Pick a preset curve"}
+                title={preset ? presetText(preset.id, "hint") : t("pickPreset")}
                 className="gap-1.5 pl-1.5 font-normal"
               />
             }
           >
             <Sparkline shape={shape} />
-            <span>{preset?.label ?? "Custom"}</span>
+            <span>{preset ? presetText(preset.id, "label") : t("custom")}</span>
             <ChevronDown className="size-3 text-muted-foreground" />
           </DropdownMenuTrigger>
           <DropdownMenuContent
@@ -489,7 +495,7 @@ function Strip({ clip }: { clip: VideoClip }) {
               {SPEED_CURVE_PRESETS.map((p) => (
                 <DropdownMenuItem
                   key={p.id}
-                  title={p.hint}
+                  title={presetText(p.id, "hint")}
                   className={cn(
                     "relative block h-20 w-40 overflow-hidden rounded-xl border border-border bg-muted/40 p-0 focus:bg-muted",
                     p.id === presetId && PICKED_RING,
@@ -504,7 +510,7 @@ function Strip({ clip }: { clip: VideoClip }) {
                     <Sparkline shape={p.shape} w={140} h={48} grid />
                   </span>
                   <span className="absolute bottom-1.5 left-2.5 text-[11.5px] font-medium">
-                    {p.label}
+                    {presetText(p.id, "label")}
                   </span>
                 </DropdownMenuItem>
               ))}
@@ -531,24 +537,24 @@ function Strip({ clip }: { clip: VideoClip }) {
           aria-pressed={!!clip.smoothSlow}
           onClick={() => useEditor.getState().setClipSmoothSlow(clip.id, !clip.smoothSlow)}
         >
-          Smooth Slow-mo
+          {t("smoothSlow")}
         </Button>
-        <InfoTip label="Smooth Slow-mo" side="top">
-          When on, everything under 1× is smoothed on export.
+        <InfoTip label={t("smoothSlow")} side="top">
+          {t("smoothSlowInfo")}
         </InfoTip>
         <span className="mx-1 h-4 w-px bg-border" />
-        <IconButton title="Add a node at the playhead" onClick={addAtPlayhead}>
+        <IconButton title={t("addNode")} onClick={addAtPlayhead}>
           <Plus className="size-3.5" />
         </IconButton>
         <IconButton
-          title="Remove the picked node (Delete)"
+          title={t("removeNode")}
           disabled={picked === null || nodes.length <= 1}
           onClick={removePicked}
         >
           <Minus className="size-3.5" />
         </IconButton>
         <IconButton
-          title="Flatten to 1×"
+          title={t("flatten")}
           onClick={() => {
             pick(null);
             setDraft(null);
@@ -560,7 +566,7 @@ function Strip({ clip }: { clip: VideoClip }) {
           <RotateCcw className="size-3.5" />
         </IconButton>
         <IconButton
-          title="Close (Esc)"
+          title={t("close", { key: "Esc" })}
           onClick={() => panelState.set(clip.id, "speedCurve", false)}
         >
           <X className="size-3.5" />

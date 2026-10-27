@@ -369,7 +369,7 @@ describe("where threads are kept", () => {
       await loadProjectThreads("p");
       writeProjectThreads("p", [big("mine", 9, 200_000)]);
       await flushThreadSaves();
-      expect(threadSaveFailure()).toContain("storage is full");
+      expect(threadSaveFailure()?.message).toContain("storage is full");
       expect((lists.get("old") as { id: string }[]).map((t) => t.id)).toEqual(["o1", "o2"]);
       expect((lists.get("older") as { id: string }[]).map((t) => t.id)).toEqual(["o0"]);
       // The open chat is still on screen for the page to show.
@@ -391,7 +391,7 @@ describe("where threads are kept", () => {
       await flushThreadSaves();
       writeProjectThreads("p", [big("a", 2, 6000)]);
       await flushThreadSaves();
-      expect(threadSaveFailure()).toContain("couldn't be saved");
+      expect(threadSaveFailure()?.message).toContain("couldn't be saved");
       expect(warn.mock.calls).toHaveLength(1);
       expect(changes).toBe(1);
       // The live copy is still there for the page to show.

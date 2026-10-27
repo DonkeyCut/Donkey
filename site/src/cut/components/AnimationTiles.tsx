@@ -1,6 +1,7 @@
 "use client";
 
 import { erodeMask } from "./textureCss";
+import { useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
 import {
   countText,
@@ -36,6 +37,8 @@ import { Tile } from "@/cut/components/PanelTile";
 import { SectionTitle } from "@/cut/components/SectionTitle";
 import { wordDrawCss } from "@/cut/lib/textRender";
 import { fontStack } from "@/cut/lib/types";
+import { useLabels } from "@/i18n/labels";
+import type { Messages } from "@/i18n/namespaces";
 
 /**
  * The animation picker: a grid of tiles, each playing its style on the style's
@@ -104,16 +107,32 @@ type Slot = "in" | "out" | "loop" | "move" | "words" | "hit";
  * to play in — long enough to read a push, short enough to come round again. */
 const MOVE_DEMO_SECONDS = 2.4;
 
-const labelOf = (slot: Slot, style: string) =>
-  slot === "hit"
-    ? (OVERLAY_HIT_STYLE_LABELS[style] ?? style)
-    : slot === "words"
-      ? (WORD_EFFECT_LABELS[style] ?? style)
-      : slot === "move"
-        ? (MOTION.holds[style]?.label ?? style)
-        : slot === "loop"
-          ? (OVERLAY_LOOP_STYLE_LABELS[style as OverlayLoopStyle] ?? style)
-          : (OVERLAY_ANIM_STYLE_LABELS[style as OverlayAnimStyle] ?? style);
+type HoldId = keyof Messages["inspector"]["holds"];
+
+/** Names a slot's style in the page's language. The registries say which ids
+ * are known; an id none of them knows reads as itself. */
+function useSlotLabel(): (slot: Slot, style: string) => string {
+  const t = useTranslations("inspector.holds");
+  const hitLabel = useLabels("overlayHit");
+  const wordLabel = useLabels("wordEffect");
+  const loopLabel = useLabels("overlayLoop");
+  const animLabel = useLabels("overlayAnim");
+  return (slot, style) => {
+    if (slot === "hit") {
+      return style in OVERLAY_HIT_STYLE_LABELS ? hitLabel(style) : style;
+    }
+    if (slot === "words") {
+      return style in WORD_EFFECT_LABELS ? wordLabel(style) : style;
+    }
+    if (slot === "move") {
+      return MOTION.holds[style] ? t(style as HoldId) : style;
+    }
+    if (slot === "loop") {
+      return style in OVERLAY_LOOP_STYLE_LABELS ? loopLabel(style) : style;
+    }
+    return style in OVERLAY_ANIM_STYLE_LABELS ? animLabel(style) : style;
+  };
+}
 
 function demoStateAt(
   slot: Slot,
@@ -216,6 +235,7 @@ const splitsGlyphs = (slot: Slot, style: string) =>
 /** The name standing still: what a card wears until the pointer reaches it,
  * and what every tile falls back to when the reader asks for less motion. */
 function FrozenName({ slot, style }: { slot: Slot; style: string }) {
+  const labelOf = useSlotLabel();
   return (
     <span className={`${WORD} text-foreground`} style={wordStyle()}>
       {labelOf(slot, style)}
@@ -244,6 +264,7 @@ function LiveName({
   index?: number;
 }) {
   const ref = useRef<HTMLSpanElement>(null);
+  const labelOf = useSlotLabel();
   const label = labelOf(slot, style);
   const typed = typesItsName(slot, style);
   const counts = countsItsName(slot, style);
@@ -437,6 +458,7 @@ function WordName({
   index?: number;
 }) {
   const ref = useRef<HTMLSpanElement>(null);
+  const labelOf = useSlotLabel();
   const label = labelOf("words", style);
   const cycle = WORD_DEMO_SECONDS + WORD_DEMO_HOLD;
   const phase = index * PHASE_STEP * cycle;
@@ -591,6 +613,7 @@ function AnimTile({
 }) {
   const ref = useRef<HTMLButtonElement>(null);
   const onScreen = useOnScreen(ref);
+  const labelOf = useSlotLabel();
   return (
     <Tile
       ref={ref}
@@ -654,6 +677,7 @@ export function AnimationTiles({
   accentDim?: number;
   onPick: (style: string | null) => void;
 }) {
+  const t = useTranslations("inspector.animationTiles");
   const tile = (id: string, i: number) => (
     <AnimTile
       key={id}
@@ -672,10 +696,10 @@ export function AnimationTiles({
     />
   );
   const none = (
-    <Tile selected={!value && !custom} onClick={() => onPick(null)} title="None" className="p-1">
+    <Tile selected={!value && !custom} onClick={() => onPick(null)} title={t("none")} className="p-1">
       <span className={STAGE}>
         <span className={`${WORD} text-muted-foreground/70`} style={wordStyle()}>
-          None
+          {t("none")}
         </span>
       </span>
     </Tile>
@@ -691,7 +715,7 @@ export function AnimationTiles({
         <div className="grid grid-cols-2 gap-[9px]">{none}</div>
         {WORD_FAMILIES.map((f) => (
           <div key={f.id} className="flex flex-col gap-1.5">
-            <SectionTitle>{f.label}</SectionTitle>
+            <SectionTitle>{t(`wordFamilies.${f.id}`)}</SectionTitle>
             <div className="grid grid-cols-2 gap-[9px]">
               {wordEffectIdsIn(f.id).map((id) => tile(id, n++))}
             </div>

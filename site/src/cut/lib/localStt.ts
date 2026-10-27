@@ -9,6 +9,7 @@
 import { localBackend } from "./backend/local";
 import { encodeWav } from "./cloudTranscribe";
 import type { SubtitleCue } from "./types";
+import { errorFromBody, UserError } from "./userError";
 
 const POLL_MS = 700;
 
@@ -51,19 +52,19 @@ async function engineTranscribe(
   const res = await localBackend.fetch("/api/cut/stt", { method: "POST", body: form });
   const body = (await res.json().catch(() => null)) as { id?: string; error?: string } | null;
   if (!res.ok || !body?.id) {
-    throw new Error(body?.error ?? "On-device transcription failed to start.");
+    throw errorFromBody(body, new UserError("local_transcription_start_failed", "On-device transcription failed to start."));
   }
   for (;;) {
     await new Promise((r) => setTimeout(r, POLL_MS));
     if (isStale?.()) return null;
     const st = await localBackend.fetch(`/api/cut/stt/${body.id}`);
-    if (!st.ok) throw new Error("The transcription job was lost.");
+    if (!st.ok) throw new UserError("transcription_job_gone", "The transcription job was lost.");
     const status = (await st.json()) as {
       status: string;
       error?: string;
       cues?: SubtitleCue[];
     };
-    if (status.status === "error") throw new Error(status.error ?? "Transcription failed.");
+    if (status.status === "error") throw errorFromBody(status, new UserError("transcription_failed", "Transcription failed."));
     if (status.status === "done") return status.cues ?? [];
   }
 }

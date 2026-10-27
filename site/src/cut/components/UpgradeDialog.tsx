@@ -3,12 +3,13 @@
 // The wall a free account meets at a paid limit: one project past the free
 // count, or a request that ran out of credits. Both sell Pro. A Pro account
 // that runs out is sent to buy credits.
+import { useLocale, useTranslations } from "next-intl";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { FolderPlus, Loader2, Zap } from "lucide-react";
 
-import { CUT_PRO } from "@/app/cut/_components/landing/cutPricingPlans";
-import { introTerms, wallBanner } from "@/cut/components/IntroOffer";
+import { CUT_PRO, useCutPro } from "@/app/[locale]/cut/_components/landing/cutPricingPlans";
+import { useIntroTerms, wallBanner } from "@/cut/components/IntroOffer";
 import { OfferButton, OfferDialog, OfferDismiss, preloadBanner } from "@/cut/components/OfferDialog";
 import { useCutBase } from "@/cut/lib/nav";
 import { onOperationFailure } from "@/cut/lib/operationFailure";
@@ -17,7 +18,7 @@ import { onUpgrade, openUpgrade, type UpgradeReason } from "@/cut/lib/upgrade";
 import { track } from "@/lib/analytics";
 import { creditCountLabel, creditsPerDollar } from "@/lib/credits/format-credits";
 import { useAccountConfig } from "@/queries/accountConfig";
-import { useIntroOffer, useProSubscription, type IntroOffer } from "@/queries/billing";
+import { useIntroOffer, useProSubscription } from "@/queries/billing";
 
 export function UpgradeDialog() {
   const [reason, setReason] = useState<UpgradeReason | null>(null);
@@ -61,6 +62,10 @@ function OpenDialog({
   projectLimit: number | null;
   onClose: () => void;
 }) {
+  const t = useTranslations("billing");
+  const locale = useLocale();
+  const introTerms = useIntroTerms();
+  const { price } = useCutPro();
   const pro = useProSubscription();
   const isPro = pro.data?.isActive === true;
   const intro = useIntroOffer({ enabled: pro.data?.isActive === false });
@@ -100,8 +105,8 @@ function OpenDialog({
         open
         onOpenChange={close}
         banner="credits"
-        title="You're out of credits"
-        body="This month's Pro credits are spent. Buy more to keep generating."
+        title={t("upgrade.outOfCredits")}
+        body={t("upgrade.proOutBody")}
         cta={
           <OfferButton
             onClick={() => {
@@ -109,25 +114,41 @@ function OpenDialog({
               router.push(`${base}/settings`);
             }}
           >
-            Buy credits
+            {t("buyCredits")}
           </OfferButton>
         }
-        secondary={<OfferDismiss onClick={onClose}>Not now</OfferDismiss>}
+        secondary={<OfferDismiss onClick={onClose}>{t("notNow")}</OfferDismiss>}
       />
     );
   }
 
   const offer = intro.data ?? null;
-  const credits = creditCountLabel(CUT_PRO.monthlyDollars * creditsPerDollar);
+  const credits = creditCountLabel(CUT_PRO.monthlyDollars * creditsPerDollar, locale);
   const wall =
     reason === "projects"
-      ? { icon: FolderPlus, title: "Upgrade to make more projects", body: projectsBody(projectLimit) }
+      ? {
+          icon: FolderPlus,
+          title: t("upgrade.projectsTitle"),
+          body: projectLimit
+            ? t("upgrade.projectsBody", { count: projectLimit })
+            : t("upgrade.projectsBodyStarter"),
+        }
       : {
           icon: Zap,
-          title: "You're out of credits",
+          title: t("upgrade.outOfCredits"),
           // An open offer prices Pro on its terms line.
-          body: `Upgrade to Pro and get ${credits} every month and 100 GB of cloud storage${offer ? "" : ` for ${CUT_PRO.price}`}.`,
+          body: offer
+            ? t("upgrade.creditsBodyOffer", { credits })
+            : t("upgrade.creditsBody", { credits, price }),
         };
+
+  // The terms line: an open offer's terms, else the price on the projects
+  // wall. The credits wall names the price in its message, so it has none.
+  const terms = offer
+    ? introTerms(offer)
+    : reason === "projects"
+      ? t("upgrade.proPrice", { price })
+      : undefined;
 
   return (
     <OfferDialog
@@ -137,34 +158,14 @@ function OpenDialog({
       closesAt={offer?.endsAt}
       title={wall.title}
       body={wall.body}
-      terms={wallTerms(reason, offer)}
+      terms={terms}
       cta={
         <OfferButton disabled={upgrade.isPending} onClick={upgrade.start}>
           {upgrade.isPending && <Loader2 className="animate-spin" data-icon="inline-start" />}
-          Upgrade to Pro
+          {t("upgradeToPro")}
         </OfferButton>
       }
-      secondary={<OfferDismiss onClick={onClose}>Not now</OfferDismiss>}
+      secondary={<OfferDismiss onClick={onClose}>{t("notNow")}</OfferDismiss>}
     />
   );
-}
-
-/** The terms line: an open offer's terms, else the price on the projects
- * wall. The credits wall names the price in its message, so it has none. */
-function wallTerms(reason: UpgradeReason, offer: IntroOffer | null): string | undefined {
-  if (offer) {
-    return introTerms(offer);
-  }
-  if (reason === "projects") {
-    return `Pro is ${CUT_PRO.price}.`;
-  }
-  return undefined;
-}
-
-/** What the free plan holds, as the projects wall says it. */
-function projectsBody(limit: number | null): string {
-  if (!limit) {
-    return "The free plan keeps your starter project. Pro makes as many as you need.";
-  }
-  return `The free plan keeps ${limit} project${limit === 1 ? "" : "s"} besides your starter. Pro makes as many as you need.`;
 }

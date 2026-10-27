@@ -33,6 +33,7 @@ import type { ClipEffect, CodeFormat, SourceProfile, TextWeight } from "@donkeyc
 import type { CameraCard } from "./cameraCard";
 import { getBackend, type CutBackend } from "./backend";
 import type { VideoProject } from "./genvideo/types";
+import type { UserErrorParams } from "./userError";
 
 export type AssetType = "video" | "audio" | "image" | "font" | "lut";
 
@@ -356,6 +357,9 @@ export interface AssetUpload {
   progress: number;
   /** Set when the upload failed; the asset is retryable until it is removed. */
   error?: string;
+  /** The failure's catalog code and values, so the tile words it in the reader's language. */
+  errorCode?: string;
+  errorParams?: UserErrorParams;
   /** The bytes are held durably in the browser store, so the asset is safe to
    * save and the upload safe to resume after a reload. */
   stored?: boolean;
@@ -1930,6 +1934,8 @@ export interface RenderRecord {
   startedAt: number;
   status: "running" | "done" | "error";
   error?: string;
+  errorCode?: string;
+  errorParams?: Record<string, string | number>;
   /** The project asset the finished render landed as. */
   assetId?: string;
 }

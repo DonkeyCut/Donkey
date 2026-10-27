@@ -8,6 +8,9 @@ import { getProject, takenMediaNames } from "./projects";
 import { head, presignPut, projectMediaKey, putObject } from "./r2";
 import { addUsage, quotaCheck } from "./usage";
 import { caught, dedupeName, err, safeFileName, storableFileName } from "./util";
+import { UserError } from "@/cut/lib/userError";
+
+const projectNotFound = () => new UserError("project_not_found", "Project not found.");
 
 /** Direct-upload cap: anything larger goes through presign. */
 const INLINE_UPLOAD_BYTES = 3.5 * 1024 * 1024;
@@ -66,7 +69,7 @@ export const mediaCloud = {
       if (!body.fileName || typeof body.bytes !== "number" || body.bytes <= 0) {
         return err("fileName and bytes are required.", 400);
       }
-      if (!(await getProject(userId, projectId))) return err("Project not found.", 404);
+      if (!(await getProject(userId, projectId))) return err(projectNotFound(), 404);
       // A resumed upload already holds its name: the browser kept the bytes
       // across a reload and asks for a fresh URL for the same claim. Re-mint
       // against the claimed key so the name never shifts; a claim that
@@ -117,7 +120,7 @@ export const mediaCloud = {
       });
       return Response.json({ fileName, key, url });
     } catch (e) {
-      return caught(e, "Could not presign the upload.");
+      return caught(e, new UserError("upload_presign_failed", "Could not presign the upload."));
     }
   },
 
@@ -128,10 +131,10 @@ export const mediaCloud = {
       const { key } = (await req.json()) as { key?: string };
       if (!key) return err("key is required.", 400);
       const row = await prisma.cutMediaObject.findFirst({ where: { userId, r2Key: key } });
-      if (!row) return err("Unknown upload.", 404);
+      if (!row) return err(new UserError("upload_unknown", "Unknown upload."), 404);
       if (row.uploadState === "complete") return Response.json({ fileName: row.fileName });
       const info = await head(key);
-      if (!info) return err("The upload never arrived.", 400);
+      if (!info) return err(new UserError("upload_never_arrived", "The upload never arrived."), 400);
       await prisma.$transaction(async (tx) => {
         await tx.cutMediaObject.update({
           where: { id: row.id },
@@ -145,7 +148,7 @@ export const mediaCloud = {
       });
       return Response.json({ fileName: row.fileName });
     } catch (e) {
-      return caught(e, "Could not complete the upload.");
+      return caught(e, new UserError("upload_complete_failed", "Could not complete the upload."));
     }
   },
 
@@ -190,7 +193,7 @@ export const mediaCloud = {
       });
       return Response.json({ urls, expiresIn: mediaUrlLifetime() });
     } catch (e) {
-      return caught(e, "Could not sign the media URLs.");
+      return caught(e, new UserError("media_sign_failed", "Could not sign the media URLs."));
     }
   },
 
@@ -198,7 +201,7 @@ export const mediaCloud = {
    * return the MediaAsset shape. Larger callers use presign. */
   async importImage(userId: string, projectId: string, req: Request) {
     try {
-      if (!(await getProject(userId, projectId))) return err("Project not found.", 404);
+      if (!(await getProject(userId, projectId))) return err(projectNotFound(), 404);
       const form = await req.formData();
       const file = form.get("file");
       if (!(file instanceof File)) return err("No image in upload.", 400);
@@ -243,7 +246,7 @@ export const mediaCloud = {
         ...(origin ? { origin } : {}),
       });
     } catch (e) {
-      return caught(e, "Could not import the image.");
+      return caught(e, new UserError("image_import_failed", "Could not import the image."));
     }
   },
 };

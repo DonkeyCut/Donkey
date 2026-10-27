@@ -2,6 +2,8 @@
 // browser connection state and reads as online: its network failures surface
 // as the errors they are.
 
+import { UserError } from "./userError";
+
 /** True while the browser says it has no connection. */
 export function isOffline(): boolean {
   return globalThis.navigator?.onLine === false;
@@ -12,8 +14,9 @@ export function onReconnect(work: () => void): void {
   globalThis.addEventListener?.("online", work);
 }
 
-/** A request the connection dropped: no answer came back at all. */
-export class ConnectionLostError extends Error {}
+/** A request the connection dropped: no answer came back at all. It carries
+ * the code of the failure the person reads, e.g. `upload_failed`. */
+export class ConnectionLostError extends UserError {}
 
 /** Whether `err` is fetch giving up on the network, by the TypeError every
  * browser throws for it, e.g. Chrome's "Failed to fetch", or Firefox's "Error

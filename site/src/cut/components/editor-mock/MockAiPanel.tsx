@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import {
   ArrowUp,
   Check,
@@ -21,6 +22,7 @@ import type {
 /** Static replica of the Cut editor's AI chat panel for the landing mock.
  * Mirrors AiPanel's structure and Tailwind styling with hardcoded content. */
 export function MockAiPanel({ project }: { project: MockProject }) {
+  const t = useTranslations("mock.aiPanel");
   return (
     <aside className="relative flex h-full w-[340px] shrink-0 flex-col overflow-hidden border-l border-border bg-card">
       <div className="flex h-[46px] shrink-0 items-center gap-1.5 border-b border-border pr-2 pl-3.5">
@@ -44,7 +46,7 @@ export function MockAiPanel({ project }: { project: MockProject }) {
           className="mock-chat-msg mt-1 flex items-center gap-1.5 text-[11.5px] text-muted-foreground"
           style={{ animationDelay: `${project.chat.length * 120}ms` }}
         >
-          <CircleDashed className="size-3 animate-spin" /> Working… 3s
+          <CircleDashed className="size-3 animate-spin" /> {t("working", { seconds: 3 })}
         </div>
       </div>
 
@@ -54,7 +56,7 @@ export function MockAiPanel({ project }: { project: MockProject }) {
             pins white directly. */}
         <div className="rounded-xl border border-input bg-card dark:bg-[color-mix(in_oklab,var(--card),white_5%)]">
           <div className="min-h-9 px-3 pt-2 text-[12.5px] leading-relaxed text-muted-foreground/70">
-            Ask about your video, or tell me what to change… @ references media
+            {t("placeholder")}
           </div>
           <div className="flex items-center gap-1 px-1.5 pb-1.5">
             <span className="flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] font-medium text-muted-foreground">

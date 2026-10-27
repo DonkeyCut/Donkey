@@ -15,6 +15,7 @@ import { renderMix as mixAudio } from "./audioMix";
 import { apiFetch } from "./backend";
 import { cloudBackend } from "./backend/cloud";
 import { mediaUrl, type MediaAsset, type SubtitleCue } from "./types";
+import { replyError, UserError } from "./userError";
 import { wavHeader } from "./wav";
 
 /** Mirror of the engine's TranscribeSpec (server/transcribe.ts) minus projectId. */
@@ -100,22 +101,13 @@ interface WireCue {
   words?: { t0: number; t1: number; w: string }[];
 }
 
-// The route's error code for an account whose included chunks are used up.
-// A `freeOnly` caller reads it off the thrown error and stops transcribing.
+// The route's error code for an account whose included chunks are used up,
+// which is also the failure's catalog code. A `freeOnly` caller reads it off
+// the thrown error and stops transcribing.
 const FREE_EXHAUSTED_CODE = "free_transcription_exhausted";
 
-export class HostedTranscribeError extends Error {
-  public constructor(
-    message: string,
-    public readonly code?: string
-  ) {
-    super(message);
-    this.name = "HostedTranscribeError";
-  }
-}
-
 export const isFreeTranscriptionExhausted = (e: unknown): boolean =>
-  e instanceof HostedTranscribeError && e.code === FREE_EXHAUSTED_CODE;
+  e instanceof UserError && e.code === FREE_EXHAUSTED_CODE;
 
 /** The transport a run posts its chunks on. Defaults to the active backend;
  * mic dictation names the hosted one, because the take it is falling back with
@@ -139,10 +131,12 @@ async function postChunk(
     | { cues?: WireCue[]; error?: string; message?: string }
     | null;
   if (!res.ok) {
-    throw new HostedTranscribeError(
-      body?.message ?? body?.error ?? "Transcription failed.",
-      body?.error
-    );
+    // The used-up allowance answers 402 with its own code under `error`, so it
+    // is read before the credits wall would claim the status.
+    if (body?.error === FREE_EXHAUSTED_CODE) {
+      throw new UserError(FREE_EXHAUSTED_CODE, body.message ?? "The free transcription allowance is used up.");
+    }
+    throw replyError(res.status, body, new UserError("transcription_failed", "Transcription failed."));
   }
   return (body?.cues ?? []).filter(
     (c) =>
@@ -247,7 +241,7 @@ export async function cloudTranscribeRecording(blob: Blob, locale?: string): Pro
   try {
     decoded = await probe.decodeAudioData(bytes);
   } catch {
-    throw new Error("Could not read the recording's audio.");
+    throw new UserError("recording_audio_unreadable", "Could not read the recording's audio.");
   } finally {
     void probe.close().catch(() => {});
   }

@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import { UserError, errorFromBody, type UserErrorParams } from "../lib/userError";
 import { exportSourceFiles } from "./sourceExport";
 import type { SourceSegment } from "../lib/sourceExportPlan";
 import { deliveryCodec, deliveryContainer, deliverySpan, KEYFRAME_INTERVAL_S, videoBitrateFor, type ExportCodec, type ExportRange, type SpecClipColor } from "../lib/exportDelivery";
@@ -440,9 +441,14 @@ export interface RenderHandle {
   stemsPath?: string;
   progress: number;
   error?: string;
+  errorCode?: string;
+  errorParams?: UserErrorParams;
   proc?: ChildProcess;
   log: string[];
 }
+
+/** H.264 carries 8 bits a channel, too few for an HDR master. */
+const h264Hdr = () => new UserError("export_h264_hdr", "H.264 is 8-bit. Export HDR as HEVC or ProRes.");
 
 /** The H.264 encoder to use, probed once against the same `ffmpeg` the exports
  * spawn. Prefer libx264 (CRF + presets) when the build carries it — the dev
@@ -541,10 +547,14 @@ export function videoCodecArgs(enc: string, spec: ExportSpec): string[] {
     : [];
   switch (enc) {
     case "libx264":
-      if (hdr) throw new Error("H.264 is 8-bit. Export HDR as HEVC or ProRes.");
+      if (hdr) {
+        throw h264Hdr();
+      }
       return ["-c:v", "libx264", "-preset", spec.preset, ...(spec.bitrate ? rate : ["-crf", String(spec.crf)]), ...gop, "-profile:v", "high", "-pix_fmt", "yuv420p"];
     case "h264_videotoolbox":
-      if (hdr) throw new Error("H.264 is 8-bit. Export HDR as HEVC or ProRes.");
+      if (hdr) {
+        throw h264Hdr();
+      }
       return ["-c:v", "h264_videotoolbox", ...rate, ...gop, "-profile:v", "high", "-pix_fmt", "yuv420p", "-allow_sw", "1"];
     case "libx265": {
       // x265's CRF scale sits about four points above x264's for the same picture.
@@ -583,7 +593,7 @@ export function videoCodecArgs(enc: string, spec: ExportSpec): string[] {
         "-pix_fmt", full ? "yuv444p10le" : "yuv422p10le"];
     }
     default:
-      throw new Error(`No encoder for ${codec}.`);
+      throw new UserError("export_no_encoder", `No encoder for ${codec}.`, { codec });
   }
 }
 
@@ -624,7 +634,9 @@ async function resolveMedia(
 ) {
   const p = mediaPathFor(file);
   const info = await statFn(p).catch(() => null);
-  if (!info?.isFile()) throw new Error(`Media file missing from project: ${file}`);
+  if (!info?.isFile()) {
+    throw new UserError("export_media_missing", `Media file missing from project: ${file}`, { file });
+  }
   return p;
 }
 
@@ -979,7 +991,7 @@ export function runFfmpeg(
       clearTimeout(watchdog);
       watchdog = setTimeout(() => {
         proc.kill("SIGKILL");
-        reject(new Error("Export stalled — no ffmpeg progress for 120s."));
+        reject(new UserError("export_stalled", "Export stalled — no ffmpeg progress for 120s."));
       }, STALL_MS);
       watchdog.unref();
     };
@@ -1005,22 +1017,27 @@ export function runFfmpeg(
       clearTimeout(watchdog);
       reject(
         err.message.includes("ENOENT")
-          ? new Error("ffmpeg was not found. Install it with: brew install ffmpeg")
+          ? new UserError("ffmpeg_not_found", "ffmpeg was not found. Install it with: brew install ffmpeg")
           : err
       );
     });
     proc.on("close", (code) => {
       clearTimeout(watchdog);
       if (code === 0) resolve();
-      else if (job.error) reject(new Error(job.error));
-      else reject(new Error(`ffmpeg exited with code ${code}.\n${job.log.slice(-8).join("")}`));
+      else if (job.error) reject(errorFromBody(job, job.error));
+      else {
+        const log = job.log.slice(-8).join("");
+        reject(new UserError("export_ffmpeg_exited", `ffmpeg exited with code ${code}.\n${log}`, { code: String(code), log }));
+      }
     });
   });
 }
 
 /** End a render whose job was canceled or timed out between passes. */
 function stopIfCanceled(job: RenderHandle) {
-  if (job.error) throw new Error(job.error);
+  if (job.error) {
+    throw errorFromBody(job, job.error);
+  }
 }
 
 /** The pipeline's edges into the world: staged-media checks, list-file
@@ -1073,7 +1090,9 @@ export async function runExport(
   mediaPathFor: (file: string) => string,
   io: ExportPipelineIO = realIO
 ) {
-  if (given.clips.length === 0) throw new Error("Nothing to export.");
+  if (given.clips.length === 0) {
+    throw new UserError("export_empty", "Nothing to export.");
+  }
   const codec = given.codec ?? "h264";
   // Stems are cut from the graph's own sound, so a spec that asks for them
   // renders.
@@ -1084,7 +1103,9 @@ export async function runExport(
         const clips = given.clips.filter((clip) => clip.file === segment.file).sort((a, b) => a.in - b.in);
         let covered = segment.from;
         for (const clip of clips) if (clip.in <= covered && clip.out > covered) covered = clip.out;
-        if (covered < segment.to) throw new Error("Source export does not match the timeline media.");
+        if (covered < segment.to) {
+          throw new UserError("export_source_mismatch", "Source export does not match the timeline media.");
+        }
       }
     }
     if (await io.exportSourceFiles(job, mediaPathFor, given.sourceSegments, codec, given.audioBitrate)) return;
@@ -1179,7 +1200,9 @@ async function renderPass(
   const output: OutputSpace = spec.colorSpace ?? "sdr";
   const hdr = output !== "sdr";
   const compositeSpace = compositeSpaceFor(output);
-  if (hdr && codec === "h264") throw new Error("H.264 is 8-bit. Export HDR as HEVC or ProRes.");
+  if (hdr && codec === "h264") {
+    throw h264Hdr();
+  }
 
   // The chroma the composite is built at. A full-chroma delivery composites
   // at 4:4:4, so the titles, captions, stickers and masks the graph draws in
@@ -1744,7 +1767,8 @@ async function renderPass(
       const text = Buffer.from(await io.readFile(path.join(job.tmpDir, path.basename(file)))).toString("utf8");
       parsed = parseLutFile(file, text);
     } catch (e) {
-      throw new Error(`The LUT ${file} could not be read: ${e instanceof Error ? e.message : String(e)}`);
+      const reason = e instanceof Error ? e.message : String(e);
+      throw new UserError("lut_file_unreadable", `The LUT ${file} could not be read: ${reason}`, { file, reason });
     }
     userLuts.set(file, parsed);
     return parsed;

@@ -1,6 +1,7 @@
 import { NO_CREDITS_MESSAGE } from "./credits";
+import { UserError } from "./userError";
 
-// The message a failed hosted call shows: sign in on 401, the credits line on
+// The failure a failed hosted call throws: sign in on 401, the credits line on
 // 402, otherwise the route's own words. The provider's reason (a filtered
 // prompt, a rate limit) rides under `details.message` and joins the headline;
 // a rejected request names its first bad field.
@@ -17,14 +18,23 @@ interface ErrorBody {
 
 const text = (v: unknown): string | undefined => (typeof v === "string" && v.trim() ? v.trim() : undefined);
 
-/** The error line for a hosted response that came back not ok. `signIn` is
- * what a signed-out caller reads, e.g. "Sign in to Donkey to check facts." */
-export async function readHostedError(res: Response, signIn: string, fallback: string): Promise<string> {
+/** The account balance can't cover the generation — callers surface a link to
+ * buy credits alongside the message. */
+export class NoCreditsError extends UserError {
+  constructor() {
+    super("credits_insufficient", NO_CREDITS_MESSAGE);
+  }
+}
+
+/** The failure for a hosted response that came back not ok. `signIn` is what
+ * a signed-out caller reads, e.g. "Sign in to Donkey to check facts." A body
+ * with words of its own answers with them, as a plain Error. */
+export async function readHostedFailure(res: Response, signIn: UserError, fallback: UserError): Promise<Error> {
   if (res.status === UNAUTHORIZED) {
     return signIn;
   }
   if (res.status === PAYMENT_REQUIRED) {
-    return NO_CREDITS_MESSAGE;
+    return new NoCreditsError();
   }
 
   const body = (await res.json().catch(() => null)) as ErrorBody | null;
@@ -33,7 +43,7 @@ export async function readHostedError(res: Response, signIn: string, fallback: s
   const message = text(body?.message) ?? issueText ?? text(body?.error);
   const detail = text(body?.details?.message);
   if (detail && detail !== message) {
-    return message ? `${message} (${detail})` : detail;
+    return new Error(message ? `${message} (${detail})` : detail);
   }
-  return message ?? fallback;
+  return message ? new Error(message) : fallback;
 }

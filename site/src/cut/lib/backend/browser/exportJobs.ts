@@ -4,6 +4,8 @@
 // files stay listed on the project's exports shelf. Shapes match the engine's
 // job feed so the dock renders every residency the same way.
 
+import type { UserErrorParams } from "../../userError";
+
 export interface BrowserExportJob {
   id: string;
   projectId: string;
@@ -12,6 +14,8 @@ export interface BrowserExportJob {
   progress: number;
   outName?: string;
   error?: string;
+  errorCode?: string;
+  errorParams?: UserErrorParams;
   startedAt?: number;
   createdAt?: number;
 }

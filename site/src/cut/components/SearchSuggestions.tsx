@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
 import { toolDisplayOf } from "@/cut/lib/toolDisplay";
 
@@ -30,6 +31,7 @@ export function SearchSuggestions({ output }: { output: unknown }) {
 }
 
 function SuggestionFrame({ html }: { html: string }) {
+  const t = useTranslations("chat.searchSuggestions");
   const ref = useRef<HTMLIFrameElement>(null);
   const [height, setHeight] = useState(0);
 
@@ -60,7 +62,7 @@ function SuggestionFrame({ html }: { html: string }) {
   return (
     <iframe
       ref={ref}
-      title="Google Search suggestions"
+      title={t("frameTitle")}
       srcDoc={`<!doctype html><html><head>${FRAME_HEAD}</head><body>${html}</body></html>`}
       sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
       referrerPolicy="no-referrer"

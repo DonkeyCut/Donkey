@@ -30,6 +30,7 @@ import { audioTrackOf, openMedia, probeMediaFile, videoTrackOf } from "./mediaRe
 import { encoderLead } from "./encoderLead";
 import { ensureProresDecoder } from "./proresDecoder";
 import { convertPlanes, isPlanarFormat, planesPassThrough, proxySize } from "./proxyPlanes";
+import { errorFromBody, UserError } from "./userError";
 
 /** The proxy's file name beside its master (server/proxy.ts `proxyNameFor`). */
 export const proxyNameFor = (fileName: string) =>
@@ -183,7 +184,7 @@ export async function encodeProxyInPage(
       const file = await handle.getFile();
       const probe = await probeMediaFile(file);
       const want = rotated % 180 === 0 ? target.width : target.height;
-      if (!probe.hasVideo || probe.width !== want) throw new Error("The preview proxy did not read back.");
+      if (!probe.hasVideo || probe.width !== want) throw new UserError("proxy_readback_failed", "The preview proxy did not read back.");
       landed = true;
       onProgress(1);
       return { fileName, sizeBytes: file.size };
@@ -252,8 +253,8 @@ export async function proxyOnTheMac(
   if (compat) form.append("compat", compat);
   const res = await engineFetch("/api/cut/proxy", { method: "POST", body: form });
   if (!res.ok) {
-    const body = (await res.json().catch(() => ({}))) as { error?: string };
-    throw new Error(body.error ?? "Could not make the preview proxy.");
+    const body: unknown = await res.json().catch(() => null);
+    throw errorFromBody(body, new UserError("proxy_failed", "Could not make the preview proxy."));
   }
   return res.blob();
 }

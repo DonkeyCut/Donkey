@@ -6,6 +6,7 @@ import { h264Encoder, vtQuality } from "./exportPipeline";
 import { mediaPath } from "./projects";
 import { assertGraphSafe, fexpr } from "./filterGraph";
 import { num, round } from "./util";
+import { UserError } from "../lib/userError";
 
 function run(cmd: string, args: string[]): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -21,7 +22,7 @@ function run(cmd: string, args: string[]): Promise<void> {
       clearTimeout(timer);
       reject(
         e.message.includes("ENOENT")
-          ? new Error("ffmpeg was not found. Install it with: brew install ffmpeg")
+          ? new UserError("ffmpeg_not_found", "ffmpeg was not found. Install it with: brew install ffmpeg")
           : e
       );
     });
@@ -200,7 +201,7 @@ function runCapture(args: string[], timeoutMs: number): Promise<CaptureRun> {
       clearTimeout(timer);
       reject(
         e.message.includes("ENOENT")
-          ? new Error("ffmpeg was not found. Install it with: brew install ffmpeg")
+          ? new UserError("ffmpeg_not_found", "ffmpeg was not found. Install it with: brew install ffmpeg")
           : e
       );
     });
@@ -241,7 +242,7 @@ export async function detectSilence(
   );
   if (!r.ok) {
     if (/does not contain any stream|matches no streams|Cannot find a matching stream/i.test(r.stderr))
-      throw new Error("This file has no audio track.");
+      throw new UserError("media_no_audio_track", "This file has no audio track.");
     throw new Error(
       r.timedOut ? "Silence detection timed out — try a shorter range." : errTail(r.stderr)
     );
@@ -299,7 +300,7 @@ export function extractAudio(
     p.on("error", (e) =>
       reject(
         e.message.includes("ENOENT")
-          ? new Error("ffmpeg was not found. Install it with: brew install ffmpeg")
+          ? new UserError("ffmpeg_not_found", "ffmpeg was not found. Install it with: brew install ffmpeg")
           : e,
       ),
     );
@@ -307,7 +308,7 @@ export function extractAudio(
       clearTimeout(timer);
       if (code === 0 && chunks.length > 0) return resolve(Buffer.concat(chunks));
       if (/does not contain any stream|matches no streams|Cannot find a matching stream/i.test(err))
-        return reject(new Error("This file has no audio track."));
+        return reject(new UserError("media_no_audio_track", "This file has no audio track."));
       reject(new Error(errTail(err) || "Could not read the audio."));
     });
   });

@@ -65,6 +65,7 @@ import type { ExportSettings } from "./exportClient";
 import { sourceExportPlan } from "@/cut/lib/sourceExportPlan";
 import { prepareSourceRemux } from "@/cut/lib/sourceRemux";
 import { deliverySpan, KEYFRAME_INTERVAL_S, videoBitrateFor } from "./exportDelivery";
+import { UserError } from "./userError";
 
 /** Audio is written at the rate and width a delivery file wants, rather than
  * the 16 kHz mono a speech model reads. */
@@ -1085,23 +1086,32 @@ export async function renderProjectToMp4(
     } finally { for (const input of inputs.values()) input.dispose(); }
   }
   const duration = projectDuration(doc);
-  if (!(duration > 0)) throw new Error("There is nothing to export yet.");
+  if (!(duration > 0)) {
+    throw new UserError("export_nothing_yet", "There is nothing to export yet.");
+  }
   // The window of the timeline the file carries: a range when the settings
   // name one, the whole cut otherwise. Frames are drawn at timeline time and
   // written at file time, so the file starts at zero.
   const from = Math.max(0, settings.range?.start ?? 0);
   const span = deliverySpan(settings.range, duration);
-  if (!(span > 0)) throw new Error("The export range is empty.");
+  if (!(span > 0)) {
+    throw new UserError("export_range_empty", "The export range is empty.");
+  }
 
   const wanted = deliveryVideoCodec(settings);
-  if (!wanted) throw new Error("This browser can't encode ProRes.");
+  if (!wanted) {
+    throw new UserError("browser_prores_unsupported", "This browser can't encode ProRes.");
+  }
   const codec = await getFirstEncodableVideoCodec([wanted], {
     width: settings.width,
     height: settings.height,
   });
   if (!codec) {
-    throw new Error(
-      `This browser can't encode ${settings.codec === "hevc" ? "HEVC" : "H.264"} at ${settings.width} × ${settings.height}.`
+    const name = settings.codec === "hevc" ? "HEVC" : "H.264";
+    throw new UserError(
+      "browser_codec_unsupported",
+      `This browser can't encode ${name} at ${settings.width} × ${settings.height}.`,
+      { codec: name, width: settings.width, height: settings.height },
     );
   }
 
@@ -1177,7 +1187,9 @@ export async function renderProjectToMp4(
         numberOfChannels: settings.audioChannels ?? AUDIO_CHANNELS,
         sampleRate: settings.audioSampleRate ?? AUDIO_RATE,
       });
-      if (!audioCodec) throw new Error("This browser can't encode AAC audio.");
+      if (!audioCodec) {
+        throw new UserError("browser_aac_unsupported", "This browser can't encode AAC audio.");
+      }
       // The mix starts its encoder's priming early, so the edit list trims
       // the priming and the sound stays on its picture.
       const lead = await encoderLead(audioCodec, mix.sampleRate, mix.numberOfChannels);

@@ -7,7 +7,8 @@ import { createJobRegistry } from "./jobRegistry";
 import { containerExtension, runExport, type ExportSpec } from "./exportPipeline";
 import { exportBaseName, stemsArchiveName, type ExportFiles } from "../lib/exportDelivery";
 import { exportsDir, mediaPath, projectDir, readProject, setActiveJobGuard } from "./projects";
-import { errorMessage } from "./util";
+import { UserError, errorFromBody, type UserErrorParams } from "../lib/userError";
+import { errorRecord } from "./util";
 
 export type { ExportSpec } from "./exportPipeline";
 
@@ -23,6 +24,8 @@ export interface Job {
   status: "queued" | "running" | "done" | "error";
   progress: number; // 0..1
   error?: string;
+  errorCode?: string;
+  errorParams?: UserErrorParams;
   /** When the job was created (queue order) and when it actually began the
    * encode (elapsed clock in the dock). */
   createdAt: number;
@@ -41,6 +44,18 @@ export interface Job {
    * start of its hand-in. */
   seenAt?: number;
   log: string[];
+}
+
+const exportCanceled = () => new UserError("export_canceled", "Export canceled.");
+const exportBusy = () => new UserError("export_busy", "Another export is already running — wait for it to finish.");
+const projectMissing = () => new UserError("project_not_found", "Project not found.");
+
+/** Settle a job as failed with `failure`'s words and code, or `fallback`'s. */
+function failJob(job: Job, failure: unknown, fallback: UserError | string): void {
+  job.status = "error";
+  job.errorCode = undefined;
+  job.errorParams = undefined;
+  Object.assign(job, errorRecord(failure, fallback));
 }
 
 const MAX_RUNNING = 2; // concurrent ffmpeg exports; extra exports queue behind them
@@ -83,8 +98,7 @@ function sweepClientJobs(now = Date.now()): void {
   for (const job of jobs.values()) {
     if (!job.client || job.status !== "running") continue;
     if (now - (job.seenAt ?? job.startedAt ?? job.createdAt) < CLIENT_RENDER_WINDOW_MS) continue;
-    job.status = "error";
-    job.error = "The tab rendering this export went away.";
+    failJob(job, null, new UserError("export_tab_gone", "The tab rendering this export went away."));
     retire(job);
   }
 }
@@ -142,13 +156,14 @@ function startRun(job: Job, spec: ExportSpec) {
     .then(async () => {
       // A cancel that landed after the last pass settled the row already;
       // its file goes the way a failed render's does.
-      if (job.status !== "running") throw new Error(job.error ?? "Export canceled.");
+      if (job.status !== "running") {
+        throw errorFromBody(job, exportCanceled());
+      }
       if (job.target === "preview") await publishPreview(job);
       job.status = "done";
     })
     .catch((err: unknown) => {
-      job.status = "error";
-      job.error = errorMessage(err, String(err));
+      failJob(job, err, String(err));
       void rm(job.outPath, { force: true }); // no half-written files in exports/
       if (job.stemsPath) void rm(job.stemsPath, { force: true });
     })
@@ -174,6 +189,8 @@ function jobView(j: Job) {
     progress: j.progress,
     outName: j.outName || undefined,
     error: j.error,
+    errorCode: j.errorCode,
+    errorParams: j.errorParams,
     createdAt: j.createdAt,
     startedAt: j.startedAt,
   };
@@ -194,19 +211,16 @@ export function cancelJob(id: string) {
   if (!job) return;
   if (job.status === "running" && job.proc) {
     job.proc.kill("SIGKILL");
-    job.status = "error";
-    job.error = "Export canceled.";
+    failJob(job, null, exportCanceled());
     retire(job);
   } else if (job.status === "running" && job.client) {
     // The tab drawing it learns of the cancel when it comes to hand the file
     // in and is refused; the row settles now so every dock clears.
-    job.status = "error";
-    job.error = "Export canceled.";
+    failJob(job, null, exportCanceled());
     retire(job);
   } else if (job.status === "queued") {
     // Never started: drop it from the queue and settle it so the dock clears.
-    job.status = "error";
-    job.error = "Export canceled.";
+    failJob(job, null, exportCanceled());
     const i = pending.findIndex((p) => p.job.id === id);
     if (i >= 0) pending.splice(i, 1);
     retire(job);
@@ -274,7 +288,7 @@ export async function createJob(form: FormData): Promise<Job> {
       tmpDir: "",
       outPath: "",
       outName: "",
-      error: "Another export is already running — wait for it to finish.",
+      ...errorRecord(null, exportBusy()),
       log: [],
     };
     jobs.set(id, job);
@@ -299,7 +313,9 @@ export async function createJob(form: FormData): Promise<Job> {
 
   try {
     const doc = await readProject(spec.projectId);
-    if (!doc) throw new Error("Project not found.");
+    if (!doc) {
+      throw projectMissing();
+    }
     job.projectName = doc.name;
     if (preview) job.outName = "preview.mp4";
     else await claimExportName(job, spec.name ?? doc.name, containerExtension(spec), spec.stemPlan?.length ? "fileAndStems" : "file");
@@ -327,8 +343,7 @@ export async function createJob(form: FormData): Promise<Job> {
       // dropped preview just refreshes later, so bow out instead of racing.
       if (runningCount() < MAX_RUNNING) startRun(job, spec);
       else {
-        job.status = "error";
-        job.error = "Another export is already running — wait for it to finish.";
+        failJob(job, null, exportBusy());
         void rm(job.tmpDir, { recursive: true, force: true });
         retire(job);
       }
@@ -337,8 +352,7 @@ export async function createJob(form: FormData): Promise<Job> {
       pump();
     }
   } catch (err) {
-    job.status = "error";
-    job.error = errorMessage(err, String(err));
+    failJob(job, err, String(err));
     if (job.tmpDir) void rm(job.tmpDir, { recursive: true, force: true });
     retire(job);
   }
@@ -378,14 +392,15 @@ export async function createClientJob(
   jobs.set(job.id, job);
   try {
     const doc = await readProject(projectId);
-    if (!doc) throw new Error("Project not found.");
+    if (!doc) {
+      throw projectMissing();
+    }
     job.projectName = doc.name;
     await claimExportName(job, name ?? doc.name, containerExtension({ container }), files);
     job.outPath = path.join(exportsDir(projectId), job.outName);
     await mkdir(path.dirname(job.outPath), { recursive: true });
   } catch (err) {
-    job.status = "error";
-    job.error = errorMessage(err, String(err));
+    failJob(job, err, String(err));
     retire(job);
   }
   return job;
@@ -436,15 +451,16 @@ export async function completeClientJob(
   job.seenAt = Date.now();
   const partial = `${job.outPath}.part`;
   try {
-    if (!body) throw new Error("The export arrived without a file.");
+    if (!body) {
+      throw new UserError("export_file_missing", "The export arrived without a file.");
+    }
     await writeBody(body, partial);
     await rename(partial, job.outPath);
     job.status = "done";
     job.progress = 1;
   } catch (err) {
     await rm(partial, { force: true });
-    job.status = "error";
-    job.error = errorMessage(err, String(err));
+    failJob(job, err, String(err));
   } finally {
     retire(job);
   }
@@ -465,7 +481,9 @@ export async function completeClientStems(
   job.seenAt = Date.now();
   const partial = `${job.stemsPath}.part`;
   try {
-    if (!body) throw new Error("The stems arrived without a file.");
+    if (!body) {
+      throw new UserError("export_stems_missing", "The stems arrived without a file.");
+    }
     await writeBody(body, partial);
     await rename(partial, job.stemsPath);
   } catch (err) {

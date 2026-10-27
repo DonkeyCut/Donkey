@@ -6,6 +6,7 @@ import { LibraryImportCard } from "@/cut/components/LibraryImportCard";
 import { libraryFolderRef, projectFolderRef } from "@/cut/lib/folderReference";
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { useFormatter, useLocale, useTranslations } from "next-intl";
 import { Captions, Check, Clapperboard, ClipboardList, Copy, Download, Ellipsis, Film, FolderOpen, FolderPlus, Image as ImageIcon, Loader2, Music, Shapes, Sparkles, Trash2, Upload, X, Blend } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -129,9 +130,7 @@ import {
 import {
   DeleteConfirm,
   SelectionMenu,
-  foldersGoNote,
-  phoneGoNote,
-  pickLabel,
+  usePickWords,
   useSelectionMenu,
 } from "./selectionMenu";
 import { TemplateCard } from "./TemplateCard";
@@ -173,16 +172,16 @@ const railGroup = (id: Tab): "files" | "gen" | "finish" =>
   : id === "subtitles" || id === "publish" ? "finish"
   : "files";
 
-const TABS: { id: Tab; label: string; icon: typeof Film }[] = [
-  { id: "media", label: "Media", icon: Clapperboard },
-  { id: "elements", label: "Elements", icon: Shapes },
-  { id: "effects", label: "Effects", icon: Sparkles },
-  { id: "transitions", label: "Transitions", icon: Blend },
-  { id: "video", label: "Video", icon: Film },
-  { id: "image", label: "Image", icon: ImageIcon },
-  { id: "audio", label: "Audio", icon: Music },
-  { id: "subtitles", label: "Subtitles", icon: Captions },
-  { id: "publish", label: "Details", icon: ClipboardList },
+const TABS: { id: Tab; icon: typeof Film }[] = [
+  { id: "media", icon: Clapperboard },
+  { id: "elements", icon: Shapes },
+  { id: "effects", icon: Sparkles },
+  { id: "transitions", icon: Blend },
+  { id: "video", icon: Film },
+  { id: "image", icon: ImageIcon },
+  { id: "audio", icon: Music },
+  { id: "subtitles", icon: Captions },
+  { id: "publish", icon: ClipboardList },
 ];
 
 export function SidePanel({
@@ -194,6 +193,7 @@ export function SidePanel({
   onImport: (files: FileList | File[], opts?: { mediaOnly?: boolean; folderId?: string }) => void;
   importing: boolean;
 }) {
+  const t = useTranslations("media.sidePanel");
   // A shared view opens only the surfaces the share opted in. The rail still
   // shows every tab so the viewer sees what the editor has; a tab the share
   // withholds sits locked, and hovering it says why. The Library is the
@@ -219,7 +219,7 @@ export function SidePanel({
   // `null` collapses the panel: clicking the active tab unselects it, leaving
   // just the icon rail so the video canvas takes the freed width.
   const [tabPref, setTab] = useLocalPref<Tab | null>("cut-side-tab", "media", (v) =>
-    v === null || TABS.some((t) => t.id === v)
+    v === null || TABS.some((x) => x.id === v)
   );
   // The remembered tab may be hidden in this share — the viewer's own last tab
   // in their own editor, which this share never offered. A share opens on what
@@ -336,7 +336,7 @@ export function SidePanel({
         )}
         contentClassName="flex flex-col items-center gap-1 py-3"
       >
-        {railTabs.map(({ id, label, icon: Icon }, tabIndex) => {
+        {railTabs.map(({ id, icon: Icon }, tabIndex) => {
           const locked = !offered(id);
           // The open tab never badges — its completions are already on screen.
           const unseenCount = isGenTab(id) && id !== tab ? unseen[id].length : 0;
@@ -368,7 +368,7 @@ export function SidePanel({
                   tab === id && "text-foreground"
                 )}
               >
-                {label}
+                {t(`tabs.${id}`)}
               </span>
             </>
           );
@@ -384,7 +384,7 @@ export function SidePanel({
                   {inner}
                 </TooltipTrigger>
                 <TooltipContent side="right" sideOffset={8}>
-                  View only. Ask the owner for edit access.
+                  {t("viewOnly")}
                 </TooltipContent>
               </Tooltip>
             </TooltipProvider>
@@ -562,11 +562,12 @@ function forDrags(props: DragProps, takesRef: (ref: AssetRef) => boolean): DragP
  * face keeps it legible where the column scrolls beneath it. Same action as
  * clicking the active rail tile. */
 function ClosePanelButton({ onClose }: { onClose: () => void }) {
+  const t = useTranslations("media.sidePanel");
   return (
     <button
       type="button"
-      aria-label="Close panel"
-      title="Close panel"
+      aria-label={t("closePanel")}
+      title={t("closePanel")}
       className="absolute top-2.5 right-2.5 z-10 grid size-7 place-items-center rounded-md bg-card text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
       onClick={onClose}
     >
@@ -592,11 +593,12 @@ function useLibraryFold(key: string) {
  * middle, a small gap right of the panel border. The hit target is wider than
  * the pill so it stays easy to grab. */
 function LibraryKnob({ open, onToggle }: { open: boolean; onToggle: () => void }) {
+  const t = useTranslations("media.sidePanel");
   return (
     <button
       type="button"
-      aria-label={open ? "Hide library" : "Show library"}
-      title={open ? "Hide library" : "Show library"}
+      aria-label={open ? t("hideLibrary") : t("showLibrary")}
+      title={open ? t("hideLibrary") : t("showLibrary")}
       className="group absolute top-1/2 -right-[16px] z-20 flex h-16 w-4 -translate-y-1/2 items-center justify-center outline-none"
       onClick={onToggle}
     >
@@ -622,6 +624,12 @@ function TileStatus({ count, busy }: { count: number; busy: boolean }) {
       </span>
     );
   return null;
+}
+
+/** A file size in megabytes with one decimal, in the page's number style:
+ * 12582912 bytes → "12.0" (the message adds the unit). */
+function megabytes(format: ReturnType<typeof useFormatter>, bytes: number): string {
+  return format.number(bytes / (1024 * 1024), { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 }
 
 function PanelHead({ title }: { title: string }) {
@@ -680,6 +688,7 @@ function ExportThumb({
  * owns, and a render this tab is doing itself, which is how a cloud or browser
  * project exports and which carries its progress on its own local row. */
 function ExportingRow({ row, settling = false }: { row: ExportRow; settling?: boolean }) {
+  const t = useTranslations("media.exports");
   const { status } = row.data;
   const running = !settling && (status === "running" || status === "rendering");
   const cancelable = !settling && exportCancelable(row);
@@ -693,15 +702,17 @@ function ExportingRow({ row, settling = false }: { row: ExportRow; settling?: bo
         <Loader2 className="size-3.5 animate-spin text-primary" />
       </div>
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-[11.5px] font-medium">Exporting…</span>
+        <span className="block truncate text-[11.5px] font-medium">{t("exporting")}</span>
         <span className="block text-[10.5px] text-muted-foreground tabular-nums">
           {settling
-            ? "Finishing…"
+            ? t("finishing")
             : running
-              ? `${pct}%${elapsed ? ` · ${elapsed}` : ""}`
+              ? elapsed
+                ? t("progressElapsed", { pct, elapsed })
+                : t("progress", { pct })
               : status === "preparing"
-                ? "Preparing…"
-                : "Queued"}
+                ? t("preparing")
+                : t("queued")}
         </span>
       </span>
       {cancelable && (
@@ -711,7 +722,7 @@ function ExportingRow({ row, settling = false }: { row: ExportRow; settling?: bo
           className="shrink-0 text-muted-foreground hover:text-destructive"
           onClick={() => useExports.getState().cancel(row.data.id)}
         >
-          Cancel
+          {t("cancel")}
         </Button>
       )}
       {running && (
@@ -737,6 +748,7 @@ function MediaPanel({
   onImport: (files: FileList | File[], opts?: { mediaOnly?: boolean; folderId?: string }) => void;
   importing: boolean;
 }) {
+  const t = useTranslations("media.mediaPanel");
   // A shared view shows only the project's own files — the Library is the
   // viewer's cross-project shelf, so the toggle drops and a plain head stays.
   const sharedFeatures = useEditor((s) => s.sharedFeatures);
@@ -756,15 +768,15 @@ function MediaPanel({
   return (
     <>
       {sharedFeatures ? (
-        <PanelHead title="Media" />
+        <PanelHead title={t("media")} />
       ) : (
         /* PanelHead's height, so the side panel's floating close button lands
            on the toggle's centerline; the right padding keeps clear of it. */
         <div className="flex h-12 shrink-0 items-center pr-12 pl-3.5">
           <SubTabs
             tabs={[
-              { id: "project", label: "Project Files" },
-              { id: "library", label: "Library" },
+              { id: "project", label: t("projectFiles") },
+              { id: "library", label: t("library") },
             ]}
             value={view}
             onChange={setSub}
@@ -796,6 +808,10 @@ function ProjectFilesPanel({
   onImport: (files: FileList | File[], opts?: { mediaOnly?: boolean; folderId?: string }) => void;
   importing: boolean;
 }) {
+  const t = useTranslations("media.projectFiles");
+  const te = useTranslations("media.exports");
+  const { pickLabel, foldersGoNote } = usePickWords();
+  const format = useFormatter();
   const caps = useCutCaps();
   // Only user-imported media lives here; anything Cut created (recordings, AI
   // generations, voiceovers, freeze frames, stock adds) is tagged with an
@@ -1016,7 +1032,7 @@ function ProjectFilesPanel({
       {!readOnly && (
         <div className="px-3.5 pb-3">
           <Button variant="outline" className="w-full" onClick={() => inputRef.current?.click()}>
-            <Upload data-icon="inline-start" /> Upload
+            <Upload data-icon="inline-start" /> {t("upload")}
           </Button>
           <input
             ref={inputRef}
@@ -1038,10 +1054,10 @@ function ProjectFilesPanel({
         <div className="flex h-9 shrink-0 items-center px-2 pb-1.5">
           <FolderCrumb
             className="text-sm"
-            root="Project Files"
+            root={t("root")}
             onRename={!readOnly ? (id, name) => useEditor.getState().renameMediaFolder(id, name) : undefined}
             trail={[
-              { id: openFolder, name: folders.find((f) => f.id === openFolder)?.name ?? "Folder" },
+              { id: openFolder, name: folders.find((f) => f.id === openFolder)?.name ?? t("folder") },
             ]}
             mime={MEDIA_MOVE_MIME}
             onGo={() => setOpenFolder(null)}
@@ -1100,23 +1116,23 @@ function ProjectFilesPanel({
 
         {openFolder === null && templates.length > 0 && (
           <div className="grid grid-cols-2 gap-2.5 px-3.5 pb-3">
-            {templates.map((t) => (
+            {templates.map((tpl) => (
               <TemplateCard
-                key={t.id}
+                key={tpl.id}
                 tile="fill"
-                template={t}
+                template={tpl}
                 mediaSrc={(f) => mediaUrl(projectId, f)}
-                drag={{ scope: "project", template: t }}
-                addTitle="Add to timeline"
-                onAdd={() => void addProjectTemplateToTimeline(projectId, t)}
-                onRename={(name) => useEditor.getState().renameTemplate(t.id, name)}
-                onDelete={() => useEditor.getState().removeTemplate(t.id)}
+                drag={{ scope: "project", template: tpl }}
+                addTitle={t("addToTimeline")}
+                onAdd={() => void addProjectTemplateToTimeline(projectId, tpl)}
+                onRename={(name) => useEditor.getState().renameTemplate(tpl.id, name)}
+                onDelete={() => useEditor.getState().removeTemplate(tpl.id)}
                 onRefDrop={(r) => {
-                  if (r.scope === "project") useEditor.getState().addAssetToTemplate(t.id, r.id);
+                  if (r.scope === "project") useEditor.getState().addAssetToTemplate(tpl.id, r.id);
                 }}
                 extraMenu={
-                  <DropdownMenuItem onClick={() => void saveTemplate(projectId, t)}>
-                    <FolderPlus /> Add to Library
+                  <DropdownMenuItem onClick={() => void saveTemplate(projectId, tpl)}>
+                    <FolderPlus /> {t("addToLibrary")}
                   </DropdownMenuItem>
                 }
               />
@@ -1126,7 +1142,7 @@ function ProjectFilesPanel({
         {order.length === 0 && !importing ? (
           openFolder !== null ? (
             <div className="px-3.5 py-6 text-center text-xs text-muted-foreground">
-              Empty folder
+              {t("emptyFolder")}
             </div>
           ) : assets.length === 0 && folders.length === 0 ? (
             <div className="px-2 py-7 text-center text-xs leading-relaxed text-balance text-muted-foreground">
@@ -1134,8 +1150,7 @@ function ProjectFilesPanel({
                 <Film className="size-5" />
                 <Music className="size-5" />
               </div>
-              Drop videos, audio and images assets here. They are only available in
-              this project.
+              {t("empty")}
             </div>
           ) : null
         ) : (
@@ -1161,7 +1176,7 @@ function ProjectFilesPanel({
               <div className="flex aspect-square flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-input text-[11px] text-muted-foreground">
                 <Loader2 className="size-4 animate-spin" />
                 <span>
-                  Importing… <LiveElapsed />
+                  {t("importing")} <LiveElapsed />
                 </span>
               </div>
             )}
@@ -1170,7 +1185,7 @@ function ProjectFilesPanel({
 
         {openFolder === null && exports.length + exporting.length + settling.length > 0 && (
           <div className="mt-5 px-3.5">
-            <div className="mb-2 text-[13px] font-semibold tracking-tight">Exports</div>
+            <div className="mb-2 text-[13px] font-semibold tracking-tight">{te("title")}</div>
             <div className="flex flex-col gap-1.5">
               {exporting.map((row) => (
                 <ExportingRow key={row.data.id} row={row} />
@@ -1195,7 +1210,7 @@ function ProjectFilesPanel({
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-[11.5px] font-medium">{it.file}</span>
                       <span className="block text-[10.5px] text-muted-foreground">
-                        {(it.size / (1024 * 1024)).toFixed(1)} MB · WAV stems · ZIP
+                        {te("stemsMeta", { size: megabytes(format, it.size) })}
                       </span>
                     </span>
                   </div>
@@ -1203,7 +1218,7 @@ function ProjectFilesPanel({
                   <button
                     type="button"
                     className="flex min-w-0 flex-1 items-center gap-2.5 text-left"
-                    title={unplayable.has(it.file) ? "Master file" : "Preview as a post"}
+                    title={unplayable.has(it.file) ? te("masterFile") : te("previewAsPost")}
                     onClick={() => !unplayable.has(it.file) && setPreview(it)}
                   >
                     <ExportThumb
@@ -1223,7 +1238,7 @@ function ProjectFilesPanel({
                     />
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-[11.5px] font-medium">
-                        {new Date(it.mtime).toLocaleString([], {
+                        {format.dateTime(new Date(it.mtime), {
                           month: "short",
                           day: "numeric",
                           hour: "numeric",
@@ -1231,7 +1246,7 @@ function ProjectFilesPanel({
                         })}
                       </span>
                       <span className="block text-[10.5px] text-muted-foreground">
-                        {(it.size / (1024 * 1024)).toFixed(1)} MB · {containerOfName(it.file).label}
+                        {te("fileMeta", { size: megabytes(format, it.size), container: containerOfName(it.file).label })}
                       </span>
                     </span>
                   </button>
@@ -1241,8 +1256,8 @@ function ProjectFilesPanel({
                       <Button
                         variant="ghost"
                         size="icon-xs"
-                        aria-label="Show in Finder"
-                        title="Show in Finder"
+                        aria-label={te("showInFinder")}
+                        title={te("showInFinder")}
                         onClick={() => void revealExport(projectId, it.file).catch(() => {})}
                       >
                         <FolderOpen />
@@ -1251,8 +1266,8 @@ function ProjectFilesPanel({
                       <Button
                         variant="ghost"
                         size="icon-xs"
-                        aria-label="Download export"
-                        title="Download"
+                        aria-label={te("downloadExport")}
+                        title={te("download")}
                         onClick={() => downloadProjectExport(projectId, it)}
                       >
                         <Download />
@@ -1261,8 +1276,8 @@ function ProjectFilesPanel({
                     <Button
                       variant="ghost"
                       size="icon-xs"
-                      aria-label="Delete export"
-                      title="Delete export"
+                      aria-label={te("deleteExport")}
+                      title={te("deleteExport")}
                       className="text-muted-foreground hover:text-destructive"
                       onClick={() => setDeletingExport(it)}
                     >
@@ -1286,14 +1301,11 @@ function ProjectFilesPanel({
       <AlertDialog open={!!deletingExport} onOpenChange={(o) => !o && setDeletingExport(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete this export?</AlertDialogTitle>
-            <AlertDialogDescription>
-              The rendered file leaves the project’s exports folder. Your cut is untouched — you
-              can export it again anytime.
-            </AlertDialogDescription>
+            <AlertDialogTitle>{te("deleteTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>{te("deleteDescription")}</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>{te("cancel")}</AlertDialogCancel>
             <AlertDialogAction
               className="bg-destructive/10 text-destructive hover:bg-destructive/20"
               onClick={(e) => {
@@ -1301,7 +1313,7 @@ function ProjectFilesPanel({
                 void removeExport();
               }}
             >
-              Delete
+              {te("delete")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -1310,7 +1322,7 @@ function ProjectFilesPanel({
       <SelectionMenu menu={ctx.menu} onClose={ctx.close}>
         {ctx.menu?.ids.length === 0 ? (
           <DropdownMenuItem onClick={() => setCreatingIds([])}>
-            <FolderPlus /> New folder
+            <FolderPlus /> {t("newFolder")}
           </DropdownMenuItem>
         ) : ctx.menu && splitPick(ctx.menu.ids).folders.length === 1 && ctx.menu.ids.length === 1 ? (
           // A menu over one folder offers the folder's own actions.
@@ -1332,13 +1344,13 @@ function ProjectFilesPanel({
                     setOpenFolder(null);
                   }}
                 >
-                  <FolderPlus /> New folder
+                  <FolderPlus /> {t("newFolder")}
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
               </>
             )}
             <DropdownMenuItem variant="destructive" onClick={() => removeMany(ctx.menu!.ids)}>
-              <Trash2 /> Delete
+              <Trash2 /> {t("delete")}
             </DropdownMenuItem>
           </>
         )}
@@ -1348,11 +1360,11 @@ function ProjectFilesPanel({
         open={deletingIds !== null}
         title={
           deletingFolders.length === 0 && deletingFiles.length === 1
-            ? "Remove this file from the project?"
-            : `Remove ${pickLabel(deletingFolders, deletingFiles, ["file", "files"], deletingHeld)} from the project?`
+            ? t("removeOneTitle")
+            : t("removeManyTitle", { label: pickLabel(deletingFolders, deletingFiles, "file", deletingHeld) })
         }
-        description={`${foldersGoNote(deletingFolders.length, deletingHeld)}Timeline clips made from them are removed too.`}
-        action="Remove"
+        description={`${foldersGoNote(deletingFolders.length, deletingHeld)}${t("clipsRemovedToo")}`}
+        action={t("remove")}
         onClose={() => setDeletingIds(null)}
         onConfirm={() => {
           deleteNow(deletingIds ?? []);
@@ -1367,12 +1379,13 @@ function ProjectFilesPanel({
  * the way: a line across the bottom of the tile while the bytes go out, and a
  * message only if they don't arrive. */
 function UploadState({ asset }: { asset: MediaAsset }) {
+  const t = useTranslations("media.uploadState");
   const upload = asset.upload;
   if (!upload) return null;
   if (upload.error) {
     return (
       <div className="absolute inset-x-0 bottom-0 flex items-center gap-1.5 bg-black/70 px-1.5 py-1 text-[10px] text-white">
-        <span className="min-w-0 flex-1 truncate">Upload failed</span>
+        <span className="min-w-0 flex-1 truncate">{t("failed")}</span>
         <button
           type="button"
           className="shrink-0 font-medium underline underline-offset-2"
@@ -1381,7 +1394,7 @@ function UploadState({ asset }: { asset: MediaAsset }) {
             retryUpload(asset.id);
           }}
         >
-          Retry
+          {t("retry")}
         </button>
       </div>
     );
@@ -1432,6 +1445,8 @@ function AssetCard({
   /** A drop that landed leaves nothing to keep picked. */
   onDragLanded?: () => void;
 }) {
+  const t = useTranslations("media.assetCard");
+  const locale = useLocale();
   const caps = useCutCaps();
   const [saved, setSaved] = useState(false);
   // Number of timeline items that would be cascade-deleted; null = no prompt.
@@ -1563,7 +1578,7 @@ function AssetCard({
                     : "bottom-1 left-1 rounded-[5px] bg-black/65 px-1 py-px text-[9.5px] text-white"
                 )}
               >
-                {formatBytes(sizeBytes)}
+                {formatBytes(sizeBytes, locale)}
               </span>
             )}
             <CardActionsMenu
@@ -1576,13 +1591,13 @@ function AssetCard({
               extra={
                 <>
                   <DropdownMenuItem onClick={saveToLibrary} disabled={!!asset.upload}>
-                    <FolderPlus /> Save to library
+                    <FolderPlus /> {t("saveToLibrary")}
                   </DropdownMenuItem>
                   {caps.revealInFinder && (
                     <DropdownMenuItem
                       onClick={() => void revealMedia(projectId, asset.fileName).catch(() => {})}
                     >
-                      <FolderOpen /> Show in Finder
+                      <FolderOpen /> {t("showInFinder")}
                     </DropdownMenuItem>
                   )}
                 </>
@@ -1618,10 +1633,10 @@ function AssetCard({
     <AlertDialog open={confirmUses !== null} onOpenChange={(o) => !o && setConfirmUses(null)}>
       <AlertDialogContent aria-describedby={undefined}>
         <AlertDialogHeader>
-          <AlertDialogTitle>Remove “{asset.name}” from the project?</AlertDialogTitle>
+          <AlertDialogTitle>{t("removeTitle", { name: asset.name })}</AlertDialogTitle>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
           <AlertDialogAction
             className="bg-destructive/10 text-destructive hover:bg-destructive/20"
             onClick={(e) => {
@@ -1630,7 +1645,7 @@ function AssetCard({
               setConfirmUses(null);
             }}
           >
-            Remove
+            {t("remove")}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
@@ -1651,6 +1666,8 @@ function LibraryPanel({ projectId, onImport }: {
   projectId: string;
   onImport: (files: FileList | File[], opts?: { mediaOnly?: boolean; folderId?: string }) => void;
 }) {
+  const t = useTranslations("media.library");
+  const { pickLabel, foldersGoNote, phoneGoNote } = usePickWords();
   const client = useQueryClient();
   // One cached listing serves every library surface (lib/queries.ts), and it
   // stays live while this panel is open: the shelf re-reads on a timer and
@@ -1837,7 +1854,7 @@ function LibraryPanel({ projectId, onImport }: {
   // holds no folders.
   const cameraRoll: LibraryFolder & { locked?: boolean } = {
     id: CAMERA_ROLL_FOLDER,
-    name: "Camera Roll",
+    name: t("cameraRoll"),
     createdAt: 0,
     residency: "cloud",
     locked: true,
@@ -1953,7 +1970,7 @@ function LibraryPanel({ projectId, onImport }: {
             <div className="flex h-9 shrink-0 items-center px-2 pb-1.5">
               <FolderCrumb
                 className="text-sm"
-                root="Library"
+                root={t("root")}
                 trail={trail}
                 onRename={openFolder !== CAMERA_ROLL_FOLDER ? renameFolder : undefined}
                 mime={LIBRARY_MOVE_MIME}
@@ -2017,26 +2034,26 @@ function LibraryPanel({ projectId, onImport }: {
           {shownTemplates.length > 0 && (
             <div className="shrink-0 px-3.5 pb-3">
               <div className="grid grid-cols-2 gap-2.5">
-                {shownTemplates.map((t) => (
+                {shownTemplates.map((tpl) => (
                   <TemplateCard
-                    key={t.id}
+                    key={tpl.id}
                     tile="fill"
-                    template={t}
-                    mediaSrc={(f) => libraryMediaUrl(f, t.residency)}
-                    drag={{ scope: "library", template: t }}
+                    template={tpl}
+                    mediaSrc={(f) => libraryMediaUrl(f, tpl.residency)}
+                    drag={{ scope: "library", template: tpl }}
                     onDragStartExtra={(e) => {
-                      e.dataTransfer.setData(LIBRARY_MOVE_MIME, JSON.stringify([t.id]));
+                      e.dataTransfer.setData(LIBRARY_MOVE_MIME, JSON.stringify([tpl.id]));
                       e.dataTransfer.effectAllowed = "copyMove";
                     }}
-                    addTitle="Add to this project"
-                    onAdd={() => void addTemplateToProject(projectId, t)}
-                    onRename={(name) => void commitTemplateRename(t.residency, t.id, name)}
-                    onDelete={() => void removeTemplate(t.residency, t.id)}
+                    addTitle={t("addToProject")}
+                    onAdd={() => void addTemplateToProject(projectId, tpl)}
+                    onRename={(name) => void commitTemplateRename(tpl.residency, tpl.id, name)}
+                    onDelete={() => void removeTemplate(tpl.residency, tpl.id)}
                     onRefDrop={(r) => {
                       if (r.scope !== "project") return;
                       const asset = useEditor.getState().assets.find((a) => a.id === r.id);
                       if (!asset) return;
-                      void addAssetToLibraryTemplate(projectId, t, asset)
+                      void addAssetToLibraryTemplate(projectId, tpl, asset)
                         .then((updated) =>
                           patch((d) => ({
                             ...d,
@@ -2057,12 +2074,11 @@ function LibraryPanel({ projectId, onImport }: {
             // content — the invitation is only for a truly empty library.
             openFolder !== null ? (
               shownTemplates.length === 0 ? (
-                <div className="px-3.5 py-6 text-center text-xs text-muted-foreground">Empty folder</div>
+                <div className="px-3.5 py-6 text-center text-xs text-muted-foreground">{t("emptyFolder")}</div>
               ) : null
             ) : all.length === 0 && folders.length === 0 && templates.length === 0 ? (
               <div className="text-balance px-3.5 py-6 text-center text-xs text-muted-foreground">
-                Drag video, audio, image and font files here. Library assets are shared across all
-                projects.
+                {t("empty")}
               </div>
             ) : null
           ) : (
@@ -2110,7 +2126,7 @@ function LibraryPanel({ projectId, onImport }: {
           />
         ) : (
           <DropdownMenuItem variant="destructive" onClick={() => setDeleting(ctxSet)}>
-            <Trash2 /> Delete
+            <Trash2 /> {t("delete")}
           </DropdownMenuItem>
         )}
       </SelectionMenu>
@@ -2118,10 +2134,10 @@ function LibraryPanel({ projectId, onImport }: {
       <DeleteConfirm
         open={!!deleting}
         title={
-          deleting ? `Delete ${pickLabel(deleting.folders, deleting.items, ["item", "items"], deletingHeld)}?` : ""
+          deleting ? t("deleteTitle", { label: pickLabel(deleting.folders, deleting.items, "item", deletingHeld) }) : ""
         }
-        description={`${foldersGoNote(deleting?.folders.length ?? 0, deletingHeld)}${phoneGoNote(deleting ? phoneSynced(deleting) : 0, deletingTotal)}Projects that already use ${deletingTotal === 1 ? "it" : "them"} keep their own copy.`}
-        action="Remove"
+        description={`${foldersGoNote(deleting?.folders.length ?? 0, deletingHeld)}${phoneGoNote(deleting ? phoneSynced(deleting) : 0, deletingTotal)}${t("keepCopy", { count: deletingTotal })}`}
+        action={t("remove")}
         onClose={() => setDeleting(null)}
         onConfirm={() => deleting && void remove(deleting)}
       />
@@ -2134,12 +2150,13 @@ function LibraryPanel({ projectId, onImport }: {
 type LibraryDeleteSet = { folders: LibraryFolder[]; items: LibraryAsset[] };
 
 function CopyChip({ text, label }: { text: string; label: string }) {
+  const t = useTranslations("media.publish");
   const [copied, setCopied] = useState(false);
   return (
     <button
       className="copy-chip inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10.5px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"
       disabled={!text}
-      title={`Copy ${label}`}
+      title={label}
       onClick={() => {
         void navigator.clipboard.writeText(text).then(() => {
           setCopied(true);
@@ -2148,12 +2165,14 @@ function CopyChip({ text, label }: { text: string; label: string }) {
       }}
     >
       {copied ? <Check className="size-3 text-emerald-600" /> : <Copy className="size-3" />}
-      {copied ? "Copied" : "Copy"}
+      {copied ? t("copied") : t("copy")}
     </button>
   );
 }
 
 function PublishPanel() {
+  const t = useTranslations("media.publish");
+  const format = useFormatter();
   const readOnly = useEditor((s) => s.readOnly);
   const publish = useEditor((s) => s.publish);
   const setPublish = useEditor((s) => s.setPublish);
@@ -2166,16 +2185,16 @@ function PublishPanel() {
 
   return (
     <>
-      <PanelHead title="Details" />
+      <PanelHead title={t("title")} />
       <ScrollArea className="min-h-0" contentClassName="flex flex-col gap-4 px-3.5 pb-4">
         <div className="flex flex-col gap-1.5">
           <div className="flex items-center justify-between">
-            <SectionTitle>Caption</SectionTitle>
-            <CopyChip text={publish.caption.trim()} label="caption" />
+            <SectionTitle>{t("caption")}</SectionTitle>
+            <CopyChip text={publish.caption.trim()} label={t("copyCaption")} />
           </div>
           <textarea
             className="publish-caption min-h-[110px] w-full resize-y rounded-lg border border-input bg-transparent px-2.5 py-2 text-[12.5px] leading-relaxed outline-none focus:border-ring"
-            placeholder={"What's happening in this video?\n\nHooks read best in the first line."}
+            placeholder={t("captionPlaceholder")}
             value={publish.caption}
             readOnly={readOnly}
             onChange={(e) => setPublish({ caption: e.target.value })}
@@ -2184,38 +2203,38 @@ function PublishPanel() {
 
         <div className="flex flex-col gap-1.5">
           <div className="flex items-center justify-between">
-            <SectionTitle>Tags</SectionTitle>
-            <CopyChip text={tagsLine} label="tags" />
+            <SectionTitle>{t("tags")}</SectionTitle>
+            <CopyChip text={tagsLine} label={t("copyTags")} />
           </div>
           <input
             className="publish-tags w-full rounded-lg border border-input bg-transparent px-2.5 py-2 text-[12.5px] outline-none focus:border-ring"
-            placeholder="fyp howto cut"
+            placeholder={t("tagsPlaceholder")}
             value={publish.tags}
             readOnly={readOnly}
             onChange={(e) => setPublish({ tags: e.target.value })}
           />
           {tagsLine && (
             <div className="publish-tag-preview flex flex-wrap gap-1">
-              {tagsLine.split(" ").map((t) => (
-                <span key={t} className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-[10.5px]">
-                  {t}
+              {tagsLine.split(" ").map((tag) => (
+                <span key={tag} className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-[10.5px]">
+                  {tag}
                 </span>
               ))}
             </div>
           )}
           <p className="text-[11px] leading-relaxed text-muted-foreground">
-            3–5 focused tags work best. Tags count toward the caption limit.
+            {t("tagsHint")}
           </p>
         </div>
 
         <div className="flex flex-col gap-1.5">
           <div className="flex items-center justify-between">
-            <SectionTitle>Sound title</SectionTitle>
-            <CopyChip text={publish.soundTitle.trim()} label="sound title" />
+            <SectionTitle>{t("soundTitle")}</SectionTitle>
+            <CopyChip text={publish.soundTitle.trim()} label={t("copySoundTitle")} />
           </div>
           <input
             className="publish-sound w-full rounded-lg border border-input bg-transparent px-2.5 py-2 text-[12.5px] outline-none focus:border-ring"
-            placeholder="My track — artist"
+            placeholder={t("soundTitlePlaceholder")}
             value={publish.soundTitle}
             readOnly={readOnly}
             onChange={(e) => setPublish({ soundTitle: e.target.value })}
@@ -2223,9 +2242,9 @@ function PublishPanel() {
         </div>
 
         <div className="flex flex-col gap-1.5 border-t border-border pt-4">
-          <SectionTitle>Notes</SectionTitle>
+          <SectionTitle>{t("notes")}</SectionTitle>
           <label className="flex items-center justify-between gap-2 text-[12px] text-muted-foreground">
-            Published
+            {t("published")}
             <input
               type="date"
               className="notes-date rounded-lg border border-input bg-transparent px-2 py-1 text-[12px] outline-none focus:border-ring"
@@ -2236,14 +2255,14 @@ function PublishPanel() {
           </label>
           <textarea
             className="notes-links min-h-[54px] w-full resize-y rounded-lg border border-input bg-transparent px-2.5 py-2 font-mono text-[11.5px] leading-relaxed outline-none focus:border-ring"
-            placeholder={"Links, one per line\nhttps://tiktok.com/…"}
+            placeholder={t("linksPlaceholder")}
             value={notes.links.join("\n")}
             readOnly={readOnly}
             onChange={(e) => setNotes({ links: e.target.value.split("\n") })}
           />
           <textarea
             className="notes-text min-h-[70px] w-full resize-y rounded-lg border border-input bg-transparent px-2.5 py-2 text-[12.5px] leading-relaxed outline-none focus:border-ring"
-            placeholder="Anything worth remembering about this cut…"
+            placeholder={t("notesPlaceholder")}
             value={notes.text}
             readOnly={readOnly}
             onChange={(e) => setNotes({ text: e.target.value })}
@@ -2263,11 +2282,11 @@ function PublishPanel() {
           >
             {copiedAll ? (
               <>
-                <Check data-icon="inline-start" /> Copied
+                <Check data-icon="inline-start" /> {t("copied")}
               </>
             ) : (
               <>
-                <Copy data-icon="inline-start" /> Copy caption + tags
+                <Copy data-icon="inline-start" /> {t("copyAll")}
               </>
             )}
           </Button>
@@ -2277,7 +2296,7 @@ function PublishPanel() {
               count > CAPTION_LIMIT ? "font-semibold text-red-600" : "text-muted-foreground"
             )}
           >
-            {count.toLocaleString()} / {CAPTION_LIMIT.toLocaleString()}
+            {t("count", { count: format.number(count), limit: format.number(CAPTION_LIMIT) })}
           </p>
         </div>
       </ScrollArea>

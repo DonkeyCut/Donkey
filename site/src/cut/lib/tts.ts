@@ -3,7 +3,8 @@
 import { geminiModelRoleNames } from "@/lib/inference/gemini-models";
 import { bytesFromBase64 } from "./bytes";
 import { wavHeader } from "./wav";
-import { readHostedError } from "./hostedError";
+import { NoCreditsError, readHostedFailure } from "./hostedError";
+import { UserError } from "./userError";
 import { hostedPost } from "./hosted";
 import { CUT_JUDGE } from "./chatRuntime";
 import { askJudge, choice } from "./judge";
@@ -223,12 +224,8 @@ interface PcmClip {
   rate: number;
 }
 
-/** The account balance can't cover the generation — callers surface a link to
- * buy credits alongside the message. */
-export class NoCreditsError extends Error {}
-
-const readError = (res: Response, fallback: string) =>
-  readHostedError(res, "Sign in to Donkey to generate voiceovers.", fallback);
+const readFailure = (res: Response, fallback: UserError) =>
+  readHostedFailure(res, new UserError("sign_in_to_generate_voiceovers", "Sign in to Donkey to generate voiceovers."), fallback);
 
 /** One hosted Gemini speech call: text in, decoded PCM out. A direction is a
  * natural-language delivery instruction ("Say warmly, like an old friend");
@@ -250,14 +247,15 @@ async function synthesizeSegment(
       : {}),
   });
   if (!res.ok) {
-    const message = await readError(res, "Voice generation failed.");
-    throw res.status === 402 ? new NoCreditsError(message) : new Error(message);
+    throw await readFailure(res, new UserError("voice_generation_failed", "Voice generation failed."));
   }
   const gen = (await res.json()) as {
     outputs?: { dataBase64?: string; contentType?: string }[];
   };
   const out = gen.outputs?.find((o) => o.dataBase64);
-  if (!out?.dataBase64) throw new Error("The provider returned no audio.");
+  if (!out?.dataBase64) {
+    throw new UserError("audio_output_missing", "The provider returned no audio.");
+  }
 
   const bytes = bytesFromBase64(out.dataBase64);
   const rate = Number(out.contentType?.match(/rate=(\d+)/)?.[1]) || 24000;
@@ -349,13 +347,21 @@ export async function renderSpeechClip(
   const raw = segments
     .map((s) => ({ text: s.text.trim(), at: Math.max(0, s.at) }))
     .filter((s) => s.text);
-  if (raw.length === 0) throw new Error("Nothing to say.");
-  if (raw.length > MAX_SEGMENTS) throw new Error(`At most ${MAX_SEGMENTS} lines at once.`);
+  if (raw.length === 0) {
+    throw new UserError("speech_text_empty", "Nothing to say.");
+  }
+  if (raw.length > MAX_SEGMENTS) {
+    throw new UserError("speech_lines_too_many", `At most ${MAX_SEGMENTS} lines at once.`, { max: MAX_SEGMENTS });
+  }
   if (raw.some((s) => s.text.length > MAX_SEGMENT_CHARS)) {
-    throw new Error(`Each line must stay under ${MAX_SEGMENT_CHARS} characters.`);
+    throw new UserError("speech_line_too_long", `Each line must stay under ${MAX_SEGMENT_CHARS} characters.`, {
+      max: MAX_SEGMENT_CHARS,
+    });
   }
   if (raw.reduce((n, s) => n + s.text.length, 0) > MAX_TOTAL_CHARS) {
-    throw new Error(`The script must stay under ${MAX_TOTAL_CHARS} characters.`);
+    throw new UserError("speech_script_too_long", `The script must stay under ${MAX_TOTAL_CHARS} characters.`, {
+      max: MAX_TOTAL_CHARS,
+    });
   }
 
   // The one place a free-text direction becomes speech settings: a model reads
@@ -391,7 +397,11 @@ export async function renderSpeechClip(
         // Name the line that failed so a one-bad-cue batch is actionable.
         if (lines.length > 1 && e instanceof Error && !(e instanceof NoCreditsError)) {
           const snippet = lines[i].text.length > 40 ? `${lines[i].text.slice(0, 40)}…` : lines[i].text;
-          throw new Error(`Line ${i + 1} ("${snippet}"): ${e.message}`);
+          throw new UserError("speech_line_failed", `Line ${i + 1} ("${snippet}"): ${e.message}`, {
+            line: i + 1,
+            snippet,
+            reason: e.message,
+          });
         }
         throw e;
       }
@@ -439,7 +449,9 @@ export async function speechClipToAsset(
   const label = name?.trim() || "AI voice";
   const file = new File([blob], `${mediaSlug(label, "ai-voice")}.wav`, { type: "audio/wav" });
   const asset = await importFileToProject(projectId, file);
-  if (!asset) throw new Error("Could not save the voiceover into the project.");
+  if (!asset) {
+    throw new UserError("voiceover_save_failed", "Could not save the voiceover into the project.");
+  }
   asset.name = label;
   asset.origin = "voiceover";
   if (language) asset.language = language;

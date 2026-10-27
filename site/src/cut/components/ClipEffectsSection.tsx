@@ -1,11 +1,11 @@
 "use client";
 
 import { X } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { Fragment } from "react";
 import {
   AMOUNTLESS_EFFECTS,
   CLIP_EFFECT_IDS,
-  EFFECT_LABELS,
   type ClipEffect,
   type ClipEffectId,
 } from "@donkeycut/effects-kit";
@@ -17,6 +17,7 @@ import { parsePercentInput } from "@/cut/components/ScrubValue";
 import { ValueSlider } from "@/cut/components/ValueSlider";
 import { useEditor } from "@/cut/lib/store";
 import type { VideoClip } from "@/cut/lib/types";
+import { useLabels } from "@/i18n/labels";
 
 /**
  * The effects a clip wears: each treats this clip's picture alone, inside its
@@ -25,6 +26,8 @@ import type { VideoClip } from "@/cut/lib/types";
  * writes.
  */
 export function ClipEffectsSection({ clip }: { clip: VideoClip }) {
+  const t = useTranslations("inspector.clipEffects");
+  const effectLabel = useLabels("effect");
   const ck = useSliderCheckpoint();
   const list = clip.effects ?? [];
   const st = () => useEditor.getState();
@@ -52,24 +55,24 @@ export function ClipEffectsSection({ clip }: { clip: VideoClip }) {
 
   return (
     <Section
-      title="Effects"
-      info="Each effect treats this clip's picture alone, inside its mask, for the clip's whole length. An effect from the Effects tab treats the whole frame under its window."
+      title={t("title")}
+      info={t("info")}
       aside={
         free.length > 0 && (
           <Select
             value={null}
-            items={Object.fromEntries(free.map((id) => [id, EFFECT_LABELS[id]]))}
+            items={Object.fromEntries(free.map((id) => [id, effectLabel(id)]))}
             onValueChange={(v) => {
               if (v) write([...list, { effect: v as ClipEffectId }]);
             }}
           >
             <SelectTrigger className="h-7 w-28 text-[12px]">
-              <SelectValue placeholder="Add effect" />
+              <SelectValue placeholder={t("add")} />
             </SelectTrigger>
             <SelectContent>
               {free.map((id) => (
                 <SelectItem key={id} value={id} className="text-[12px]">
-                  {EFFECT_LABELS[id]}
+                  {effectLabel(id)}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -79,10 +82,10 @@ export function ClipEffectsSection({ clip }: { clip: VideoClip }) {
     >
       {list.map((e, i) => (
         <Fragment key={e.effect}>
-          <Row label={EFFECT_LABELS[e.effect]}>
+          <Row label={effectLabel(e.effect)}>
             {!AMOUNTLESS_EFFECTS.includes(e.effect) && (
               <ValueSlider
-                label={`${EFFECT_LABELS[e.effect]} amount`}
+                label={t("amount", { effect: effectLabel(e.effect) })}
                 sliderClassName="data-horizontal:w-24"
                 valueClassName="w-9 text-muted-foreground"
                 value={e.amount ?? 0.5}
@@ -101,13 +104,13 @@ export function ClipEffectsSection({ clip }: { clip: VideoClip }) {
             )}
             <Tooltip>
               <TooltipTrigger
-                aria-label={`Remove ${EFFECT_LABELS[e.effect]}`}
+                aria-label={t("removeEffect", { effect: effectLabel(e.effect) })}
                 className="grid size-6 place-items-center rounded text-muted-foreground transition-colors hover:text-foreground"
                 onClick={() => write(list.filter((_, j) => j !== i))}
               >
                 <X className="size-3.5" />
               </TooltipTrigger>
-              <TooltipContent>Remove</TooltipContent>
+              <TooltipContent>{t("remove")}</TooltipContent>
             </Tooltip>
           </Row>
           {e.effect === "flash" && <FlashPulseRows pulse={e} write={(patch, how) => setPulse(i, patch, how)} />}

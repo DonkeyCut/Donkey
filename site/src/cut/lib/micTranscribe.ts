@@ -5,6 +5,7 @@ import { confirmEngine } from "./api";
 import { hasLocalCompute } from "./backend";
 import { localBackend } from "./backend/local";
 import { cloudTranscribeRecording } from "./cloudTranscribe";
+import { errorFromBody, UserError } from "./userError";
 
 // Live dictation for the chat composer. The browser holds the mic permission,
 // so capture happens in the page, and the transcription runs wherever it can.
@@ -101,7 +102,9 @@ export interface MicController {
   stream: MediaStream | null;
   /** Evolving transcript while recording. */
   partial: string;
-  error: string | null;
+  /** Why the last dictation ended, worded by the panel: a coded UserError
+   * (errors catalog) or the engine's or browser's own error. */
+  error: Error | null;
   /** Begin capturing + transcribing. */
   start: () => Promise<void>;
   /** Finish, resolve the final transcript, and hand it to `onResult`. */
@@ -114,7 +117,7 @@ export function useMicTranscription(onResult: (text: string) => void): MicContro
   const [state, setState] = useState<MicState>("idle");
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [partial, setPartial] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<Error | null>(null);
 
   const jobRef = useRef<string | null>(null);
   /** Which transcriber this dictation is on; a run that loses the engine flips
@@ -201,7 +204,7 @@ export function useMicTranscription(onResult: (text: string) => void): MicContro
    * engine never holds a session nothing is feeding and the user is never left
    * watching an empty transcript. */
   const fail = useCallback(
-    (message: string) => {
+    (message: Error) => {
       const job = jobRef.current;
       jobRef.current = null;
       if (job) void localBackend.fetch(`/api/cut/mic/${job}/cancel`, { method: "POST" }).catch(() => {});
@@ -220,7 +223,7 @@ export function useMicTranscription(onResult: (text: string) => void): MicContro
     if (silenceTimer.current) clearTimeout(silenceTimer.current);
     silenceTimer.current = setTimeout(() => {
       if (gotAudioRef.current) return;
-      fail("No audio is reaching Donkey from this microphone. Check the input device and try again.");
+      fail(new UserError("mic_no_audio", "No audio is reaching Donkey from this microphone. Check the input device and try again."));
     }, FIRST_AUDIO_MS);
   }, [fail]);
 
@@ -241,7 +244,7 @@ export function useMicTranscription(onResult: (text: string) => void): MicContro
           recorderRef.current = null;
           // The engine is still transcribing this one; only a dictation the
           // recording *was* has nothing left to finish with.
-          if (modeRef.current === "hosted") fail("The browser stopped recording the microphone.");
+          if (modeRef.current === "hosted") fail(new UserError("mic_recording_stopped", "The browser stopped recording the microphone."));
         };
         rec.start(RECORDER_SLICE_MS);
         recorderRef.current = rec;
@@ -259,7 +262,7 @@ export function useMicTranscription(onResult: (text: string) => void): MicContro
    * screen changes but the partial. Returns false when there was no recording
    * to fall back on, in which case the dictation ended with `reason` shown. */
   const degrade = useCallback(
-    (reason: string): boolean => {
+    (reason: Error): boolean => {
       if (!recorderRef.current) {
         fail(reason);
         return false;
@@ -300,14 +303,14 @@ export function useMicTranscription(onResult: (text: string) => void): MicContro
         headers: { "Content-Type": "application/octet-stream" },
         body: merged.buffer,
       });
-      if (!res.ok) throw new Error(`Donkey turned the audio away (${res.status}).`);
+      if (!res.ok) throw new UserError("mic_audio_refused", `Donkey turned the audio away (${res.status}).`, { status: res.status });
       failuresRef.current = 0;
     } catch (e) {
       // A dropped chunk just shortens the transcript; a run of them means the
       // engine is no longer taking this dictation, and the recording takes over.
       failuresRef.current += 1;
       if (failuresRef.current >= MAX_FEED_FAILURES) {
-        degrade(e instanceof Error ? e.message : "Donkey stopped receiving the audio.");
+        degrade(e instanceof Error ? e : new UserError("mic_feed_stopped", "Donkey stopped receiving the audio."));
       }
     } finally {
       feedingRef.current = false;
@@ -346,7 +349,7 @@ export function useMicTranscription(onResult: (text: string) => void): MicContro
       }
       // A session that died — a locale with no model on this Mac, a process
       // that quit — has no transcript coming; the recording carries it instead.
-      if (data.status === "error") degrade(data.error || "Dictation stopped on this Mac.");
+      if (data.status === "error") degrade(errorFromBody(data, new UserError("mic_engine_stopped", "Dictation stopped on this Mac.")));
     } catch {
       // Transient poll failure; the next tick retries. An engine that is gone
       // shows up in the feeds, which are what carry the audio.
@@ -380,7 +383,7 @@ export function useMicTranscription(onResult: (text: string) => void): MicContro
         const ctx = new AudioContext();
         ctxRef.current = ctx;
         await ctx.resume();
-        if (ctx.state !== "running") throw new Error("This page is not allowed to capture audio right now.");
+        if (ctx.state !== "running") throw new UserError("mic_capture_denied", "This page is not allowed to capture audio right now.");
         const url = URL.createObjectURL(new Blob([PCM_WORKLET], { type: "text/javascript" }));
         try {
           await ctx.audioWorklet.addModule(url);
@@ -411,12 +414,12 @@ export function useMicTranscription(onResult: (text: string) => void): MicContro
         // instead of on a transcript that quietly stopped growing.
         ctx.onstatechange = () => {
           if (ctxRef.current === ctx && ctx.state !== "running") {
-            degrade("The browser stopped audio capture for this page.");
+            degrade(new UserError("mic_capture_stopped", "The browser stopped audio capture for this page."));
           }
         };
         return true;
       } catch (e) {
-        return degrade(e instanceof Error ? e.message : "This browser could not capture the microphone.");
+        return degrade(e instanceof Error ? e : new UserError("mic_capture_failed", "This browser could not capture the microphone."));
       }
     },
     [degrade]
@@ -433,7 +436,7 @@ export function useMicTranscription(onResult: (text: string) => void): MicContro
       media = await navigator.mediaDevices.getUserMedia({ audio: true });
     } catch {
       setState("idle");
-      setError("Microphone access was blocked. Allow the microphone for this site, then try again.");
+      setError(new UserError("mic_blocked", "Microphone access was blocked. Allow the microphone for this site, then try again."));
       return;
     }
     streamRef.current = media;
@@ -450,7 +453,7 @@ export function useMicTranscription(onResult: (text: string) => void): MicContro
     if (modeRef.current === "hosted" && !recording) {
       teardownAudio();
       setState("idle");
-      setError("This browser could not record the microphone.");
+      setError(new UserError("mic_no_recorder", "This browser could not record the microphone."));
       return;
     }
     setStream(media);
@@ -518,13 +521,13 @@ export function useMicTranscription(onResult: (text: string) => void): MicContro
     recChunksRef.current = [];
     teardownAudio();
     if (blob.size === 0) {
-      setError("Nothing was recorded from the microphone.");
+      setError(new UserError("mic_nothing_recorded", "Nothing was recorded from the microphone."));
       return "";
     }
     try {
       return await cloudTranscribeRecording(blob, navigator.language);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Transcription failed.");
+      setError(e instanceof Error ? e : new UserError("mic_transcription_failed", "Transcription failed."));
       // Whatever the engine had said before it dropped out beats nothing.
       return partialRef.current;
     }

@@ -12,6 +12,7 @@ import { dedupeName } from "../server/cloud/util";
 import type { LibraryAsset } from "../server/library";
 import { prisma, registerObjectIn, storageTransaction, type ClaimedJob } from "./db";
 import { deleteObjects, downloadToFile, libraryKey, uploadFile } from "./r2";
+import { UserError } from "../lib/userError";
 
 /** The edges a library proxy job crosses, stubbed by its test. */
 export interface LibraryProxyIO {
@@ -59,9 +60,9 @@ export async function runLibraryProxyJob(
   const compat = compatCoverIn(asked);
   if (!assetId) throw new Error("Library proxy job has no asset.");
   const row = await io.db.cutLibraryAsset.findFirst({ where: { id: assetId, userId: job.userId, deletedAt: null } });
-  if (!row) throw new Error(DELETED);
+  if (!row) throw new UserError("library_file_deleted", DELETED);
   const media = await io.db.cutMediaObject.findFirst({ where: { id: row.mediaObjectId, userId: job.userId } });
-  if (!media) throw new Error("Library media is missing.");
+  if (!media) throw new UserError("library_media_missing", "Library media is missing.");
 
   // A replay, or a second ask after the copy landed, returns what is there.
   const had = (row.meta as { proxyFile?: string } | null)?.proxyFile;
@@ -74,7 +75,7 @@ export async function runLibraryProxyJob(
   try {
     const src = path.join(tmp, path.basename(media.fileName));
     await io.download(media.r2Key, src);
-    if (isCanceled()) throw new Error("Proxy canceled.");
+    if (isCanceled()) throw new UserError("proxy_canceled", "Proxy canceled.");
 
     // The copy shares the library prefix, so its name is deduped against
     // every file the shelf holds there.
@@ -96,7 +97,7 @@ export async function runLibraryProxyJob(
       },
     };
     await (compat ? io.makeCompat(handle, src, out, { ...opts, cover: compat }) : io.make(handle, src, out, opts));
-    if (isCanceled()) throw new Error("Proxy canceled.");
+    if (isCanceled()) throw new UserError("proxy_canceled", "Proxy canceled.");
 
     key = libraryKey(job.userId, fileName);
     const mime = compat === "video" ? "video/webm" : "video/mp4";
@@ -106,7 +107,7 @@ export async function runLibraryProxyJob(
     const updated = await io.transact(async (tx) => {
       // The asset may have been deleted while the copy was built.
       const live = await tx.cutLibraryAsset.findFirst({ where: { id: assetId, userId: job.userId, deletedAt: null } });
-      if (!live) throw new Error(DELETED);
+      if (!live) throw new UserError("library_file_deleted", DELETED);
       await io.register(tx, {
         userId: job.userId, projectId: null, r2Key: stored, fileName, mime, bytes, kind: "proxy",
       });

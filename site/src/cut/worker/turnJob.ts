@@ -1,5 +1,7 @@
 import type { UIMessage } from "ai";
+import { DEFAULT_LOCALE, isLocale } from "@/i18n/locales";
 import { geminiModelRoleNames } from "@/lib/inference/gemini-models";
+import { bindCreatorLocale, requestedLocale } from "../lib/defaultNames";
 import { openCloudProject, pushCloudProject } from "../lib/headless/docSession";
 import { dropPiSession, streamCutChat } from "../lib/pi/cutAgent";
 import { headlessDeps, type HeadlessSession } from "../lib/pi/serverDeps";
@@ -98,6 +100,9 @@ export async function runTurnJob(
   if (!spec?.threadId || !Array.isArray(spec.messages))
     throw new Error("Turn job carries no thread payload.");
 
+  // What the turn's tools create is named in the language of the person asking.
+  await bindCreatorLocale(requestedLocale(spec.locale));
+
   const session = runnerSession(job);
   const doc = await openCloudProject(session, job.projectId);
 
@@ -133,6 +138,7 @@ export async function runTurnJob(
     threadId: piKey,
     model: spec.model ?? geminiModelRoleNames.chat,
     messages: spec.messages as UIMessage[],
+    locale: isLocale(spec.locale) ? spec.locale : DEFAULT_LOCALE,
     abortSignal: abort.signal,
     deps,
   }).getReader();

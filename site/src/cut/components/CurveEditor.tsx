@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { useRef, useState } from "react";
 import { curveLut, type CurvePoint, type GradeCurves } from "@donkeycut/effects-kit";
 import { cn } from "@/lib/utils";
@@ -15,11 +16,11 @@ import { cn } from "@/lib/utils";
 
 type Channel = "m" | "r" | "g" | "b";
 
-const CHANNELS: { id: Channel; label: string; color: string }[] = [
-  { id: "m", label: "Master", color: "var(--foreground)" },
-  { id: "r", label: "Red", color: "#ff453a" },
-  { id: "g", label: "Green", color: "#32d74b" },
-  { id: "b", label: "Blue", color: "#0a84ff" },
+const CHANNELS: { id: Channel; color: string }[] = [
+  { id: "m", color: "var(--foreground)" },
+  { id: "r", color: "#ff453a" },
+  { id: "g", color: "#32d74b" },
+  { id: "b", color: "#0a84ff" },
 ];
 
 const IDENTITY: CurvePoint[] = [
@@ -38,6 +39,7 @@ export function CurveEditor({
   onDraft: (curves: GradeCurves) => void;
   onCommit: (curves: GradeCurves) => void;
 }) {
+  const t = useTranslations("timeline.curves");
   const [channel, setChannel] = useState<Channel>("m");
   const svgRef = useRef<SVGSVGElement>(null);
   const drag = useRef<{ index: number; points: CurvePoint[] } | null>(null);
@@ -128,7 +130,7 @@ export function CurveEditor({
             key={c.id}
             type="button"
             className={cn(
-              "flex-1 rounded-md px-1 py-0.5 text-[11.5px] font-medium transition-colors",
+              "min-w-0 flex-1 truncate rounded-md px-1 py-0.5 text-[11.5px] font-medium transition-colors",
               channel === c.id
                 ? "bg-secondary text-foreground"
                 : "text-muted-foreground hover:text-foreground",
@@ -136,7 +138,7 @@ export function CurveEditor({
             )}
             onClick={() => setChannel(c.id)}
           >
-            {c.label}
+            {t(`channels.${c.id}`)}
           </button>
         ))}
       </div>

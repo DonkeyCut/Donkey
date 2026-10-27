@@ -26,12 +26,13 @@ import {
 } from "../library";
 import { serveFileRange, wantsDownload } from "../serveFile";
 import { importFromUrl } from "../urlImport";
-import { errorMessage } from "../util";
+import { UserError } from "../../lib/userError";
+import { errorReply } from "../util";
 
-const err = (message: string, status: number) =>
-  Response.json({ error: message }, { status });
-const caught = (e: unknown, fallback: string) =>
-  err(errorMessage(e, fallback), 500);
+const err = (failure: string | UserError, status: number) =>
+  Response.json(errorReply(failure, ""), { status });
+const caught = (e: unknown, fallback: string | UserError) =>
+  Response.json(errorReply(e, fallback), { status: 500 });
 
 /** Link imports by the key the page sent with them. A page that reloads
  * mid-import asks again under the same key and waits on the download already
@@ -78,7 +79,7 @@ export const libraryApi = {
       } & TemplateInput;
       return Response.json(await saveTemplate(projectId, input));
     } catch (e) {
-      return caught(e, "Could not save the template.");
+      return caught(e, new UserError("template_save_failed", "Could not save the template."));
     }
   },
 
@@ -97,7 +98,7 @@ export const libraryApi = {
         .filter((f): f is File => f instanceof File);
       return Response.json(await importTemplate(doc, files));
     } catch (e) {
-      return caught(e, "Could not add the template.");
+      return caught(e, new UserError("template_add_failed", "Could not add the template."));
     }
   },
 
@@ -107,7 +108,7 @@ export const libraryApi = {
       const { projectId } = (await req.json()) as { projectId: string };
       return Response.json(await copyTemplateToProject(id, projectId));
     } catch (e) {
-      return caught(e, "Could not add the template.");
+      return caught(e, new UserError("template_add_failed", "Could not add the template."));
     }
   },
 
@@ -119,7 +120,7 @@ export const libraryApi = {
       } & Parameters<typeof addMediaToTemplate>[2];
       return Response.json(await addMediaToTemplate(id, projectId, input));
     } catch (e) {
-      return caught(e, "Could not add to the template.");
+      return caught(e, new UserError("template_append_failed", "Could not add to the template."));
     }
   },
 
@@ -128,7 +129,7 @@ export const libraryApi = {
       const { name } = (await req.json()) as { name?: string };
       return Response.json(await renameTemplate(id, name ?? ""));
     } catch (e) {
-      return caught(e, "Could not rename the template.");
+      return caught(e, new UserError("template_rename_failed", "Could not rename the template."));
     }
   },
 
@@ -141,7 +142,7 @@ export const libraryApi = {
       }
       return Response.json(await makeLibraryProxy(id, { maxHeight: body.maxHeight!, crf: body.crf! }));
     } catch (e) {
-      return caught(e, "Could not make the playable copy.");
+      return caught(e, new UserError("playable_copy_make_failed", "Could not make the playable copy."));
     }
   },
 
@@ -150,7 +151,7 @@ export const libraryApi = {
       const { name } = (await req.json()) as { name?: string };
       return Response.json(await renameAsset(id, name ?? ""));
     } catch (e) {
-      return caught(e, "Could not rename the file.");
+      return caught(e, new UserError("file_rename_failed", "Could not rename the file."));
     }
   },
 
@@ -159,7 +160,7 @@ export const libraryApi = {
       await deleteTemplate(id);
       return Response.json({ ok: true });
     } catch (e) {
-      return caught(e, "Could not delete the template.");
+      return caught(e, new UserError("template_delete_failed", "Could not delete the template."));
     }
   },
 
@@ -170,7 +171,7 @@ export const libraryApi = {
       if (!url) return err("No URL provided.", 400);
       return Response.json(await importOnce(key, () => importFromUrl(url, { audio: audio === true })));
     } catch (e) {
-      return caught(e, "Could not import that URL.");
+      return caught(e, new UserError("url_import_failed", "Could not import that URL."));
     }
   },
 
@@ -179,7 +180,7 @@ export const libraryApi = {
       const { name, parentId } = (await req.json()) as { name?: string; parentId?: string | null };
       return Response.json(await createFolder(name ?? "", parentId ?? null));
     } catch (e) {
-      return caught(e, "Could not create folder.");
+      return caught(e, new UserError("folder_create_failed", "Could not create folder."));
     }
   },
 
@@ -189,7 +190,7 @@ export const libraryApi = {
       const { name, parentId } = (await req.json()) as { name?: string; parentId?: string | null };
       return Response.json(await updateFolder(id, { name, parentId }));
     } catch (e) {
-      return caught(e, "Could not update folder.");
+      return caught(e, new UserError("folder_update_failed", "Could not update folder."));
     }
   },
 
@@ -198,7 +199,7 @@ export const libraryApi = {
       await deleteFolder(id);
       return Response.json({ ok: true });
     } catch (e) {
-      return caught(e, "Could not delete folder.");
+      return caught(e, new UserError("folder_delete_failed", "Could not delete folder."));
     }
   },
 
@@ -212,7 +213,7 @@ export const libraryApi = {
       await moveItem(id, folderId ?? null);
       return Response.json({ ok: true });
     } catch (e) {
-      return caught(e, "Could not move item.");
+      return caught(e, new UserError("library_item_move_failed", "Could not move item."));
     }
   },
 
@@ -259,7 +260,7 @@ export const libraryApi = {
         ),
       );
     } catch (e) {
-      return caught(e, "Upload failed.");
+      return caught(e, new UserError("upload_failed", "Upload failed."));
     }
   },
 
@@ -268,7 +269,7 @@ export const libraryApi = {
       await removeAsset(id);
       return Response.json({ ok: true });
     } catch (e) {
-      return caught(e, "Could not delete.");
+      return caught(e, new UserError("library_delete_failed", "Could not delete."));
     }
   },
 
@@ -282,7 +283,7 @@ export const libraryApi = {
       const fileName = await copyLibraryAssetToProject(assetId, projectId);
       return Response.json({ fileName });
     } catch (e) {
-      return caught(e, "Could not add from library.");
+      return caught(e, new UserError("library_add_failed", "Could not add from library."));
     }
   },
 
@@ -298,7 +299,7 @@ export const libraryApi = {
         await addFromProject(projectId, fileName, name ?? fileName),
       );
     } catch (e) {
-      return caught(e, "Could not save to library.");
+      return caught(e, new UserError("library_save_failed", "Could not save to library."));
     }
   },
 

@@ -38,6 +38,7 @@ import {
 import type { QueueVerdict } from "../src/cut/lib/queueTriage";
 import { AUDIO_STATE, EDITOR_STATE, SAFE_TOOLS, SCENE_PLANNED, serveSafeTool, userTurn } from "./lib/cut-eval/fixtures";
 import { queueCases, type QueueCase } from "./lib/cut-eval/queueCases";
+import { DEFAULT_LOCALE } from "../src/i18n/locales";
 
 const args = process.argv.slice(2);
 const argValue = (flag: string) => {
@@ -125,7 +126,7 @@ async function runLiveFold(): Promise<string[]> {
   };
   const messages = [userTurn("Add a title that says Welcome at the start")] as unknown as UIMessage[];
   let reply = "";
-  const stream = streamCutChat({ threadId, model: geminiModelRoleNames.chat, messages, deps: live });
+  const stream = streamCutChat({ threadId, model: geminiModelRoleNames.chat, messages, locale: DEFAULT_LOCALE, deps: live });
   const reader = stream.getReader();
   for (;;) {
     const { done, value } = await reader.read();
@@ -194,7 +195,7 @@ async function runLiveQueueBack(): Promise<string[]> {
     userTurn("turn my narration audio into a smooth 2D cartoon", { state: AUDIO_STATE }),
   ] as unknown as UIMessage[];
   let reply = "";
-  const stream = streamCutChat({ threadId, model: geminiModelRoleNames.chat, messages, deps: live });
+  const stream = streamCutChat({ threadId, model: geminiModelRoleNames.chat, messages, locale: DEFAULT_LOCALE, deps: live });
   const reader = stream.getReader();
   for (;;) {
     const { done, value } = await reader.read();

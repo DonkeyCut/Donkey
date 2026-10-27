@@ -11,6 +11,7 @@ import { download } from "../server/urlDownload";
 import { videoDimensions } from "../server/util";
 import { prisma, registerObject, unregisterObjects, type ClaimedJob } from "./db";
 import { deleteObjects, libraryKey, mediaKey, mimeFor, uploadFile } from "./r2";
+import { UserError } from "../lib/userError";
 
 /** What a project import_url job records in CutRenderJob.result — the same
  * shape the engine's synchronous import route returns to the client. */
@@ -53,8 +54,8 @@ export async function runImportUrlJob(
     maxBytes?: number;
   };
   if (typeof maxBytes !== "number" || !(maxBytes > 0))
-    throw new Error("There is no storage left on this account for an import.");
-  if (!url || !/^https?:\/\//i.test(url.trim())) throw new Error("Enter a valid http(s) URL.");
+    throw new UserError("import_no_storage", "There is no storage left on this account for an import.");
+  if (!url || !/^https?:\/\//i.test(url.trim())) throw new UserError("url_invalid", "Enter a valid http(s) URL.");
   const toLibrary = target === "library";
   const projectId = job.projectId;
   if (!toLibrary && !projectId) throw new Error("Import job has no project.");
@@ -80,14 +81,14 @@ export async function runImportUrlJob(
   const tmp = await mkdtemp(path.join(os.tmpdir(), "cut-dl-"));
   try {
     const dl = await download(url.trim(), tmp, { audio: audio === true });
-    if (isCanceled()) throw new Error("Import canceled.");
+    if (isCanceled()) throw new UserError("import_canceled", "Import canceled.");
     let landing = 0;
     for (const f of dl.files) {
       landing += (await stat(f.file)).size;
       if (f.poster) landing += (await stat(f.poster)).size;
     }
     if (landing > maxBytes)
-      throw new Error("The download is larger than the storage left on this account.");
+      throw new UserError("download_over_storage", "The download is larger than the storage left on this account.");
 
     const rows = await prisma.cutMediaObject.findMany({
       where: toLibrary ? { userId: job.userId, kind: "library" } : { projectId, kind: "media" },
@@ -105,7 +106,7 @@ export async function runImportUrlJob(
     const libraryRows: string[] = [];
     try {
       for (const f of dl.files) {
-        if (isCanceled()) throw new Error("Import canceled.");
+        if (isCanceled()) throw new UserError("import_canceled", "Import canceled.");
         const base = toLibrary ? safeFileName(f.file) : path.basename(f.file);
         const fileName = dedupeName(base, taken);
         taken.add(fileName);
@@ -201,7 +202,7 @@ async function addLibraryRow(
   filing?: { folderId: string; origin: "inspiration" }
 ): Promise<LibraryAsset> {
   const type = libraryTypeOf(fileName);
-  if (!type) throw new Error("Unsupported file type.");
+  if (!type) throw new UserError("file_type_unsupported", "Unsupported file type.");
   const duration = type === "image" ? 0 : await probeDuration(localFile);
   const dims = type === "audio" ? null : await videoDimensions(localFile);
   const meta = {

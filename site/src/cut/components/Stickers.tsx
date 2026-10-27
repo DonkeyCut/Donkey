@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
+import { useTranslations } from "next-intl";
 import { Copy, Loader2, Plus, Sparkles, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
@@ -27,6 +28,7 @@ import { CopyHandlePill, MentionTextarea, RefChips } from "./AssetRefs";
 import { GeneratedAssetMenu } from "./GeneratedAssetMenu";
 import { DictationControl } from "./MicDictation";
 import { HostedErrorText } from "./hostedError";
+import { useDescribeError } from "@/i18n/describeError";
 
 /**
  * The project's sticker images — generated cutouts, all tagged origin
@@ -70,6 +72,7 @@ export function StickerTile({
   handle?: string;
   readOnly: boolean;
 }) {
+  const t = useTranslations("media.stickers");
   const { picked, pick } = useAssetPick(a.id);
   const lottie = isLottieAsset(a);
   return (
@@ -115,8 +118,8 @@ export function StickerTile({
         {!readOnly && (
           <div className="pointer-events-auto flex shrink-0 items-center gap-1">
             <button
-              title="Add to timeline"
-              aria-label={`Add ${a.name}`}
+              title={t("addToTimeline")}
+              aria-label={t("addNamed", { name: a.name })}
               className={ROUND_ACTION}
               onClick={() =>
                 useEditor
@@ -138,7 +141,7 @@ export function StickerTile({
                       .catch(() => {})
                   }
                 >
-                  <Copy /> Copy reference
+                  <Copy /> {t("copyReference")}
                 </DropdownMenuItem>
               }
               after={
@@ -146,7 +149,7 @@ export function StickerTile({
                   variant="destructive"
                   onClick={() => useEditor.getState().removeAsset(a.id)}
                 >
-                  <Trash2 /> Delete
+                  <Trash2 /> {t("delete")}
                 </DropdownMenuItem>
               }
             />
@@ -157,12 +160,6 @@ export function StickerTile({
   );
 }
 
-const STAGE_LABEL: Record<StickerStage, string> = {
-  generating: "Drawing…",
-  cutting: "Cutting out…",
-  saving: "Saving…",
-};
-
 /**
  * "Create a sticker": prompt → hosted image generation → background removal
  * (the plain-backdrop knockout first, then matting) → white die-cut outline →
@@ -171,6 +168,8 @@ const STAGE_LABEL: Record<StickerStage, string> = {
  * so the two read as one way of asking for a picture.
  */
 export function CreateSticker({ projectId }: { projectId: string }) {
+  const t = useTranslations("media");
+  const describeError = useDescribeError();
   const [prompt, setPrompt] = useState("");
   const [refs, setRefs] = useState<AssetRef[]>([]);
   const [stage, setStage] = useState<StickerStage | null>(null);
@@ -204,7 +203,7 @@ export function CreateSticker({ projectId }: { projectId: string }) {
       setPrompt("");
       setRefs([]);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not create the sticker.");
+      setError(describeError(err, t("stickers.createFailed")));
     } finally {
       setStage(null);
     }
@@ -233,7 +232,7 @@ export function CreateSticker({ projectId }: { projectId: string }) {
         />
         <MentionTextarea
           className="min-h-[100px] w-full resize-y bg-transparent px-2.5 py-2 pr-9 text-[12.5px] leading-relaxed outline-none"
-          placeholder="A corgi in sunglasses… Drop an image in or type @ to reference one."
+          placeholder={t("stickers.placeholder")}
           value={prompt}
           onChange={setPrompt}
           candidates={candidates}
@@ -266,17 +265,19 @@ export function CreateSticker({ projectId }: { projectId: string }) {
           ) : (
             <Sparkles data-icon="inline-start" />
           )}
-          {stage ? STAGE_LABEL[stage] : "Create sticker"}
+          {stage ? t(`stickers.stage.${stage}`) : t("stickers.create")}
         </Button>
       </div>
 
       {signedIn === false && (
         <p className="shrink-0 text-[11px] leading-relaxed text-muted-foreground">
-          Generating runs on your Donkey account.{" "}
-          <a className="font-medium text-blue-600 hover:underline dark:text-blue-400" href={signInUrl()}>
-            Sign in
-          </a>{" "}
-          to continue.
+          {t.rich("signInToGenerate", {
+            link: (chunks) => (
+              <a className="font-medium text-blue-600 hover:underline dark:text-blue-400" href={signInUrl()}>
+                {chunks}
+              </a>
+            ),
+          })}
         </p>
       )}
 

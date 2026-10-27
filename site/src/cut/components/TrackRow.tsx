@@ -2,9 +2,11 @@
 
 import { useState } from "react";
 import { Loader2 } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { trackMotion } from "@/cut/lib/trackMotion";
 import { TRACK_TARGETS, type TrackTarget } from "@/cut/lib/trackTargets";
+import { useDescribeError } from "@/i18n/describeError";
 
 /**
  * The inspector's motion-tracking control: pick what to track and the item's
@@ -13,6 +15,8 @@ import { TRACK_TARGETS, type TrackTarget } from "@/cut/lib/trackTargets";
  * footage the row shows how far it has got.
  */
 export function TrackRow({ id, use }: { id: string; use: "mask" | "follow" }) {
+  const t = useTranslations("timeline.trackRow");
+  const describeError = useDescribeError();
   const [progress, setProgress] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -24,7 +28,7 @@ export function TrackRow({ id, use }: { id: string; use: "mask" | "follow" }) {
     try {
       await trackMotion({ id, target, use, onProgress: (share) => setProgress(Math.round(share * 100)) });
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not track the footage.");
+      setError(describeError(e, t("failed")));
     } finally {
       setProgress(null);
     }
@@ -33,27 +37,27 @@ export function TrackRow({ id, use }: { id: string; use: "mask" | "follow" }) {
   return (
     <>
       <div className="flex items-center justify-between gap-2 py-1">
-        <span className="text-[11.5px] font-medium text-muted-foreground">{use === "mask" ? "Track" : "Follow"}</span>
+        <span className="text-[11.5px] font-medium text-muted-foreground">{use === "mask" ? t("track") : t("follow")}</span>
         {progress !== null ? (
           <span className="flex h-8 items-center gap-1.5 text-[12px] text-muted-foreground">
             <Loader2 className="size-3.5 animate-spin" />
-            Tracking {progress}%
+            {t("tracking", { progress })}
           </span>
         ) : (
           <Select
             value={null}
-            items={Object.fromEntries(TRACK_TARGETS.map((t) => [t.id, t.label]))}
+            items={Object.fromEntries(TRACK_TARGETS.map((target) => [target.id, t(`targets.${target.id}`)]))}
             onValueChange={(v) => {
               if (v) void run(v as TrackTarget);
             }}
           >
             <SelectTrigger className="h-8 w-36 text-[12px]">
-              <SelectValue placeholder="Pick a target" />
+              <SelectValue placeholder={t("pickTarget")} />
             </SelectTrigger>
             <SelectContent>
-              {TRACK_TARGETS.map((t) => (
-                <SelectItem key={t.id} value={t.id} className="text-[12px]">
-                  {t.label}
+              {TRACK_TARGETS.map((target) => (
+                <SelectItem key={target.id} value={target.id} className="text-[12px]">
+                  {t(`targets.${target.id}`)}
                 </SelectItem>
               ))}
             </SelectContent>

@@ -46,6 +46,7 @@ import { encodeProxyInPage, proxyNameFor, proxyOnTheMac, type Landed } from "./p
 import { compatCoverOf, compatCovers, compatProxyNameFor, isLightProxyName, type CompatCover } from "./proxyNames";
 import { releaseProxyHold, useEditor } from "./store";
 import type { MediaAsset, StoredAsset } from "./types";
+import { errorFields, errorFromBody, UserError, type ErrorFields } from "./userError";
 
 /** Past this many pixels a frame is heavier than 1080p (a 2048×1080 DCI
  * frame is not). */
@@ -100,7 +101,10 @@ export type ProxyState =
   | { kind: "making"; progress: number }
   /** No residency could make one; the preview plays the master. */
   | { kind: "none" }
-  | { kind: "failed"; error: string };
+  | ({ kind: "failed"; error: string } & ErrorFields);
+
+// A proxy that failed with nothing more to say.
+const proxyFailed = () => new UserError("proxy_failed", "Could not make the preview proxy.");
 
 interface ProxyJobs {
   jobs: Record<string, ProxyState>;
@@ -181,7 +185,7 @@ export async function ensureProxy(
       const live = useEditor.getState().assets.find((a) => a.id === asset.id);
       if (ask.kind === "compat" && live) void enrichAsset(live);
     } catch (e) {
-      jobs.set(asset.id, { kind: "failed", error: e instanceof Error ? e.message : "Could not make the preview proxy." });
+      jobs.set(asset.id, { kind: "failed", ...errorFields(e, proxyFailed()) });
     }
   } finally {
     inFlight.delete(asset.id);
@@ -307,16 +311,16 @@ async function requestProxy(
     body: JSON.stringify(body),
   });
   const started = (await res.json().catch(() => ({}))) as Partial<Landed> & { jobId?: string; error?: string };
-  if (!res.ok) throw new Error(started.error ?? "Could not make the preview proxy.");
+  if (!res.ok) throw errorFromBody(started, proxyFailed());
   if (started.fileName && typeof started.sizeBytes === "number") {
     return { fileName: started.fileName, sizeBytes: started.sizeBytes };
   }
-  if (backend.kind !== "cloud" || !started.jobId) throw new Error(started.error ?? "Could not make the preview proxy.");
-  const result = await pollCloudJob<Partial<Landed>>(started.jobId, backend, "Could not make the preview proxy.", {
-    timedOut: "The preview proxy took too long.",
+  if (backend.kind !== "cloud" || !started.jobId) throw errorFromBody(started, proxyFailed());
+  const result = await pollCloudJob<Partial<Landed>>(started.jobId, backend, proxyFailed(), {
+    timedOut: new UserError("proxy_too_slow", "The preview proxy took too long."),
     onProgress,
   });
-  if (!result.fileName || typeof result.sizeBytes !== "number") throw new Error("Could not make the preview proxy.");
+  if (!result.fileName || typeof result.sizeBytes !== "number") throw proxyFailed();
   return { fileName: result.fileName, sizeBytes: result.sizeBytes };
 }
 

@@ -4,6 +4,7 @@
 // queued/running row holds the project's agent write lease (lease.ts), and
 // the generic /jobs/:jobId route serves the poll.
 import type { Prisma } from "@/generated/prisma/client";
+import { DEFAULT_LOCALE, isLocale, type Locale } from "@/i18n/locales";
 import { prisma } from "@/lib/prisma";
 import { cutLimitsFor, liveJobCheck } from "./limits";
 import { queueLeasedJob } from "./lease";
@@ -17,6 +18,17 @@ export interface AgentTurnSpec {
   threadId: string;
   messages: unknown[];
   model?: string;
+  /** The interface language the reply is written in. */
+  locale?: Locale;
+}
+
+/** The language a turn replies in: the caller's, else the account's. */
+async function turnLocale(userId: string, asked: unknown): Promise<Locale> {
+  if (isLocale(asked)) {
+    return asked;
+  }
+  const user = await prisma.user.findUnique({ where: { id: userId }, select: { locale: true } });
+  return isLocale(user?.locale) ? user.locale : DEFAULT_LOCALE;
 }
 
 export const turnsCloud = {
@@ -57,6 +69,7 @@ export const turnsCloud = {
         threadId,
         messages: body.messages,
         ...(typeof body.model === "string" && body.model ? { model: body.model } : {}),
+        locale: await turnLocale(userId, body.locale),
       };
       const row = await queueLeasedJob(userId, projectId, "agent_turn", spec as unknown as Prisma.InputJsonValue);
       if (row instanceof Response) return row;

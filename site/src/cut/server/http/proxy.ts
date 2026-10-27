@@ -3,7 +3,8 @@ import os from "node:os";
 import path from "node:path";
 import { compatCoverIn, compatProxyNameFor } from "@/cut/lib/proxyNames";
 import { makeCompatProxy, makeProxy, proxyNameFor } from "../proxy";
-import { errorMessage } from "../util";
+import { UserError } from "../../lib/userError";
+import { errorReply } from "../util";
 
 /**
  * Build a preview proxy of a master the caller supplies, for a project this
@@ -50,7 +51,7 @@ export const proxyApi = {
       });
     } catch (e) {
       return Response.json(
-        { error: errorMessage(e, "Could not make the preview proxy.") },
+        errorReply(e, new UserError("proxy_failed", "Could not make the preview proxy.")),
         { status: 500 }
       );
     } finally {

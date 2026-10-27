@@ -10,6 +10,8 @@ import { useEnvironment } from "@/cut/lib/environment";
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Clapperboard, Laptop, Loader2, X } from "lucide-react";
+import { useTranslations } from "next-intl";
+import { useDescribeError } from "@/i18n/describeError";
 import { Button } from "@/components/ui/button";
 import {
   apiFetch,
@@ -114,6 +116,8 @@ export function Editor({
    * the store in read-only mode before mounting. */
   viewer?: boolean;
 }) {
+  const t = useTranslations("editor.editor");
+  const describeError = useDescribeError();
   const [chatActivity, setChatActivity] = useState<{ projectId: string; status: ChatStatus } | null>(null);
   const onChatStatusChange = useCallback((id: string, status: ChatStatus) => {
     setChatActivity((current) => current?.projectId === id && current.status === status
@@ -152,7 +156,7 @@ export function Editor({
   }, []);
   const back = backTarget(useCutBase(), from, folder);
   const loaded = useEditor((s) => s.loaded);
-  const loadError = useEditor((s) => s.loadError);
+  const loadError = useEditor((s) => s.loadFailure ?? s.loadError);
   // The tab is the open project, so it wears the project's name — through
   // renames too.
   useTabTitle(useEditor((s) => s.projectName));
@@ -1172,7 +1176,7 @@ export function Editor({
         e.preventDefault();
         s.toggleGuidesShown();
       } else if (e.key.toLowerCase() === "t" && !e.metaKey && !e.ctrlKey && !e.altKey) {
-        s.addOverlay();
+        s.addOverlay({ text: t("defaultText") });
       } else if ((e.key === "ArrowLeft" || e.key === "ArrowRight") && !controlFocused) {
         e.preventDefault();
         // While playing, arrows skip in 1s jumps and playback rolls on (seek
@@ -1186,7 +1190,7 @@ export function Editor({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [importFiles]);
+  }, [importFiles, t]);
 
   // Takes shot on a paired phone land in this project's media as they arrive.
   usePhoneInbox(importFiles);
@@ -1200,7 +1204,7 @@ export function Editor({
     <Button
       variant="outline"
       nativeButton={false}
-      render={<Link href={back.href}>Back to {back.tab}</Link>}
+      render={<Link href={back.href}>{t("backTo", { tab: back.tab })}</Link>}
     />
   );
 
@@ -1213,8 +1217,7 @@ export function Editor({
         <div className="flex max-w-sm flex-col items-center gap-3 text-center">
           <Laptop className="size-7 text-muted-foreground" />
           <p className="text-sm text-muted-foreground">
-            This is a local project — it lives on this Mac. Open the Donkey app and it opens
-            here.
+            {t("needsApp")}
           </p>
           {leave}
         </div>
@@ -1227,7 +1230,7 @@ export function Editor({
       <div className="grid h-full place-items-center">
         <div className="flex flex-col items-center gap-3 text-center">
           <Clapperboard className="size-7 text-muted-foreground" />
-          <p className="text-sm text-muted-foreground">{loadError}</p>
+          <p className="text-sm text-muted-foreground">{describeError(loadError)}</p>
           {leave}
         </div>
       </div>
@@ -1302,16 +1305,16 @@ export function Editor({
       {exportOpen && <ExportDialog />}
       {shareGone && (
         <div className="fixed top-14 left-1/2 z-50 max-w-[calc(100%-2rem)] -translate-x-1/2 rounded-full bg-foreground/90 px-3.5 py-1.5 text-center text-xs font-medium text-background shadow-lg">
-          This share is no longer available.
+          {t("shareGone")}
         </div>
       )}
       {conflictReloaded && (
         <div className="fixed top-14 left-1/2 z-50 flex max-w-[calc(100%-2rem)] -translate-x-1/2 items-center gap-1.5 rounded-full bg-foreground/90 py-1.5 pr-1.5 pl-3.5 text-background shadow-lg">
-          <span className="text-xs font-medium">Reloaded a newer version saved elsewhere.</span>
+          <span className="text-xs font-medium">{t("conflictReloaded")}</span>
           <Button
             variant="ghost"
             size="icon-sm"
-            aria-label="Dismiss"
+            aria-label={t("dismiss")}
             className="rounded-full text-background hover:bg-background/15 hover:text-background"
             onClick={() => setConflictReloaded(false)}
           >

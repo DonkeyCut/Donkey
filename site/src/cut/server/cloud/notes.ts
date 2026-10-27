@@ -13,6 +13,7 @@ import { Prisma } from "@/generated/prisma/client";
 import { resolveParent, subtreeOf } from "@/cut/lib/folderTree";
 import { NOTE_LABELS_MAX } from "@/cut/lib/types";
 import { prisma } from "@/lib/prisma";
+import { UserError } from "@/cut/lib/userError";
 import { caught, err } from "./util";
 
 export interface NoteView {
@@ -161,7 +162,7 @@ export function createNotesCloud(db: typeof prisma = prisma) {
   },
   async get(userId: string, id: string) {
     const row = await db.cutNote.findFirst({ where: { id, userId, deletedAt: null } });
-    return row ? Response.json(view(row)) : err("Note not found.", 404);
+    return row ? Response.json(view(row)) : err(new UserError("note_not_found", "Note not found."), 404);
   },
   /** Every note including tombstones, newest first, and the folders they file
    * into. Notes are small and the set is one person's, so the merge reads the
@@ -206,13 +207,18 @@ export function createNotesCloud(db: typeof prisma = prisma) {
       const location = body.libraryLocation === undefined ? undefined
         : parsedLocation?.success ? parsedLocation.data : null;
       if (location?.residency === "cloud" && location.folderId !== null && !await db.cutFolder.findFirst({ where: { id: location.folderId, userId, scope: "library" }, select: { id: true } })) {
-        return err("Library folder not found.", 404);
+        return err(new UserError("library_folder_not_found", "Library folder not found."), 404);
       }
       // Over the cap the write is refused outright: truncating here would
       // answer 200 with a note wearing fewer labels than the person gave it,
       // and the merge would carry that loss back to their other device.
       if (Array.isArray(body.labelIds) && new Set(body.labelIds).size > NOTE_LABELS_MAX) {
-        return err(`A note can carry at most ${NOTE_LABELS_MAX} labels.`, 400);
+        return err(
+          new UserError("note_labels_too_many", `A note can carry at most ${NOTE_LABELS_MAX} labels.`, {
+            max: NOTE_LABELS_MAX,
+          }),
+          400
+        );
       }
       const labelIds = await resolveLabels(db, userId, body.labelIds);
       const data = {
@@ -241,7 +247,7 @@ export function createNotesCloud(db: typeof prisma = prisma) {
       });
       return Response.json(view(row));
     } catch (e) {
-      return caught(e, "Could not save the note.");
+      return caught(e, new UserError("note_save_failed", "Could not save the note."));
     }
   },
 
@@ -257,7 +263,7 @@ export function createNotesCloud(db: typeof prisma = prisma) {
       });
       return Response.json({ ok: true });
     } catch (e) {
-      return caught(e, "Could not delete the note.");
+      return caught(e, new UserError("note_delete_failed", "Could not delete the note."));
     }
   },
 
@@ -273,7 +279,7 @@ export function createNotesCloud(db: typeof prisma = prisma) {
       if (!NOTE_ID.test(id)) return err("Invalid folder id.", 400);
       const body = (await req.json()) as { name?: string; parentId?: string | null };
       const name = String(body.name ?? "").trim().slice(0, 120);
-      if (!name) return err("Folder name required.", 400);
+      if (!name) return err(new UserError("folder_name_required", "Folder name required."), 400);
       const existing = await db.cutFolder.findFirst({
         where: { id, userId, scope: "note" },
         select: { id: true, parentId: true },
@@ -291,7 +297,7 @@ export function createNotesCloud(db: typeof prisma = prisma) {
       const row = await db.cutFolder.update({ where: { id }, data: { name, parentId } });
       return Response.json(folderView(row));
     } catch (e) {
-      return caught(e, "Could not save the folder.");
+      return caught(e, new UserError("note_folder_save_failed", "Could not save the folder."));
     }
   },
 
@@ -316,7 +322,7 @@ export function createNotesCloud(db: typeof prisma = prisma) {
       });
       return Response.json({ ok: true });
     } catch (e) {
-      return caught(e, "Could not delete the folder.");
+      return caught(e, new UserError("note_folder_delete_failed", "Could not delete the folder."));
     }
   },
 
@@ -330,7 +336,7 @@ export function createNotesCloud(db: typeof prisma = prisma) {
       if (!NOTE_ID.test(id)) return err("Invalid label id.", 400);
       const body = (await req.json()) as { name?: string };
       const name = String(body.name ?? "").trim().slice(0, 60);
-      if (!name) return err("Label name required.", 400);
+      if (!name) return err(new UserError("label_name_required", "Label name required."), 400);
       const existing = await db.cutNoteLabel.findFirst({
         where: { id, userId },
         select: { id: true },
@@ -342,7 +348,7 @@ export function createNotesCloud(db: typeof prisma = prisma) {
       const row = await db.cutNoteLabel.update({ where: { id }, data: { name } });
       return Response.json(labelView(row));
     } catch (e) {
-      return caught(e, "Could not save the label.");
+      return caught(e, new UserError("label_save_failed", "Could not save the label."));
     }
   },
 
@@ -367,7 +373,7 @@ export function createNotesCloud(db: typeof prisma = prisma) {
       });
       return Response.json({ ok: true });
     } catch (e) {
-      return caught(e, "Could not delete the label.");
+      return caught(e, new UserError("label_delete_failed", "Could not delete the label."));
     }
   },
 };

@@ -8,10 +8,13 @@ import { OUTPUT_SPACES } from "@donkeycut/effects-kit";
 import { isTimelineId, normalizeAspect, sanitizeTimelines, type ProjectDoc, type ProjectFolder, type ProjectSummary } from "@/cut/lib/types";
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
+import { defaultNames } from "@/cut/lib/defaultNames";
+import { creatorLocaleOf } from "./creatorLocale";
 import { deleteLadder } from "./ladderStore";
 import { MEDIA_REDIRECT_HEADERS, mediaObjectUrl } from "./mediaCdn";
 import { del, deletePrefix, projectPrefix, projectMediaKey } from "./r2";
 import { addUsage } from "./usage";
+import { UserError } from "@/cut/lib/userError";
 import { caught, decodeFileParam, err, redirect } from "./util";
 
 const projectFolderView = (row: {
@@ -28,6 +31,11 @@ const projectFolderView = (row: {
 
 const HTTP_BAD_REQUEST = 400;
 const HTTP_NOT_FOUND = 404;
+
+// Refusals the projects home reads, coded so the page words them.
+const PROJECT_NOT_FOUND = new UserError("project_not_found", "Project not found.");
+const FOLDER_NOT_FOUND = new UserError("folder_not_found", "Folder not found.");
+const FOLDER_NAME_REQUIRED = new UserError("folder_name_required", "Folder name required.");
 
 // Writer ids are the transport's crypto.randomUUID().
 const WRITER_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -234,11 +242,13 @@ export const projectsCloud = {
 
   async create(userId: string, req: Request) {
     try {
-      const { name, folderId, aspect } = (await req.json()) as {
+      const { name, folderId, aspect, locale } = (await req.json()) as {
         name?: string;
         folderId?: string | null;
         aspect?: string;
+        locale?: string;
       };
+      const untitled = name?.trim() ? "" : (await defaultNames(await creatorLocaleOf(userId, locale))).untitled;
       const folder = folderId
         ? await prisma.cutFolder.findFirst({ where: { id: folderId, userId, scope: "project" } })
         : null;
@@ -246,7 +256,7 @@ export const projectsCloud = {
       const now = Date.now();
       const doc: ProjectDoc = {
         version: 1,
-        name: (name ?? "Untitled").trim() || "Untitled",
+        name: name?.trim() || untitled,
         createdAt: now,
         updatedAt: now,
         assets: [],
@@ -260,18 +270,18 @@ export const projectsCloud = {
       });
       return Response.json(summarize(row, 0));
     } catch (e) {
-      return caught(e, "Could not create project.");
+      return caught(e, new UserError("project_create_failed", "Could not create project."));
     }
   },
 
   async get(userId: string, id: string, req: Request) {
     if (req.method === "HEAD") {
       const row = await prisma.cutProject.findFirst({ where: { id, userId }, select: { version: true } });
-      if (!row) return err("Project not found.", 404);
+      if (!row) return err(PROJECT_NOT_FOUND, 404);
       return new Response(null, { headers: { "x-cut-doc-version": String(row.version) } });
     }
     const row = await getProject(userId, id);
-    if (!row) return err("Project not found.", 404);
+    if (!row) return err(PROJECT_NOT_FOUND, 404);
     return Response.json(docOf(row), {
       headers: { "x-cut-doc-version": String(row.version) },
     });
@@ -283,7 +293,7 @@ export const projectsCloud = {
   async put(userId: string, id: string, req: Request) {
     try {
       const row = await getProject(userId, id);
-      if (!row) return err("Project not found.", 404);
+      if (!row) return err(PROJECT_NOT_FOUND, 404);
       const vParam = new URL(req.url).searchParams.get("v");
       const writer = writerOf(req);
       if (writer === "invalid") {
@@ -331,25 +341,25 @@ export const projectsCloud = {
       // write raced the guarded update.
       const current = base ? await getProject(userId, id) : row;
       if (!current) {
-        return err("Project not found.", HTTP_NOT_FOUND);
+        return err(PROJECT_NOT_FOUND, HTTP_NOT_FOUND);
       }
       return Response.json(
         { error: "conflict", doc: docOf(current), version: current.version },
         { status: HTTP_CONFLICT }
       );
     } catch (e) {
-      return caught(e, "Could not save project.");
+      return caught(e, new UserError("project_save_failed", "Could not save project."));
     }
   },
 
   async remove(userId: string, id: string) {
     try {
       const row = await getProject(userId, id);
-      if (!row) return err("Project not found.", 404);
+      if (!row) return err(PROJECT_NOT_FOUND, 404);
       await deleteProjectCascade(userId, id);
       return Response.json({ ok: true });
     } catch (e) {
-      return caught(e, "Could not delete project.");
+      return caught(e, new UserError("project_delete_failed", "Could not delete project."));
     }
   },
 
@@ -357,17 +367,17 @@ export const projectsCloud = {
     try {
       const { folderId } = (await req.json()) as { folderId: string | null };
       const row = await getProject(userId, id);
-      if (!row) return err("Project not found.", 404);
+      if (!row) return err(PROJECT_NOT_FOUND, 404);
       if (folderId) {
         const folder = await prisma.cutFolder.findFirst({
           where: { id: folderId, userId, scope: "project" },
         });
-        if (!folder) return err("Folder not found.", 500);
+        if (!folder) return err(FOLDER_NOT_FOUND, 500);
       }
       await prisma.cutProject.update({ where: { id }, data: { folderId: folderId ?? null } });
       return Response.json({ ok: true });
     } catch (e) {
-      return caught(e, "Could not move project.");
+      return caught(e, new UserError("project_move_failed", "Could not move project."));
     }
   },
 
@@ -383,7 +393,7 @@ export const projectsCloud = {
     try {
       const { name, parentId } = (await req.json()) as { name?: string; parentId?: string | null };
       const trimmed = (name ?? "").trim();
-      if (!trimmed) return err("Folder name required.", 500);
+      if (!trimmed) return err(FOLDER_NAME_REQUIRED, 500);
       const folders = await prisma.cutFolder.findMany({
         where: { userId, scope: "project" },
         select: { id: true, parentId: true },
@@ -398,7 +408,7 @@ export const projectsCloud = {
       });
       return Response.json(projectFolderView(row));
     } catch (e) {
-      return caught(e, "Could not create folder.");
+      return caught(e, new UserError("folder_create_failed", "Could not create folder."));
     }
   },
 
@@ -408,12 +418,12 @@ export const projectsCloud = {
     try {
       const { name, parentId } = (await req.json()) as { name?: string; parentId?: string | null };
       const trimmed = name?.trim();
-      if (name !== undefined && !trimmed) return err("Folder name required.", 500);
+      if (name !== undefined && !trimmed) return err(FOLDER_NAME_REQUIRED, 500);
       const folders = await prisma.cutFolder.findMany({
         where: { userId, scope: "project" },
         select: { id: true, parentId: true },
       });
-      if (!folders.some((f) => f.id === id)) return err("Folder not found.", 500);
+      if (!folders.some((f) => f.id === id)) return err(FOLDER_NOT_FOUND, 500);
       const updated = await prisma.cutFolder.update({
         where: { id },
         data: {
@@ -423,7 +433,7 @@ export const projectsCloud = {
       });
       return Response.json(projectFolderView(updated));
     } catch (e) {
-      return caught(e, "Could not update folder.");
+      return caught(e, new UserError("folder_update_failed", "Could not update folder."));
     }
   },
 
@@ -449,7 +459,7 @@ export const projectsCloud = {
       });
       return Response.json({ ok: true });
     } catch (e) {
-      return caught(e, "Could not delete folder.");
+      return caught(e, new UserError("folder_delete_failed", "Could not delete folder."));
     }
   },
 
@@ -491,7 +501,7 @@ export const projectsCloud = {
       }
       return Response.json({ ok: true });
     } catch (e) {
-      return caught(e, "Could not delete the media file.");
+      return caught(e, new UserError("media_delete_failed", "Could not delete the media file."));
     }
   },
 
@@ -545,7 +555,7 @@ export const projectsCloud = {
       }
       return Response.json({ ok: true });
     } catch (e) {
-      return caught(e, "Could not delete the export.");
+      return caught(e, new UserError("export_delete_failed", "Could not delete the export."));
     }
   },
 

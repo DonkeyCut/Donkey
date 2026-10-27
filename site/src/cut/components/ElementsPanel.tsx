@@ -1,12 +1,14 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { dealsMarks, lineLikeShape, shapePathD } from "@donkeycut/effects-kit";
 import { SubTabs } from "@/cut/components/SubTabs";
 import { clearElementDrag, setElementDragData, setObjectDragImage } from "@/cut/lib/assetDrag";
 import { PICKED_RING, pickGridNav, useAssetPick } from "@/cut/lib/assetPick";
 import { useEnvironment } from "@/cut/lib/environment";
 import { useEditor } from "@/cut/lib/store";
-import { SHAPE_LABELS, type ShapeKind } from "@/cut/lib/types";
+import type { ShapeKind } from "@/cut/lib/types";
+import { useLabels } from "@/i18n/labels";
 import { SHAPE_KINDS } from "@/cut/components/ElementsPanel.tools";
 import { useLocalPref } from "@/cut/lib/uiState";
 import { cn } from "@/lib/utils";
@@ -22,17 +24,17 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 
 type Category = "stickers" | "shapes";
 
-const CATEGORIES = [
-  { id: "stickers", label: "Stickers" },
-  { id: "shapes", label: "Shapes" },
-] as const;
+const CATEGORIES = [{ id: "stickers" }, { id: "shapes" }] as const;
 
 export function ElementsPanel({ projectId }: { projectId: string }) {
+  const t = useTranslations("media.elements");
   const readOnly = useEditor((s) => s.readOnly);
   const { chatgpt } = useEnvironment();
   // Inside ChatGPT the card shows no credits, so Stickers, a generation
   // surface, leaves the panel.
-  const categories = chatgpt ? CATEGORIES.filter((c) => c.id !== "stickers") : CATEGORIES;
+  const categories = (chatgpt ? CATEGORIES.filter((c) => c.id !== "stickers") : CATEGORIES).map(
+    (c) => ({ id: c.id, label: t(c.id) })
+  );
   const [viewPref, setView] = useLocalPref<Category>("cut-elements-view", "stickers", (v) =>
     CATEGORIES.some((c) => c.id === v)
   );
@@ -68,7 +70,7 @@ export function ElementsPanel({ projectId }: { projectId: string }) {
               </div>
             ) : (
               <p className="px-2 py-6 text-center text-xs leading-relaxed text-balance text-muted-foreground">
-                Stickers you make land here, cut out and ready to place.
+                {t("stickersEmpty")}
               </p>
             )}
           </>
@@ -90,6 +92,7 @@ export function ElementsPanel({ projectId }: { projectId: string }) {
  * with its name under it. A click picks it, a drag onto the timeline places
  * it. */
 function ShapeTile({ shape }: { shape: ShapeKind }) {
+  const shapeLabel = useLabels("shape");
   const { picked, pick } = useAssetPick(`shape:${shape}`);
   return (
     <button
@@ -113,7 +116,7 @@ function ShapeTile({ shape }: { shape: ShapeKind }) {
       >
         <ShapeSwatch shape={shape} className="size-16" />
       </span>
-      <span className="leading-none">{SHAPE_LABELS[shape]}</span>
+      <span className="leading-none">{shapeLabel(shape)}</span>
     </button>
   );
 }

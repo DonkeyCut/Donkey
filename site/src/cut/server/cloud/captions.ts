@@ -32,6 +32,7 @@ import {
   visualSubtitlesPrompt,
   type CaptionInput,
 } from "../ai/captionPrompts";
+import { errorBody, UserError } from "@/cut/lib/userError";
 import { err } from "./util";
 
 const PROVIDER = "gemini";
@@ -63,7 +64,7 @@ async function geminiOnce(
   parts: GeminiPart[]
 ): Promise<string> {
   const clientConfig = geminiClientConfig(process.env);
-  if (!clientConfig.configured) throw new Error("Captions are not configured on this deployment.");
+  if (!clientConfig.configured) throw new UserError("captions_unconfigured", "Captions are not configured on this deployment.");
   let raw: unknown;
   try {
     const client = defaultGeminiClientFactory(clientConfig.options);
@@ -86,7 +87,7 @@ async function geminiOnce(
     const credit = creditErrorResponse(error);
     if (credit) throw new RespondWith(credit);
     const mapped = geminiApiError("The caption model is unavailable.", error);
-    throw new RespondWith(err(mapped.message, mapped.statusCode ?? 502));
+    throw new RespondWith(err(new UserError("caption_model_unavailable", mapped.message), mapped.statusCode ?? 502));
   }
   const usage = (raw as { usageMetadata?: unknown }).usageMetadata;
   try {
@@ -225,7 +226,7 @@ export const captionsCloud = {
             timeout(BATCH_TIMEOUT_MS),
           ]);
           const arr = parseStringArray(raw, batch.length);
-          if (!arr) throw new Error("The reply came back malformed.");
+          if (!arr) throw new UserError("caption_reply_malformed", "The reply came back malformed.");
           return arr;
         };
         try {
@@ -240,7 +241,7 @@ export const captionsCloud = {
       return Response.json({ texts: flat });
     } catch (e) {
       if (e instanceof RespondWith) return e.response;
-      return err(e instanceof Error ? e.message : "Could not write captions.", 500);
+      return Response.json(errorBody(e, new UserError("captions_write_failed", "Could not write captions.")), { status: 500 });
     }
   },
 
@@ -295,7 +296,7 @@ export const captionsCloud = {
       const raw = await geminiOnce(userId, route, "visual_subtitles", parts);
       const parsed = parseJsonPayload(raw);
       if (!Array.isArray(parsed)) {
-        return err("The caption model returned an unreadable response — try again.", 502);
+        return err(new UserError("caption_reply_unreadable", "The caption model returned an unreadable response — try again."), 502);
       }
       const cues = parsed
         .filter(
@@ -316,7 +317,7 @@ export const captionsCloud = {
       return Response.json({ cues });
     } catch (e) {
       if (e instanceof RespondWith) return e.response;
-      return err(e instanceof Error ? e.message : "Could not caption the visuals.", 500);
+      return Response.json(errorBody(e, new UserError("visual_captions_failed", "Could not caption the visuals.")), { status: 500 });
     }
   },
 };

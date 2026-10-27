@@ -1,11 +1,11 @@
 "use client";
 
 import { bytesFromBase64 } from "./bytes";
-import { readHostedError } from "./hostedError";
+import { readHostedFailure } from "./hostedError";
 import { hostedPost } from "./hosted";
 import { importFileToProject } from "./media";
-import { NoCreditsError } from "./tts";
 import { mediaSlug, type MediaAsset } from "./types";
+import { UserError } from "./userError";
 import type { MusicLength } from "@/lib/credits/price-sheet";
 
 // Client side of AI music generation: Gemini/Lyria on Donkey's hosted inference
@@ -24,8 +24,8 @@ export const MUSIC_VARIANTS: { id: MusicVariant; label: string; hint: string }[]
   { id: "song", label: "Full track", hint: "~2 min" },
 ];
 
-const readError = (res: Response, fallback: string) =>
-  readHostedError(res, "Sign in to Donkey to generate music.", fallback);
+const readFailure = (res: Response, fallback: UserError) =>
+  readHostedFailure(res, new UserError("sign_in_to_generate_music", "Sign in to Donkey to generate music."), fallback);
 
 /** Display name for the track: the prompt, tidied and capped. */
 function musicName(prompt: string) {
@@ -54,8 +54,7 @@ export async function synthesizeMusic(
     ...(opts?.variant === "song" ? { parameters: { variant: "song" } } : {}),
   });
   if (!res.ok) {
-    const message = await readError(res, "Music generation failed.");
-    throw res.status === 402 ? new NoCreditsError(message) : new Error(message);
+    throw await readFailure(res, new UserError("music_generation_failed", "Music generation failed."));
   }
   const gen = (await res.json()) as {
     outputs?: { dataBase64?: string; url?: string; contentType?: string; filename?: string }[];
@@ -73,16 +72,20 @@ export async function synthesizeMusic(
     });
   } else if (out?.url) {
     const dl = await fetch(out.url);
-    if (!dl.ok) throw new Error("Could not download the generated music.");
+    if (!dl.ok) {
+      throw new UserError("music_download_failed", "Could not download the generated music.");
+    }
     file = new File([await dl.arrayBuffer()], fileName, {
       type: out.contentType ?? "audio/mpeg",
     });
   } else {
-    throw new Error("The provider returned no music.");
+    throw new UserError("music_output_missing", "The provider returned no music.");
   }
 
   const asset = await importFileToProject(projectId, file);
-  if (!asset) throw new Error("Could not save the generated music into the project.");
+  if (!asset) {
+    throw new UserError("music_save_failed", "Could not save the generated music into the project.");
+  }
   asset.name = label;
   // Generated (not a user import): stays out of the Media panel and lists in the
   // Audio tab's Music generator. A chat-made track is re-tagged to its thread by

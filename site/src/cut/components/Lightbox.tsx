@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { LUT_FILE_ICON } from "@/cut/lib/linkedLibrary";
 import { isLinkedAssetType } from "@/cut/lib/types";
 import { Check, Copy, FileText, Loader2, Music, Plus, X } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { MEDIA_CORS } from "@/cut/lib/mediaCors";
 import { addLibraryAssetToProject, fetchLibrary } from "@/cut/lib/library";
@@ -39,6 +40,7 @@ const FALLBACK_RATIO = 16 / 9;
 const VIEWER_FRAME_SIZE = 720;
 
 export function Lightbox() {
+  const t = useTranslations("editor.lightbox");
   const item = useLightbox((s) => s.item);
   // The shape the media reported on load, for an item opened without one.
   // Keyed to its src, so the next item starts unmeasured.
@@ -141,7 +143,7 @@ export function Lightbox() {
         onClick={(e) => e.stopPropagation()}
       >
         <button
-          title="Close"
+          title={t("close")}
           className="absolute top-3 right-3 z-10 grid size-8 place-items-center rounded-full bg-black/45 text-white hover:bg-black/65"
           onClick={() => useLightbox.getState().close()}
         >
@@ -168,7 +170,7 @@ export function Lightbox() {
                   ) : (
                     <Plus data-icon="inline-start" />
                   )}
-                  {added ? "Added" : "Use"}
+                  {added ? t("added") : t("use")}
                 </Button>
               )}
             </div>
@@ -177,10 +179,10 @@ export function Lightbox() {
               <div className="flex flex-col gap-1">
                 <div className="flex items-center justify-between">
                   <span className="text-[11px] font-semibold tracking-wide text-white/60 uppercase">
-                    Prompt
+                    {t("prompt")}
                   </span>
                   <button
-                    title="Copy prompt"
+                    title={t("copyPrompt")}
                     className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10.5px] font-medium text-white/60 transition-colors hover:bg-white/10 hover:text-white"
                     onClick={() => {
                       void navigator.clipboard
@@ -196,7 +198,7 @@ export function Lightbox() {
                     ) : (
                       <Copy className="size-3" />
                     )}
-                    {copied ? "Copied" : "Copy"}
+                    {copied ? t("copied") : t("copy")}
                   </button>
                 </div>
                 <p className="rounded-lg bg-white/10 px-3 py-2 text-[12.5px] leading-relaxed text-white/90">
@@ -263,6 +265,7 @@ function VideoBody({
   style?: { aspectRatio: number };
   onRatio: (ratio: number) => void;
 }) {
+  const t = useTranslations("editor.lightbox");
   const videoRef = useRef<HTMLVideoElement>(null);
   // Playing is what the element reports, never what was asked of it: an
   // autoplay the browser blocks fires no `pause`, and a transport that
@@ -342,7 +345,7 @@ function VideoBody({
       {blank && (
         <span className="pointer-events-none absolute top-3 left-3 flex items-center gap-1.5 rounded-full bg-black/55 px-2.5 py-1 text-[11px] text-white backdrop-blur-sm">
           <Loader2 className="size-3 animate-spin" />
-          Preparing playback
+          {t("preparingPlayback")}
         </span>
       )}
       <MediaTransport
@@ -463,6 +466,7 @@ function LutBody({ item }: { item: LightboxItem }) {
 }
 
 function TextBody({ item }: { item: LightboxItem }) {
+  const t = useTranslations("editor.lightbox");
   const { text, failed } = useDocText(item.src);
   return (
     <div className="flex max-h-[68vh] flex-col overflow-hidden rounded-2xl bg-card shadow-2xl">
@@ -472,7 +476,7 @@ function TextBody({ item }: { item: LightboxItem }) {
       </div>
       <div className="min-h-0 overflow-y-auto px-4 py-3 text-[12.5px] leading-relaxed">
         {failed ? (
-          <p className="text-muted-foreground">Could not read the file.</p>
+          <p className="text-muted-foreground">{t("readFailed")}</p>
         ) : text === null ? (
           <Loader2 className="size-4 animate-spin text-muted-foreground" />
         ) : (

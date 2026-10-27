@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { EditorContent, useEditor, useEditorState, type Editor } from "@tiptap/react";
+import { useTranslations } from "next-intl";
 import { BubbleMenu } from "@tiptap/react/menus";
 import StarterKit from "@tiptap/starter-kit";
 import { TaskItem, TaskList } from "@tiptap/extension-list";
@@ -14,19 +15,20 @@ import { blocksOf, docOf, dropBlankLines, splitSelection, TextColor } from "@/cu
 import { useLocalPref } from "@/cut/lib/uiState";
 import { cn } from "@/lib/utils";
 
-/** What a selection can turn its lines into, the way the toolbar names it. */
-const TURN_INTO: { id: string; label: string; active: (e: Editor) => boolean; run: (e: Editor) => void }[] = [
-  { id: "text", label: "Text", active: (e) => e.isActive("paragraph") && !e.isActive("bulletList") && !e.isActive("orderedList") && !e.isActive("taskList") && !e.isActive("blockquote"), run: (e) => toText(e).setParagraph().run() },
+/** What a selection can turn its lines into. The toolbar names each by its id
+ * in the home catalog's turn-into names. */
+type TurnId = "text" | "h1" | "h2" | "h3" | "bullet" | "number" | "todo" | "quote";
+const TURN_INTO: { id: TurnId; active: (e: Editor) => boolean; run: (e: Editor) => void }[] = [
+  { id: "text", active: (e) => e.isActive("paragraph") && !e.isActive("bulletList") && !e.isActive("orderedList") && !e.isActive("taskList") && !e.isActive("blockquote"), run: (e) => toText(e).setParagraph().run() },
   ...([1, 2, 3] as const).map((level) => ({
-    id: `h${level}`,
-    label: `Heading ${level}`,
+    id: `h${level}` as const,
     active: (e: Editor) => e.isActive("heading", { level }),
     run: (e: Editor) => toText(e).setHeading({ level }).run(),
   })),
-  { id: "bullet", label: "Bulleted list", active: (e) => e.isActive("bulletList"), run: (e) => toList(e).toggleBulletList().run() },
-  { id: "number", label: "Numbered list", active: (e) => e.isActive("orderedList"), run: (e) => toList(e).toggleOrderedList().run() },
-  { id: "todo", label: "To-do list", active: (e) => e.isActive("taskList"), run: (e) => toList(e).toggleTaskList().run() },
-  { id: "quote", label: "Quote", active: (e) => e.isActive("blockquote"), run: (e) => toText(e).setParagraph().toggleBlockquote().run() },
+  { id: "bullet", active: (e) => e.isActive("bulletList"), run: (e) => toList(e).toggleBulletList().run() },
+  { id: "number", active: (e) => e.isActive("orderedList"), run: (e) => toList(e).toggleOrderedList().run() },
+  { id: "todo", active: (e) => e.isActive("taskList"), run: (e) => toList(e).toggleTaskList().run() },
+  { id: "quote", active: (e) => e.isActive("blockquote"), run: (e) => toText(e).setParagraph().toggleBlockquote().run() },
 ];
 /** Lift the selected lines out of any list or quote first, so every turn
  * starts from plain lines. */
@@ -98,6 +100,7 @@ export default function NoteBodyEditor({
   onChange: (body: string) => void;
   onEditor?: (editor: Editor | null) => void;
 }) {
+  const t = useTranslations("home.noteEditor");
   const [initial] = useState(() => docOf(parseNoteBody(body)));
   // The handlers as of the last render; the editor holds the ones it was
   // made with.
@@ -120,7 +123,7 @@ export default function NoteBodyEditor({
       TaskList,
       TaskItem.configure({ nested: true }),
       TextColor,
-      Placeholder.configure({ placeholder: "Write your note…" }),
+      Placeholder.configure({ placeholder: t("placeholder") }),
     ],
     content: initial,
     editorProps: { attributes: { class: "outline-none min-h-[50vh]" }, handlePaste: pasteMarkdown },
@@ -155,6 +158,7 @@ export default function NoteBodyEditor({
 /** The selection's toolbar. Every press keeps the editor's focus, so the
  * selection it acts on stays put. */
 function Toolbar({ editor }: { editor: Editor }) {
+  const t = useTranslations("home.noteEditor");
   const [panel, setPanel] = useState<"turn" | "list" | "color" | null>(null);
   // The style the list button makes: the last one picked from its menu, kept
   // across notes and reloads.
@@ -164,7 +168,7 @@ function Toolbar({ editor }: { editor: Editor }) {
   const state = useEditorState({
     editor,
     selector: ({ editor: e }) => ({
-      turn: TURN_INTO.find((t) => t.active(e))?.id ?? "text",
+      turn: TURN_INTO.find((x) => x.active(e))?.id ?? "text",
       bold: e.isActive("bold"),
       italic: e.isActive("italic"),
       underline: e.isActive("underline"),
@@ -174,8 +178,8 @@ function Toolbar({ editor }: { editor: Editor }) {
   });
   const keep = (e: React.MouseEvent) => e.preventDefault();
   const color = NOTE_TEXT_COLORS.find((c) => c.id === state.color);
-  const turn = (id: string) => TURN_INTO.find((t) => t.id === id)!.run(editor);
-  const label = (id: string) => TURN_INTO.find((t) => t.id === id)!.label;
+  const turn = (id: TurnId) => TURN_INTO.find((x) => x.id === id)!.run(editor);
+  const label = (id: TurnId) => t(`turnInto.${id}`);
   const activeList = LIST_STYLES.find((l) => l.id === state.turn);
   const list = LIST_STYLES.find((l) => l.id === listStyle)!;
 
@@ -191,23 +195,23 @@ function Toolbar({ editor }: { editor: Editor }) {
         onToggle={() => setPanel(panel === "turn" ? null : "turn")}
         trigger={<>{label(state.turn)}<ChevronDown className="size-3.5 opacity-50" /></>}
       >
-        {TURN_INTO.map((t) => (
-          <MenuItem key={t.id} checked={t.id === state.turn} onPick={() => { t.run(editor); setPanel(null); }}>
-            {t.label}
+        {TURN_INTO.map((x) => (
+          <MenuItem key={x.id} checked={x.id === state.turn} onPick={() => { x.run(editor); setPanel(null); }}>
+            {label(x.id)}
           </MenuItem>
         ))}
       </Menu>
       <Divider />
-      <Toggle label="Bold" on={state.bold} onPress={() => editor.chain().focus().toggleBold().run()}><Bold className="size-4" /></Toggle>
-      <Toggle label="Italic" on={state.italic} onPress={() => editor.chain().focus().toggleItalic().run()}><Italic className="size-4" /></Toggle>
-      <Toggle label="Underline" on={state.underline} onPress={() => editor.chain().focus().toggleUnderline().run()}><Underline className="size-4" /></Toggle>
-      <Toggle label="Strikethrough" on={state.strike} onPress={() => editor.chain().focus().toggleStrike().run()}><Strikethrough className="size-4" /></Toggle>
+      <Toggle label={t("bold")} on={state.bold} onPress={() => editor.chain().focus().toggleBold().run()}><Bold className="size-4" /></Toggle>
+      <Toggle label={t("italic")} on={state.italic} onPress={() => editor.chain().focus().toggleItalic().run()}><Italic className="size-4" /></Toggle>
+      <Toggle label={t("underline")} on={state.underline} onPress={() => editor.chain().focus().toggleUnderline().run()}><Underline className="size-4" /></Toggle>
+      <Toggle label={t("strikethrough")} on={state.strike} onPress={() => editor.chain().focus().toggleStrike().run()}><Strikethrough className="size-4" /></Toggle>
       <Divider />
       <Toggle label={label(list.id)} on={state.turn === list.id} onPress={() => turn(state.turn === list.id ? "text" : list.id)}><list.icon className="size-4" /></Toggle>
       <Menu
         open={panel === "list"}
         onToggle={() => setPanel(panel === "list" ? null : "list")}
-        label="List style"
+        label={t("listStyle")}
         trigger={<ChevronDown className="size-3.5 opacity-50" />}
         fit="icon"
       >
@@ -221,15 +225,15 @@ function Toolbar({ editor }: { editor: Editor }) {
       <Menu
         open={panel === "color"}
         onToggle={() => setPanel(panel === "color" ? null : "color")}
-        label="Text color"
+        label={t("textColor")}
         trigger={<><span className="font-semibold" style={{ color: color?.paper }}>A</span><ChevronDown className="size-3.5 opacity-50" /></>}
       >
         <MenuItem checked={!color} onPick={() => { editor.chain().focus().unsetMark("textColor").run(); setPanel(null); }}>
-          <span className="w-4 text-center font-semibold">A</span> Default
+          <span className="w-4 text-center font-semibold">A</span> {t("defaultColor")}
         </MenuItem>
         {NOTE_TEXT_COLORS.map((c) => (
           <MenuItem key={c.id} checked={c.id === state.color} onPick={() => { editor.chain().focus().setMark("textColor", { color: c.id }).run(); setPanel(null); }}>
-            <span className="w-4 text-center font-semibold" style={{ color: c.paper }}>A</span> {c.name}
+            <span className="w-4 text-center font-semibold" style={{ color: c.paper }}>A</span> {t(`textColors.${c.id}`)}
           </MenuItem>
         ))}
       </Menu>

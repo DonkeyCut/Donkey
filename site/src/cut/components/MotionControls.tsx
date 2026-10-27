@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { useMemo } from "react";
 import {
   CAMERA_SCALE_MAX,
@@ -7,7 +8,6 @@ import {
   CAMERA_WORLD_MAX,
   CAMERA_WORLD_MIN,
   EASE_IDS,
-  EASE_LABELS,
   ELEMENT_BLUR_MAX,
   hasOverlayKeys,
   keyIndexAt,
@@ -31,6 +31,7 @@ import { CUT_MOTION } from "@/cut/lib/motionSettings";
 import { usePreviewTime } from "@/cut/lib/playhead";
 import { useEditor } from "@/cut/lib/store";
 import { clipPoseAt, isEffectOverlay, type Overlay, type VideoClip } from "@/cut/lib/types";
+import { useLabels } from "@/i18n/labels";
 
 /**
  * The motion rows an element, a selection of elements, and a group's camera
@@ -41,22 +42,24 @@ import { clipPoseAt, isEffectOverlay, type Overlay, type VideoClip } from "@/cut
 
 const st = () => useEditor.getState();
 const SLIDER = { sliderClassName: "data-horizontal:w-24", valueClassName: "w-9 text-muted-foreground" };
-const EASE_ITEMS = Object.fromEntries(EASE_IDS.map((id) => [id, EASE_LABELS[id]]));
 const local = (o: { start: number; end: number }, now: number) =>
   Math.max(0, Math.min(now - o.start, Math.max(0.1, o.end - o.start)));
 
 /** The curve out of the key under the playhead. */
 function EaseRow({ ease, onPick }: { ease: EaseId | undefined; onPick: (ease: EaseId | undefined) => void }) {
+  const t = useTranslations("inspector.motion");
+  const easeLabel = useLabels("ease");
+  const easeItems = Object.fromEntries(EASE_IDS.map((id) => [id, easeLabel(id)]));
   return (
-    <Row label="Ease">
-      <Select value={ease ?? "linear"} items={EASE_ITEMS} onValueChange={(id) => onPick(id === "linear" ? undefined : (id as EaseId))}>
+    <Row label={t("ease")}>
+      <Select value={ease ?? "linear"} items={easeItems} onValueChange={(id) => onPick(id === "linear" ? undefined : (id as EaseId))}>
         <SelectTrigger className="h-8 w-36 text-[12px]">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
           {EASE_IDS.map((id) => (
             <SelectItem key={id} value={id} className="text-[12px]">
-              {EASE_LABELS[id]}
+              {easeLabel(id)}
             </SelectItem>
           ))}
         </SelectContent>
@@ -75,20 +78,21 @@ function MotionBlurRows({
   onChange: (motionBlur: number | undefined, phase: "draft" | "commit" | "once") => void;
   ck: ReturnType<typeof useSliderCheckpoint>;
 }) {
+  const t = useTranslations("inspector.motion");
   return (
     <>
-      <Row label="Motion blur">
-        {shutter?.mixed && <Value className="text-muted-foreground italic">Mixed</Value>}
+      <Row label={t("motionBlur")}>
+        {shutter?.mixed && <Value className="text-muted-foreground italic">{t("mixed")}</Value>}
         <Switch
           checked={!!shutter && !shutter.mixed}
           onCheckedChange={(on) => onChange(on ? CUT_MOTION.motionBlur : undefined, "once")}
-          aria-label="Motion blur"
+          aria-label={t("motionBlur")}
         />
       </Row>
       {shutter && (
-        <Row label="Shutter">
+        <Row label={t("shutter")}>
           <ValueSlider
-            label="Shutter"
+            label={t("shutter")}
             {...SLIDER}
             value={shutter.value}
             mixed={shutter.mixed}
@@ -123,10 +127,11 @@ function BlurRow({
   onSet: (v: number) => void;
   ck: ReturnType<typeof useSliderCheckpoint>;
 }) {
+  const t = useTranslations("inspector.motion");
   return (
-    <Row label="Blur">
+    <Row label={t("blur")}>
       <ValueSlider
-        label="Blur"
+        label={t("blur")}
         {...SLIDER}
         value={blur.value}
         mixed={blur.mixed}
@@ -245,6 +250,7 @@ export function ClipMotionRows({ clip, tLocal }: { clip: VideoClip; tLocal: numb
  * play edits the key at the playhead; with none, it sets the first key.
  */
 export function GroupCameraSection({ groupId }: { groupId: string }) {
+  const tr = useTranslations("inspector.motion");
   const overlays = useEditor((s) => s.overlays);
   const seek = useEditor((s) => s.seek);
   const now = usePreviewTime();
@@ -270,7 +276,7 @@ export function GroupCameraSection({ groupId }: { groupId: string }) {
   };
   const keys = view.keys;
   return (
-    <Section title="Camera">
+    <Section title={tr("camera")}>
       <KeyRow
         element={{ start: view.start, end: view.end }}
         now={now}
@@ -287,12 +293,12 @@ export function GroupCameraSection({ groupId }: { groupId: string }) {
         }}
         onSeek={seek}
       />
-      <Row label="Look at">
+      <Row label={tr("lookAt")}>
         {(["x", "y"] as const).map((axis) => (
           <span key={axis} className="flex items-center gap-1">
             <span className="text-[11px] text-muted-foreground/70 uppercase">{axis}</span>
             <ScrubValue
-              label={`Camera ${axis.toUpperCase()}`}
+              label={tr("cameraAxis", { axis: axis.toUpperCase() })}
               className="w-9 text-muted-foreground"
               value={pose[axis] * 100}
               min={CAMERA_WORLD_MIN * 100}
@@ -315,9 +321,9 @@ export function GroupCameraSection({ groupId }: { groupId: string }) {
           </span>
         ))}
       </Row>
-      <Row label="Zoom">
+      <Row label={tr("zoom")}>
         <ValueSlider
-          label="Camera zoom"
+          label={tr("cameraZoom")}
           {...SLIDER}
           valueClassName="w-12 text-muted-foreground"
           value={pose.scale}
@@ -341,9 +347,9 @@ export function GroupCameraSection({ groupId }: { groupId: string }) {
           }}
         />
       </Row>
-      <Row label="Roll">
+      <Row label={tr("roll")}>
         <ValueSlider
-          label="Camera roll"
+          label={tr("cameraRoll")}
           {...SLIDER}
           value={pose.rotation}
           min={-180}

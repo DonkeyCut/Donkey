@@ -5,6 +5,7 @@ import type { RenderHandle } from "../server/exportPipeline";
 import { assertGraphSafe } from "../server/filterGraph";
 import { prisma, registerObject, type ClaimedJob } from "./db";
 import { cardKey, uploadFile } from "./r2";
+import { UserError } from "../lib/userError";
 
 // The share card: what a link to a shared project unfurls with. The render
 // itself is an ordinary export of the cut's opening seconds (runExportJob
@@ -45,7 +46,9 @@ function ffmpeg(handle: RenderHandle, args: string[]): Promise<void> {
     proc.on("close", (code) => {
       clearTimeout(timer);
       if (code === 0) resolve();
-      else reject(new Error(`ffmpeg exited with code ${code}.\n${tail}`));
+      else {
+        reject(new UserError("export_ffmpeg_exited", `ffmpeg exited with code ${code}.\n${tail}`, { code: String(code), log: tail }));
+      }
     });
   });
 }
@@ -109,7 +112,9 @@ export async function storeCardArtifacts(
     where: { id: job.id },
     select: { state: true },
   });
-  if (live?.state !== "running") throw new Error("Canceled.");
+  if (live?.state !== "running") {
+    throw new UserError("render_canceled", "Canceled.");
+  }
 
   const stillKey = cardKey(job.userId, projectId, "jpg");
   const animKey = cardKey(job.userId, projectId, "gif");

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useTranslations } from "next-intl";
 import {
   Check,
   ChevronRight,
@@ -34,22 +35,14 @@ import { MEDIA_CORS } from "@/cut/lib/mediaCors";
 // editor bridge; this is the control surface — approve the plan, watch shots
 // land, redo one by clicking its chip.
 
-const STATUS_LABEL: Record<SceneRun["status"], string> = {
-  planning: "Planning",
-  awaiting_approval: "Storyboard ready",
-  generating: "Rendering",
-  done: "Done",
-  failed: "Failed",
-};
-
 /** mm:ss for a frame count at the plan's fixed rate. */
 function fmt(frames: number): string {
   return formatDuration((frames / GEN_FPS) * 1000);
 }
 
-/** A single shot's own length in seconds, for the filmstrip badge ("3.2s"). */
+/** A single shot's own length in seconds, for the filmstrip badge ("3.2"). */
 function shotSecs(sh: Shot): string {
-  return `${((sh.endFrame - sh.startFrame) / GEN_FPS).toFixed(1)}s`;
+  return ((sh.endFrame - sh.startFrame) / GEN_FPS).toFixed(1);
 }
 
 /** The shot statuses that mean a render is actively in flight. */
@@ -61,6 +54,7 @@ function describe(sh: Shot): string {
 }
 
 export function SceneCard({ threadId }: { threadId: string }) {
+  const t = useTranslations("chat.sceneCard");
   const run = useGenScene((s) => s.run);
   const projectId = useEditor((s) => s.projectId);
   const [open, setOpen] = useState(true);
@@ -104,9 +98,9 @@ export function SceneCard({ threadId }: { threadId: string }) {
   // it is the one the user can act on.
   const creditsReason = run.shots.find(
     (sh) => sh.status === "failed" && sh.error === NO_CREDITS_MESSAGE
-  )?.error;
+  );
   const stillReason =
-    creditsReason ?? run.shots.find((sh) => sh.status === "failed" && sh.error)?.error;
+    creditsReason ?? run.shots.find((sh) => sh.status === "failed" && sh.error);
   // Elapsed clock: planning counts from the run start, rendering from approval;
   // it stops at the end. Hidden while waiting for the user at the gate.
   const clockAnchor = run.status === "planning" ? run.startedAt : run.renderStartedAt ?? run.startedAt;
@@ -117,10 +111,10 @@ export function SceneCard({ threadId }: { threadId: string }) {
     <div className="ai-scene-card mt-2 mb-3 text-[11.5px]">
       <div className="flex items-center gap-1.5">
         <Clapperboard className="size-3.5 text-[#0a84ff]" />
-        <span className="font-semibold">Generate video</span>
+        <span className="font-semibold">{t("title")}</span>
         <span className="ml-auto flex items-center gap-1 text-[10.5px] text-muted-foreground">
           {inFlight && <CircleDashed className="size-3 animate-spin" />}
-          {STATUS_LABEL[run.status]}
+          {t(`status.${run.status}`)}
           {elapsed && <span className="tabular-nums">· {elapsed}</span>}
         </span>
       </div>
@@ -140,13 +134,13 @@ export function SceneCard({ threadId }: { threadId: string }) {
               <ChevronRight
                 className={`size-3 shrink-0 transition-transform ${open ? "rotate-90" : ""}`}
               />
-              <span className="font-medium text-foreground">Plan</span>
+              <span className="font-medium text-foreground">{t("plan")}</span>
               <span>
-                {run.shots.length} shot{run.shots.length === 1 ? "" : "s"} · {fmt(totalFrames)}
+                {t("planSummary", { count: run.shots.length, length: fmt(totalFrames) })}
               </span>
               {showProgress && (
                 <span className="ml-auto tabular-nums text-[10.5px]">
-                  {run.placed}/{run.total} placed
+                  {t("placed", { placed: run.placed, total: run.total })}
                 </span>
               )}
             </button>
@@ -164,9 +158,9 @@ export function SceneCard({ threadId }: { threadId: string }) {
           // before its frames): the tiles would be blank placeholders, so state
           // the plan as a line and let shots appear as they actually render.
           <p className="mt-2 flex items-center gap-1.5">
-            <span className="font-medium">Plan</span>
+            <span className="font-medium">{t("plan")}</span>
             <span className="text-muted-foreground">
-              {run.shots.length} shot{run.shots.length === 1 ? "" : "s"} · {fmt(totalFrames)}
+              {t("planSummary", { count: run.shots.length, length: fmt(totalFrames) })}
             </span>
           </p>
         ))}
@@ -184,7 +178,7 @@ export function SceneCard({ threadId }: { threadId: string }) {
         <p className="mt-2 flex items-start gap-1.5 text-amber-700">
           <TriangleAlert className="mt-px size-3 shrink-0" />
           <span>
-            <HostedErrorText error={run.error} link={false} />
+            <HostedErrorText error={run} link={false} />
           </span>
         </p>
       )}
@@ -197,13 +191,16 @@ export function SceneCard({ threadId }: { threadId: string }) {
             <span className="flex items-start gap-1 text-[10.5px] text-amber-700">
               <TriangleAlert className="mt-px size-3 shrink-0" />
               <span>
-                {stillCount} of {run.shots.length} shot{run.shots.length === 1 ? "" : "s"} held a
-                still —{" "}
-                {stillReason ? (
-                  <HostedErrorText error={stillReason} link={false} />
-                ) : (
-                  "video generation failed"
-                )}
+                {t.rich("stillsHeld", {
+                  held: stillCount,
+                  count: run.shots.length,
+                  reason: () =>
+                    stillReason ? (
+                      <HostedErrorText error={stillReason} link={false} />
+                    ) : (
+                      t("videoFailed")
+                    ),
+                })}
               </span>
             </span>
           )}
@@ -214,7 +211,7 @@ export function SceneCard({ threadId }: { threadId: string }) {
                 className="h-7 flex-1 text-[11.5px]"
                 onClick={() => useGenScene.getState().approve()}
               >
-                Approve &amp; render{run.shots.length ? ` (${run.shots.length})` : ""}
+                {t("approve", { count: run.shots.length })}
               </Button>
             )}
             {run.status === "failed" && (
@@ -225,12 +222,12 @@ export function SceneCard({ threadId }: { threadId: string }) {
                 className="h-7 flex-1 text-[11.5px]"
                 onClick={() => useGenScene.getState().retryRun()}
               >
-                Retry
+                {t("retry")}
               </Button>
             )}
             {run.status === "done" && stillCount === 0 && (
               <span className="flex flex-1 items-center gap-1 text-emerald-600">
-                <Check className="size-3.5" /> Video ready
+                <Check className="size-3.5" /> {t("ready")}
               </span>
             )}
             {run.status === "done" && stillCount > 0 && (
@@ -239,7 +236,7 @@ export function SceneCard({ threadId }: { threadId: string }) {
                 className="h-7 flex-1 text-[11.5px]"
                 onClick={() => useGenScene.getState().retryFailedShots()}
               >
-                Retry {stillCount} shot{stillCount === 1 ? "" : "s"}
+                {t("retryShots", { count: stillCount })}
               </Button>
             )}
           </div>
@@ -306,6 +303,7 @@ function ShotTile({
   redoable: boolean;
   atGate: boolean;
 }) {
+  const t = useTranslations("chat.sceneCard");
   const clip = shot.clip ? assets.find((a) => a.id === shot.clip) : undefined;
   const frame = shot.startKeyframe ? assets.find((a) => a.id === shot.startKeyframe) : undefined;
   const media = clip ?? frame;
@@ -318,7 +316,7 @@ function ShotTile({
     <div className="flex min-w-0 flex-col gap-1">
       <div
         onClick={view}
-        title={`Shot ${n} — ${describe(shot)}`}
+        title={t("shotHint", { n, description: describe(shot) })}
         className={cn(
           "group/tile relative w-full overflow-hidden rounded-md bg-muted transition-opacity",
           ref ? "cursor-zoom-in hover:opacity-95" : "cursor-default"
@@ -361,18 +359,18 @@ function ShotTile({
         )}
         {shot.status === "failed" && (
           <span className="absolute top-1 left-1 rounded bg-amber-500/90 px-1 text-[8.5px] font-medium text-white">
-            still
+            {t("still")}
           </span>
         )}
 
         <span className="absolute right-1 bottom-1 rounded bg-black/65 px-1 font-mono text-[9px] text-white tabular-nums">
-          {shotSecs(shot)}
+          {t("shotSeconds", { seconds: shotSecs(shot) })}
         </span>
 
         {redoable && (
           <button
             type="button"
-            title={atGate ? "Redraw this frame" : "Redo this shot"}
+            title={atGate ? t("redraw") : t("redo")}
             onClick={(e) => {
               e.stopPropagation();
               useGenScene.getState().regenerateShot(n);
@@ -387,7 +385,7 @@ function ShotTile({
         )}
       </div>
       <div className="min-w-0">
-        <div className="truncate text-[9.5px] font-medium text-foreground">Shot {n}</div>
+        <div className="truncate text-[9.5px] font-medium text-foreground">{t("shot", { n })}</div>
         <p className="line-clamp-2 text-[9px] leading-snug text-muted-foreground">{describe(shot)}</p>
       </div>
     </div>
@@ -399,6 +397,7 @@ function ShotTile({
  * Nothing the run does is internal: this is the same story the agent would
  * tell in chat. */
 function RunActivity({ run, inFlight }: { run: SceneRun; inFlight: boolean }) {
+  const t = useTranslations("chat.sceneCard");
   // Feed thumbnails resolve against the open project's media (the run's
   // assets are project assets, chat-owned).
   const assets = useEditor((s) => s.assets);
@@ -418,7 +417,7 @@ function RunActivity({ run, inFlight }: { run: SceneRun; inFlight: boolean }) {
 
   return (
     <div className="ai-scene-activity mt-2 flex flex-col gap-1.5">
-      <div className="text-[10.5px] font-medium text-muted-foreground">Activity</div>
+      <div className="text-[10.5px] font-medium text-muted-foreground">{t("activity")}</div>
       {run.feed.map((f, i) => {
         const asset = f.mediaId ? assets.find((a) => a.id === f.mediaId) : undefined;
         const ref = asset ? refFromAsset(asset) : undefined;
@@ -452,6 +451,7 @@ function FeedEntry({
   asset?: MediaAsset;
   pulse: boolean;
 }) {
+  const t = useTranslations("chat.sceneCard");
   const [expanded, setExpanded] = useState(false);
   const { ref: videoRef, handlers: hoverPlay } = useHoverPlay();
   const inPlace = item?.kind === "image" || item?.kind === "video";
@@ -476,7 +476,7 @@ function FeedEntry({
         <div
           className="group/tile relative cursor-zoom-out overflow-hidden rounded-xl border border-border bg-muted"
           style={{ width, aspectRatio: ratio }}
-          title={`${item.name} — click to minimize`}
+          title={t("minimizeHint", { name: item.name })}
           onClick={() => setExpanded(false)}
           {...(item.kind === "video" ? hoverPlay : {})}
         >
@@ -500,7 +500,7 @@ function FeedEntry({
             </span>
           )}
           <button
-            title="Expand"
+            title={t("expand")}
             className={cn(
               scrimIconButton,
               "absolute top-1 right-1 opacity-0 transition-opacity group-hover/tile:opacity-100"
@@ -523,7 +523,7 @@ function FeedEntry({
       {item && (
         <button
           type="button"
-          title={`${item.name} — click to view`}
+          title={t("viewHint", { name: item.name })}
           className="shrink-0"
           onClick={() =>
             inPlace

@@ -12,6 +12,7 @@ import { uploadProjectMediaTo } from "./media";
 import { localMediaFile } from "./mediaSync";
 import type { ProjectDoc, StoredAsset } from "./types";
 import { compatCoverOf } from "./proxyNames";
+import { UserError } from "./userError";
 
 /** Move a project's conversations onto the copy.
  *
@@ -52,7 +53,7 @@ export async function copyProjectAcross(
   let created: string | null = null;
   try {
     const docRes = await src.fetch(`/api/cut/projects/${projectId}`);
-    if (!docRes.ok) throw new Error("Could not read the project.");
+    if (!docRes.ok) throw new UserError("project_read_failed", "Could not read the project.");
     const doc = (await docRes.json()) as ProjectDoc;
     const name = opts.rename ? opts.rename(doc.name ?? "") : (doc.name ?? "");
     const createRes = await dst.fetch("/api/cut/projects", {
@@ -61,7 +62,7 @@ export async function copyProjectAcross(
       body: JSON.stringify({ name }),
     });
     const summary = (await createRes.json()) as { id?: string };
-    if (!createRes.ok || !summary.id) throw new Error("Could not create the project.");
+    if (!createRes.ok || !summary.id) throw new UserError("project_creation_failed", "Could not create the project.");
     created = summary.id;
     const assets = Array.isArray(doc.assets) ? doc.assets : [];
     const names = new Map<string, string>();
@@ -90,7 +91,7 @@ export async function copyProjectAcross(
         const bytes = await src.fetch(
           `/api/cut/projects/${projectId}/media/${encodeURIComponent(f.fileName)}`
         );
-        if (!bytes.ok) throw new Error(`Could not read “${f.name}”.`);
+        if (!bytes.ok) throw new UserError("media_read_failed", `Could not read “${f.name}”.`, { name: f.name });
         blob = await bytes.blob();
       }
       names.set(f.fileName, await uploadProjectMediaTo(dst, summary.id, blob, f.fileName));
@@ -121,7 +122,7 @@ export async function copyProjectAcross(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(copied),
     });
-    if (!putRes.ok) throw new Error("Could not save the project.");
+    if (!putRes.ok) throw new UserError("project_doc_save_failed", "Could not save the project.");
     await copyChatThreads(src, dst, projectId, summary.id);
     if (!carryProxies) {
       // The worker builds the proxies the copy left behind; the editor writes

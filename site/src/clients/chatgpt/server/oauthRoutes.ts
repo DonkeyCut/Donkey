@@ -34,6 +34,9 @@ import {
 } from "@/clients/chatgpt/server/oauthRateLimit";
 import { identitySigner, openIdMetadata } from "@/clients/chatgpt/server/oidc";
 import { signInReturnCookie } from "@/lib/signInReturn";
+import { escapeHtml, requestLocale } from "@/clients/chatgpt/server/locale";
+import type { Locale } from "@/i18n/locales";
+import { translatorFor } from "@/i18n/translator";
 
 const NO_STORE_HEADERS = { "Cache-Control": "no-store", Pragma: "no-cache" };
 const CONSENT_COOKIE_NAME = "__Host-donkey-chatgpt-consent";
@@ -146,7 +149,7 @@ export async function authorize(request: Request) {
   });
 
   // Signed in now, so the remembered sign-in return has done its job.
-  const page = consentPage(nonce, authorization, browserToken);
+  const page = await consentPage(requestLocale(request), nonce, authorization, browserToken);
   page.headers.append("Set-Cookie", signInReturnCookie(null));
   return page;
 }
@@ -172,17 +175,17 @@ export const consent = withDonkeyAuth(async (request) => {
   const { nonce, decision } = parsed.data;
 
   const browserToken = consentBrowserToken(request.headers.get("cookie"));
-  if (!browserToken) return expiredConsent();
+  if (!browserToken) return expiredConsent(request);
 
   const challengeId = `chatgpt:${tokenHash(nonce)}`;
   const challenge = await prisma.verification.findUnique({
     where: { id: challengeId },
   });
   if (!challenge || challenge.expiresAt <= new Date()) {
-    return expiredConsent();
+    return expiredConsent(request);
   }
   if (challenge.identifier !== `chatgpt-consent:${request.donkey.userId}`) {
-    return expiredConsent();
+    return expiredConsent(request);
   }
 
   // Revalidate against current settings before issuing a code.
@@ -193,7 +196,7 @@ export const consent = withDonkeyAuth(async (request) => {
     !parsedChallenge.success ||
     !sameSecret(parsedChallenge.data.browserTokenHash, tokenHash(browserToken))
   ) {
-    return expiredConsent();
+    return expiredConsent(request);
   }
   const { authorization } = parsedChallenge.data;
   if (!authorizeInput(new URLSearchParams(authorization), config)) {
@@ -204,7 +207,7 @@ export const consent = withDonkeyAuth(async (request) => {
     where: { id: challengeId, expiresAt: { gt: new Date() } },
   });
   if (!consumed.count) {
-    return expiredConsent();
+    return expiredConsent(request);
   }
 
   const callbackUrl = new URL(authorization.redirect_uri);
@@ -353,9 +356,11 @@ function consentBrowserToken(header: string | null) {
   return value && /^[A-Za-z0-9_-]{43}$/.test(value) ? value : null;
 }
 
-function expiredConsent() {
+async function expiredConsent(request: Request) {
+  const locale = requestLocale(request);
+  const t = await translatorFor(locale, "chatgpt");
   return new Response(
-    `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Restart connection</title></head><body><h1>Start the connection again</h1><p>This connection page expired or your signed-in account changed. Return to OpenAI and start the connection again.</p></body></html>`,
+    `<!doctype html><html lang="${locale}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(t("consent.expiredTitle"))}</title></head><body><h1>${escapeHtml(t("consent.expiredHeading"))}</h1><p>${escapeHtml(t("consent.expiredBody"))}</p></body></html>`,
     {
       status: 400,
       headers: {
@@ -368,30 +373,28 @@ function expiredConsent() {
   );
 }
 
-function consentPage(
+async function consentPage(
+  locale: Locale,
   nonce: string,
   authorization: Authorization,
   browserToken: string,
 ) {
+  const t = await translatorFor(locale, "chatgpt");
   const scopes = authorization.scope.split(" ");
-  const access = scopes.includes("projects:write") ? "view and edit" : "view";
-  const escapedNonce = nonce.replace(
-    /[&<>"']/g,
-    (character) =>
-      ({
-        "&": "&amp;",
-        "<": "&lt;",
-        ">": "&gt;",
-        '"': "&quot;",
-        "'": "&#39;",
-      })[character]!,
-  );
+
+  // One sentence for what the grant reaches: the projects, and the account
+  // identity when openid (and email) ride along.
+  const access = t("consent.access", {
+    access: scopes.includes("projects:write") ? "edit" : "view",
+    identity: !scopes.includes("openid") ? "none" : scopes.includes("email") ? "email" : "account",
+  });
+  const escapedNonce = escapeHtml(nonce);
   const html = `<!doctype html>
-<html lang="en">
+<html lang="${locale}">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
-    <title>Connect to ChatGPT</title>
+    <title>${escapeHtml(t("consent.title"))}</title>
     <style>
       body { font: 17px system-ui; max-width: 460px; margin: 12vh auto; padding: 24px; color: #202020; background: #faf9f7; }
       h1 { display: flex; align-items: center; gap: 14px; font-size: 34px; margin: 0 0 20px; }
@@ -404,11 +407,11 @@ function consentPage(
   </head>
   <body>
     <h1><img src="/donkey-logo.svg" alt="">Donkey Cut</h1>
-    <p>ChatGPT can ${access} your projects${scopes.includes("openid") ? ` and read your account information${scopes.includes("email") ? ", including your email address" : ""}` : ""}.</p>
+    <p>${escapeHtml(access)}</p>
     <form method="post" action="${OAUTH_PATH}/authorize">
       <input type="hidden" name="nonce" value="${escapedNonce}">
-      <button name="decision" value="allow">Connect</button>
-      <button name="decision" value="deny">Cancel</button>
+      <button name="decision" value="allow">${escapeHtml(t("consent.connect"))}</button>
+      <button name="decision" value="deny">${escapeHtml(t("consent.cancel"))}</button>
     </form>
   </body>
 </html>`;

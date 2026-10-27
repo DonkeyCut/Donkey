@@ -10,6 +10,7 @@ import { syncSourceSound } from "./media";
 import { CUT_SOUND } from "./soundSettings";
 import { useEditor } from "./store";
 import { assetIsSilent, type MediaAsset } from "./types";
+import { UserError } from "./userError";
 import { queueWatchSweep } from "./watch/sweep";
 
 interface BoundSound {
@@ -39,12 +40,25 @@ export async function bindRecording(
   const s = useEditor.getState();
   const video = s.assets.find((a) => a.id === videoId);
   const rec = s.assets.find((a) => a.id === audioId);
-  if (!video || video.type !== "video") throw new Error("That video is no longer in the project.");
-  if (!rec) throw new Error("That recording is no longer in the project.");
-  if (rec.type !== "audio") throw new Error(`"${rec.name}" is not an audio file.`);
-  if (assetIsSilent(video))
-    throw new Error(`"${video.name}" has no sound of its own to line the recording up against.`);
-  if (!(video.duration > 0) || !(rec.duration > 0)) throw new Error("Both files must finish importing first.");
+  if (!video || video.type !== "video") {
+    throw new UserError("sync_video_missing", "That video is no longer in the project.");
+  }
+  if (!rec) {
+    throw new UserError("sync_recording_missing", "That recording is no longer in the project.");
+  }
+  if (rec.type !== "audio") {
+    throw new UserError("sync_recording_not_audio", `"${rec.name}" is not an audio file.`, { name: rec.name });
+  }
+  if (assetIsSilent(video)) {
+    throw new UserError(
+      "sync_video_silent",
+      `"${video.name}" has no sound of its own to line the recording up against.`,
+      { name: video.name },
+    );
+  }
+  if (!(video.duration > 0) || !(rec.duration > 0)) {
+    throw new UserError("sync_files_importing", "Both files must finish importing first.");
+  }
   const { syncProbeSeconds, syncMaxSeconds, syncMinConfidence } = CUT_SOUND;
   const [cameraFrom, cameraTo] = probeWindow(video, syncProbeSeconds, near);
   const answer = await syncSourceSound(video.url, rec.url, {
@@ -54,9 +68,18 @@ export async function bindRecording(
   });
   if (!answer || answer.confidence < syncMinConfidence) {
     const read = answer ? ` (confidence ${answer.confidence.toFixed(2)}, needs ${syncMinConfidence})` : "";
-    throw new Error(
-      `No clear alignment between "${rec.name}" and "${video.name}"${read}. They may be different takes, or share too little sound.`
-    );
+    const message = `No clear alignment between "${rec.name}" and "${video.name}"${read}. They may be different takes, or share too little sound.`;
+
+    // The weak-match line names the score it got and the score it needs.
+    if (answer) {
+      throw new UserError("sync_alignment_weak", message, {
+        recording: rec.name,
+        video: video.name,
+        confidence: answer.confidence.toFixed(2),
+        needs: syncMinConfidence,
+      });
+    }
+    throw new UserError("sync_alignment_none", message, { recording: rec.name, video: video.name });
   }
   const offset = Math.round(answer.offset * 1e5) / 1e5;
   useEditor.getState().setAssetSoundFrom(video.id, { assetId: rec.id, offset });

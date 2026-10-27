@@ -5,6 +5,8 @@ import { getActiveProSubscription } from "@/lib/billing/pro-subscription";
 import { cloudProjectsFull } from "@/lib/billing/project-limit-server";
 import { isDonkeySuperUser } from "@/lib/super-user";
 import { normalizeAspect, type ProjectDoc } from "@/cut/lib/types";
+import { defaultNames } from "@/cut/lib/defaultNames";
+import { DEFAULT_LOCALE, type Locale } from "@/i18n/locales";
 import { ADOPT_COMMAND, type AdoptedAsset } from "@/cut/lib/commandBatch";
 import { NO_CARD_OPEN, queueCommands, waitForJob, type CommandCall, type CommandJobResult, type JobRow } from "@/cut/server/cloud/commands";
 import { needsWorker, queueDocExport, queueImportUrl } from "@/cut/server/cloud/jobs";
@@ -45,10 +47,13 @@ const jobStatus = (row: Pick<JobRow, "state">): "queued" | "running" | "done" | 
 const jobError = (row: Pick<JobRow, "state" | "error">) =>
   row.state === "canceled" ? "The job was canceled." : row.error ?? undefined;
 
+// `locale` is the ChatGPT session's language, the one a project made with no
+// name is named in.
 export function projectTools(
   identity: Identity,
   config: ChatgptConfig,
   db = prisma,
+  locale: Locale = DEFAULT_LOCALE,
 ) {
   const canRender = identity.scopes.includes("previews:render");
   const canEdit = identity.scopes.includes("projects:write");
@@ -438,7 +443,7 @@ export function projectTools(
       const now = Date.now();
       const doc: ProjectDoc = {
         version: 1,
-        name: name.trim() || "Untitled",
+        name: name.trim() || (await defaultNames(locale)).untitled,
         createdAt: now,
         updatedAt: now,
         assets: [],

@@ -25,6 +25,7 @@ import { storedMediaUrl } from "./mediaSync";
 import { CUT_UPLOADS } from "./chatRuntime";
 import { connectionLost, isOffline, onReconnect } from "./network";
 import { useEditor } from "./store";
+import { errorFields, UserError, type ErrorFields } from "./userError";
 
 /** Blob URLs owned by the browser store's registry stay alive for the whole
  * session; only tab-scoped object URLs are this queue's to revoke. */
@@ -163,11 +164,11 @@ export function markUploadStored(assetId: string, fileName: string) {
  * demote a store-backed asset to tab-scoped (which would strip it from the
  * saved document), and `server` so the indicator keeps calling a copy a copy.
  * `updateAsset` merges shallowly; `upload` is replaced whole. */
-function uploadPatch(job: Job, progress: number, error?: string) {
+function uploadPatch(job: Job, progress: number, failure?: ErrorFields) {
   return {
     upload: {
       progress,
-      ...(error !== undefined ? { error } : {}),
+      ...failure,
       ...(storeBacked(job) ? { stored: true as const } : {}),
       ...(job.pending.asset.upload?.server ? { server: true as const } : {}),
     },
@@ -304,7 +305,7 @@ async function run(job: Job) {
     if (!wanted(job)) return storeBacked(job) ? stopStored(job) : cancelUpload(asset.id);
     useEditor.getState().updateAsset(
       asset.id,
-      uploadPatch(job, 0, err instanceof Error ? err.message : "Upload failed.")
+      uploadPatch(job, 0, errorFields(err, new UserError("upload_failed", "Upload failed.")))
     );
     if (connectionLost(err)) {
       scheduleResume(job);

@@ -13,6 +13,7 @@ import { mediaPath as projectMediaPath, readProject } from "./projects";
 import { makeProxy, proxyNameFor } from "./proxy";
 import { templateExtras } from "./templateExtras";
 import { exists, uniqueName, writeJsonAtomic } from "./util";
+import { UserError } from "@/cut/lib/userError";
 
 /** The Mac's library: reusable media that lives outside any project, shared by
  * every account that signs in on this Mac. */
@@ -229,7 +230,7 @@ function ffprobe(args: string[]): Promise<string> {
     p.on("close", (code) => {
       clearTimeout(timer);
       if (code === 0) resolve(out.trim());
-      else reject(new Error("Could not read this media file."));
+      else reject(new UserError("media_file_unreadable", "Could not read this media file."));
     });
   });
 }
@@ -283,7 +284,7 @@ export async function register(
   originalFile?: string,
 ): Promise<LibraryAsset> {
   const type = libraryTypeOf(fileName);
-  if (!type) throw new Error("Unsupported file type.");
+  if (!type) throw new UserError("file_type_unsupported", "Unsupported file type.");
   // A linked item has no streams to measure; the page that checked it sends
   // what its row carries instead.
   const meta: { duration: number; width?: number; height?: number } =
@@ -318,7 +319,7 @@ export async function addUpload(
   linked?: LinkedMeta,
   prepare = false,
 ): Promise<LibraryAsset> {
-  if (!libraryTypeOf(file.name)) throw new Error("Unsupported file type.");
+  if (!libraryTypeOf(file.name)) throw new UserError("file_type_unsupported", "Unsupported file type.");
   await mkdir(libMedia(), { recursive: true });
   const fileName = await freeName(file.name);
   await writeFile(
@@ -361,7 +362,7 @@ export async function addFromProject(
   name: string,
 ): Promise<LibraryAsset> {
   const src = projectMediaPath(projectId, fileName);
-  if (!(await exists(src))) throw new Error("Media file not found in project.");
+  if (!(await exists(src))) throw new UserError("project_media_not_found", "Media file not found in project.");
   await mkdir(libMedia(), { recursive: true });
   const dest = await freeName(fileName);
   await copyFile(src, libMediaPath(dest));
@@ -376,7 +377,7 @@ export async function addDownloaded(
   source?: LibrarySource,
   posterPath?: string,
 ): Promise<LibraryAsset> {
-  if (!libraryTypeOf(srcPath)) throw new Error("Unsupported file type.");
+  if (!libraryTypeOf(srcPath)) throw new UserError("file_type_unsupported", "Unsupported file type.");
   await mkdir(libMedia(), { recursive: true });
   const dest = await freeName(path.basename(srcPath));
   await copyFile(srcPath, libMediaPath(dest));
@@ -398,8 +399,8 @@ export async function copyLibraryAssetToProject(
 ): Promise<string> {
   const idx = await readIndex();
   const asset = idx.assets.find((a) => a.id === assetId);
-  if (!asset) throw new Error("Library asset not found.");
-  if (!(await readProject(projectId))) throw new Error("Project not found.");
+  if (!asset) throw new UserError("library_asset_not_found", "Library asset not found.");
+  if (!(await readProject(projectId))) throw new UserError("project_not_found", "Project not found.");
 
   const base = asset.fileName;
   const dest = await uniqueName(base, (n) => projectMediaPath(projectId, n));
@@ -445,7 +446,7 @@ async function removeFiles(files: string[]) {
 
 export async function removeAsset(id: string) {
   const files = await mutateIndex((idx) => {
-    if (!idx.assets.some((a) => a.id === id)) throw new Error("Library asset not found.");
+    if (!idx.assets.some((a) => a.id === id)) throw new UserError("library_asset_not_found", "Library asset not found.");
     return takeAssets(idx, new Set([id]));
   });
   await removeFiles(files);
@@ -462,8 +463,8 @@ export function makeLibraryProxy(id: string, opts: { maxHeight: number; crf: num
   if (running) return running;
   const build = (async () => {
     const asset = (await readIndex()).assets.find((a) => a.id === id);
-    if (!asset) throw new Error("Library asset not found.");
-    if (asset.type !== "video") throw new Error("Only a video takes a playable copy.");
+    if (!asset) throw new UserError("library_asset_not_found", "Library asset not found.");
+    if (asset.type !== "video") throw new UserError("playable_copy_video_only", "Only a video takes a playable copy.");
     if (asset.proxyFile && (await exists(libMediaPath(asset.proxyFile)))) return asset;
     const fileName = await freeName(proxyNameFor(asset.fileName));
     const out = libMediaPath(fileName);
@@ -473,7 +474,7 @@ export function makeLibraryProxy(id: string, opts: { maxHeight: number; crf: num
       // The asset may have been deleted while the copy was built.
       return await mutateIndex((idx) => {
         const live = idx.assets.find((a) => a.id === id);
-        if (!live) throw new Error("Library asset not found.");
+        if (!live) throw new UserError("library_asset_not_found", "Library asset not found.");
         live.proxyFile = fileName;
         return live;
       });
@@ -503,7 +504,7 @@ export async function createFolder(
   parentId: string | null = null,
 ): Promise<LibraryFolder> {
   const trimmed = name.trim();
-  if (!trimmed) throw new Error("Folder name required.");
+  if (!trimmed) throw new UserError("folder_name_required", "Folder name required.");
   const id = crypto.randomUUID().slice(0, 8);
   return mutateIndex((idx) => {
     const folder: LibraryFolder = {
@@ -524,10 +525,10 @@ export async function updateFolder(
   patch: { name?: string; parentId?: string | null },
 ): Promise<LibraryFolder> {
   const trimmed = patch.name?.trim();
-  if (patch.name !== undefined && !trimmed) throw new Error("Folder name required.");
+  if (patch.name !== undefined && !trimmed) throw new UserError("folder_name_required", "Folder name required.");
   return mutateIndex((idx) => {
     const folder = (idx.folders ?? []).find((f) => f.id === id);
-    if (!folder) throw new Error("Folder not found.");
+    if (!folder) throw new UserError("folder_not_found", "Folder not found.");
     if (trimmed) folder.name = trimmed.slice(0, 80);
     if (patch.parentId !== undefined) {
       folder.parentId = resolveParent(idx.folders ?? [], id, patch.parentId);
@@ -565,9 +566,9 @@ export async function moveItem(id: string, folderId: string | null) {
     const item =
       idx.assets.find((a) => a.id === id) ??
       (idx.templates ?? []).find((t) => t.id === id);
-    if (!item) throw new Error("Library item not found.");
+    if (!item) throw new UserError("library_item_not_found", "Library item not found.");
     if (folderId && !(idx.folders ?? []).some((f) => f.id === folderId)) {
-      throw new Error("Folder not found.");
+      throw new UserError("folder_not_found", "Folder not found.");
     }
     item.folderId = folderId;
   });
@@ -624,12 +625,12 @@ export async function importTemplate(
   input: TemplateInput & { folderId?: string | null },
   files: File[],
 ): Promise<LibraryTemplate> {
-  if (templateEmpty(input)) throw new Error("Nothing to add.");
+  if (templateEmpty(input)) throw new UserError("template_nothing_to_add", "Nothing to add.");
   await mkdir(libMedia(), { recursive: true });
   const media: TemplateMedia[] = [];
   for (const [i, m] of (input.media ?? []).entries()) {
     const file = files[i];
-    if (!file) throw new Error("Template media missing.");
+    if (!file) throw new UserError("template_media_missing", "Template media missing.");
     const dest = await freeName(m.fileName || file.name);
     await writeFile(libMediaPath(dest), Buffer.from(await file.arrayBuffer()));
     media.push({ ...m, fileName: dest });
@@ -658,14 +659,14 @@ export async function saveTemplate(
   projectId: string,
   input: TemplateInput,
 ): Promise<LibraryTemplate> {
-  if (!(await readProject(projectId))) throw new Error("Project not found.");
-  if (templateEmpty(input)) throw new Error("Nothing to save.");
+  if (!(await readProject(projectId))) throw new UserError("project_not_found", "Project not found.");
+  if (templateEmpty(input)) throw new UserError("template_nothing_to_save", "Nothing to save.");
   await mkdir(libMedia(), { recursive: true });
   const media: TemplateMedia[] = [];
   for (const m of input.media) {
     const src = projectMediaPath(projectId, m.fileName);
     if (!(await exists(src)))
-      throw new Error("Media file not found in project.");
+      throw new UserError("project_media_not_found", "Media file not found in project.");
     const dest = await freeName(m.fileName);
     await copyFile(src, libMediaPath(dest));
     media.push({
@@ -700,10 +701,10 @@ export async function saveTemplate(
 /** Materialize a template into a project: copy its media in and hand the client
  * the project file names (in template media order) plus the stored edit. */
 export async function copyTemplateToProject(templateId: string, projectId: string) {
-  if (!(await readProject(projectId))) throw new Error("Project not found.");
+  if (!(await readProject(projectId))) throw new UserError("project_not_found", "Project not found.");
   const idx = await readIndex();
   const template = (idx.templates ?? []).find((x) => x.id === templateId);
-  if (!template) throw new Error("Template not found.");
+  if (!template) throw new UserError("template_not_found", "Template not found.");
   const media: TemplateMedia[] = [];
   for (const m of template.media) {
     const dest = await uniqueName(m.fileName, (n) =>
@@ -730,14 +731,14 @@ export async function addMediaToTemplate(
   },
 ): Promise<LibraryTemplate> {
   const src = projectMediaPath(projectId, input.media.fileName);
-  if (!(await exists(src))) throw new Error("Media file not found in project.");
+  if (!(await exists(src))) throw new UserError("project_media_not_found", "Media file not found in project.");
   await mkdir(libMedia(), { recursive: true });
   const dest = await freeName(input.media.fileName);
   await copyFile(src, libMediaPath(dest));
   try {
     return await mutateIndex((idx) => {
       const t = (idx.templates ?? []).find((x) => x.id === templateId);
-      if (!t) throw new Error("Template not found.");
+      if (!t) throw new UserError("template_not_found", "Template not found.");
       const mi = t.media.length;
       t.media = [...t.media, { ...input.media, fileName: dest }];
       if (input.audio)
@@ -766,7 +767,7 @@ export async function renameTemplate(
   const next = itemName(name);
   return mutateIndex((idx) => {
     const template = (idx.templates ?? []).find((t) => t.id === id);
-    if (!template) throw new Error("Template not found.");
+    if (!template) throw new UserError("template_not_found", "Template not found.");
     template.name = next;
     return template;
   });
@@ -776,7 +777,7 @@ export async function renameAsset(id: string, name: string): Promise<LibraryAsse
   const next = itemName(name);
   return mutateIndex((idx) => {
     const asset = idx.assets.find((a) => a.id === id);
-    if (!asset) throw new Error("Library asset not found.");
+    if (!asset) throw new UserError("library_asset_not_found", "Library asset not found.");
     asset.name = next;
     return asset;
   });

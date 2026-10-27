@@ -8,6 +8,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { useTranslations } from "next-intl";
 import {
   AudioLines,
   Check,
@@ -65,18 +66,20 @@ import { GeneratedAssetMenu } from "@/cut/components/GeneratedAssetMenu";
 import { cn } from "@/lib/utils";
 import { scrimIconButton } from "@/cut/components/iconButton";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { useDescribeError } from "@/i18n/describeError";
 
 /** Starting points for the direction prompt — picking one fills the input so
- * it can be tweaked before generating. */
-const DIRECTION_PRESETS: { label: string; text: string }[] = [
-  { label: "Warm", text: "Say warmly, like an old friend" },
-  { label: "Energetic", text: "Say with high energy, like a hype announcer" },
-  { label: "Documentary", text: "Narrate calmly and evenly, like a nature documentary" },
-  { label: "Movie trailer", text: "Say dramatically, with gravity, like a movie trailer" },
-  { label: "News anchor", text: "Read briskly and clearly, like a news anchor" },
-  { label: "Whisper", text: "Whisper softly, close to the mic" },
-  { label: "Bedtime story", text: "Read slowly and gently, like a bedtime story" },
-];
+ * it can be tweaked before generating. Each id names a label and a direction
+ * line in the panels catalog. */
+const DIRECTION_PRESETS = [
+  "warm",
+  "energetic",
+  "documentary",
+  "movieTrailer",
+  "newsAnchor",
+  "whisper",
+  "bedtimeStory",
+] as const;
 
 /** The Audio tab: Voice generates an AI voiceover, Music an instrumental bed;
  * each lists what it made as playable rows that drop onto the soundtrack at the
@@ -95,6 +98,7 @@ export function AudioPanel({
   sub: "voice" | "music";
   onSub: (v: "voice" | "music") => void;
 }) {
+  const t = useTranslations("panels.audio");
   const readOnly = useEditor((s) => s.readOnly);
   // The app-wide preview player: starting a clip stops the last one, here or
   // on a chat audio card. Leaving the tab silences only this panel's own
@@ -120,8 +124,8 @@ export function AudioPanel({
       <div className="flex h-12 shrink-0 items-center pr-12 pl-3.5">
         <SubTabs
           tabs={[
-            { id: "voice", label: "Voice" },
-            { id: "music", label: "Music" },
+            { id: "voice", label: t("voiceTab") },
+            { id: "music", label: t("musicTab") },
           ]}
           value={sub}
           onChange={onSub}
@@ -155,6 +159,8 @@ export function AudioPanel({
  * soundtrack. Mirrors VoiceGenerator's shape — several syntheses can run at
  * once, so the button stays live and a status row counts them. */
 function MusicGenerator({ projectId }: { projectId: string }) {
+  const t = useTranslations("panels.audio");
+  const describeError = useDescribeError();
   // Prompt + vocals mode live in a store so a dragged/clicked sample can seed
   // them for remixing (see musicGen.ts). Lyria sings by default; a bed under
   // narration usually wants no vocals, so the toggle defaults to instrumental.
@@ -186,8 +192,7 @@ function MusicGenerator({ projectId }: { projectId: string }) {
     return STOCK_MUSIC.find((s) => s.id === ref.id);
   };
   const [error, setError] = useState<{ text: string } | null>(null);
-  const fail = (e: unknown, fallback: string) =>
-    setError({ text: e instanceof Error ? e.message : fallback });
+  const fail = (e: unknown, fallback: string) => setError({ text: describeError(e, fallback) });
   // Music runs on the user's Donkey account, like image/video/voiceover.
   const signedOut = useSignedIn() === false;
 
@@ -217,7 +222,7 @@ function MusicGenerator({ projectId }: { projectId: string }) {
           useEditor.getState().addAsset(asset);
           void enrichAsset(asset);
         } catch (e) {
-          fail(e, "Music generation failed.");
+          fail(e, t("musicFailed"));
         } finally {
           settle();
         }
@@ -225,7 +230,7 @@ function MusicGenerator({ projectId }: { projectId: string }) {
     );
   };
 
-  const variantLabel = MUSIC_VARIANTS.find((v) => v.id === variant) ?? MUSIC_VARIANTS[0];
+  const variantId = (MUSIC_VARIANTS.find((v) => v.id === variant) ?? MUSIC_VARIANTS[0]).id;
   // Every take renders a track at the length's flat price.
   const cost = useGenerateCost((sheet) => musicMicros(sheet, variant, takes));
   const button = generateButton(cost, () => void generate());
@@ -233,7 +238,7 @@ function MusicGenerator({ projectId }: { projectId: string }) {
   return (
     <div className="music-generator flex flex-col gap-3.5">
       <div className="flex flex-col gap-2">
-        <SectionTitle>Describe the music</SectionTitle>
+        <SectionTitle>{t("describeMusic")}</SectionTitle>
         <div
           className={cn(
             "relative rounded-lg border border-input focus-within:border-ring",
@@ -258,7 +263,7 @@ function MusicGenerator({ projectId }: { projectId: string }) {
         >
           <textarea
             className="music-prompt min-h-[88px] w-full resize-y rounded-lg bg-transparent px-2.5 py-2 pr-9 text-[12.5px] leading-relaxed outline-none"
-            placeholder="Warm acoustic guitar and soft piano, calm and hopeful — or describe a song to sing"
+            placeholder={t("musicPlaceholder")}
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
           />
@@ -271,33 +276,39 @@ function MusicGenerator({ projectId }: { projectId: string }) {
         <div className="flex gap-2">
           <PillSelect
             className="h-7 flex-1"
-            title="Length"
+            title={t("length")}
             value={variant}
-            display={variantLabel.label}
-            options={MUSIC_VARIANTS.map((v) => ({ value: v.id, label: `${v.label} · ${v.hint}` }))}
+            display={t(`musicVariants.${variantId}.label`)}
+            options={MUSIC_VARIANTS.map((v) => ({
+              value: v.id,
+              label: t("variantOption", {
+                label: t(`musicVariants.${v.id}.label`),
+                hint: t(`musicVariants.${v.id}.hint`),
+              }),
+            }))}
             onChange={setVariant}
           />
           <PillSelect
             className="h-7 flex-1"
-            title="Takes"
+            title={t("takesTitle")}
             value={String(takes)}
-            display={`${takes} take${takes > 1 ? "s" : ""}`}
+            display={t("takes", { count: takes })}
             options={[1, 2, 3, 4].map((n) => ({
               value: String(n),
-              label: `${n} take${n > 1 ? "s" : ""}`,
+              label: t("takes", { count: n }),
             }))}
             onChange={(v) => setTakes(Number(v))}
           />
         </div>
         <div className="flex rounded-lg bg-muted p-0.5 text-[11.5px]">
-          {([["song", "Song"], ["instrumental", "Instrumental"]] as const).map(([val, label]) => {
+          {([["song", t("song")], ["instrumental", t("instrumental")]] as const).map(([val, label]) => {
             const active = (val === "instrumental") === instrumental;
             return (
               <button
                 key={val}
                 type="button"
                 onClick={() => setInstrumental(val === "instrumental")}
-                title={val === "song" ? "Let the model write and sing lyrics" : "No vocals — a background bed"}
+                title={val === "song" ? t("songHint") : t("instrumentalHint")}
                 className={cn(
                   "flex-1 rounded-md px-3 py-0.5 font-medium transition-colors",
                   active
@@ -313,16 +324,16 @@ function MusicGenerator({ projectId }: { projectId: string }) {
         <Button
           className="music-generate w-full"
           disabled={!prompt.trim() || signedOut}
-          title={!prompt.trim() ? "Describe the music above to generate" : undefined}
+          title={!prompt.trim() ? t("describeToGenerate") : undefined}
           onClick={button.onClick}
         >
           <Music data-icon="inline-start" />
-          Generate music
+          {t("generateMusic")}
         </Button>
         {pending > 0 && (
           <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
             <Loader2 className="size-3.5 shrink-0 animate-spin" />
-            {pending === 1 ? "Generating…" : `Generating ${pending}…`}
+            {t("generating", { count: pending })}
             <LiveElapsed />
           </div>
         )}
@@ -330,11 +341,13 @@ function MusicGenerator({ projectId }: { projectId: string }) {
 
       {signedOut ? (
         <p className="music-signin text-[11px] leading-relaxed text-muted-foreground">
-          Music runs on your Donkey account.{" "}
-          <a className="font-medium text-blue-600 hover:underline dark:text-blue-400" href={signInUrl()}>
-            Sign in
-          </a>{" "}
-          to continue.
+          {t.rich("musicSignIn", {
+            link: (chunks) => (
+              <a className="font-medium text-blue-600 hover:underline dark:text-blue-400" href={signInUrl()}>
+                {chunks}
+              </a>
+            ),
+          })}
         </p>
       ) : (
         error && (
@@ -348,6 +361,8 @@ function MusicGenerator({ projectId }: { projectId: string }) {
 }
 
 function VoiceGenerator({ projectId }: { projectId: string }) {
+  const t = useTranslations("panels.audio");
+  const describeError = useDescribeError();
   const voice = useSpeakerVoice();
   const language = useSpeechLanguage();
   const [script, setScript] = useState("");
@@ -356,8 +371,7 @@ function VoiceGenerator({ projectId }: { projectId: string }) {
   // unmounting when the user changes tabs.
   const pending = useActiveWork("audio", "voice");
   const [error, setError] = useState<{ text: string } | null>(null);
-  const fail = (e: unknown, fallback: string) =>
-    setError({ text: e instanceof Error ? e.message : fallback });
+  const fail = (e: unknown, fallback: string) => setError({ text: describeError(e, fallback) });
   const directionInput = useRef<HTMLTextAreaElement>(null);
   // Voiceovers run on the user's Donkey account, like image/video generation.
   const signedOut = useSignedIn() === false;
@@ -399,7 +413,7 @@ function VoiceGenerator({ projectId }: { projectId: string }) {
       });
       void enrichAsset(asset);
     } catch (e) {
-      fail(e, "Voice generation failed.");
+      fail(e, t("voiceFailed"));
     } finally {
       settle();
     }
@@ -410,23 +424,22 @@ function VoiceGenerator({ projectId }: { projectId: string }) {
       {/* Voice settings first — pick how the voice sounds, then script it. */}
       <VoicePicker
         direction={direction}
-        onError={(e) => fail(e, "Could not play the sample.")}
+        onError={(e) => fail(e, t("sampleFailed"))}
       />
 
       <div className="flex flex-col gap-1.5">
         <div className="flex items-center gap-1">
-          <SectionTitle>Voice direction</SectionTitle>
+          <SectionTitle>{t("voiceDirection")}</SectionTitle>
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger
                 className="voice-direction-info grid size-4 place-items-center text-muted-foreground transition-colors hover:text-foreground"
-                aria-label="About voice direction"
+                aria-label={t("aboutDirection")}
               >
                 <Info className="size-3.5" />
               </TooltipTrigger>
               <TooltipContent side="right" className="max-w-60">
-                Optional. Tell the voice how to deliver the lines — its tone, pace, and energy, or
-                ask it to speak in another language.
+                {t("directionHint")}
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>
@@ -436,27 +449,30 @@ function VoiceGenerator({ projectId }: { projectId: string }) {
             ref={directionInput}
             rows={2}
             className="voice-direction min-h-[52px] w-full resize-y rounded-lg border border-input bg-transparent py-2 pr-9 pl-2.5 text-[12.5px] leading-relaxed outline-none focus:border-ring"
-            placeholder="Say warmly, like an old friend"
+            placeholder={t("directionPresets.warm.text")}
             value={direction}
             onChange={(e) => setDirection(e.target.value)}
           />
           <DropdownMenu>
             <DropdownMenuTrigger
               className="voice-direction-presets absolute top-1.5 right-1 grid size-7 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-              aria-label="Direction presets"
+              aria-label={t("directionPresetsLabel")}
             >
               <ChevronDown className="size-4" />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-64">
-              {DIRECTION_PRESETS.map((p) => (
-                <DropdownMenuItem key={p.label} onClick={() => setDirection(p.text)}>
-                  <div className="flex min-w-0 flex-1 flex-col">
-                    <span className="text-[12px] font-medium">{p.label}</span>
-                    <span className="truncate text-[11px] text-muted-foreground">{p.text}</span>
-                  </div>
-                  {direction === p.text && <Check className="size-3.5 shrink-0" />}
-                </DropdownMenuItem>
-              ))}
+              {DIRECTION_PRESETS.map((id) => {
+                const text = t(`directionPresets.${id}.text`);
+                return (
+                  <DropdownMenuItem key={id} onClick={() => setDirection(text)}>
+                    <div className="flex min-w-0 flex-1 flex-col">
+                      <span className="text-[12px] font-medium">{t(`directionPresets.${id}.label`)}</span>
+                      <span className="truncate text-[11px] text-muted-foreground">{text}</span>
+                    </div>
+                    {direction === text && <Check className="size-3.5 shrink-0" />}
+                  </DropdownMenuItem>
+                );
+              })}
               <DropdownMenuSeparator />
               <DropdownMenuItem
                 onClick={() => {
@@ -465,7 +481,7 @@ function VoiceGenerator({ projectId }: { projectId: string }) {
                   setTimeout(() => directionInput.current?.focus(), 0);
                 }}
               >
-                <span className="text-[12px] font-medium">Custom…</span>
+                <span className="text-[12px] font-medium">{t("custom")}</span>
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -477,11 +493,11 @@ function VoiceGenerator({ projectId }: { projectId: string }) {
       {/* The script and its generate button stay together so the button's job —
           and why it's disabled until there's a script — is obvious. */}
       <div className="flex flex-col gap-2">
-        <SectionTitle>Script</SectionTitle>
+        <SectionTitle>{t("script")}</SectionTitle>
         <div className="relative rounded-lg border border-input focus-within:border-ring">
           <textarea
             className="voice-script min-h-[88px] w-full resize-y rounded-lg bg-transparent px-2.5 py-2 pr-9 text-[12.5px] leading-relaxed outline-none"
-            placeholder="What should the voice say?"
+            placeholder={t("scriptPlaceholder")}
             value={script}
             onChange={(e) => setScript(e.target.value)}
           />
@@ -494,16 +510,16 @@ function VoiceGenerator({ projectId }: { projectId: string }) {
         <Button
           className="voice-generate w-full"
           disabled={!script.trim() || signedOut}
-          title={!script.trim() ? "Write a script above to generate" : undefined}
+          title={!script.trim() ? t("writeScriptToGenerate") : undefined}
           onClick={() => void generate()}
         >
           <AudioLines data-icon="inline-start" />
-          Generate audio
+          {t("generateAudio")}
         </Button>
         {pending > 0 && (
           <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
             <Loader2 className="size-3.5 shrink-0 animate-spin" />
-            {pending === 1 ? "Generating…" : `Generating ${pending}…`}
+            {t("generating", { count: pending })}
             <LiveElapsed />
           </div>
         )}
@@ -511,11 +527,13 @@ function VoiceGenerator({ projectId }: { projectId: string }) {
 
       {signedOut ? (
         <p className="voice-signin text-[11px] leading-relaxed text-muted-foreground">
-          Voiceovers run on your Donkey account.{" "}
-          <a className="font-medium text-blue-600 hover:underline dark:text-blue-400" href={signInUrl()}>
-            Sign in
-          </a>{" "}
-          to continue.
+          {t.rich("voiceSignIn", {
+            link: (chunks) => (
+              <a className="font-medium text-blue-600 hover:underline dark:text-blue-400" href={signInUrl()}>
+                {chunks}
+              </a>
+            ),
+          })}
         </p>
       ) : (
         error && (
@@ -631,6 +649,7 @@ export function AudioCardFace({
    * take its corner). */
   durationClassName?: string | false;
 }) {
+  const t = useTranslations("panels.audio");
   const playing = usePreviewAudio((s) => s.url) === url;
   useEffect(() => () => usePreviewAudio.getState().stop(url), [url]);
   return (
@@ -641,8 +660,8 @@ export function AudioCardFace({
       />
       <button
         type="button"
-        title={playing ? "Pause" : "Play"}
-        aria-label={playing ? "Pause" : "Play"}
+        title={playing ? t("pause") : t("play")}
+        aria-label={playing ? t("pause") : t("play")}
         className="absolute bottom-2 left-2 grid size-8 place-items-center rounded-full bg-[#e3f2e8] text-[#0F6E56] shadow transition-transform hover:scale-105"
         onClick={(e) => {
           e.stopPropagation();
@@ -746,6 +765,7 @@ export function AudioRow({
 }) {
   // A row inside a registered card (the chat's audio cards) registers
   // nothing of its own, so the card's copy still answers over it.
+  const t = useTranslations("panels.audio");
   const copyRef = useRefCopy(refs ?? NO_REFS);
   return (
     <AudioPillSurface
@@ -769,7 +789,7 @@ export function AudioRow({
         })
       }
       onDragEnd={onDragStart ? clearAssetDrag : undefined}
-      title={onDragStart ? "Drag onto the timeline, or click + to add" : undefined}
+      title={onDragStart ? t("dragOrAdd") : undefined}
     >
       {/* Scrim so the name reads over the white waveform, not just the text-shadow. */}
       <div
@@ -788,8 +808,8 @@ export function AudioRow({
           "absolute top-1/2 left-1.5 grid size-6 shrink-0 -translate-y-1/2 place-items-center rounded-full transition-colors",
           playing ? "bg-white text-emerald-600" : "bg-black/30 text-white hover:bg-black/50"
         )}
-        title={playing ? "Pause" : "Play"}
-        aria-label={playing ? "Pause" : "Play"}
+        title={playing ? t("pause") : t("play")}
+        aria-label={playing ? t("pause") : t("play")}
         onClick={() => onTogglePlay(url)}
       >
         {playing ? <Pause className="size-3" /> : <Play className="size-3" />}
@@ -803,8 +823,8 @@ export function AudioRow({
         {menu}
         <button
           type="button"
-          title="Add at the playhead"
-          aria-label="Add at the playhead"
+          title={t("addAtPlayhead")}
+          aria-label={t("addAtPlayhead")}
           className={scrimIconButton}
           onClick={onAdd}
         >
@@ -834,12 +854,13 @@ function ProjectAudio({
   const assets = useEditor((s) => s.assets);
   const audio = assets.filter((a) => a.type === "audio" && a.origin === "voiceover");
   const pulsing = useGenNotify((s) => s.pulsing.audio);
+  const t = useTranslations("panels.audio");
   return (
     <div className="flex flex-col gap-1.5">
-      <SectionTitle>Generated audio</SectionTitle>
+      <SectionTitle>{t("generatedAudio")}</SectionTitle>
       {audio.length === 0 && !importing && (
         <p className="text-[11px] leading-relaxed text-muted-foreground">
-          No generated audio yet — write a script above and generate one.
+          {t("noGeneratedAudio")}
         </p>
       )}
       <div className="flex flex-col gap-1.5">
@@ -865,7 +886,7 @@ function ProjectAudio({
                     variant="destructive"
                     onClick={() => useEditor.getState().removeAsset(a.id)}
                   >
-                    <Trash2 /> Delete
+                    <Trash2 /> {t("delete")}
                   </DropdownMenuItem>
                 }
               />
@@ -875,7 +896,7 @@ function ProjectAudio({
         ))}
         {importing && (
           <div className="flex items-center gap-2 rounded-lg border border-dashed border-input px-2.5 py-2 text-[11px] text-muted-foreground">
-            <Loader2 className="size-3.5 animate-spin" /> Importing… <LiveElapsed />
+            <Loader2 className="size-3.5 animate-spin" /> {t("importing")} <LiveElapsed />
           </div>
         )}
       </div>
@@ -897,12 +918,13 @@ function ProjectMusic({
   // non-null origin keeps them out of the Media panel.
   const audio = assets.filter((a) => a.type === "audio" && a.origin === "generated");
   const pulsing = useGenNotify((s) => s.pulsing.audio);
+  const t = useTranslations("panels.audio");
   return (
     <div className="flex flex-col gap-1.5">
-      <SectionTitle>Generated music</SectionTitle>
+      <SectionTitle>{t("generatedMusic")}</SectionTitle>
       {audio.length === 0 && (
         <p className="text-[11px] leading-relaxed text-muted-foreground">
-          No generated music yet — describe a mood above and generate one.
+          {t("noGeneratedMusic")}
         </p>
       )}
       <div className="flex flex-col gap-1.5">
@@ -928,7 +950,7 @@ function ProjectMusic({
                     variant="destructive"
                     onClick={() => useEditor.getState().removeAsset(a.id)}
                   >
-                    <Trash2 /> Delete
+                    <Trash2 /> {t("delete")}
                   </DropdownMenuItem>
                 }
               />

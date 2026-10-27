@@ -16,7 +16,8 @@
 
 import { geminiModelRoleNames } from "@/lib/inference/gemini-models";
 import { hostedPost } from "../../hosted";
-import { NO_CREDITS_MESSAGE } from "../../credits";
+import { NoCreditsError } from "../../hostedError";
+import { UserError } from "../../userError";
 import { secToFrame, type RawShot } from "../coverage";
 import { wordsInRange, type BreakdownRole, type ScriptRole, type StyleRole } from "../capabilities";
 import { refImageParts, type InlineImagePart } from "./refImages";
@@ -39,7 +40,8 @@ async function llmJson<T>(
   parse: (o: Record<string, unknown>) => T | null,
   images: InlineImagePart[] = []
 ): Promise<T> {
-  let lastError = new Error("The planning model is unavailable — try again.");
+  const unavailable = () => new UserError("planning_model_unavailable", "The planning model is unavailable — try again.");
+  let lastError: Error = unavailable();
   for (const delay of LLM_RETRY_DELAYS_MS) {
     if (delay > 0) await new Promise((r) => setTimeout(r, delay));
     let res: Response;
@@ -63,10 +65,14 @@ async function llmJson<T>(
       continue; // network blip — retry
     }
     if (!res.ok) {
-      if (res.status === 402) throw new Error(NO_CREDITS_MESSAGE);
-      if (res.status === 401) throw new Error("Sign in to Donkey to generate a video.");
+      if (res.status === 402) {
+        throw new NoCreditsError();
+      }
+      if (res.status === 401) {
+        throw new UserError("sign_in_to_generate_video", "Sign in to Donkey to generate a video.");
+      }
       const reason = await providerReason(res);
-      lastError = new Error(reason ?? "The planning model is unavailable — try again.");
+      lastError = reason ? new Error(reason) : unavailable();
       // Any other 4xx is deterministic — the same request fails the same way —
       // so surface the reason now instead of burning the retry envelope on it.
       if (res.status < 500 && res.status !== 408 && res.status !== 429) throw lastError;
@@ -77,12 +83,12 @@ async function llmJson<T>(
     try {
       parsed = JSON.parse(body.output_text ?? "") as Record<string, unknown>;
     } catch {
-      lastError = new Error("The planning model returned unreadable output.");
+      lastError = new UserError("planning_output_unreadable", "The planning model returned unreadable output.");
       continue;
     }
     const out = parse(parsed);
     if (out === null) {
-      lastError = new Error("The planning model returned an unusable plan.");
+      lastError = new UserError("planning_plan_unusable", "The planning model returned an unusable plan.");
       continue;
     }
     return out;

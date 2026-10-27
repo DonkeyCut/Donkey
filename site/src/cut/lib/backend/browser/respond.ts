@@ -1,12 +1,13 @@
 // The replies the browser backend's handlers build. Shapes match the engine's
 // (`server/http/*`), so a call site can't tell which backend answered.
 
+import { errorBody, type UserError } from "../../userError";
+
 export const json = (body: unknown, status = 200) => Response.json(body, { status });
 
-export const err = (message: string, status: number) => json({ error: message }, status);
+export const err = (failure: string | UserError, status: number) => json(errorBody(failure, ""), status);
 
-export const caught = (e: unknown, fallback: string) =>
-  err(e instanceof Error ? e.message : fallback, 500);
+export const caught = (e: unknown, fallback: string | UserError) => json(errorBody(e, fallback), 500);
 
 /** Serve a store file the way serveFileRange presents it: typed bytes, an
  * attachment disposition when the URL asks to download. Blob-backed Responses

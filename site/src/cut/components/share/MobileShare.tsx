@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Clapperboard, FileText, Images, Loader2, MessageSquare, Captions } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import type { ProjectDoc, ShareFeatures, StoredAsset } from "@/cut/lib/types";
 import { BottomSheet } from "./BottomSheet";
@@ -53,6 +54,7 @@ export function MobileShare(props: MobileShareProps) {
 }
 
 function MobileShareContent({ token, projectId, name, features }: MobileShareProps) {
+  const t = useTranslations("editor.mobileShare");
   const api = useCallback(
     (path: string) => `/api/cut-shared/${encodeURIComponent(token)}${path}`,
     [token]
@@ -152,14 +154,14 @@ function MobileShareContent({ token, projectId, name, features }: MobileSharePro
 
   const sheets = useMemo(() => {
     const out: { id: SheetId; label: string; icon: React.ReactNode }[] = [];
-    if (features.details) out.push({ id: "details", label: "Details", icon: <FileText /> });
-    if (features.subtitles) out.push({ id: "subtitles", label: "Transcript", icon: <Captions /> });
+    if (features.details) out.push({ id: "details", label: t("details"), icon: <FileText /> });
+    if (features.subtitles) out.push({ id: "subtitles", label: t("transcript"), icon: <Captions /> });
     if (features.media || features.genai) {
-      out.push({ id: "media", label: "Media", icon: <Images /> });
+      out.push({ id: "media", label: t("media"), icon: <Images /> });
     }
-    if (features.chat) out.push({ id: "chat", label: "Chat", icon: <MessageSquare /> });
+    if (features.chat) out.push({ id: "chat", label: t("chat"), icon: <MessageSquare /> });
     return out;
-  }, [features]);
+  }, [features, t]);
 
   return (
     <div className="flex h-[100dvh] flex-col bg-background">
@@ -198,14 +200,14 @@ function MobileShareContent({ token, projectId, name, features }: MobileSharePro
         ) : (
           <div className="flex flex-col items-center gap-3 px-8 text-center">
             {stream.state === "failed" ? (
-              <p className="text-sm text-white/70">This project can&apos;t be played right now.</p>
+              <p className="text-sm text-white/70">{t("cantPlay")}</p>
             ) : (
               <>
                 <Loader2 className="size-5 animate-spin text-white/70" />
                 <p className="text-sm text-white/70">
                   {stream.state === "preparing"
-                    ? "Getting this project ready to play…"
-                    : "Loading…"}
+                    ? t("preparing")
+                    : t("loading")}
                 </p>
               </>
             )}
@@ -248,36 +250,37 @@ function Empty({ children }: { children: React.ReactNode }) {
 }
 
 function DetailsSheet({ doc }: { doc: ProjectDoc | null }) {
-  if (!doc) return <Empty>Loading…</Empty>;
+  const t = useTranslations("editor.mobileShare");
+  if (!doc) return <Empty>{t("loading")}</Empty>;
   const notes = doc.notes;
   const publish = doc.publish;
   const links = notes?.links?.filter(Boolean) ?? [];
   if (!notes?.text && !notes?.publishedAt && links.length === 0 && !publish?.caption) {
-    return <Empty>No details shared.</Empty>;
+    return <Empty>{t("noDetails")}</Empty>;
   }
   return (
     <div className="flex flex-col gap-4 pb-2 text-sm">
       {publish?.caption && (
         <section className="flex flex-col gap-1">
-          <h3 className="text-xs font-medium text-muted-foreground">Caption</h3>
+          <h3 className="text-xs font-medium text-muted-foreground">{t("caption")}</h3>
           <p className="whitespace-pre-wrap">{publish.caption}</p>
         </section>
       )}
       {notes?.publishedAt && (
         <section className="flex flex-col gap-1">
-          <h3 className="text-xs font-medium text-muted-foreground">Published</h3>
+          <h3 className="text-xs font-medium text-muted-foreground">{t("published")}</h3>
           <p>{notes.publishedAt}</p>
         </section>
       )}
       {notes?.text && (
         <section className="flex flex-col gap-1">
-          <h3 className="text-xs font-medium text-muted-foreground">Notes</h3>
+          <h3 className="text-xs font-medium text-muted-foreground">{t("notes")}</h3>
           <p className="whitespace-pre-wrap">{notes.text}</p>
         </section>
       )}
       {links.length > 0 && (
         <section className="flex flex-col gap-1">
-          <h3 className="text-xs font-medium text-muted-foreground">Links</h3>
+          <h3 className="text-xs font-medium text-muted-foreground">{t("links")}</h3>
           {links.map((l) => (
             <a
               key={l}
@@ -303,9 +306,10 @@ function stamp(seconds: number): string {
 }
 
 function SubtitlesSheet({ doc }: { doc: ProjectDoc | null }) {
-  if (!doc) return <Empty>Loading…</Empty>;
+  const t = useTranslations("editor.mobileShare");
+  if (!doc) return <Empty>{t("loading")}</Empty>;
   const cues = doc.subtitles?.cues ?? [];
-  if (cues.length === 0) return <Empty>No transcript shared.</Empty>;
+  if (cues.length === 0) return <Empty>{t("noTranscript")}</Empty>;
   return (
     <ul className="flex flex-col gap-2 pb-2 text-sm">
       {cues.map((cue, i) => (
@@ -329,6 +333,7 @@ function MediaSheet({
   projectId: string;
   doc: ProjectDoc | null;
 }) {
+  const t = useTranslations("editor.mobileShare");
   const [urls, setUrls] = useState<Record<string, string>>({});
   // Only assets a clip does not already use: the cut itself is the video above,
   // so this lists what the share adds to it.
@@ -362,8 +367,8 @@ function MediaSheet({
     };
   }, [api, projectId, assets]);
 
-  if (!doc) return <Empty>Loading…</Empty>;
-  if (assets.length === 0) return <Empty>No media shared.</Empty>;
+  if (!doc) return <Empty>{t("loading")}</Empty>;
+  if (assets.length === 0) return <Empty>{t("noMedia")}</Empty>;
   return (
     <div className="grid grid-cols-3 gap-2 pb-2">
       {assets.map((a) => (
@@ -419,27 +424,28 @@ function messageText(m: NonNullable<SharedThread["messages"]>[number]): string {
 }
 
 function ChatSheet({ api, projectId }: { api: (path: string) => string; projectId: string }) {
+  const t = useTranslations("editor.mobileShare");
   const [threads, setThreads] = useState<SharedThread[] | null>(null);
   useEffect(() => {
     let alive = true;
     void fetch(api(`/projects/${projectId}/chats`))
       .then((r) => (r.ok ? (r.json() as Promise<SharedThread[]>) : []))
-      .then((t) => alive && setThreads(Array.isArray(t) ? t : []))
+      .then((list) => alive && setThreads(Array.isArray(list) ? list : []))
       .catch(() => alive && setThreads([]));
     return () => {
       alive = false;
     };
   }, [api, projectId]);
 
-  if (threads === null) return <Empty>Loading…</Empty>;
+  if (threads === null) return <Empty>{t("loading")}</Empty>;
   // Emptiness is decided on what will actually render, not on the message
   // count: a thread of nothing but tool calls has messages and no readable
   // text, and counting those would open a blank sheet instead of saying so.
   const shown = threads
-    .flatMap((t) => t.messages ?? [])
+    .flatMap((thread) => thread.messages ?? [])
     .map((m) => ({ role: m.role, text: messageText(m) }))
     .filter((m) => m.text.length > 0);
-  if (shown.length === 0) return <Empty>No chat shared.</Empty>;
+  if (shown.length === 0) return <Empty>{t("noChat")}</Empty>;
   return (
     <ul className="flex flex-col gap-3 pb-2 text-sm">
       {shown.map((m, i) => (

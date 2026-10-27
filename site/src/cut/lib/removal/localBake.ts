@@ -15,6 +15,7 @@ import { personSegmenter, segmentSubjectAlpha } from "../cutout";
 import { createRasterCanvas } from "../raster";
 import type { MediaAsset, VideoClip } from "../types";
 import { liveReader } from "../liveReader";
+import { UserError } from "../userError";
 
 export class MatteBakeCancelled extends Error {
   constructor() {
@@ -35,7 +36,9 @@ export async function localBakeMatte(
   opts: { onProgress?: (fraction: number) => void; signal?: AbortSignal } = {}
 ): Promise<{ blob: Blob; in: number }> {
   const segmenter = await personSegmenter();
-  if (!segmenter) throw new Error("On-device segmentation is unavailable in this browser.");
+  if (!segmenter) {
+    throw new UserError("segmentation_unavailable", "On-device segmentation is unavailable in this browser.");
+  }
   const still = asset.type === "image";
   const from = still ? 0 : Math.max(0, clip.in);
   const to = still ? from + 1 / MATTE_FPS : Math.min(clip.out, asset.duration || clip.out);
@@ -45,7 +48,9 @@ export async function localBakeMatte(
   const reader = liveReader(asset);
   try {
     const first = await reader.frameAt(from);
-    if (first.kind !== "ready") throw new Error("The clip's picture could not be read.");
+    if (first.kind !== "ready") {
+      throw new UserError("clip_picture_unreadable", "The clip's picture could not be read.");
+    }
     const { w, h } = scaledEvenSize(first.width, first.height, MATTE_SHORT);
     const enc = await openCanvasVideo({
       width: w,

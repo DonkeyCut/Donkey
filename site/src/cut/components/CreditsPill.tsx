@@ -8,6 +8,7 @@ import { useEffect } from "react";
 import Link from "next/link";
 import { useQueryClient } from "@tanstack/react-query";
 import { Loader2, Zap } from "lucide-react";
+import { useLocale, useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useEngineUser } from "@/cut/lib/backend/hooks";
@@ -55,6 +56,8 @@ export function useLiveCreditBalance() {
 }
 
 function BalancePill() {
+  const t = useTranslations("billing.creditsPill");
+  const locale = useLocale();
   const queryClient = useQueryClient();
   const balance = useCreditBalance();
   useLiveCreditBalance();
@@ -79,14 +82,14 @@ function BalancePill() {
   return (
     <Popover>
       <PopoverTrigger
-        aria-label={`Credits: ${formatCredits(balance.data.balance)}`}
+        aria-label={t("label", { credits: formatCredits(balance.data.balance, locale) })}
         onClick={() =>
           track("cut_credits_pill_clicked", { credits: creditsFromDollars(balance.data.balance, "down"), dollars })
         }
         className={PILL}
       >
         <Zap className="size-3.5" />
-        {compactCredits(balance.data.balance)}
+        {compactCredits(balance.data.balance, locale)}
       </PopoverTrigger>
       <PopoverContent side="bottom" align="end" sideOffset={6} className="w-64 p-0">
         <PlanCard balance={balance.data.balance} />
@@ -99,6 +102,8 @@ function BalancePill() {
 // free account is sold Pro; a Pro account already pays, so its button goes to
 // billing, where credits are bought.
 function PlanCard({ balance }: { balance: string }) {
+  const t = useTranslations("billing");
+  const locale = useLocale();
   const base = useCutBase();
   const pro = useProSubscription();
   const upgrade = useUpgradeToPro();
@@ -106,24 +111,24 @@ function PlanCard({ balance }: { balance: string }) {
   return (
     <div className="text-sm">
       <div className="flex items-center justify-between gap-3 px-4 py-3">
-        <span className="font-semibold">{isPro ? "Pro" : "Free"}</span>
+        <span className="font-semibold">{isPro ? "Pro" : t("creditsPill.free")}</span>
         {pro.data &&
           (isPro ? (
             <Button size="sm" render={<Link href={`${base}/settings`} />}>
-              Buy credits
+              {t("buyCredits")}
             </Button>
           ) : (
             <Button size="sm" disabled={upgrade.isPending} onClick={upgrade.start}>
               {upgrade.isPending && <Loader2 className="animate-spin" data-icon="inline-start" />}
-              Upgrade
+              {t("creditsPill.upgrade")}
             </Button>
           ))}
       </div>
       <div className="flex items-center gap-2.5 border-t border-border px-4 py-3">
         <Zap className="size-4 text-muted-foreground" />
-        <span className="flex-1 text-muted-foreground">Credits</span>
+        <span className="flex-1 text-muted-foreground">{t("creditsPill.credits")}</span>
         <span className="font-medium tabular-nums">
-          {formatCreditCount(creditsFromDollars(balance, "down"))}
+          {formatCreditCount(creditsFromDollars(balance, "down"), locale)}
         </span>
       </div>
     </div>

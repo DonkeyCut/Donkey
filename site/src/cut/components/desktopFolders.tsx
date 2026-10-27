@@ -2,6 +2,7 @@
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Folder, MoreHorizontal, Pencil, Share2, Trash2 } from "lucide-react";
+import { useLocale, useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -17,6 +18,7 @@ import { PICKED_RING } from "@/cut/lib/assetPick";
 import { additiveClick } from "@/cut/lib/hostKeys";
 import { clearRefDrag, setRefDragData, type AssetRef } from "@/cut/lib/assetRef";
 import { reportSwallowed } from "@/cut/lib/report";
+import { useDescribeError } from "@/i18n/describeError";
 import { formatBytes } from "@/lib/bytes";
 import { RefDropZone } from "./RefDropZone";
 import { cn } from "@/lib/utils";
@@ -301,6 +303,7 @@ function CrumbStep({
 }
 
 function FolderTitle({ name, onRename }: { name: string; onRename: (name: string) => void | Promise<void> }) {
+  const t = useTranslations("home.folders");
   const [editing, setEditing] = useState(false);
   const [error, setError] = useState(false);
   return (
@@ -315,9 +318,9 @@ function FolderTitle({ name, onRename }: { name: string; onRename: (name: string
           }}
         />
       ) : (
-        <button type="button" title="Rename folder" className="max-w-full cursor-text truncate rounded-md px-1 hover:bg-muted" onClick={() => { setError(false); setEditing(true); }}>{name}</button>
+        <button type="button" title={t("renameFolder")} className="max-w-full cursor-text truncate rounded-md px-1 hover:bg-muted" onClick={() => { setError(false); setEditing(true); }}>{name}</button>
       )}
-      {error && <span role="alert" className="ml-2 text-xs font-normal text-destructive">Could not rename folder.</span>}
+      {error && <span role="alert" className="ml-2 text-xs font-normal text-destructive">{t("renameFailed")}</span>}
     </span>
   );
 }
@@ -393,22 +396,23 @@ export function FolderMenuItems({
   onShare,
   onRename,
   onDelete,
-  deleteLabel = "Delete folder",
+  deleteLabel,
 }: {
   onShare?: () => void;
   onRename: () => void;
   onDelete: () => void;
   deleteLabel?: string;
 }) {
+  const t = useTranslations("home.folders");
   return (
     <>
-      {onShare && <DropdownMenuItem onClick={onShare}><Share2 /> Share</DropdownMenuItem>}
+      {onShare && <DropdownMenuItem onClick={onShare}><Share2 /> {t("share")}</DropdownMenuItem>}
       <DropdownMenuItem onClick={onRename}>
-        <Pencil /> Rename
+        <Pencil /> {t("rename")}
       </DropdownMenuItem>
       <DropdownMenuSeparator />
       <DropdownMenuItem variant="destructive" onClick={onDelete}>
-        <Trash2 /> {deleteLabel}
+        <Trash2 /> {deleteLabel ?? t("deleteFolder")}
       </DropdownMenuItem>
     </>
   );
@@ -488,6 +492,9 @@ export function FolderShelf<F extends DeskFolder>({
   // A folder tile accepts an internal selection (its MIME), another folder
   // tile when the host nests folders, and, when the host wires it up, OS
   // files dragged from the desktop.
+  const t = useTranslations("home.folders");
+  const locale = useLocale();
+  const describeError = useDescribeError();
   const dragTypes = (e: React.DragEvent) => Array.from(e.dataTransfer.types);
   const nests = !!folderMime && !!onDropFolders;
   // The tile being dragged, so it does not light up as its own target. The
@@ -528,7 +535,7 @@ export function FolderShelf<F extends DeskFolder>({
       () => setTimeout(release, LANDING_GRACE_MS),
       (err: unknown) => {
         release();
-        setFailed(err instanceof Error && err.message ? err.message : "Could not create folder.");
+        setFailed(describeError(err, t("createFailed")));
         reportSwallowed("[cut] folder create failed", err, name);
       },
     );
@@ -644,7 +651,7 @@ export function FolderShelf<F extends DeskFolder>({
                 <Button
                   variant="ghost"
                   size="icon-sm"
-                  aria-label="Folder options"
+                  aria-label={t("options")}
                   className={cn(
                     "size-6 opacity-0 group-hover/f:opacity-100 data-[state=open]:opacity-100",
                     rows
@@ -662,7 +669,7 @@ export function FolderShelf<F extends DeskFolder>({
                 onShare={onShare && (() => onShare(f.id))}
                 onRename={() => setEditingId(f.id)}
                 onDelete={() => void onDelete(f.id)}
-                deleteLabel={isPicked && picked.size > 1 ? "Delete" : "Delete folder"}
+                deleteLabel={isPicked && picked.size > 1 ? t("delete") : t("deleteFolder")}
               />
             </DropdownMenuContent>
           </DropdownMenu>
@@ -686,8 +693,8 @@ export function FolderShelf<F extends DeskFolder>({
             <div className="min-w-0 flex-1">
               <div className="truncate text-xs font-medium">{f.name}</div>
               <div className="flex items-center gap-1 text-[10px] text-muted-foreground tabular-nums">
-                {s.count} {s.count === 1 ? "item" : "items"}
-                {s.size != null ? ` · ${formatBytes(s.size)}` : ""}
+                {t("items", { count: s.count })}
+                {s.size != null ? ` · ${formatBytes(s.size, locale)}` : ""}
                 {badgeOf?.(f.id)}
               </div>
             </div>
@@ -712,7 +719,7 @@ export function FolderShelf<F extends DeskFolder>({
             </span>
             <span className="flex items-center gap-1 text-[10px] text-muted-foreground tabular-nums">
               {s.count}
-              {s.size != null ? ` · ${formatBytes(s.size)}` : ""}
+              {s.size != null ? ` · ${formatBytes(s.size, locale)}` : ""}
               {badgeOf?.(f.id)}
             </span>
             {menu}
@@ -746,7 +753,7 @@ export function FolderShelf<F extends DeskFolder>({
           <Input
             autoFocus
             value={draft}
-            placeholder="Name"
+            placeholder={t("namePlaceholder")}
             className={cn("h-6 text-[11px]", rows ? "flex-1" : "w-full")}
             onChange={(e) => setDraft(e.target.value)}
             onBlur={closeCreate}

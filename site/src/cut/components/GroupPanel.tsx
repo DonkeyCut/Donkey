@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useTranslations } from "next-intl";
 import { AlignCenter, AlignHorizontalSpaceAround, AlignLeft, AlignRight, AlignVerticalSpaceAround, Bold, FlipHorizontal2, FlipVertical2, Italic, StretchHorizontal, Type } from "lucide-react";
 import { hasOverlayKeys, hasSpeedCurve, LETTER_SPACING_MIN, lineLikeShape, poseAt, retimeOf, ZOOM_LEVELS, ZOOM_RAMP_MAX, zoomRampOf } from "@donkeycut/effects-kit";
 import { ColorField } from "@/cut/components/ColorField";
@@ -13,7 +14,7 @@ import { parseNumberInput, parsePercentInput, parseSecondsInput, parseSpeedInput
 import { ValueSlider } from "@/cut/components/ValueSlider";
 import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { selectionCenter, selectionSummary, selectionTranslation, sharedNumber, sharedValue } from "@/cut/lib/groupEdit";
+import { selectionCenter, selectionCounts, selectionTranslation, sharedNumber, sharedValue } from "@/cut/lib/groupEdit";
 import { usePanelState } from "@/cut/lib/panelState";
 import { usePreviewTime } from "@/cut/lib/playhead";
 import { clipWindow, maxClipFade, useEditor } from "@/cut/lib/store";
@@ -47,6 +48,7 @@ import {
   type VideoClip,
 } from "@/cut/lib/types";
 import { cn } from "@/lib/utils";
+import type { Messages } from "@/i18n/namespaces";
 
 /**
  * The panel for several items at once: a group, or any multi-selection. It
@@ -58,6 +60,7 @@ import { cn } from "@/lib/utils";
  * what one title, clip, shape, sticker or effect can set, several can.
  */
 export function GroupPanel({ selection }: { selection: readonly NonNullable<Selection>[] }) {
+  const t = useTranslations("media.groupPanel");
   const overlays = useEditor((s) => s.overlays);
   const clips = useEditor((s) => s.clips);
   const audios = useEditor((s) => s.audioClips);
@@ -72,7 +75,7 @@ export function GroupPanel({ selection }: { selection: readonly NonNullable<Sele
   }, [selection, overlays, clips, audios]);
   const all = [...items.overlays, ...items.clips, ...items.audios];
   const group = sharedValue(all.map((it) => it.groupId));
-  const title = !group.mixed && group.value ? "Group" : `${all.length} items`;
+  const title = !group.mixed && group.value ? t("group") : t("items", { count: all.length });
   const texts = items.overlays.filter(isTextOverlay);
   const shapes = items.overlays.filter(isShapeOverlay);
   const stickers = items.overlays.filter(isStickerOverlay);
@@ -107,7 +110,7 @@ export function GroupPanel({ selection }: { selection: readonly NonNullable<Sele
         <span className="truncate text-sm font-semibold tracking-tight">{title}</span>
       </div>
       <div className="flex flex-col gap-1 px-3.5 pb-4">
-        <div className="mb-1 text-[11px] text-muted-foreground">{selectionSummary(items)}</div>
+        <div className="mb-1 text-[11px] text-muted-foreground">{selectionCounts(items).map(([kind, count]) => t(`summary.${kind}`, { count })).join(" · ")}</div>
         {onlyOverlays && texts.length === items.overlays.length && <TextRows texts={texts} />}
         {onlyOverlays && shapes.length === items.overlays.length && <ShapeRows shapes={shapes} />}
         {onlyOverlays && stickers.length === items.overlays.length && <StickerRows stickers={stickers} />}
@@ -167,11 +170,24 @@ const formatPercent = (v: number) => `${Math.round(v * 100)}%`;
 const formatSpeed = (v: number) => `${v.toFixed(2)}×`;
 const parsePercentText = (raw: string) => parseNumberInput(raw.replace(/%$/, ""));
 
+// The align toggles' names, by the alignment each sets.
+const ALIGN_LABEL = { left: "alignLeft", center: "alignCenter", right: "alignRight" } as const;
+
+/** A zoom depth's catalog key; the kit's ids are "shallow", "moderate", "deep". */
+type ZoomLevelId = keyof Messages["media"]["groupPanel"]["zoomLevels"];
+
+/** Typed "off" in the duck field reads as off, in English or the page's word. */
+const isOffWord = (raw: string, off: string) => {
+  const word = raw.trim().toLowerCase();
+  return word === "off" || word === off.toLowerCase();
+};
+
 function MixedSwitch({ label, values, onChange }: { label: string; values: boolean[]; onChange: (v: boolean) => void }) {
+  const t = useTranslations("media.groupPanel");
   const shared = sharedValue(values);
   return (
     <Row label={label}>
-      {shared.mixed && <Value className="text-muted-foreground italic">Mixed</Value>}
+      {shared.mixed && <Value className="text-muted-foreground italic">{t("mixed")}</Value>}
       <Switch checked={!shared.mixed && shared.value} onCheckedChange={onChange} aria-label={label} />
     </Row>
   );
@@ -219,6 +235,7 @@ function MixedSeg<T extends string>({
  * An effect has no transform: it joins the Hidden row and nothing else.
  */
 function TransformRows({ items }: { items: { overlays: Overlay[]; clips: VideoClip[]; audios: AudioClip[] } }) {
+  const t = useTranslations("media.groupPanel");
   const write = useGroupWrite();
   const now = usePreviewTime();
   const { clips, audios } = items;
@@ -273,7 +290,7 @@ function TransformRows({ items }: { items: { overlays: Overlay[]; clips: VideoCl
   const hidden = [...items.overlays.map((o) => !!o.hidden), ...clips.map((c) => !!c.hidden), ...audios.map((a) => !!a.hidden)];
   const hiddenRow = (
     <MixedSwitch
-      label="Hidden"
+      label={t("hidden")}
       values={hidden}
       onChange={(v) =>
         write.once(() => {
@@ -287,14 +304,14 @@ function TransformRows({ items }: { items: { overlays: Overlay[]; clips: VideoCl
   // Sound and effects have no transform: such a selection shares only Hidden.
   if (!visual) return hiddenRow;
   return (
-    <Section title="Transform">
+    <Section title={t("transform")}>
       {overlays.length > 0 && !clips.length && (
-        <Row label="Position">
+        <Row label={t("position")}>
           {(["x", "y"] as const).map((axis) => (
             <span key={axis} className="flex items-center gap-1">
               <span className="text-[11px] text-muted-foreground/70 uppercase">{axis}</span>
               <ScrubValue
-                label={`${axis.toUpperCase()} position`}
+                label={axis === "x" ? t("xPosition") : t("yPosition")}
                 className="w-9 text-muted-foreground"
                 value={center[axis] * 100}
                 min={clampOverlayPos(-Infinity, grouped) * 100}
@@ -311,9 +328,9 @@ function TransformRows({ items }: { items: { overlays: Overlay[]; clips: VideoCl
           ))}
         </Row>
       )}
-      <Row label="Rotation">
+      <Row label={t("rotation")}>
         <ValueSlider
-          label="Rotation"
+          label={t("rotation")}
           {...SLIDER}
           value={rotation.value}
           mixed={rotation.mixed}
@@ -327,9 +344,9 @@ function TransformRows({ items }: { items: { overlays: Overlay[]; clips: VideoCl
           onCommit={(v) => write.commit(() => rotate(v))}
         />
       </Row>
-      <Row label="Opacity">
+      <Row label={t("opacity")}>
         <ValueSlider
-          label="Opacity"
+          label={t("opacity")}
           {...SLIDER}
           value={opacity.value}
           mixed={opacity.mixed}
@@ -351,6 +368,7 @@ function TransformRows({ items }: { items: { overlays: Overlay[]; clips: VideoCl
  * weight and slant, alignment, size, spacing, text box width, color, outline,
  * shadow and backdrop. */
 function TextRows({ texts }: { texts: TextOverlay[] }) {
+  const t = useTranslations("media.groupPanel");
   const write = useGroupWrite();
   const font = sharedValue(texts.map((t) => t.font));
   const size = sharedNumber(texts.map((t) => t.size));
@@ -396,15 +414,15 @@ function TextRows({ texts }: { texts: TextOverlay[] }) {
   return (
     <>
       <StylePresetsRow overlay={texts[0]} peers={texts} />
-      <Field label="Font">
+      <Field label={t("font")}>
         <FontPicker value={font.value} mixed={font.mixed} onChange={(id) => write.once(() => set({ font: id as TextOverlay["font"] }))} />
       </Field>
       <div className="mt-1 flex items-center gap-2">
         <SegGroup>
-          <SegToggle label="Bold" active={!bold.mixed && bold.value} onClick={() => write.once(() => set({ weight: bold.mixed || !bold.value ? 700 : 400 }))}>
+          <SegToggle label={t("bold")} active={!bold.mixed && bold.value} onClick={() => write.once(() => set({ weight: bold.mixed || !bold.value ? 700 : 400 }))}>
             <Bold />
           </SegToggle>
-          <SegToggle label="Italic" active={!italic.mixed && italic.value} onClick={() => write.once(() => set({ italic: italic.mixed || !italic.value ? true : undefined }))}>
+          <SegToggle label={t("italic")} active={!italic.mixed && italic.value} onClick={() => write.once(() => set({ italic: italic.mixed || !italic.value ? true : undefined }))}>
             <Italic />
           </SegToggle>
         </SegGroup>
@@ -418,7 +436,7 @@ function TextRows({ texts }: { texts: TextOverlay[] }) {
           ).map(([a, Icon]) => (
             <SegToggle
               key={a}
-              label={`Align ${a}`}
+              label={t(ALIGN_LABEL[a])}
               active={!align.mixed && align.value === a}
               onClick={() => write.once(() => set({ align: a === "center" ? undefined : a }))}
             >
@@ -427,7 +445,7 @@ function TextRows({ texts }: { texts: TextOverlay[] }) {
           ))}
         </SegGroup>
         <NumberField
-          label="Text size"
+          label={t("textSize")}
           className="ml-auto w-[74px]"
           icon={<Type />}
           value={size.value}
@@ -443,9 +461,9 @@ function TextRows({ texts }: { texts: TextOverlay[] }) {
         />
       </div>
       <div className="mt-1 grid grid-cols-2 gap-2">
-        <Field label="Line height">
+        <Field label={t("lineHeight")}>
           <NumberField
-            label="Line height"
+            label={t("lineHeight")}
             icon={<AlignVerticalSpaceAround />}
             value={lineHeight.value}
             mixed={lineHeight.mixed}
@@ -460,9 +478,9 @@ function TextRows({ texts }: { texts: TextOverlay[] }) {
             onCommit={(v) => write.commit(() => set({ lineHeight: Math.abs(v - 1.25) < 0.025 ? undefined : v }))}
           />
         </Field>
-        <Field label="Letter spacing">
+        <Field label={t("letterSpacing")}>
           <NumberField
-            label="Letter spacing"
+            label={t("letterSpacing")}
             icon={<AlignHorizontalSpaceAround />}
             value={letterSpacing.value}
             mixed={letterSpacing.mixed}
@@ -478,59 +496,59 @@ function TextRows({ texts }: { texts: TextOverlay[] }) {
           />
         </Field>
       </div>
-      <Field label="Text width">
-        <NumberField label="Text box width" icon={<StretchHorizontal />} value={wrapWidth.value} mixed={wrapWidth.mixed}
-          min={0} max={200} step={1} presets={TEXT_WIDTHS} format={(v) => v === 0 ? "Auto" : `${Math.round(v)}%`} parse={parsePercentText}
+      <Field label={t("textWidth")}>
+        <NumberField label={t("textBoxWidth")} icon={<StretchHorizontal />} value={wrapWidth.value} mixed={wrapWidth.mixed}
+          min={0} max={200} step={1} presets={TEXT_WIDTHS} format={(v) => v === 0 ? t("auto") : `${Math.round(v)}%`} parse={parsePercentText}
           onDraft={(v) => write.draft(() => set({ wrapWidth: v > 0 ? v / 100 : undefined }))}
           onCommit={(v) => write.commit(() => set({ wrapWidth: v > 0 ? v / 100 : undefined }))}
         />
       </Field>
-      <Row label="Color">
+      <Row label={t("color")}>
         <ColorField
           value={color.value}
           mixed={color.mixed}
-          label="Text color"
+          label={t("textColor")}
           onBegin={() => st().pushHistory()}
           onLive={(c) => set({ color: c })}
           onCommit={(c) => write.once(() => set({ color: c }))}
         />
       </Row>
       <Section
-        title="Outline"
+        title={t("outline")}
         enabled={outlined}
         onEnabledChange={(v) => write.once(() => setEach((t) => ({ stroke: v ? (t.stroke ?? { color: "#111114", width: 0.04 }) : undefined })))}
       >
         {outlined && (
           <>
-            <Row label="Color">
+            <Row label={t("color")}>
               <ColorField
                 value={strokeColor.value}
                 mixed={strokeColor.mixed}
-                label="Outline color"
+                label={t("outlineColor")}
                 onBegin={() => st().pushHistory()}
                 onLive={(c) => setEach((t) => ({ stroke: { ...t.stroke!, color: c } }))}
                 onCommit={(c) => write.once(() => setEach((t) => ({ stroke: { ...t.stroke!, color: c } })))}
               />
             </Row>
-            {slide("Width", strokeWidth, { min: 1, max: 15, step: 0.5, snap: [4] }, (v) => String(Math.round(v)), parseNumberInput, (v) =>
+            {slide(t("width"), strokeWidth, { min: 1, max: 15, step: 0.5, snap: [4] }, (v) => String(Math.round(v)), parseNumberInput, (v) =>
               setEach((t) => ({ stroke: { ...t.stroke!, width: v / 100 } }))
             )}
           </>
         )}
       </Section>
-      <Section title="Shadow" enabled={shadowed} onEnabledChange={(v) => write.once(() => set({ shadow: v }))}>
+      <Section title={t("shadow")} enabled={shadowed} onEnabledChange={(v) => write.once(() => set({ shadow: v }))}>
         {shadowed && (
           <>
-            <Row label="Color">
+            <Row label={t("color")}>
               <ColorField
                 value={shadowColor.value}
                 mixed={shadowColor.mixed}
-                label="Shadow color"
+                label={t("shadowColor")}
                 onBegin={() => st().pushHistory()}
                 onLive={(c) => setEach((t) => ({ shadow: { ...shadowOf(t), color: c } }))}
                 onCommit={(c) => write.once(() => setEach((t) => ({ shadow: { ...shadowOf(t), color: c } })))}
                 opacity={{
-                  label: "Shadow opacity",
+                  label: t("shadowOpacity"),
                   value: shadowOpacity.value,
                   mixed: shadowOpacity.mixed,
                   onDraft: (v) => write.draft(() => setEach((t) => ({ shadow: { ...shadowOf(t), opacity: v } }))),
@@ -538,25 +556,25 @@ function TextRows({ texts }: { texts: TextOverlay[] }) {
                 }}
               />
             </Row>
-            {slide("Blur", shadowBlur, { min: 0, max: 60, step: 1, snap: [14] }, (v) => String(Math.round(v)), parseNumberInput, (v) =>
+            {slide(t("blur"), shadowBlur, { min: 0, max: 60, step: 1, snap: [14] }, (v) => String(Math.round(v)), parseNumberInput, (v) =>
               setEach((t) => ({ shadow: { ...shadowOf(t), blur: v } }))
             )}
           </>
         )}
       </Section>
-      <Section title="Backdrop" enabled={plated} onEnabledChange={(v) => write.once(() => set({ plate: v }))}>
+      <Section title={t("backdrop")} enabled={plated} onEnabledChange={(v) => write.once(() => set({ plate: v }))}>
         {plated && (
           <>
-            <Row label="Color">
+            <Row label={t("color")}>
               <ColorField
                 value={plateColor.value}
                 mixed={plateColor.mixed}
-                label="Backdrop color"
+                label={t("backdropColor")}
                 onBegin={() => st().pushHistory()}
                 onLive={(c) => set({ plateColor: c })}
                 onCommit={(c) => write.once(() => set({ plateColor: c }))}
                 opacity={{
-                  label: "Backdrop opacity",
+                  label: t("backdropOpacity"),
                   value: plateOpacity.value,
                   mixed: plateOpacity.mixed,
                   onDraft: (v) => write.draft(() => set({ plateOpacity: v })),
@@ -564,7 +582,7 @@ function TextRows({ texts }: { texts: TextOverlay[] }) {
                 }}
               />
             </Row>
-            {slide("Radius", plateRadius, { min: 0, max: 1, step: 0.01, snap: [PLATE_RADIUS] }, (v) => String(Math.round(v * 100)), parsePercentInput, (v) =>
+            {slide(t("radius"), plateRadius, { min: 0, max: 1, step: 0.01, snap: [PLATE_RADIUS] }, (v) => String(Math.round(v * 100)), parsePercentInput, (v) =>
               set({ plateRadius: v })
             )}
           </>
@@ -576,6 +594,7 @@ function TextRows({ texts }: { texts: TextOverlay[] }) {
 
 /** Fill, corner radius and outline, over a selection of shapes only. */
 function ShapeRows({ shapes }: { shapes: ShapeOverlay[] }) {
+  const t = useTranslations("media.groupPanel");
   const write = useGroupWrite();
   const boxes = shapes.every((s) => !lineLikeShape(s.shape));
   const rects = shapes.every((s) => s.shape === "rect");
@@ -588,18 +607,18 @@ function ShapeRows({ shapes }: { shapes: ShapeOverlay[] }) {
   const set = (patch: (s: ShapeOverlay) => OverlayPatch) => patchOverlays(shapes, (o) => patch(o as ShapeOverlay));
   return (
     <>
-      <Row label={boxes ? "Fill" : "Color"}>
+      <Row label={boxes ? t("fill") : t("color")}>
         <ColorField
           value={fill.value}
           mixed={fill.mixed}
-          label={boxes ? "Fill color" : "Shape color"}
+          label={boxes ? t("fillColor") : t("shapeColor")}
           onBegin={() => st().pushHistory()}
           onLive={(c) => set(() => ({ fill: c }))}
           onCommit={(c) => write.once(() => set(() => ({ fill: c })))}
           opacity={
             boxes
               ? {
-                  label: "Fill opacity",
+                  label: t("fillOpacity"),
                   value: fillOpacity.value,
                   mixed: fillOpacity.mixed,
                   onDraft: (v) => write.draft(() => set(() => ({ fillOpacity: v >= 0.995 ? undefined : v }))),
@@ -610,9 +629,9 @@ function ShapeRows({ shapes }: { shapes: ShapeOverlay[] }) {
         />
       </Row>
       {rects && (
-        <Row label="Corner radius">
+        <Row label={t("cornerRadius")}>
           <ValueSlider
-            label="Corner radius"
+            label={t("cornerRadius")}
             {...SLIDER}
             value={radius.value}
             mixed={radius.mixed}
@@ -628,25 +647,25 @@ function ShapeRows({ shapes }: { shapes: ShapeOverlay[] }) {
       )}
       {boxes && (
         <Section
-          title="Outline"
+          title={t("outline")}
           enabled={outlined}
           onEnabledChange={(v) => write.once(() => set((s) => ({ stroke: v ? (s.stroke ?? { color: "#111114", width: 6 }) : undefined })))}
         >
           {outlined && (
             <>
-              <Row label="Color">
+              <Row label={t("color")}>
                 <ColorField
                   value={strokeColor.value}
                   mixed={strokeColor.mixed}
-                  label="Outline color"
+                  label={t("outlineColor")}
                   onBegin={() => st().pushHistory()}
                   onLive={(c) => set((s) => ({ stroke: { ...s.stroke!, color: c } }))}
                   onCommit={(c) => write.once(() => set((s) => ({ stroke: { ...s.stroke!, color: c } })))}
                 />
               </Row>
-              <Row label="Width">
+              <Row label={t("width")}>
                 <ValueSlider
-                  label="Outline width"
+                  label={t("outlineWidth")}
                   {...SLIDER}
                   value={strokeWidth.value}
                   mixed={strokeWidth.mixed}
@@ -670,12 +689,13 @@ function ShapeRows({ shapes }: { shapes: ShapeOverlay[] }) {
 
 /** Size, over a selection of stickers only. */
 function StickerRows({ stickers }: { stickers: StickerOverlay[] }) {
+  const t = useTranslations("media.groupPanel");
   const write = useGroupWrite();
   const size = sharedNumber(stickers.map((s) => s.w));
   return (
-    <Row label="Size">
+    <Row label={t("size")}>
       <ValueSlider
-        label="Sticker size"
+        label={t("stickerSize")}
         {...SLIDER}
         value={size.value}
         mixed={size.mixed}
@@ -695,6 +715,7 @@ function StickerRows({ stickers }: { stickers: StickerOverlay[] }) {
  * one is a zoom, amount otherwise. Where a zoom lands is aimed on its own
  * picture, so the focus stays per effect. */
 function EffectRows({ effects }: { effects: EffectOverlay[] }) {
+  const t = useTranslations("media.groupPanel");
   const write = useGroupWrite();
   const amount = sharedNumber(effects.map((e) => e.amount ?? 0.5));
   const set = (patch: OverlayPatch) => patchOverlays(effects, () => patch);
@@ -702,7 +723,7 @@ function EffectRows({ effects }: { effects: EffectOverlay[] }) {
     const ramp = sharedNumber(effects.map((e) => zoomRampOf(e.ramp)));
     return (
       <>
-        <Row label="Depth" grow>
+        <Row label={t("depth")} grow>
           <div className="flex min-w-0 grow rounded-lg border border-input p-0.5 text-[11.5px] font-medium">
             {ZOOM_LEVELS.map((l) => {
               const active = !amount.mixed && Math.abs(amount.value - l.amount) < 0.01;
@@ -717,15 +738,15 @@ function EffectRows({ effects }: { effects: EffectOverlay[] }) {
                   )}
                   onClick={() => write.once(() => set({ amount: l.amount }))}
                 >
-                  {l.label}
+                  {t(`zoomLevels.${l.id as ZoomLevelId}`)}
                 </button>
               );
             })}
           </div>
         </Row>
-        <Row label="Speed">
+        <Row label={t("speed")}>
           <ValueSlider
-            label="Zoom speed"
+            label={t("zoomSpeed")}
             {...SLIDER}
             value={ramp.value}
             mixed={ramp.mixed}
@@ -742,9 +763,9 @@ function EffectRows({ effects }: { effects: EffectOverlay[] }) {
     );
   }
   return (
-    <Row label="Amount">
+    <Row label={t("amount")}>
       <ValueSlider
-        label="Effect amount"
+        label={t("effectAmount")}
         {...SLIDER}
         value={amount.value}
         mixed={amount.mixed}
@@ -767,6 +788,7 @@ function EffectRows({ effects }: { effects: EffectOverlay[] }) {
  * clip's own switch, ducking and fades belong to soundtrack clips.
  */
 function SoundRows({ clips, audios, onOpenSound }: { clips: VideoClip[]; audios: AudioClip[]; onOpenSound: () => void }) {
+  const t = useTranslations("media.groupPanel");
   const write = useGroupWrite();
   // A clip's rate lands once, on release: changing it resettles the row.
   const [speedDraft, setSpeedDraft] = useState<number | null>(null);
@@ -811,9 +833,9 @@ function SoundRows({ clips, audios, onOpenSound }: { clips: VideoClip[]; audios:
   );
   return (
     <>
-      <Row label="Speed">
+      <Row label={t("speed")}>
         <ValueSlider
-          label="Speed"
+          label={t("speed")}
           {...SLIDER}
           value={speedDraft ?? speed.value}
           mixed={speedDraft === null && speed.mixed}
@@ -833,7 +855,7 @@ function SoundRows({ clips, audios, onOpenSound }: { clips: VideoClip[]; audios:
         />
       </Row>
       <MixedSwitch
-        label="Reverse"
+        label={t("reverse")}
         values={[...clips.map((c) => !!c.reverse), ...audios.map((a) => !!a.reverse)]}
         onChange={(v) =>
           write.batch(() => {
@@ -842,9 +864,9 @@ function SoundRows({ clips, audios, onOpenSound }: { clips: VideoClip[]; audios:
           })
         }
       />
-      <Row label="Volume">
+      <Row label={t("volume")}>
         <ValueSlider
-          label="Volume"
+          label={t("volume")}
           {...SLIDER}
           value={volume.value}
           mixed={volume.mixed}
@@ -860,30 +882,30 @@ function SoundRows({ clips, audios, onOpenSound }: { clips: VideoClip[]; audios:
       </Row>
       {clips.length > 0 && (
         <MixedSwitch
-          label="Mute audio"
+          label={t("muteAudio")}
           values={clips.map((c) => c.muted)}
           onChange={(v) => write.once(() => patchClips(clips, () => ({ muted: v })))}
         />
       )}
       {audios.length > 0 && !clips.length && (
-        <Row label="Duck others">
+        <Row label={t("duckOthers")}>
           <ValueSlider
-            label="Duck others"
+            label={t("duckOthers")}
             {...SLIDER}
             value={duck.value}
             mixed={duck.mixed}
             min={0}
             max={1}
             step={0.05}
-            format={(v) => (v >= 0.999 ? "Off" : formatPercent(v))}
-            parse={(raw) => (raw.trim().toLowerCase() === "off" ? 1 : parsePercentInput(raw))}
+            format={(v) => (v >= 0.999 ? t("off") : formatPercent(v))}
+            parse={(raw) => (isOffWord(raw, t("off")) ? 1 : parsePercentInput(raw))}
             onDraft={(v) => write.draft(() => patchAudios(audios, () => ({ duck: v < 0.999 ? v : undefined })))}
             onCommit={(v) => write.commit(() => patchAudios(audios, () => ({ duck: v < 0.999 ? v : undefined })))}
           />
         </Row>
       )}
-      {audios.length > 0 && !clips.length && fadeRow("Fade in", "fadeIn", fadeIn)}
-      {audios.length > 0 && !clips.length && fadeRow("Fade out", "fadeOut", fadeOut)}
+      {audios.length > 0 && !clips.length && fadeRow(t("fadeIn"), "fadeIn", fadeIn)}
+      {audios.length > 0 && !clips.length && fadeRow(t("fadeOut"), "fadeOut", fadeOut)}
       <SoundQualityRow sound={sound} onOpen={onOpenSound} />
     </>
   );
@@ -892,25 +914,26 @@ function SoundRows({ clips, audios, onOpenSound }: { clips: VideoClip[]; audios:
 /** Framing, zoom and flip over a selection of video clips. Pan stays per
  * clip: where a picture has slack depends on that clip's own footage. */
 function ClipPictureRows({ clips }: { clips: VideoClip[] }) {
+  const t = useTranslations("media.groupPanel");
   const write = useGroupWrite();
   const fit = sharedValue(clips.map((c) => c.fit ?? "fit"));
   const zoom = sharedNumber(clips.map(clipZoom));
   const flips = (key: "flipH" | "flipV") => sharedValue(clips.map((c) => !!c[key]));
   return (
     <>
-      <Row label="Framing">
+      <Row label={t("framing")}>
         <MixedSeg
           options={[
-            { id: "fit", label: "Fit" },
-            { id: "fill", label: "Fill" },
+            { id: "fit", label: t("fit") },
+            { id: "fill", label: t("fill") },
           ]}
           shared={fit}
           onPick={(mode) => write.once(() => patchClips(clips, () => ({ fit: mode, panX: 0, panY: 0 })))}
         />
       </Row>
-      <Row label="Zoom">
+      <Row label={t("zoom")}>
         <ValueSlider
-          label="Zoom"
+          label={t("zoom")}
           {...SLIDER}
           value={zoom.value}
           mixed={zoom.mixed}
@@ -925,12 +948,12 @@ function ClipPictureRows({ clips }: { clips: VideoClip[] }) {
           onCommit={(v) => write.commit(() => patchClips(clips, () => ({ zoom: v > 1.001 ? v : undefined })))}
         />
       </Row>
-      <Row label="Flip">
+      <Row label={t("flip")}>
         <div className="flex rounded-lg border border-input p-0.5">
           {(
             [
-              ["flipH", "Flip horizontal", FlipHorizontal2],
-              ["flipV", "Flip vertical", FlipVertical2],
+              ["flipH", t("flipHorizontal"), FlipHorizontal2],
+              ["flipV", t("flipVertical"), FlipVertical2],
             ] as const
           ).map(([key, label, Icon]) => {
             const shared = flips(key);
@@ -962,6 +985,7 @@ function ClipPictureRows({ clips }: { clips: VideoClip[] }) {
 
 /** Corner radius, border width and color over a selection of video clips. */
 function ClipBorderRows({ clips }: { clips: VideoClip[] }) {
+  const t = useTranslations("media.groupPanel");
   const write = useGroupWrite();
   const bordered = clips.every((c) => !!c.boxStyle);
   const width = sharedNumber(clips.map((c) => c.boxStyle?.borderWidth ?? 0));
@@ -970,7 +994,7 @@ function ClipBorderRows({ clips }: { clips: VideoClip[] }) {
   const set = (patch: Partial<BoxStyle>) => patchClips(clips, (c) => ({ boxStyle: { ...liveClip(c).boxStyle, ...patch } }));
   return (
     <Section
-      title="Border"
+      title={t("border")}
       enabled={bordered}
       onEnabledChange={(v) =>
         write.once(() =>
@@ -980,9 +1004,9 @@ function ClipBorderRows({ clips }: { clips: VideoClip[] }) {
     >
       {bordered && (
         <>
-          <Row label="Width">
+          <Row label={t("width")}>
             <ScrubValue
-              label="Border width"
+              label={t("borderWidth")}
               className="w-9 text-muted-foreground"
               value={width.value}
               min={0}
@@ -994,9 +1018,9 @@ function ClipBorderRows({ clips }: { clips: VideoClip[] }) {
               onCommit={(v) => write.commit(() => set({ borderWidth: v }))}
             />
           </Row>
-          <Row label="Radius">
+          <Row label={t("radius")}>
             <ScrubValue
-              label="Corner radius"
+              label={t("cornerRadius")}
               className="w-9 text-muted-foreground"
               value={radius.value}
               min={0}
@@ -1008,11 +1032,11 @@ function ClipBorderRows({ clips }: { clips: VideoClip[] }) {
               onCommit={(v) => write.commit(() => set({ radius: v }))}
             />
           </Row>
-          <Row label="Color">
+          <Row label={t("color")}>
             <ColorField
               value={color.value}
               mixed={color.mixed}
-              label="Border color"
+              label={t("borderColor")}
               onBegin={() => st().pushHistory()}
               onLive={(c) => set({ borderColor: c })}
               onCommit={(c) => write.once(() => set({ borderColor: c }))}
@@ -1026,6 +1050,7 @@ function ClipBorderRows({ clips }: { clips: VideoClip[] }) {
 
 /** Drop shadow over a selection of video clips. */
 function ClipShadowRows({ clips }: { clips: VideoClip[] }) {
+  const t = useTranslations("media.groupPanel");
   const write = useGroupWrite();
   const shadowed = clips.every((c) => !!c.boxStyle?.shadow);
   const blur = sharedNumber(clips.map((c) => c.boxStyle?.shadow?.blur ?? 24));
@@ -1054,7 +1079,7 @@ function ClipShadowRows({ clips }: { clips: VideoClip[] }) {
   );
   return (
     <Section
-      title="Shadow"
+      title={t("shadow")}
       enabled={shadowed}
       onEnabledChange={(v) =>
         write.once(() =>
@@ -1070,8 +1095,8 @@ function ClipShadowRows({ clips }: { clips: VideoClip[] }) {
     >
       {shadowed && (
         <>
-          <Row label="Blur">{scrub("Shadow blur", blur, { min: 0, max: 120 }, (v) => set({ blur: v }))}</Row>
-          <Row label="Offset">
+          <Row label={t("blur")}>{scrub(t("shadowBlur"), blur, { min: 0, max: 120 }, (v) => set({ blur: v }))}</Row>
+          <Row label={t("offset")}>
             {(
               [
                 ["x", offsetX],
@@ -1080,13 +1105,13 @@ function ClipShadowRows({ clips }: { clips: VideoClip[] }) {
             ).map(([axis, shared]) => (
               <span key={axis} className="flex items-center gap-1">
                 <span className="text-[11px] text-muted-foreground/70 uppercase">{axis}</span>
-                {scrub(`Shadow ${axis.toUpperCase()} offset`, shared, { min: -120, max: 120 }, (v) => set({ [axis]: Math.round(v) || undefined }))}
+                {scrub(axis === "x" ? t("shadowXOffset") : t("shadowYOffset"), shared, { min: -120, max: 120 }, (v) => set({ [axis]: Math.round(v) || undefined }))}
               </span>
             ))}
           </Row>
-          <Row label="Opacity">
+          <Row label={t("opacity")}>
             <ValueSlider
-              label="Shadow opacity"
+              label={t("shadowOpacity")}
               {...SLIDER}
               value={opacity.value}
               mixed={opacity.mixed}
@@ -1099,11 +1124,11 @@ function ClipShadowRows({ clips }: { clips: VideoClip[] }) {
               onCommit={(v) => write.commit(() => set({ opacity: v }))}
             />
           </Row>
-          <Row label="Color">
+          <Row label={t("color")}>
             <ColorField
               value={color.value}
               mixed={color.mixed}
-              label="Shadow color"
+              label={t("shadowColor")}
               onBegin={() => st().pushHistory()}
               onLive={(c) => set({ color: c })}
               onCommit={(c) => write.once(() => set({ color: c }))}

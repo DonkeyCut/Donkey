@@ -3,6 +3,7 @@ import {
   Mp4OutputFormat, Output, StreamTarget, type Input, type EncodedPacket, type InputVideoTrack, type InputAudioTrack, type Rotation,
 } from "mediabunny";
 import type { SourceSegment } from "@/cut/lib/sourceExportPlan";
+import { UserError } from "@/cut/lib/userError";
 
 // MP4 edits express the playback window while keeping the dependency frames
 // around each cut. The mdat stays on disk; only the movie index is rewritten.
@@ -12,7 +13,7 @@ function boxes(bytes: Uint8Array, start = 8): Box[] {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   for (let at = start; at < bytes.length;) {
     const size = view.getUint32(at);
-    if (size < 8 || at + size > bytes.length) throw new Error("Invalid MP4 movie index.");
+    if (size < 8 || at + size > bytes.length) throw new UserError("mp4_index_invalid", "Invalid MP4 movie index.");
     result.push({ type: String.fromCharCode(...bytes.subarray(at + 4, at + 8)), bytes: bytes.slice(at, at + size) });
     at += size;
   }
@@ -40,7 +41,7 @@ function setDuration(bytes: Uint8Array, ticks: number, track = false) {
 export function trimMovieIndex(bytes: Uint8Array, offsets: number[], duration: number): Uint8Array {
   const children = boxes(bytes);
   const header = children.find((b) => b.type === "mvhd");
-  if (!header) throw new Error("MP4 has no movie header.");
+  if (!header) throw new UserError("mp4_header_missing", "MP4 has no movie header.");
   const movieScale = timeScale(header.bytes);
   setDuration(header.bytes, duration * movieScale);
   let index = 0;
@@ -51,7 +52,7 @@ export function trimMovieIndex(bytes: Uint8Array, offsets: number[], duration: n
     const tkhd = track.find((b) => b.type === "tkhd");
     const mdia = track.find((b) => b.type === "mdia");
     const mdhd = mdia && boxes(mdia.bytes).find((b) => b.type === "mdhd");
-    if (!tkhd || !mdhd || offset === undefined) throw new Error("Invalid MP4 trim track.");
+    if (!tkhd || !mdhd || offset === undefined) throw new UserError("mp4_trim_track_invalid", "Invalid MP4 trim track.");
     setDuration(tkhd.bytes, duration * movieScale, true);
     // Version 1 stores both the segment duration and media time in 64 bits.
     const edit = new Uint8Array(28);
@@ -73,7 +74,7 @@ export type SourceWriter = {
 /** A codec-compatible copy needs neither a decoder nor an encoder. */
 export async function prepareTrimRemux(input: Input, trim: SourceSegment, codec: "h264" | "hevc", audioInput: Input = input) {
   if (!Number.isFinite(trim.from) || !Number.isFinite(trim.to) || trim.from < 0 || trim.to <= trim.from) {
-    throw new Error("Invalid source trim range.");
+    throw new UserError("source_trim_range_invalid", "Invalid source trim range.");
   }
   const video = await input.getPrimaryVideoTrack();
   const audio = await audioInput.getPrimaryAudioTrack();
@@ -143,7 +144,7 @@ export async function prepareTrimRemux(input: Input, trim: SourceSegment, codec:
       audioOut?.close();
       stop();
       await output.finalize();
-      if (!movie) throw new Error("Trim export produced no movie index.");
+      if (!movie) throw new UserError("trim_export_no_index", "Trim export produced no movie index.");
       const edited = trimMovieIndex(movie.bytes, offsets, trim.to - trim.from);
       await writer.write(edited, movie.position);
       await writer.truncate(movie.position + edited.length);
@@ -164,7 +165,7 @@ export async function prepareSourceRemux(inputs: Map<string, Input>, segments: S
   if (!segments.length) return null;
   const tracks: { segment: SourceSegment; video: InputVideoTrack; audio: InputAudioTrack | null; sink: EncodedPacketSink; first: EncodedPacket; config: VideoDecoderConfig; rotation: Rotation; signature: string }[] = [];
   for (const segment of segments) {
-    if (!(segment.from >= 0 && segment.to > segment.from && Number.isFinite(segment.to))) throw new Error("Invalid source export range.");
+    if (!(segment.from >= 0 && segment.to > segment.from && Number.isFinite(segment.to))) throw new UserError("source_export_range_invalid", "Invalid source export range.");
     const input = inputs.get(segment.file)!;
     const video = await input.getPrimaryVideoTrack();
     const audio = await input.getPrimaryAudioTrack();
@@ -222,7 +223,7 @@ export async function prepareSourceRemux(inputs: Map<string, Input>, segments: S
       videoOut.close();
       await output.finalize();
       stop();
-      if (!movie) throw new Error("Source export produced no movie index.");
+      if (!movie) throw new UserError("source_export_no_index", "Source export produced no movie index.");
       const edited = trimMovieIndex(movie.bytes, [preroll], duration);
       await writer.write(edited, movie.position); await writer.truncate(movie.position + edited.length);
       progress(1);

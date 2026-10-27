@@ -50,12 +50,16 @@ export function selectionTranslation(
   return { dx, dy };
 }
 
-/** "5 shapes · 4 titles": what a selection holds, by kind, in selection order. */
-export function selectionSummary(items: { overlays: readonly Overlay[]; clips: readonly VideoClip[]; audios: readonly AudioClip[] }): string {
-  const counts = new Map<string, number>();
-  const bump = (name: string) => counts.set(name, (counts.get(name) ?? 0) + 1);
+/** A kind of item a selection counts. */
+export type SelectionKind = "clip" | "title" | "shape" | "effect" | "sticker" | "audio";
+
+/** What a selection holds, by kind, in selection order — [["shape", 5],
+ * ["title", 4]] — for the panel to word as "5 shapes · 4 titles". */
+export function selectionCounts(items: { overlays: readonly Overlay[]; clips: readonly VideoClip[]; audios: readonly AudioClip[] }): [SelectionKind, number][] {
+  const counts = new Map<SelectionKind, number>();
+  const bump = (kind: SelectionKind) => counts.set(kind, (counts.get(kind) ?? 0) + 1);
   for (let i = 0; i < items.clips.length; i++) bump("clip");
   for (const o of items.overlays) bump(isTextOverlay(o) ? "title" : isShapeOverlay(o) ? "shape" : isEffectOverlay(o) ? "effect" : "sticker");
-  for (let i = 0; i < items.audios.length; i++) bump("audio clip");
-  return [...counts].map(([name, n]) => `${n} ${name}${n === 1 ? "" : "s"}`).join(" · ");
+  for (let i = 0; i < items.audios.length; i++) bump("audio");
+  return [...counts];
 }

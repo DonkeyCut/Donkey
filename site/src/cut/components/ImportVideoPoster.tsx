@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useEffectEvent, useState } from "react";
 import { Film } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { Skeleton } from "@/components/ui/skeleton";
 import { importPoster, type ImportPosterFrame } from "@/cut/lib/importPoster";
 import { holdMemory } from "@/cut/lib/memoryBudget";
@@ -22,6 +23,7 @@ type Props = {
  * browser has none: what stands in for a clip still arriving on a shelf, or
  * one whose media element cannot show its picture. */
 export function ImportVideoPoster({ source, name, size, onShape, onFrame, onUnreadable }: Props) {
+  const t = useTranslations("editor.importPoster");
   const [visible, setVisible] = useState(false);
   const [poster, setPoster] = useState<string>();
   const [unreadable, setUnreadable] = useState(false);
@@ -70,7 +72,7 @@ export function ImportVideoPoster({ source, name, size, onShape, onFrame, onUnre
         <img src={poster} alt={name} className="size-full object-cover" />
       ) : unreadable ? (
         <div className="flex size-full items-center justify-center bg-muted text-muted-foreground">
-          <Film className="size-8" aria-label="Video" />
+          <Film className="size-8" aria-label={t("video")} />
         </div>
       ) : <Skeleton className="size-full rounded-none" />}
     </div>

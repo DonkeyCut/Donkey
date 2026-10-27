@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useTranslations } from "next-intl";
 import { Mic, Square, UserRound, Video, X } from "lucide-react";
 import {
   BufferTarget,
@@ -48,6 +49,17 @@ function stamp() {
 
 type DeviceOption = { id: string; label: string };
 
+// What the dialog says in place of the preview, as keys of
+// `editor.recordDialog`: the state holds the key, the render words it.
+type RecordMessage =
+  | "deviceFallback"
+  | "cameraBlocked"
+  | "micBlocked"
+  | "cameraStartFailed"
+  | "startFailed"
+  | "saveFailed"
+  | "emptyRecording";
+
 // Remembers the last device pick per kind so reopening the dialog restores it.
 // Chrome keeps deviceIds stable per-origin once permission is granted.
 const STORE_KEY = { videoinput: "cut.record.cameraId", audioinput: "cut.record.micId" };
@@ -68,11 +80,15 @@ function saveDeviceId(kind: "videoinput" | "audioinput", id: string | null) {
   }
 }
 
-function toOptions(devices: MediaDeviceInfo[], kind: MediaDeviceKind, fallback: string) {
+function toOptions(
+  devices: MediaDeviceInfo[],
+  kind: MediaDeviceKind,
+  fallback: (n: number) => string,
+) {
   return devices
     .filter((d) => d.kind === kind && d.deviceId)
     .sort((a, b) => Number(b.deviceId === "default") - Number(a.deviceId === "default"))
-    .map((d, i) => ({ id: d.deviceId, label: d.label || `${fallback} ${i + 1}` }));
+    .map((d, i) => ({ id: d.deviceId, label: d.label || fallback(i + 1) }));
 }
 
 export function RecordDialog({
@@ -84,9 +100,10 @@ export function RecordDialog({
   onClose: () => void;
   onUse: (file: File) => void;
 }) {
+  const t = useTranslations("editor.recordDialog");
   const [stream, setStream] = useState<MediaStream | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [error, setError] = useState<RecordMessage | null>(null);
+  const [notice, setNotice] = useState<RecordMessage | null>(null);
   const [recording, setRecording] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
@@ -176,13 +193,11 @@ export function RecordDialog({
           setMicId(null);
           saveDeviceId("videoinput", null);
           saveDeviceId("audioinput", null);
-          setNotice("That device could not be started — switched back to the default.");
+          setNotice("deviceFallback");
           return;
         }
         setError(
-          mode === "camera"
-            ? "Camera access was blocked. Allow camera and microphone for this site in Chrome, then try again."
-            : "Microphone access was blocked. Allow the microphone for this site in Chrome, then try again."
+          mode === "camera" ? "cameraBlocked" : "micBlocked"
         );
       });
     return () => {
@@ -249,9 +264,7 @@ export function RecordDialog({
       setRecording(true);
     } catch {
       setError(
-        mode === "camera"
-          ? "This browser could not start a camera recording. Check that no other app is using the camera, then try again."
-          : "This browser could not start a recording. Try again."
+        mode === "camera" ? "cameraStartFailed" : "startFailed"
       );
     } finally {
       startingRef.current = false;
@@ -266,14 +279,12 @@ export function RecordDialog({
     try {
       await output.finalize();
     } catch {
-      setError("The recording could not be saved. Try again.");
+      setError("saveFailed");
       return;
     }
     const buffer = output.target.buffer;
     if (!buffer || buffer.byteLength === 0) {
-      setError(
-        "The recording came back empty. Check that no other app is using the camera, then try again."
-      );
+      setError("emptyRecording");
       return;
     }
     // An MP4 holding only sound takes the audio extension and MIME, so it
@@ -300,8 +311,8 @@ export function RecordDialog({
     saveDeviceId("audioinput", id);
   };
 
-  const cameras = toOptions(devices, "videoinput", "Camera");
-  const mics = toOptions(devices, "audioinput", "Microphone");
+  const cameras = toOptions(devices, "videoinput", (n) => t("cameraN", { n }));
+  const mics = toOptions(devices, "audioinput", (n) => t("micN", { n }));
   const activeCameraId =
     cameraId ?? stream?.getVideoTracks()[0]?.getSettings().deviceId ?? "";
   const activeMicId =
@@ -324,21 +335,21 @@ export function RecordDialog({
       >
         {/* Kept for accessibility; the dialog reads as its own preview. */}
         <DialogTitle className="sr-only">
-          {mode === "camera" ? "Record camera" : "Record audio"}
+          {mode === "camera" ? t("titleCamera") : t("titleAudio")}
         </DialogTitle>
         {/* Custom close so it stays legible over the full-bleed video. */}
         <button
           type="button"
           onClick={onClose}
-          aria-label="Close"
-          title="Close"
+          aria-label={t("close")}
+          title={t("close")}
           className="absolute top-3 right-3 z-20 grid size-9 place-items-center rounded-full bg-black/45 text-white backdrop-blur-sm transition-colors hover:bg-black/65"
         >
           <X className="size-4" />
         </button>
 
         {error ? (
-          <p className="p-6 text-sm text-muted-foreground">{error}</p>
+          <p className="p-6 text-sm text-muted-foreground">{t(error)}</p>
         ) : (
           <>
             {mode === "camera" ? (
@@ -363,7 +374,7 @@ export function RecordDialog({
                   <div className="absolute inset-0 grid place-items-center">
                     <div className="flex flex-col items-center gap-3 text-white/60">
                       <UserRound className="size-12" strokeWidth={1.25} />
-                      <span className="text-xs">{notice ?? "Waiting for permission…"}</span>
+                      <span className="text-xs">{notice ? t(notice) : t("waiting")}</span>
                     </div>
                   </div>
                 )}
@@ -371,7 +382,7 @@ export function RecordDialog({
                 {stream && notice && !recording && (
                   <p className="absolute inset-x-0 bottom-24 z-10 text-center">
                     <span className="rounded-md bg-black/60 px-2 py-1 text-xs text-white">
-                      {notice}
+                      {t(notice)}
                     </span>
                   </p>
                 )}
@@ -424,7 +435,7 @@ export function RecordDialog({
                 {stream && notice && !recording && (
                   <p className="absolute inset-x-0 top-3 z-10 text-center">
                     <span className="rounded-md bg-black/60 px-2 py-1 text-xs text-white">
-                      {notice}
+                      {t(notice)}
                     </span>
                   </p>
                 )}
@@ -463,7 +474,7 @@ export function RecordDialog({
                     />
                   ) : (
                     <span className="min-w-0 flex-1 text-center text-xs text-white/60">
-                      {notice ?? "Waiting for permission…"}
+                      {notice ? t(notice) : t("waiting")}
                     </span>
                   )}
                   <span className="font-mono text-sm text-white/70 tabular-nums">
@@ -490,10 +501,11 @@ function RecordButton({
   onStart: () => void;
   onStop: () => void;
 }) {
+  const t = useTranslations("editor.recordDialog");
   return !recording ? (
     <button
       className="grid size-14 place-items-center rounded-full bg-white shadow-md transition-transform hover:scale-105 disabled:opacity-60"
-      title="Start recording"
+      title={t("start")}
       disabled={disabled}
       onClick={onStart}
     >
@@ -502,7 +514,7 @@ function RecordButton({
   ) : (
     <button
       className="grid size-14 place-items-center rounded-full bg-white shadow-md transition-transform hover:scale-105"
-      title="Stop and use recording"
+      title={t("stop")}
       onClick={onStop}
     >
       <Square className="size-6 fill-red-500 stroke-none" />

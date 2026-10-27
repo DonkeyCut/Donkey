@@ -19,6 +19,8 @@
  * construction. Seconds appear only at the editor boundary (see coverage.ts).
  */
 
+import type { UserErrorParams } from "../userError";
+
 /** A reference the user brought, passed to generation as media not text. */
 export interface RefAsset {
   mediaId: string;
@@ -108,6 +110,8 @@ export interface Shot {
   attempts: number;
   lastPrompt?: string;
   error?: string;
+  errorCode?: string;
+  errorParams?: UserErrorParams;
 }
 
 /** One beat's frame span — the beat→timeline map a re-cut reads to synthesize
@@ -215,6 +219,6 @@ export type VideoEvent =
   | { type: "asset"; label: string; mediaId: string; key?: string }
   /** The live ticker: one line on what the run is doing right now. */
   | { type: "activity"; message: string; key?: string }
-  | { type: "error"; message: string };
+  | { type: "error"; message: string; errorCode?: string; errorParams?: UserErrorParams };
 
 export type VideoEmit = (event: VideoEvent) => void;

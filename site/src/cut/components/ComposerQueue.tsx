@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useTranslations } from "next-intl";
 import {
   ArrowUpRight,
   Check,
@@ -76,6 +77,7 @@ export function ComposerQueue({
   onReorder: (ids: string[]) => void;
   onTogglePaused: () => void;
 }) {
+  const t = useTranslations("chat.composerQueue");
   const [open, setOpen] = useState(true);
   const frozen = editingId !== null;
   const waiting = items.filter((m) => m.status === "queued" || m.status === "folding");
@@ -126,16 +128,14 @@ export function ComposerQueue({
         >
           <span className="shrink-0 text-[11px] font-medium text-muted-foreground">
             {waiting.length === 1
-              ? "1 up next"
+              ? t("upNext")
               : waiting.length > 1
-                ? `${waiting.length} in queue`
-                : spawned.length === 1
-                  ? "1 in another chat"
-                  : `${spawned.length} in other chats`}
+                ? t("inQueue", { count: waiting.length })
+                : t("inOtherChats", { count: spawned.length })}
           </span>
           {paused && (
             <span className="truncate text-[11px] text-muted-foreground/60">
-              Paused
+              {t("paused")}
             </span>
           )}
         </button>
@@ -143,7 +143,7 @@ export function ComposerQueue({
           <button
             type="button"
             className={queueIconButton}
-            title={paused ? "Resume the queue" : "Pause the queue"}
+            title={paused ? t("resume") : t("pause")}
             onClick={onTogglePaused}
           >
             {paused ? <Play className="size-3" /> : <Pause className="size-3" />}
@@ -151,7 +151,7 @@ export function ComposerQueue({
           <button
             type="button"
             className={queueIconButton}
-            title={open ? "Collapse" : "Expand"}
+            title={open ? t("collapse") : t("expand")}
             onClick={() => setOpen(!open)}
           >
             <ChevronDown
@@ -261,7 +261,7 @@ export function ComposerQueue({
                         </div>
                         {shown === "spawned" && (
                           <div className="mt-0.5 text-[10.5px] text-muted-foreground/60">
-                            Running in another chat
+                            {t("runningElsewhere")}
                           </div>
                         )}
                         <UnmentionedRefPills text={it.text} refs={it.attachments} className="mt-1 text-xs" />
@@ -292,7 +292,7 @@ export function ComposerQueue({
                         <button
                           type="button"
                           className={queueIconButton}
-                          title="Open that chat"
+                          title={t("openChat")}
                           onClick={() => it.threadId && onOpen(it.threadId)}
                         >
                           <ArrowUpRight className="size-3" />
@@ -301,7 +301,7 @@ export function ComposerQueue({
                       <button
                         type="button"
                         className={queueIconButton}
-                        title="Edit this message"
+                        title={t("edit")}
                         onClick={() => onEditingChange(it.id)}
                       >
                         <Pencil className="size-3" />
@@ -310,7 +310,7 @@ export function ComposerQueue({
                       <button
                         type="button"
                         className={queueIconButton}
-                        title="Remove from the queue"
+                        title={t("remove")}
                         onClick={() => onRemove(it.id)}
                       >
                         <Trash2 className="size-3" />
@@ -336,6 +336,7 @@ function QueueEditBox({
   onCancel: () => void;
   onSave: (text: string) => void;
 }) {
+  const t = useTranslations("chat.composerQueue");
   const [value, setValue] = useState(initial);
   const ref = useRef<HTMLTextAreaElement>(null);
   useEffect(() => {
@@ -370,14 +371,14 @@ function QueueEditBox({
           className="inline-flex h-6 items-center gap-1 rounded-md bg-primary px-2 text-[11px] font-medium text-primary-foreground transition-colors hover:bg-primary/85"
           onClick={() => onSave(value)}
         >
-          <Check className="size-3" /> Save
+          <Check className="size-3" /> {t("save")}
         </button>
         <button
           type="button"
           className="h-6 rounded-md px-2 text-[11px] text-muted-foreground transition-colors hover:bg-muted-foreground/10"
           onClick={onCancel}
         >
-          Cancel
+          {t("cancel")}
         </button>
       </div>
     </div>

@@ -1,6 +1,7 @@
 "use client";
 
 import { ArtifactVideo } from "@donkeycut/artifact-player/ArtifactVideo";
+import { useTranslations } from "next-intl";
 
 import { useEffect, useRef, useState } from "react";
 import { MEDIA_CORS } from "@/cut/lib/mediaCors";
@@ -35,8 +36,8 @@ export interface ExportItem {
 
 type Platform = "original" | "tiktok" | "instagram" | "youtube";
 
-const PLATFORMS: { id: Platform; label: string }[] = [
-  { id: "original", label: "Original" },
+const PLATFORMS: { id: Platform; label?: string }[] = [
+  { id: "original" },
   { id: "tiktok", label: "TikTok" },
   { id: "instagram", label: "Instagram" },
   { id: "youtube", label: "YouTube" },
@@ -57,6 +58,7 @@ export function PlatformPreviewDialog({
   item: ExportItem;
   onClose: () => void;
 }) {
+  const t = useTranslations("editor.platformPreview");
   const publish = useEditor((s) => s.publish);
   const aspect = useEditor((s) => s.aspect);
   const [platform, setPlatform] = useState<Platform>("original");
@@ -89,10 +91,10 @@ export function PlatformPreviewDialog({
   };
 
   const url = exportFileUrl(projectId, item);
-  const handle = publish.handle.trim().replace(/^@+/, "") || "you";
+  const handle = publish.handle.trim().replace(/^@+/, "") || t("defaultHandle");
   const caption = publish.caption.trim();
   const tagsLine = normalizeTags(publish.tags);
-  const sound = publish.soundTitle.trim() || `original sound - ${handle}`;
+  const sound = publish.soundTitle.trim() || t("originalSound", { handle });
   const original = platform === "original";
 
   return (
@@ -106,7 +108,7 @@ export function PlatformPreviewDialog({
       <div className="relative flex max-h-full flex-col items-center gap-4 overflow-hidden rounded-2xl bg-card px-10 py-5 shadow-2xl">
         <button
           className="absolute top-3 right-3 grid size-7 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-          aria-label="Close preview"
+          aria-label={t("close")}
           onClick={onClose}
         >
           <X className="size-4" />
@@ -125,7 +127,7 @@ export function PlatformPreviewDialog({
               aria-pressed={platform === p.id}
               onClick={() => setPlatform(p.id)}
             >
-              {p.label}
+              {p.label ?? t("original")}
             </button>
           ))}
         </div>
@@ -179,7 +181,7 @@ export function PlatformPreviewDialog({
 
           <button
             className="absolute top-3.5 left-3.5 z-20 grid size-7 place-items-center rounded-full bg-black/40 text-white"
-            aria-label={muted ? "Unmute" : "Mute"}
+            aria-label={muted ? t("unmute") : t("mute")}
             onClick={() => setMuted((m) => !m)}
           >
             {muted ? <VolumeX className="size-3.5" /> : <Volume2 className="size-3.5" />}
@@ -191,11 +193,11 @@ export function PlatformPreviewDialog({
               time={time}
               duration={duration}
               onToggle={togglePlay}
-              onSeek={(t) => {
+              onSeek={(at) => {
                 const v = videoRef.current;
                 if (!v) return;
-                v.currentTime = t;
-                setTime(t);
+                v.currentTime = at;
+                setTime(at);
               }}
             />
           )}
@@ -251,6 +253,7 @@ function RailItem({
 }
 
 function TikTokChrome({ handle, caption, tags, sound }: ChromeProps) {
+  const t = useTranslations("editor.platformPreview");
   return (
     <div className="preview-tiktok pointer-events-none absolute inset-0 z-10">
       <div
@@ -259,9 +262,9 @@ function TikTokChrome({ handle, caption, tags, sound }: ChromeProps) {
           shadow
         )}
       >
-        <span className="opacity-75">Following</span>
+        <span className="opacity-75">{t("following")}</span>
         <span className="relative font-semibold">
-          For You
+          {t("forYou")}
           <span className="absolute -bottom-1.5 left-1/2 h-0.5 w-5 -translate-x-1/2 rounded bg-white" />
         </span>
         <Search className="absolute right-4 size-4.5 text-white" />
@@ -280,7 +283,7 @@ function TikTokChrome({ handle, caption, tags, sound }: ChromeProps) {
           label="1,842"
         />
         <RailItem icon={<Bookmark className="size-6.5 fill-white text-white" />} label="12.3K" />
-        <RailItem icon={<Share2 className="size-6.5 fill-white text-white" />} label="Share" />
+        <RailItem icon={<Share2 className="size-6.5 fill-white text-white" />} label={t("share")} />
         <span className="mt-0.5 grid size-9 animate-[spin_5s_linear_infinite] place-items-center rounded-full bg-neutral-900 ring-4 ring-neutral-800">
           <Music2 className="size-3.5 text-white" />
         </span>
@@ -307,6 +310,7 @@ function TikTokChrome({ handle, caption, tags, sound }: ChromeProps) {
 }
 
 function ReelsChrome({ handle, caption, tags, sound }: ChromeProps) {
+  const t = useTranslations("editor.platformPreview");
   return (
     <div className="preview-instagram pointer-events-none absolute inset-0 z-10">
       <div className="absolute top-4 inset-x-0 flex items-center justify-between px-4">
@@ -332,7 +336,7 @@ function ReelsChrome({ handle, caption, tags, sound }: ChromeProps) {
             {handle}
           </span>
           <span className="rounded-md border border-white/80 px-1.5 py-0.5 text-[11px] font-medium text-white">
-            Follow
+            {t("follow")}
           </span>
         </div>
         {(caption || tags) && (
@@ -340,7 +344,7 @@ function ReelsChrome({ handle, caption, tags, sound }: ChromeProps) {
             {caption}
             {caption && tags ? " " : ""}
             {tags}
-            <span className="text-white/60"> … more</span>
+            <span className="text-white/60"> {t("more")}</span>
           </p>
         )}
         <div className="flex max-w-full items-center gap-1.5 self-start rounded-full border border-white/25 bg-black/35 px-2.5 py-1 backdrop-blur-sm">
@@ -355,6 +359,7 @@ function ReelsChrome({ handle, caption, tags, sound }: ChromeProps) {
 }
 
 function ShortsChrome({ handle, caption, tags, sound }: ChromeProps) {
+  const t = useTranslations("editor.platformPreview");
   return (
     <div className="preview-youtube pointer-events-none absolute inset-0 z-10">
       <div className="absolute top-4 inset-x-0 flex items-center justify-between px-4">
@@ -367,10 +372,10 @@ function ShortsChrome({ handle, caption, tags, sound }: ChromeProps) {
       </div>
 
       <div className="absolute right-2.5 bottom-14 flex flex-col items-center gap-4">
-        <RailItem icon={<ThumbsUp className="size-6 text-white" />} label="Like" />
-        <RailItem icon={<ThumbsDown className="size-6 text-white" />} label="Dislike" />
+        <RailItem icon={<ThumbsUp className="size-6 text-white" />} label={t("like")} />
+        <RailItem icon={<ThumbsDown className="size-6 text-white" />} label={t("dislike")} />
         <RailItem icon={<MessageCircle className="size-6 -scale-x-100 text-white" />} label="1.2K" />
-        <RailItem icon={<Share2 className="size-6 text-white" />} label="Share" />
+        <RailItem icon={<Share2 className="size-6 text-white" />} label={t("share")} />
         <span className="grid size-9 animate-[spin_6s_linear_infinite] place-items-center rounded-lg bg-neutral-900 ring-2 ring-white/20">
           <Music2 className="size-3.5 text-white" />
         </span>
@@ -383,7 +388,7 @@ function ShortsChrome({ handle, caption, tags, sound }: ChromeProps) {
             @{handle}
           </span>
           <span className="rounded-full bg-white px-2.5 py-1 text-[11px] font-semibold text-black">
-            Subscribe
+            {t("subscribe")}
           </span>
         </div>
         {(caption || tags) && (

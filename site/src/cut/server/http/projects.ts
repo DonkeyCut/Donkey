@@ -28,15 +28,19 @@ import {
 } from "../projects";
 import { convertToMp4, mp4NameFor } from "../convert";
 import { convertModeIn } from "@/cut/lib/convertMode";
+import { requestedLocale } from "@/cut/lib/defaultNames";
 import { makeCompatProxy, makeProxy, proxyNameFor } from "../proxy";
 import { serveFileRange, wantsDownload } from "../serveFile";
 import { importUrlToProject } from "../urlImport";
 import { createTranscribeJob, getTranscribeJob, type TranscribeSpec } from "../transcribe";
-import { exists, uniqueName, errorMessage } from "../util";
+import { UserError } from "../../lib/userError";
+import { exists, uniqueName, errorReply } from "../util";
 
-const err = (message: string, status: number) => Response.json({ error: message }, { status });
-const caught = (e: unknown, fallback: string, status = 500) =>
-  err(errorMessage(e, fallback), status);
+const err = (failure: string | UserError, status: number) => Response.json(errorReply(failure, ""), { status });
+const caught = (e: unknown, fallback: string | UserError, status = 500) =>
+  Response.json(errorReply(e, fallback), { status });
+// The reply for an id with no project behind it, coded so the page words it.
+const PROJECT_NOT_FOUND = new UserError("project_not_found", "Project not found.");
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 
 /** Project CRUD, media, exports, transcription, freeze-frames. */
@@ -54,7 +58,7 @@ export const projectsApi = {
       const { name, parentId } = (await req.json()) as { name?: string; parentId?: string | null };
       return Response.json(await createProjectFolder(name ?? "", parentId ?? null));
     } catch (e) {
-      return caught(e, "Could not create folder.");
+      return caught(e, new UserError("folder_create_failed", "Could not create folder."));
     }
   },
 
@@ -64,7 +68,7 @@ export const projectsApi = {
       const { name, parentId } = (await req.json()) as { name?: string; parentId?: string | null };
       return Response.json(await updateProjectFolder(id, { name, parentId }));
     } catch (e) {
-      return caught(e, "Could not update folder.");
+      return caught(e, new UserError("folder_update_failed", "Could not update folder."));
     }
   },
 
@@ -73,7 +77,7 @@ export const projectsApi = {
       await deleteProjectFolder(id);
       return Response.json({ ok: true });
     } catch (e) {
-      return caught(e, "Could not delete folder.");
+      return caught(e, new UserError("folder_delete_failed", "Could not delete folder."));
     }
   },
 
@@ -84,32 +88,33 @@ export const projectsApi = {
       await moveProjectToFolder(id, folderId ?? null);
       return Response.json({ ok: true });
     } catch (e) {
-      return caught(e, "Could not move project.");
+      return caught(e, new UserError("project_move_failed", "Could not move project."));
     }
   },
 
   async create(req: Request) {
     try {
-      const { name, folderId, aspect } = (await req.json()) as {
+      const { name, folderId, aspect, locale } = (await req.json()) as {
         name?: string;
         folderId?: string | null;
         aspect?: string;
+        locale?: string;
       };
       return Response.json(
-        await createProject(name ?? "Untitled", folderId ?? null, normalizeAspect(aspect))
+        await createProject(name ?? "", folderId ?? null, normalizeAspect(aspect), requestedLocale(locale))
       );
     } catch (e) {
-      return caught(e, "Could not create project.");
+      return caught(e, new UserError("project_create_failed", "Could not create project."));
     }
   },
 
   async get(req: Request, { id }: { id: string }) {
     const revision = await projectFileRevision(id);
-    if (!revision) return err("Project not found.", 404);
+    if (!revision) return err(PROJECT_NOT_FOUND, 404);
     const headers = { "x-cut-doc-version": revision };
     if (req.method === "HEAD") return new Response(null, { headers });
     const doc = await readProject(id).catch(() => null);
-    if (!doc) return err("Project not found.", 404);
+    if (!doc) return err(PROJECT_NOT_FOUND, 404);
     void sweepOrphanMedia(id, doc).catch(() => {});
     return Response.json(doc, { headers });
   },
@@ -117,7 +122,7 @@ export const projectsApi = {
   async put(req: Request, { id }: { id: string }) {
     try {
       const existing = await readProject(id);
-      if (!existing) return err("Project not found.", 404);
+      if (!existing) return err(PROJECT_NOT_FOUND, 404);
       const body = (await req.json()) as Partial<ProjectDoc>;
       const doc: ProjectDoc = {
         ...existing,
@@ -171,7 +176,7 @@ export const projectsApi = {
       const revision = await writeProject(id, doc);
       return Response.json({ ok: true, updatedAt: doc.updatedAt, revision });
     } catch (e) {
-      return caught(e, "Could not save project.");
+      return caught(e, new UserError("project_save_failed", "Could not save project."));
     }
   },
 
@@ -180,16 +185,18 @@ export const projectsApi = {
       await deleteProject(id);
       return Response.json({ ok: true });
     } catch (e) {
-      return caught(e, "Could not delete project.");
+      return caught(e, new UserError("project_delete_failed", "Could not delete project."));
     }
   },
 
   /** Duplicate a project (doc + media) into a fresh one. */
-  async duplicate(_req: Request, { id }: { id: string }) {
+  async duplicate(req: Request, { id }: { id: string }) {
     try {
-      return Response.json(await duplicateProject(id));
+      // The copy is named in its creator's language; an older page sends no body.
+      const { locale } = ((await req.json().catch(() => null)) ?? {}) as { locale?: string };
+      return Response.json(await duplicateProject(id, requestedLocale(locale)));
     } catch (e) {
-      return caught(e, "Could not duplicate project.");
+      return caught(e, new UserError("project_duplicate_error", "Could not duplicate project."));
     }
   },
 
@@ -211,20 +218,20 @@ export const projectsApi = {
       if (!url) return err("No URL provided.", 400);
       return Response.json(await importUrlToProject(id, url, { audio: audio === true }));
     } catch (e) {
-      return caught(e, "Could not import that URL.");
+      return caught(e, new UserError("url_import_failed", "Could not import that URL."));
     }
   },
 
   async uploadMedia(req: Request, { id }: { id: string }) {
     try {
-      if (!(await readProject(id))) return err("Project not found.", 404);
+      if (!(await readProject(id))) return err(PROJECT_NOT_FOUND, 404);
       const form = await req.formData();
       const file = form.get("file");
       if (!(file instanceof File)) return err("No file in upload.", 400);
       const fileName = await saveMedia(id, file);
       return Response.json({ fileName });
     } catch (e) {
-      return caught(e, "Upload failed.");
+      return caught(e, new UserError("upload_failed", "Upload failed."));
     }
   },
 
@@ -234,7 +241,7 @@ export const projectsApi = {
       await deleteMedia(id, decodeURIComponent(file));
       return Response.json({ ok: true });
     } catch (e) {
-      return caught(e, "Could not delete the media file.");
+      return caught(e, new UserError("media_delete_failed", "Could not delete the media file."));
     }
   },
 
@@ -246,14 +253,14 @@ export const projectsApi = {
     } catch {
       return err("Bad request.", 400);
     }
-    if (!(await exists(p))) return err("Media file not found.", 404);
+    if (!(await exists(p))) return err(new UserError("media_file_not_found", "Media file not found."), 404);
     try {
       await new Promise<void>((resolve, reject) =>
         execFile("open", ["-R", p], (e) => (e ? reject(e) : resolve()))
       );
       return Response.json({ ok: true });
     } catch (e) {
-      return caught(e, "Could not reveal the file.");
+      return caught(e, new UserError("file_reveal_failed", "Could not reveal the file."));
     }
   },
 
@@ -301,14 +308,14 @@ export const projectsApi = {
     } catch {
       return err("Bad request.", 400);
     }
-    if (!(await exists(p))) return err("Export not found.", 404);
+    if (!(await exists(p))) return err(new UserError("export_not_found", "Export not found."), 404);
     try {
       await new Promise<void>((resolve, reject) =>
         execFile("open", ["-R", p], (e) => (e ? reject(e) : resolve()))
       );
       return Response.json({ ok: true });
     } catch (e) {
-      return caught(e, "Could not reveal the file.");
+      return caught(e, new UserError("file_reveal_failed", "Could not reveal the file."));
     }
   },
 
@@ -318,7 +325,7 @@ export const projectsApi = {
       await deleteExport(id, decodeURIComponent(file));
       return Response.json({ ok: true });
     } catch (e) {
-      return caught(e, "Could not delete the export.");
+      return caught(e, new UserError("export_delete_failed", "Could not delete the export."));
     }
   },
 
@@ -344,11 +351,13 @@ export const projectsApi = {
   async transcribePoll(req: Request, { id }: { id: string }) {
     const jobId = new URL(req.url).searchParams.get("job");
     const job = jobId ? getTranscribeJob(jobId) : undefined;
-    if (!job || job.projectId !== id) return err("Unknown transcription job.", 404);
+    if (!job || job.projectId !== id) return err(new UserError("transcribe_job_unknown", "Unknown transcription job."), 404);
     return Response.json({
       status: job.status,
       stage: job.stage,
       error: job.error,
+      errorCode: job.errorCode,
+      errorParams: job.errorParams,
       cues: job.status === "done" ? job.cues : undefined,
     });
   },
@@ -357,7 +366,7 @@ export const projectsApi = {
    * resolution — no video baking. AI generations and stock tiles land here. */
   async importImage(req: Request, { id }: { id: string }) {
     try {
-      if (!(await readProject(id))) return err("Project not found.", 404);
+      if (!(await readProject(id))) return err(PROJECT_NOT_FOUND, 404);
       const form = await req.formData();
       const file = form.get("file");
       if (!(file instanceof File)) return err("No image in upload.", 400);
@@ -378,14 +387,14 @@ export const projectsApi = {
         ...(origin ? { origin } : {}),
       });
     } catch (e) {
-      return caught(e, "Could not import the image.");
+      return caught(e, new UserError("image_import_failed", "Could not import the image."));
     }
   },
 
   /** Render a freeze-frame still clip from a media file's frame. */
   async freeze(req: Request, { id }: { id: string }) {
     try {
-      if (!(await readProject(id))) return err("Project not found.", 404);
+      if (!(await readProject(id))) return err(PROJECT_NOT_FOUND, 404);
       const body = (await req.json()) as {
         file?: string;
         srcTime?: number;
@@ -437,13 +446,13 @@ export const projectsApi = {
    * the asset over to it and dropping the old bytes is the client's call. */
   async convert(req: Request, { id }: { id: string }) {
     try {
-      if (!(await readProject(id))) return err("Project not found.", 404);
+      if (!(await readProject(id))) return err(PROJECT_NOT_FOUND, 404);
       const body = (await req.json()) as { file?: string; maxHeight?: number; mode?: unknown };
       if (!body.file) return err("file is required.", 400);
       const mode = convertModeIn(body.mode);
       if (!mode) return err("mode is fit or reencode.", 400);
       const src = mediaPath(id, body.file);
-      if (!(await exists(src))) return err("Media file missing from project.", 404);
+      if (!(await exists(src))) return err(new UserError("media_file_missing", "Media file missing from project."), 404);
       const fileName = await uniqueName(mp4NameFor(body.file), (n) => mediaPath(id, n));
       const outPath = mediaPath(id, fileName);
       const handle = { tmpDir: "", outPath, progress: 0, log: [] as string[] };
@@ -460,7 +469,7 @@ export const projectsApi = {
         ...outcome,
       });
     } catch (e) {
-      return caught(e, "Could not convert that file.");
+      return caught(e, new UserError("convert_failed", "Could not convert that file."));
     }
   },
 
@@ -471,14 +480,14 @@ export const projectsApi = {
    * the master's streams (lib/proxyNames.ts). */
   async proxy(req: Request, { id }: { id: string }) {
     try {
-      if (!(await readProject(id))) return err("Project not found.", 404);
+      if (!(await readProject(id))) return err(PROJECT_NOT_FOUND, 404);
       const body = (await req.json()) as { file?: string; maxHeight?: number; crf?: number; compat?: unknown };
       if (!body.file) return err("file is required.", 400);
       if (typeof body.maxHeight !== "number" || typeof body.crf !== "number") return err("maxHeight and crf are required.", 400);
       const compat = compatCoverIn(body.compat);
       if (body.compat !== undefined && !compat) return err("compat is audio or video.", 400);
       const src = mediaPath(id, body.file);
-      if (!(await exists(src))) return err("Media file missing from project.", 404);
+      if (!(await exists(src))) return err(new UserError("media_file_missing", "Media file missing from project."), 404);
       const fileName = await uniqueName(compat ? compatProxyNameFor(body.file, compat, false) : proxyNameFor(body.file), (n) => mediaPath(id, n));
       const outPath = mediaPath(id, fileName);
       const handle = { tmpDir: "", outPath, progress: 0, log: [] as string[] };
@@ -486,7 +495,7 @@ export const projectsApi = {
       const outcome = compat ? await makeCompatProxy(handle, src, outPath, { ...opts, cover: compat }) : await makeProxy(handle, src, outPath, opts);
       return Response.json({ fileName, ...outcome });
     } catch (e) {
-      return caught(e, "Could not make the preview proxy.");
+      return caught(e, new UserError("proxy_failed", "Could not make the preview proxy."));
     }
   },
 

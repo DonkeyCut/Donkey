@@ -21,7 +21,7 @@ test("an upload the connection dropped picks back up when the connection returns
     localUrl: "blob:take",
     send: async () => {
       sends++;
-      if (sends === 1) throw new ConnectionLostError("Upload failed.");
+      if (sends === 1) throw new ConnectionLostError("upload_failed", "Upload failed.");
       return "take.mov";
     },
   };

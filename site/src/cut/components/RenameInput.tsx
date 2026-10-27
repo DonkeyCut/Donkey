@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
+import { useTranslations } from "next-intl";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
@@ -17,6 +18,7 @@ export function RenameInput({
   onDone: (name?: string) => void;
   className?: string;
 }) {
+  const t = useTranslations("home.rename");
   const [draft, setDraft] = useState(value);
   const done = useRef(false);
   const finish = (keep: boolean) => {
@@ -29,7 +31,7 @@ export function RenameInput({
     <Input
       autoFocus
       value={draft}
-      aria-label="Name"
+      aria-label={t("name")}
       className={cn("h-6 w-full px-1.5 text-[12px]", className)}
       onFocus={(e) => e.currentTarget.select()}
       onChange={(e) => setDraft(e.target.value)}

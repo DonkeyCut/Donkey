@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { ChevronDown } from "lucide-react";
+import { useLocale, useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
@@ -46,7 +47,7 @@ import { useExports } from "@/cut/lib/exportStore";
 import { projectDuration, useEditor } from "@/cut/lib/store";
 import { subtitleFiles } from "@/cut/lib/subtitleFile";
 import { formatTime } from "@/cut/lib/time";
-import { CUT_LOUDNESS, LOUDNESS_CHOICES, loudnessLabel, loudnessSettings, type LoudnessId } from "@/cut/lib/loudnessSettings";
+import { CUT_LOUDNESS, LOUDNESS_CHOICES, loudnessSettings, type LoudnessId } from "@/cut/lib/loudnessSettings";
 import { planStems } from "@/cut/lib/stems";
 import { cn } from "@/lib/utils";
 
@@ -58,7 +59,6 @@ const FORMATS = EXPORT_CONTAINERS.flatMap((c) =>
     container: c.id as ExportContainer,
     codec: k.id as ExportCodec,
     label: `${c.label} (${k.label})`,
-    detail: k.detail,
   }))
 );
 
@@ -70,6 +70,8 @@ const QUALITY_RUNGS = [...EXPORT_QUALITIES].reverse();
 // finished file — is tracked in the app-wide exports dock, so starting one
 // never blocks starting another.
 export function ExportDialog() {
+  const t = useTranslations("editor.exportDialog");
+  const locale = useLocale();
   const setExportOpen = useEditor((s) => s.setExportOpen);
   const aspect = useEditor((s) => s.aspect);
   const clips = useEditor((s) => s.clips);
@@ -228,7 +230,18 @@ export function ExportDialog() {
     setExportOpen(false); // the dock takes it from here
   };
 
-  const sizeEstimate = formatSizeEstimate(estimateExportBytes(settings, span));
+  const sizeEstimate = formatSizeEstimate(estimateExportBytes(settings, span), locale);
+  // The rung names: the source frame reads in the page's language, the fixed
+  // sizes ("4K", "1080p") read as they are.
+  const rungLabel = (r: { id: string; label: string }) => (r.id === "source" ? t("source") : r.label);
+  // A loudness target by name, with its level beside it ("Social · −14 LUFS").
+  const loudnessName = (id: LoudnessId) =>
+    id === "off"
+      ? t(`loudness.${id}`)
+      : t("loudnessTarget", {
+          name: t(`loudness.${id}`),
+          lufs: String(CUT_LOUDNESS.targets[id]).replace("-", "−"),
+        });
   // ProRes encodes at one rate per profile, so the quality scale and the
   // typed bitrate have nothing to act on.
   const prores = fixedRate(settings.codec);
@@ -244,17 +257,17 @@ export function ExportDialog() {
     <Dialog open onOpenChange={(o) => !o && setExportOpen(false)}>
       <DialogContent className="gap-0 p-0 sm:max-w-lg">
         <DialogHeader className="px-6 pt-6 pb-4">
-          <DialogTitle className="text-xl">Export</DialogTitle>
+          <DialogTitle className="text-xl">{t("title")}</DialogTitle>
         </DialogHeader>
 
         <DialogBody className="mx-0 my-0 flex flex-col gap-6 px-6 pt-1 pb-6">
-          <div className="grid grid-cols-6 gap-1.5 max-sm:grid-cols-3" role="radiogroup" aria-label="Export preset">
+          <div className="grid grid-cols-6 gap-1.5 max-sm:grid-cols-3" role="radiogroup" aria-label={t("presetGroup")}>
             {EXPORT_QUICK_PRESETS.map((p) => (
               <PresetTile
                 key={p.id}
                 checked={preset === p.id}
-                label={p.label}
-                title={p.detail}
+                label={t(`quickPresets.${p.id}.label`)}
+                title={t(`quickPresets.${p.id}.detail`)}
                 onClick={() => {
                   setMbpsText("");
                   setCustomPicked(false);
@@ -264,30 +277,36 @@ export function ExportDialog() {
             ))}
             <PresetTile
               checked={preset === null}
-              label="Custom"
-              title="Set every option yourself"
+              label={t("custom")}
+              title={t("customHint")}
               onClick={() => setCustomPicked(true)}
             />
           </div>
 
           <Scale
-            label="Resolution"
-            value={`${settings.width} × ${settings.height}${resolution.upscale ? " · upscaled" : ""}`}
+            label={t("resolution")}
+            value={
+              resolution.upscale
+                ? t("sizeUpscaled", { width: settings.width, height: settings.height })
+                : t("size", { width: settings.width, height: settings.height })
+            }
             index={rungIndex}
             stops={rungs.map((r) => ({
-              label: r.label,
-              title: `${r.width} × ${r.height}${r.upscale ? " · upscaled from the source" : ""}`,
+              label: rungLabel(r),
+              title: r.upscale
+                ? t("sizeUpscaledFromSource", { width: r.width, height: r.height })
+                : t("size", { width: r.width, height: r.height }),
             }))}
             onIndex={(i) => set({ resolution: rungs[i]!.id })}
           />
 
           {/* ProRes fixes its own bitrate, so the scale stays put and greys out. */}
           <Scale
-            label="Quality"
-            value={customRate ? `${choice.bitrateMbps} Mbps · ${sizeEstimate}` : sizeEstimate}
+            label={t("quality")}
+            value={customRate ? t("customRateValue", { mbps: choice.bitrateMbps ?? 0, size: sizeEstimate }) : sizeEstimate}
             index={customRate ? null : qualityIndex}
             disabled={prores}
-            stops={QUALITY_RUNGS.map((q) => ({ label: q.label, title: q.detail }))}
+            stops={QUALITY_RUNGS.map((q) => ({ label: t(`qualities.${q.id}.label`), title: t(`qualities.${q.id}.detail`) }))}
             onIndex={(i) => {
               setMbpsText("");
               set({ quality: QUALITY_RUNGS[i]!.id, bitrateMbps: undefined });
@@ -295,9 +314,9 @@ export function ExportDialog() {
           />
 
           <div className="flex flex-col gap-3">
-            <Field label="File name">
+            <Field label={t("fileName")}>
               <Input
-                aria-label="File name"
+                aria-label={t("fileName")}
                 className="h-8 w-48 text-sm"
                 value={name}
                 placeholder={projectName}
@@ -305,44 +324,46 @@ export function ExportDialog() {
               />
             </Field>
             {selection && (
-              <Field label="Range">
+              <Field label={t("range")}>
                 <Select value={rangeMode} onValueChange={(v) => setRangeMode(v as "all" | "selection")}>
-                  <SelectTrigger className="w-fit min-w-32" aria-label="Range">
+                  <SelectTrigger className="w-fit min-w-32" aria-label={t("range")}>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent align="end">
-                    <SelectItem value="all">Whole video</SelectItem>
+                    <SelectItem value="all">{t("wholeVideo")}</SelectItem>
                     <SelectItem
                       value="selection"
-                      title="From the first selected item's start to the last one's end, every row included"
+                      title={t("selectionHint")}
                     >
-                      Selection · {formatTime(selection.start)}–{formatTime(selection.end)}
+                      {t("selectionRange", { start: formatTime(selection.start), end: formatTime(selection.end) })}
                     </SelectItem>
                   </SelectContent>
                 </Select>
               </Field>
             )}
-            <Field label="Frame rate">
+            <Field label={t("frameRate")}>
               <Select
                 value={String(choice.fps)}
                 onValueChange={(v) => set({ fps: v === "source" ? "source" : Number(v) })}
               >
-                <SelectTrigger className="w-fit min-w-32" aria-label="Frame rate">
+                <SelectTrigger className="w-fit min-w-32" aria-label={t("frameRate")}>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent align="end">
-                  <SelectItem value="source" title="The rate the footage plays at">
-                    {probing ? "Source · reading…" : `Source · ${Number((sourceFps ?? DEFAULT_EXPORT_FPS).toFixed(3))} fps`}
+                  <SelectItem value="source" title={t("sourceRateHint")}>
+                    {probing
+                      ? t("sourceReading")
+                      : t("sourceRate", { fps: Number((sourceFps ?? DEFAULT_EXPORT_FPS).toFixed(3)) })}
                   </SelectItem>
                   {EXPORT_FRAME_RATES.map((f) => (
                     <SelectItem key={f} value={String(f)}>
-                      {f} fps
+                      {t("fps", { fps: f })}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </Field>
-            <Field label="Format">
+            <Field label={t("format")}>
               <Select
                 value={formatId}
                 onValueChange={(v) => {
@@ -359,34 +380,34 @@ export function ExportDialog() {
                   });
                 }}
               >
-                <SelectTrigger className="w-fit min-w-32" aria-label="Format">
+                <SelectTrigger className="w-fit min-w-32" aria-label={t("format")}>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent align="end">
                   {FORMATS.map((f) => (
-                    <SelectItem key={f.id} value={f.id} title={f.detail} disabled={hdr && f.codec === "h264"}>
+                    <SelectItem key={f.id} value={f.id} title={t(`codecs.${f.codec}`)} disabled={hdr && f.codec === "h264"}>
                       {f.label}
-                      {hdr && f.codec === "h264" ? " · 8-bit" : ""}
+                      {hdr && f.codec === "h264" ? ` · ${t("eightBit")}` : ""}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </Field>
-            <Field label="Color">
+            <Field label={t("color")}>
               <Select value={colorSpace} onValueChange={(v) => setColorSpace(v as OutputSpace)}>
-                <SelectTrigger className="w-fit min-w-32" aria-label="Color">
+                <SelectTrigger className="w-fit min-w-32" aria-label={t("color")}>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent align="end">
                   {OUTPUT_SPACES.map((o) => (
                     <SelectItem key={o.id} value={o.id}>
-                      {o.label}
+                      {t(`colorSpaces.${o.id}`)}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </Field>
-            <Field label="Audio">
+            <Field label={t("audio")}>
               <Select
                 value={choice.audioCodec}
                 onValueChange={(v) =>
@@ -396,12 +417,12 @@ export function ExportDialog() {
                   })
                 }
               >
-                <SelectTrigger className="w-32" aria-label="Audio">
+                <SelectTrigger className="w-32" aria-label={t("audio")}>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent align="end">
                   {EXPORT_AUDIO.map((a) => (
-                    <SelectItem key={a.id} value={a.id} title={a.detail}>
+                    <SelectItem key={a.id} value={a.id} title={t(`audioCodecs.${a.id}`)}>
                       {a.label}
                     </SelectItem>
                   ))}
@@ -409,21 +430,21 @@ export function ExportDialog() {
               </Select>
             </Field>
             <Field
-              label="Loudness"
+              label={t("loudnessLabel")}
               hint={
                 loudness === "off"
                   ? undefined
-                  : `Sets the whole mix to its target and holds true peaks under ${String(CUT_LOUDNESS.truePeakCeiling).replace("-", "−")} dBTP.`
+                  : t("loudnessHint", { ceiling: String(CUT_LOUDNESS.truePeakCeiling).replace("-", "−") })
               }
             >
               <Select value={loudness} onValueChange={(v) => setLoudness(v as LoudnessId)}>
-                <SelectTrigger className="w-fit min-w-32" aria-label="Loudness">
+                <SelectTrigger className="w-fit min-w-32" aria-label={t("loudnessLabel")}>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent align="end">
                   {LOUDNESS_CHOICES.map((c) => (
                     <SelectItem key={c.id} value={c.id}>
-                      {loudnessLabel(c.id)}
+                      {loudnessName(c.id)}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -433,13 +454,13 @@ export function ExportDialog() {
 
           <Collapsible open={moreOpen} onOpenChange={setMoreOpen} className="flex flex-col gap-3">
             <CollapsibleTrigger className="flex items-center justify-between text-sm text-muted-foreground transition-colors hover:text-foreground">
-              More settings
+              {t("moreSettings")}
               <ChevronDown className={cn("size-4 transition-transform", moreOpen && "rotate-180")} />
             </CollapsibleTrigger>
             <CollapsibleContent className="flex flex-col gap-3">
               <Field
-                label="Custom bitrate"
-                hint="Higher bitrates mean better quality and larger files. Use it when a platform requires a specific bitrate; ProRes sets its own."
+                label={t("customBitrate")}
+                hint={t("customBitrateHint")}
               >
                 <label
                   className={cn(
@@ -453,8 +474,8 @@ export function ExportDialog() {
                     min={0.5}
                     max={MAX_MBPS}
                     step={0.5}
-                    placeholder="Auto"
-                    aria-label="Bitrate in megabits per second"
+                    placeholder={t("auto")}
+                    aria-label={t("bitrateLabel")}
                     disabled={prores}
                     className="h-6 w-16 border-0 bg-transparent px-0 text-sm shadow-none [appearance:textfield] focus-visible:ring-0 disabled:cursor-not-allowed [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                     value={mbpsText}
@@ -464,16 +485,16 @@ export function ExportDialog() {
                       set({ bitrateMbps: v > 0 ? v : undefined });
                     }}
                   />
-                  <span className="text-xs text-muted-foreground">Mbps</span>
+                  <span className="text-xs text-muted-foreground">{t("mbps")}</span>
                 </label>
               </Field>
               {canStem && (
                 <Field
-                  label="Stems"
-                  hint="Saves one WAV per lane, dialogue and each soundtrack lane, zipped beside the video for mixing elsewhere."
+                  label={t("stems")}
+                  hint={t("stemsHint")}
                 >
                   <Switch
-                    aria-label="Export stems"
+                    aria-label={t("exportStems")}
                     checked={withStems}
                     onCheckedChange={(v) => setWithStems(v === true)}
                   />
@@ -481,11 +502,11 @@ export function ExportDialog() {
               )}
               {captionFiles.length > 0 && (
                 <Field
-                  label="Captions file"
-                  hint="Saves the captions as an SRT file to your Downloads folder, for platforms that take their own captions."
+                  label={t("captionsFile")}
+                  hint={t("captionsFileHint")}
                 >
                   <Switch
-                    aria-label="Save a captions file"
+                    aria-label={t("saveCaptionsFile")}
                     checked={withCaptions}
                     onCheckedChange={(v) => setWithCaptions(v === true)}
                   />
@@ -496,8 +517,7 @@ export function ExportDialog() {
 
           {!inTab && (
             <p className="text-xs leading-relaxed text-muted-foreground">
-              This browser can&apos;t encode {prores ? "ProRes" : hdr ? "HDR" : "this"} itself, so it renders in the
-              cloud and lands here when done.
+              {t("cloudRender", { kind: prores ? "prores" : hdr ? "hdr" : "other" })}
             </p>
           )}
         </DialogBody>
@@ -505,17 +525,17 @@ export function ExportDialog() {
         <DialogFooter className="mx-0 mb-0 flex-col gap-3 rounded-b-xl bg-muted/40 px-6 py-5 sm:flex-col">
           <div className="flex items-center justify-between gap-3 text-sm text-muted-foreground">
             <span className="truncate">
-              {settings.width} × {settings.height} · {settings.fps} fps ·{" "}
+              {t("size", { width: settings.width, height: settings.height })} · {t("fps", { fps: settings.fps })} ·{" "}
               {FORMATS.find((f) => f.id === formatId)?.label ?? formatId} · {settings.audioCodec.toUpperCase()}
-              {hdr ? ` · ${OUTPUT_SPACES.find((o) => o.id === colorSpace)?.label}` : ""}
+              {hdr ? ` · ${t(`colorSpaces.${colorSpace}`)}` : ""}
               {range ? ` · ${formatTime(span)}` : ""}
-              {settings.loudness !== undefined ? ` · ${String(settings.loudness).replace("-", "−")} LUFS` : ""}
-              {stems ? " · stems" : ""}
+              {settings.loudness !== undefined ? ` · ${t("lufs", { lufs: String(settings.loudness).replace("-", "−") })}` : ""}
+              {stems ? ` · ${t("stemsTag")}` : ""}
             </span>
             <span className="shrink-0 tabular-nums">{sizeEstimate}</span>
           </div>
           <Button className="h-11 w-full text-base" onClick={run} disabled={waiting}>
-            {waiting ? "Reading the footage…" : "Export video"}
+            {waiting ? t("reading") : t("exportVideo")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -554,7 +574,7 @@ function PresetTile({
       )}
       onClick={onClick}
     >
-      {label}
+      <span className="truncate">{label}</span>
     </button>
   );
 }
@@ -580,6 +600,7 @@ function Scale({
   disabled?: boolean;
   onIndex: (i: number) => void;
 }) {
+  const t = useTranslations("editor.exportDialog");
   const last = Math.max(0, stops.length - 1);
   return (
     <div className={cn("flex flex-col gap-1", disabled && "opacity-40")}>
@@ -596,7 +617,7 @@ function Scale({
         value={index ?? 0}
         onValueChange={(v) => onIndex(Array.isArray(v) ? v[0]! : v)}
       />
-      <div className="relative h-4" role="radiogroup" aria-label={`${label} presets`}>
+      <div className="relative h-4" role="radiogroup" aria-label={t("scalePresets", { label })}>
         {stops.map((s, i) => (
           <button
             key={s.label}

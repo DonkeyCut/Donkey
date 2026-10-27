@@ -11,6 +11,7 @@ import { estimatedShape, importUrlToLibrary, moveLibraryItem, uploadToLibrary, t
 import type { LibraryUploadState } from "@/cut/lib/libraryUpload";
 import { libraryKey, libraryScope, patchLibrary, refetchLibrary } from "@/cut/lib/queries";
 import type { Residency } from "@/cut/lib/residency";
+import { UserError, errorFields, type ErrorFields } from "@/cut/lib/userError";
 
 export type LibraryArrival = {
   id: string;
@@ -24,9 +25,8 @@ export type LibraryArrival = {
   stage: "preparing" | "uploading" | ImportStage;
   startStage: "preparing" | "uploading" | ImportStage;
   shape?: { width: number; height: number };
-  error?: string;
   run: () => Promise<void>;
-};
+} & ErrorFields;
 
 export const useLibraryImports = create<{ items: LibraryArrival[] }>(() => ({ items: [] }));
 const update = (fn: (items: LibraryArrival[]) => LibraryArrival[]) =>
@@ -59,18 +59,18 @@ export function importLibraryFiles(
     let running: Promise<void> | undefined;
     const work = async () => {
       if (!wanted(id)) return;
-      update((items) => items.map((item) => item.id === id ? { ...item, error: undefined, startedAt: Date.now() } : item));
+      update((items) => items.map((item) => item.id === id ? { ...item, error: undefined, errorCode: undefined, errorParams: undefined, startedAt: Date.now() } : item));
       try {
         const expanded = await expandLinkedFiles([file]);
         if (!wanted(id)) return;
         if (expanded.length !== 1 || expanded[0] !== file) {
           const children = expanded.filter(accepts).map(prepare);
-          if (!children.length) throw new Error("This archive contains no supported files.");
+          if (!children.length) throw new UserError("archive_no_supported_files", "This archive contains no supported files.");
           update((items) => items.flatMap((item) => item.id === id ? children : [item]));
           for (const child of children) await child.run();
           return;
         }
-        if (!accepts(file)) throw new Error("This file contains no supported media.");
+        if (!accepts(file)) throw new UserError("file_no_supported_media", "This file contains no supported media.");
         if (!asset) {
           const residency = isLinkedFile(file) && !target.folderId ? await shelfForNewItem(file.size) : target.residency;
           if (!wanted(id)) return;
@@ -84,14 +84,14 @@ export function importLibraryFiles(
         if (!wanted(id)) return;
         if (!client.getQueryData(libraryKey(libraryScope()))) {
           await refetchLibrary(client);
-          if (!client.getQueryData(libraryKey(libraryScope()))) throw new Error("Could not refresh the library. Retry to show the saved file.");
+          if (!client.getQueryData(libraryKey(libraryScope()))) throw new UserError("library_refresh_failed", "Could not refresh the library. Retry to show the saved file.");
         }
         const landed = asset;
         patchLibrary(client, (data) => ({ ...data, assets: [landed, ...data.assets.filter((item) => item.id !== landed.id)] }));
         if (isLinkedType(asset.type)) void syncLinkedLibrary();
         dismissLibraryImport(id);
       } catch (error) {
-        if (wanted(id)) update((items) => items.map((item) => item.id === id ? { ...item, error: error instanceof Error ? error.message : "Could not import this file." } : item));
+        if (wanted(id)) update((items) => items.map((item) => item.id === id ? { ...item, ...errorFields(error, new UserError("file_import_failed", "Could not import this file.")) } : item));
       }
     };
     return {
@@ -173,7 +173,7 @@ function linkArrival(saved: SavedLink, client: QueryClient): LibraryArrival {
     // A retry restarts the clock on the tile and on the saved link.
     if (useLibraryImports.getState().items.find((item) => item.id === id)?.error) {
       link = { ...link, startedAt: Date.now() };
-      update((items) => items.map((item) => item.id === id ? { ...item, error: undefined, stage: item.startStage, startedAt: link.startedAt } : item));
+      update((items) => items.map((item) => item.id === id ? { ...item, error: undefined, errorCode: undefined, errorParams: undefined, stage: item.startStage, startedAt: link.startedAt } : item));
     }
     await editLinks(owner, (links) => [...links.filter((l) => l.id !== id), link]);
     try {
@@ -194,7 +194,7 @@ function linkArrival(saved: SavedLink, client: QueryClient): LibraryArrival {
       }
       dismissLibraryImport(id);
     } catch (error) {
-      if (wanted()) update((items) => items.map((item) => item.id === id ? { ...item, error: error instanceof Error ? error.message : "Could not import that URL." } : item));
+      if (wanted()) update((items) => items.map((item) => item.id === id ? { ...item, ...errorFields(error, new UserError("url_import_failed", "Could not import that URL.")) } : item));
       await editLinks(owner, (links) => links.filter((l) => l.id !== id));
     }
   };

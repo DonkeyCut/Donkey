@@ -7,6 +7,7 @@
 // lives).
 import { type ReactNode } from "react";
 import { Loader2 } from "lucide-react";
+import { useLocale, useTranslations } from "next-intl";
 import {
   Tooltip,
   TooltipContent,
@@ -22,6 +23,7 @@ import { cn } from "@/lib/utils";
 import { useAccountConfig } from "@/queries/accountConfig";
 import { useOpenBillingPortal, useProSubscription } from "@/queries/billing";
 import { formatBytes } from "@/lib/bytes";
+import type { Locale } from "@/i18n/locales";
 
 const PILL =
   "flex cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-full border border-border bg-card px-3 py-1.5 text-xs font-medium shadow-xs transition-colors";
@@ -29,9 +31,9 @@ const PILL =
 /** "278 / 250 MB" — the pill sits in a crowded top bar, so a unit is spelled
  * out only where it carries information: repeat it just when the two numbers
  * land on different ones ("1.2 GB / 250 MB"). */
-export function usageLabel(bytes: number, quotaBytes: number): string {
-  const used = formatBytes(bytes);
-  const cap = formatBytes(quotaBytes);
+export function usageLabel(bytes: number, quotaBytes: number, locale: Locale): string {
+  const used = formatBytes(bytes, locale);
+  const cap = formatBytes(quotaBytes, locale);
   const unit = cap.slice(cap.lastIndexOf(" ") + 1);
   const short = used.endsWith(` ${unit}`) ? used.slice(0, -(unit.length + 1)) : used;
   return `${short} / ${cap}`;
@@ -44,6 +46,8 @@ export function StoragePill() {
 }
 
 function CloudStoragePill() {
+  const t = useTranslations("billing.storagePill");
+  const locale = useLocale();
   const pro = useProSubscription();
   // The meter has to move as media lands, so this reader is the polling one.
   const usage = useCloudUsage(pro.data?.isActive === false, { poll: true });
@@ -62,7 +66,7 @@ function CloudStoragePill() {
       config.data?.settings.proEndingNotice.daysBefore ?? SETTINGS.proEndingNotice.default.daysBefore;
     if (days >= daysBefore) return null;
     return (
-      <PillTooltip message="Your Pro plan is set to cancel. Resume it to keep your cloud storage.">
+      <PillTooltip message={t("cancelTooltip")}>
         <TooltipTrigger
           className={cn(PILL, "text-muted-foreground hover:bg-muted hover:text-foreground")}
           disabled={portal.isPending}
@@ -77,7 +81,7 @@ function CloudStoragePill() {
           }}
         >
           {portal.isPending && <Loader2 className="size-3 animate-spin" />}
-          Pro · {days === 0 ? "ends today" : `ends in ${days} day${days === 1 ? "" : "s"}`}
+          {t("ends", { days })}
         </TooltipTrigger>
       </PillTooltip>
     );
@@ -90,10 +94,10 @@ function CloudStoragePill() {
   // an over-quota account has to learn that uploads are being turned away, and
   // that it is fixable, without clicking first.
   const message = u.grace
-    ? "Your Pro plan ended and you're over the free limit. Upgrade or free up space before your oldest projects are deleted."
+    ? t("graceTooltip")
     : frac >= 1
-      ? "You've run out of cloud storage. Upgrade or free up space to keep uploading."
-      : `${formatBytes(u.bytes)} of ${formatBytes(u.quotaBytes)} of cloud storage used.`;
+      ? t("fullTooltip")
+      : t("usedTooltip", { used: formatBytes(u.bytes, locale), quota: formatBytes(u.quotaBytes, locale) });
   return (
     <PillTooltip message={message}>
       <TooltipTrigger
@@ -113,7 +117,7 @@ function CloudStoragePill() {
           });
         }}
       >
-        {usageLabel(u.bytes, u.quotaBytes)}
+        {usageLabel(u.bytes, u.quotaBytes, locale)}
       </TooltipTrigger>
     </PillTooltip>
   );

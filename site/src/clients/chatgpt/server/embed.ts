@@ -7,6 +7,10 @@ import {
   OAuthRateLimitError,
 } from "@/clients/chatgpt/server/oauthRateLimit";
 import { recordEditorSession, redeemEditorCode } from "@/clients/chatgpt/server/oauthTokens";
+import { escapeHtml, requestLocale } from "@/clients/chatgpt/server/locale";
+import type { Locale } from "@/i18n/locales";
+import type { Messages } from "@/i18n/namespaces";
+import { translatorFor } from "@/i18n/translator";
 
 const NO_STORE_HEADERS = { "Cache-Control": "no-store", Pragma: "no-cache" };
 
@@ -15,8 +19,8 @@ const NO_STORE_HEADERS = { "Cache-Control": "no-store", Pragma: "no-cache" };
  * skeleton over the frame until the frame says it has something to show, so
  * every answer here is either the editor or a page that says so.
  */
-function refusal(message: string, status: number, retryAfter?: string) {
-  const page = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Donkey Cut</title></head><body style="margin:0;min-height:100vh;display:grid;place-items:center;padding:24px;box-sizing:border-box;background:#fff;color:#737373;font:14px/1.5 system-ui,sans-serif;text-align:center"><p>${message}</p><script>parent.postMessage({ type: "donkeycut:ready" }, "*")</script></body></html>`;
+function refusal(locale: Locale, message: string, status: number, retryAfter?: string) {
+  const page = `<!doctype html><html lang="${locale}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Donkey Cut</title></head><body style="margin:0;min-height:100vh;display:grid;place-items:center;padding:24px;box-sizing:border-box;background:#fff;color:#737373;font:14px/1.5 system-ui,sans-serif;text-align:center"><p>${escapeHtml(message)}</p><script>parent.postMessage({ type: "donkeycut:ready" }, "*")</script></body></html>`;
   return new Response(page, {
     status,
     headers: {
@@ -27,7 +31,8 @@ function refusal(message: string, status: number, retryAfter?: string) {
   });
 }
 
-const TOO_MANY = "Too many requests. Try again in a minute.";
+type RefusalKey = keyof Messages["chatgpt"]["embed"];
+type Refuse = (key: RefusalKey, status: number, retryAfter?: string) => Response;
 
 /**
  * GET /api/chatgpt/embed?code=…&project=…: the card's frame redeems its one-use
@@ -36,29 +41,34 @@ const TOO_MANY = "Too many requests. Try again in a minute.";
  * own sign-in never crosses into the frame, and the frame's never leaves it.
  */
 export async function embedEndpoint(request: Request) {
+  // Every refusal reads in the frame's language.
+  const locale = requestLocale(request);
+  const t = await translatorFor(locale, "chatgpt");
+  const refuse: Refuse = (key, status, retryAfter) => refusal(locale, t(`embed.${key}`), status, retryAfter);
+
   try {
-    return await redeem(request);
+    return await redeem(request, refuse);
   } catch (error) {
     console.error("[chatgpt] embed redeem failed", error);
-    return refusal("Donkey Cut could not open the editor. Open the project again from ChatGPT.", 500);
+    return refuse("failed", 500);
   }
 }
 
-async function redeem(request: Request) {
+async function redeem(request: Request, refuse: Refuse) {
   const config = await chatgptConfig();
-  if (!config.enabled) return refusal("ChatGPT connection is not enabled.", 503);
+  if (!config.enabled) return refuse("disabled", 503);
   const limited = limitOAuthSource(request, "embed", config.oauthRequestsPerIpMinute);
-  if (limited) return refusal(TOO_MANY, 429, limited.headers.get("Retry-After") ?? undefined);
+  if (limited) return refuse("tooMany", 429, limited.headers.get("Retry-After") ?? undefined);
 
   const params = new URL(request.url).searchParams;
   const project = params.get("project") ?? "";
-  if (!/^[A-Za-z0-9_-]{1,128}$/.test(project)) return refusal("Bad request.", 400);
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(project)) return refuse("badRequest", 400);
   const redeemed = await redeemEditorCode(params.get("code") ?? "", config);
-  if (!redeemed) return refusal("This editor link has expired. Open the project again from ChatGPT.", 403);
+  if (!redeemed) return refuse("expired", 403);
   try {
     enforceOAuthUserLimit(redeemed.userId, "embed", config.requestsPerMinute);
   } catch (error) {
-    if (error instanceof OAuthRateLimitError) return refusal(TOO_MANY, 429, String(error.retryAfterSeconds));
+    if (error instanceof OAuthRateLimitError) return refuse("tooMany", 429, String(error.retryAfterSeconds));
     throw error;
   }
 

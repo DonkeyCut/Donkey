@@ -8,6 +8,7 @@ import { parseHTML } from "linkedom";
 import { convertToMp4, fitsAlready, streamCodecs } from "./convert";
 import type { LibrarySource } from "./library";
 import { pexelsFileUrl, pexelsVideo } from "./pexels";
+import { UserError } from "../lib/userError";
 
 // Bring back whatever a URL points at. yt-dlp, resolved from PATH, pulls
 // anything with a video or audio stream (TikTok, YouTube, Instagram, …); X's
@@ -120,7 +121,7 @@ export async function download(
     }
   }
   const first = failures[0];
-  throw first instanceof Error ? first : new Error("Nothing could be imported from that URL.");
+  throw first instanceof Error ? first : new UserError("url_nothing_imported", "Nothing could be imported from that URL.");
 }
 
 /** A Pexels video by its page link: the page refuses a server, so its best
@@ -135,8 +136,10 @@ async function downloadPexels(
   const file = video.file ?? (await pexelsFileUrl(video.id));
   // Newer videos name their files by a second id only the page shows.
   if (!file)
-    throw new Error(
-      `Pexels video ${video.id} keeps its files under names only its page shows: read the page for its videos.pexels.com/video-files/${video.id}/… link (the 1920 or 1080 wide one) and import that link.`
+    throw new UserError(
+      "pexels_files_hidden",
+      `Pexels video ${video.id} keeps its files under names only its page shows: read the page for its videos.pexels.com/video-files/${video.id}/… link (the 1920 or 1080 wide one) and import that link.`,
+      { id: video.id }
     );
   const got = await downloadMedia(file, tmp, opts);
   const title = (video.file ? video.title : `${video.title} (Pexels ${video.id})`).slice(0, 120);
@@ -154,7 +157,11 @@ class MediaHostError extends Error {}
 
 /** The bundled tool is missing — every retry lands here, so the first attempt
  * is the last. */
-class MissingToolError extends Error {}
+class MissingToolError extends UserError {
+  constructor() {
+    super("url_tool_missing", "yt-dlp is not available in this build.");
+  }
+}
 
 async function downloadMedia(url: string, tmp: string, opts: DownloadOptions = {}): Promise<Downloaded> {
   // Read what sits at the URL before pulling any bytes. The extractor name
@@ -186,7 +193,7 @@ async function downloadMedia(url: string, tmp: string, opts: DownloadOptions = {
   }
   // Pick the largest media file left behind (the merged output).
   const names = (await readdir(out)).filter((f) => MEDIA_EXT.test(f));
-  if (names.length === 0) throw new Error("Nothing downloadable was found at that URL.");
+  if (names.length === 0) throw new UserError("url_nothing_downloadable", "Nothing downloadable was found at that URL.");
   const sized = await Promise.all(
     names.map(async (n) => ({ n, size: (await stat(path.join(out, n))).size }))
   );
@@ -267,7 +274,7 @@ async function savePoster(
 
 async function downloadDirectImage(url: string, dir: string): Promise<Downloaded> {
   const res = await fetch(url);
-  if (!res.ok) throw new Error("Could not download that image.");
+  if (!res.ok) throw new UserError("image_download_failed", "Could not download that image.");
   const name = path.basename(new URL(url).pathname) || "image.jpg";
   const file = path.join(dir, name);
   await writeFile(file, Buffer.from(await res.arrayBuffer()));
@@ -384,7 +391,7 @@ async function xArticle(
   const cover = scraped.cover || article.cover_media?.media_info?.original_img_url;
   const text = clamp([postWords, title, body].filter(Boolean).join("\n\n"), MAX_PAGE_TEXT);
   if (!text && !cover) {
-    throw new Error("Could not read that X Article — import the post that published it.");
+    throw new UserError("x_article_unreadable", "Could not read that X Article — import the post that published it.");
   }
   const files = cover
     ? [await savePhoto(cover, dir, "article-cover", title || "Article cover")]
@@ -455,7 +462,7 @@ async function savePhoto(
 ): Promise<{ file: string; title: string }> {
   let img = await fetch(`${photoUrl}${photoUrl.includes("?") ? "&" : "?"}name=orig`);
   if (!img.ok) img = await fetch(photoUrl);
-  if (!img.ok) throw new Error("Could not download the post's photos.");
+  if (!img.ok) throw new UserError("post_photos_download_failed", "Could not download the post's photos.");
   const ext = (
     /\.(png|jpe?g|webp|gif)(?:$|\?)/i.exec(photoUrl)?.[1] ||
     (img.headers.get("content-type")?.includes("png") ? "png" : "jpg")
@@ -478,9 +485,9 @@ async function fetchPage(url: string): Promise<{ html: string; url: string }> {
     headers: { "user-agent": PAGE_UA, accept: "text/html,application/xhtml+xml,*/*" },
     redirect: "follow",
   });
-  if (!res.ok) throw new Error(`That page could not be read (${res.status}).`);
+  if (!res.ok) throw new UserError("page_read_failed", `That page could not be read (${res.status}).`, { status: res.status });
   const type = res.headers.get("content-type") ?? "";
-  if (type && !/text\/|xml|json/i.test(type)) throw new Error("That URL is not a readable page.");
+  if (type && !/text\/|xml|json/i.test(type)) throw new UserError("url_not_readable_page", "That URL is not a readable page.");
   const buf = await res.arrayBuffer();
   const bytes = buf.byteLength > MAX_PAGE_BYTES ? buf.slice(0, MAX_PAGE_BYTES) : buf;
   return { html: Buffer.from(bytes).toString("utf8"), url: res.url || url };
@@ -725,7 +732,7 @@ function ytDlpBinaries(): string[] {
  * the build that answered so the download starts with the one that works. */
 async function probeUrl(url: string): Promise<{ meta: YtMeta; bin: string }> {
   const bins = ytDlpBinaries();
-  if (bins.length === 0) throw new MissingToolError("yt-dlp is not available in this build.");
+  if (bins.length === 0) throw new MissingToolError();
   let first: unknown;
   for (const bin of bins) {
     try {
@@ -734,7 +741,7 @@ async function probeUrl(url: string): Promise<{ meta: YtMeta; bin: string }> {
       first ??= e;
     }
   }
-  throw first instanceof Error ? first : new Error("Nothing could be read at that URL.");
+  throw first instanceof Error ? first : new UserError("url_nothing_readable", "Nothing could be read at that URL.");
 }
 
 // What the whole ladder may spend. Someone is watching a tile the entire time,
@@ -769,7 +776,7 @@ async function runYtDlp(
       first ??= e;
     }
   }
-  throw first instanceof Error ? first : new Error("Download failed.");
+  throw first instanceof Error ? first : new UserError("download_failed", "Download failed.");
 }
 
 function ytDlp(
@@ -871,7 +878,7 @@ function ytDlpJson(bin: string, args: string[], timeoutMs = 300_000): Promise<Yt
     const p = spawn(bin, ["--no-playlist", "--no-progress", ...args]);
     const timer = setTimeout(() => {
       p.kill("SIGKILL");
-      reject(new Error("Download timed out."));
+      reject(new UserError("download_timed_out", "Download timed out."));
     }, timeoutMs);
     timer.unref();
     let out = "";
@@ -883,7 +890,7 @@ function ytDlpJson(bin: string, args: string[], timeoutMs = 300_000): Promise<Yt
       // Bun and Node word a missing binary differently; the code is the same.
       reject(
         (e as NodeJS.ErrnoException).code === "ENOENT"
-          ? new MissingToolError("yt-dlp is not available in this build.")
+          ? new MissingToolError()
           : e
       );
     });

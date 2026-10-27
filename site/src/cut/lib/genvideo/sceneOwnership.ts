@@ -7,6 +7,7 @@ import type { ProjectDoc } from "../types";
 import { docWriterIdle } from "./docWriter";
 import { VideoOrchestrator } from "./orchestrator";
 import { SceneOwnedElsewhere, withSceneLease } from "./sceneLease";
+import { UserError } from "../userError";
 export { SceneOwnedElsewhere } from "./sceneLease";
 
 /** Every entry into a scene takes the project's lease, including reload recovery. */
@@ -22,7 +23,9 @@ export function ownScene(projectId: string, scene: VideoOrchestrator, fresh = fa
       let leaseMs = CHAT_RUNTIME.sceneLeaseMs;
       const lease = async (release = false) => {
         const res = await backend.fetch(route, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ owner, release, leaseMs: CHAT_RUNTIME.sceneLeaseMs }) });
-        if (!res.ok) throw new Error("Could not reserve the video run.");
+        if (!res.ok) {
+          throw new UserError("scene_lease_failed", "Could not reserve the video run.");
+        }
         const result = await res.json() as { acquired: boolean; leaseMs?: number };
         if (result.leaseMs) leaseMs = result.leaseMs;
         return result.acquired;
@@ -31,13 +34,19 @@ export function ownScene(projectId: string, scene: VideoOrchestrator, fresh = fa
         await flushEditorSave(projectId);
         await docWriterIdle(projectId);
         const res = await backend.fetch(`/api/cut/projects/${encodeURIComponent(projectId)}`, { observe: true });
-        if (!res.ok) throw new Error("Could not read the video run.");
+        if (!res.ok) {
+          throw new UserError("scene_read_failed", "Could not read the video run.");
+        }
         const doc = await res.json() as ProjectDoc;
         const current = useEditor.getState();
         const revision = res.headers.get("x-cut-doc-version");
         if (backend.kind === "cloud" && current.projectId === projectId && current.loaded &&
-            revision && projectRevision(projectId) !== revision)
-          throw new Error("The project changed in another tab. Reload it before continuing the video run.");
+            revision && projectRevision(projectId) !== revision) {
+          throw new UserError(
+            "scene_project_changed",
+            "The project changed in another tab. Reload it before continuing the video run.",
+          );
+        }
         if (!fresh && doc.genvideo?.id !== scene.project.id) {
           scene.abort();
           return scene.project;
@@ -55,7 +64,9 @@ export function ownScene(projectId: string, scene: VideoOrchestrator, fresh = fa
         return result;
       };
       if (backend.kind === "browser") {
-        if (typeof navigator === "undefined" || !navigator.locks) throw new Error("This browser cannot coordinate background video runs.");
+        if (typeof navigator === "undefined" || !navigator.locks) {
+          throw new UserError("scene_locks_unavailable", "This browser cannot coordinate background video runs.");
+        }
         return await navigator.locks.request(`cut-scene:${projectId}`, { ifAvailable: true }, async (lock) => {
           if (!lock) throw new SceneOwnedElsewhere();
           return execute();

@@ -2,6 +2,7 @@
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import Link from "next/link";
+import { useTranslations } from "next-intl";
 import { CUT_APP_BASE, homeHref, projectHref } from "@/cut/lib/nav";
 import { Check, Clock, Copy, FileText, X } from "lucide-react";
 import {
@@ -177,13 +178,14 @@ export function CopyHandlePill({
   name: string;
   className?: string;
 }) {
+  const t = useTranslations("chat.assetRefs");
   const [copied, setCopied] = useState(false);
   const token = handle ? `@${handle}` : mentionToken(name);
   return (
     <button
       type="button"
-      title="Copy reference"
-      aria-label={`Copy reference ${token}`}
+      title={t("copyReference")}
+      aria-label={t("copyReferenceToken", { token })}
       className={cn(
         "absolute top-1 left-1 max-w-[calc(100%-0.5rem)] rounded-[5px] opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100",
         className
@@ -200,7 +202,7 @@ export function CopyHandlePill({
           .catch(() => {});
       }}
     >
-      <RefHandlePill token={copied ? "Copied" : token} />
+      <RefHandlePill token={copied ? t("copied") : token} />
     </button>
   );
 }
@@ -323,6 +325,7 @@ export function RefTokenChip({
   onDark?: boolean;
   peekSide?: "top" | "bottom";
 }) {
+  const t = useTranslations("chat.assetRefs");
   const [peek, setPeek] = useState(false);
   // Entity refs have no media to peek at and no card to jump to — the pill
   // itself, icon plus name, is the whole story.
@@ -355,7 +358,7 @@ export function RefTokenChip({
     >
       <button
         type="button"
-        title={`${item.name} — click to show`}
+        title={t("showHint", { name: item.name })}
         className={cn(
           "ref-token rounded-md px-1 font-mono text-[11px] transition-colors",
           onDark
@@ -506,6 +509,7 @@ export function RefChips({
    * row exactly when the arriving chip would. */
   trailing?: ReactNode;
 }) {
+  const t = useTranslations("chat.assetRefs");
   const candidates = useRefCandidates();
   if (refs.length === 0 && !trailing) return null;
   return (
@@ -522,7 +526,7 @@ export function RefChips({
           <span key={r.id} className="inline-flex max-w-full items-center gap-1 rounded-md border border-border bg-muted px-2 py-1 text-xs">
             {entityGlyph(r, "size-3 shrink-0")}
             <CollectionLink item={r} className="truncate">{r.name}</CollectionLink>
-            <button type="button" aria-label={`Remove ${r.name}`} onClick={() => onRemove(r)}><X className="size-3" /></button>
+            <button type="button" aria-label={t("removeName", { name: r.name })} onClick={() => onRemove(r)}><X className="size-3" /></button>
           </span>
         );
         return (
@@ -571,6 +575,7 @@ function RefChip({
   peekSide: "top" | "bottom";
   thumbClassName: string;
 }) {
+  const t = useTranslations("chat.assetRefs");
   const [hover, setHover] = useState(false);
   // The moment card must survive interactions that take the pointer or focus
   // off the chip — a slider/hot-text drag (pointer capture) and typing in the
@@ -632,7 +637,7 @@ function RefChip({
       ) : (
         <button
           type="button"
-          title={`${item.name} — click to show`}
+          title={t("showHint", { name: item.name })}
           className="block text-left"
           onClick={() => revealRef(item)}
         >
@@ -674,8 +679,8 @@ function RefChip({
         hover && item.scope !== "entity" && <RefPeek item={item} side={peekSide} />
       )}
       <button
-        aria-label={`Remove ${item.name}`}
-        title="Remove"
+        aria-label={t("removeName", { name: item.name })}
+        title={t("remove")}
         className="absolute -top-1.5 -right-1.5 grid size-4.5 place-items-center rounded-full bg-neutral-900 text-white shadow-sm transition-colors hover:bg-neutral-700"
         onClick={() => onRemove(item)}
       >
@@ -768,6 +773,7 @@ function MomentControls({
   onChange: (ref: AssetRef) => void;
   className?: string;
 }) {
+  const tMoment = useTranslations("chat.assetRefs");
   const { lo, hi } = momentBounds(item, dur);
   const t = item.t ?? lo;
   const apply = (next: number) =>
@@ -775,7 +781,7 @@ function MomentControls({
   return (
     <div className={cn("flex items-center gap-2", className)}>
       <ValueSlider
-        label="Pinned moment"
+        label={tMoment("pinnedMoment")}
         sliderClassName="min-w-0 flex-1"
         valueClassName="shrink-0 text-muted-foreground"
         value={t}
@@ -923,14 +929,15 @@ function useCopied(): [boolean, (text: string) => void] {
 /** Hover icon button that copies the asset's reference token (`@v2`, or the
  * `@name` form when it has no short handle). */
 export function CopyRefButton({ name, className }: { name: string; className?: string }) {
+  const t = useTranslations("chat.assetRefs");
   const [copied, copy] = useCopied();
   const ref = useRefFor(name);
   const token = ref ? refToken(ref) : mentionToken(name);
   return (
     <span
       role="button"
-      aria-label={`Copy reference to ${name}`}
-      title={`Copy ${token} to reference in prompts`}
+      aria-label={t("copyReferenceTo", { name })}
+      title={t("copyTokenHint", { token })}
       className={cn(
         "grid size-5 cursor-pointer place-items-center rounded-full bg-black/45 text-white hover:bg-black/65",
         className
@@ -999,6 +1006,7 @@ export function CopyNameLabel({
    * projects homes — show the name and nothing more. */
   mention?: boolean;
 }) {
+  const t = useTranslations("chat.assetRefs");
   const [copied, copy] = useCopied();
   const ref = useRefFor(name);
   const token = ref ? refToken(ref) : mentionToken(name);
@@ -1009,7 +1017,7 @@ export function CopyNameLabel({
   return (
     <button
       type="button"
-      title={`Click to copy ${token} — paste it in any prompt to reference this asset`}
+      title={t("clickToCopyHint", { token })}
       className={cn("flex min-w-0 items-center gap-1 cursor-copy text-left", className)}
       onClick={(e) => {
         e.stopPropagation();
@@ -1024,7 +1032,7 @@ export function CopyNameLabel({
       )}
       {copied ? (
         <span className={cn("truncate", dark ? "text-white" : "text-emerald-600")}>
-          Copied {token}
+          {t("copiedToken", { token })}
         </span>
       ) : (
         <TruncatedText text={shown} />
@@ -1143,6 +1151,7 @@ function MentionPill({
   /** Select the whole token in the textarea. */
   onSelectToken: () => void;
 }) {
+  const t = useTranslations("chat.assetRefs");
   const spanRef = useRef<HTMLSpanElement>(null);
   const coverRef = useRef<HTMLSpanElement>(null);
   const [wrapped, setWrapped] = useState(false);
@@ -1190,7 +1199,7 @@ function MentionPill({
         pinnable && "pointer-events-auto cursor-pointer hover:bg-[#0a84ff]/25",
         atomic && "pointer-events-auto cursor-default"
       )}
-      title={pinnable ? `${item.name} — click to pin the moment` : undefined}
+      title={pinnable ? t("pinHint", { name: item.name }) : undefined}
       // mousedown, not click: preventDefault keeps focus in the textarea.
       onMouseDown={
         pinnable
@@ -1308,6 +1317,7 @@ export function MentionTextarea({
    * the moment if the cut moves before the message goes out. */
   onInsertTime?: (mark: TimeMark) => void;
 }) {
+  const t = useTranslations("chat.assetRefs");
   const taRef = useRef<HTMLTextAreaElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const backdropRef = useRef<HTMLDivElement>(null);
@@ -1616,7 +1626,7 @@ export function MentionTextarea({
                 <Clock className="size-4" />
               </span>
               <RefHandleBadge handle={PLAYHEAD_HANDLE} className="shrink-0" />
-              <span className="min-w-0 flex-1 truncate text-[11.5px]">{PLAYHEAD_NAME}</span>
+              <span className="min-w-0 flex-1 truncate text-[11.5px]">{t("playhead")}</span>
               <PlayheadRowTime />
             </button>
           )}

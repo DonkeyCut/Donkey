@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Markdown from "react-markdown";
+import { useTranslations } from "next-intl";
 import { cn } from "@/lib/utils";
 import { baseMarkdownComponents } from "./markdownComponents";
 
@@ -101,8 +102,9 @@ function parseRows(text: string, delim: string): string[][] {
 const CSV_ROW_CAP = 200;
 
 function CsvTable({ text, delim }: { text: string; delim: string }) {
+  const t = useTranslations("home.docText");
   const rows = parseRows(text, delim);
-  if (rows.length === 0) return <p className="text-muted-foreground">Empty file.</p>;
+  if (rows.length === 0) return <p className="text-muted-foreground">{t("empty")}</p>;
   const [head, ...body] = rows;
   const shown = body.slice(0, CSV_ROW_CAP);
   return (
@@ -130,7 +132,7 @@ function CsvTable({ text, delim }: { text: string; delim: string }) {
         </tbody>
       </table>
       {body.length > shown.length && (
-        <p className="mt-1.5 text-muted-foreground">+{body.length - shown.length} more rows</p>
+        <p className="mt-1.5 text-muted-foreground">{t("moreRows", { count: body.length - shown.length })}</p>
       )}
     </div>
   );

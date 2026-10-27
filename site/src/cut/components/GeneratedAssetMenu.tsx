@@ -2,6 +2,7 @@
 
 import { useState, type ReactNode } from "react";
 import { Clapperboard, Download, Ellipsis, FolderPlus, Trash2 } from "lucide-react";
+import { useTranslations } from "next-intl";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -39,7 +40,7 @@ export function GeneratedAssetMenu({
   before,
   after,
   onDelete,
-  deleteLabel = "Delete",
+  deleteLabel,
 }: {
   asset: MediaAsset;
   projectId: string;
@@ -49,6 +50,7 @@ export function GeneratedAssetMenu({
   onDelete?: () => void;
   deleteLabel?: string;
 }) {
+  const t = useTranslations("home.generatedMenu");
   // Timeline items the delete would take with it; null = no prompt open.
   const [confirmUses, setConfirmUses] = useState<number | null>(null);
 
@@ -65,8 +67,8 @@ export function GeneratedAssetMenu({
     <>
     <DropdownMenu>
       <DropdownMenuTrigger
-        aria-label="More actions"
-        title="More actions"
+        aria-label={t("moreActions")}
+        title={t("moreActions")}
         className={triggerClassName}
       >
         <Ellipsis className="size-3.5" />
@@ -81,7 +83,7 @@ export function GeneratedAssetMenu({
             useEditor.getState().updateAsset(asset.id, { origin: undefined, chatId: undefined })
           }
         >
-          <Clapperboard /> Add to Media
+          <Clapperboard /> {t("addToMedia")}
         </DropdownMenuItem>
         <DropdownMenuItem
           onClick={() =>
@@ -90,19 +92,19 @@ export function GeneratedAssetMenu({
             })
           }
         >
-          <FolderPlus /> Add to Library
+          <FolderPlus /> {t("addToLibrary")}
         </DropdownMenuItem>
         <DropdownMenuItem
           onClick={() => downloadMedia(projectId, asset)}
           disabled={!!asset.upload}
         >
-          <Download /> Download
+          <Download /> {t("download")}
         </DropdownMenuItem>
         {(after != null || onDelete) && <DropdownMenuSeparator />}
         {after}
         {onDelete && (
           <DropdownMenuItem variant="destructive" onClick={remove}>
-            <Trash2 /> {deleteLabel}
+            <Trash2 /> {deleteLabel ?? t("delete")}
           </DropdownMenuItem>
         )}
       </DropdownMenuContent>
@@ -110,16 +112,13 @@ export function GeneratedAssetMenu({
     <AlertDialog open={confirmUses !== null} onOpenChange={(o) => !o && setConfirmUses(null)}>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Delete “{asset.name}”?</AlertDialogTitle>
+          <AlertDialogTitle>{t("deleteTitle", { name: asset.name })}</AlertDialogTitle>
           <AlertDialogDescription>
-            {confirmUses === 1
-              ? "It plays in 1 place on the timeline, which goes with it."
-              : `It plays in ${confirmUses} places on the timeline, which go with it.`}{" "}
-            The media file is deleted too, and this can’t be undone.
+            {t("timelineUses", { count: confirmUses ?? 0 })} {t("fileGoes")}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
           <AlertDialogAction
             className="bg-destructive/10 text-destructive hover:bg-destructive/20"
             onClick={() => {
@@ -127,7 +126,7 @@ export function GeneratedAssetMenu({
               onDelete?.();
             }}
           >
-            Delete
+            {t("delete")}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

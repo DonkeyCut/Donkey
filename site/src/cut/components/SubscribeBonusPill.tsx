@@ -8,7 +8,8 @@
 import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Gift } from "lucide-react";
-import { creditValidity, OfferButton, OfferDialog, OfferDismiss, subscribeOfferCopy } from "@/cut/components/OfferDialog";
+import { useFormatter, useLocale, useTranslations } from "next-intl";
+import { OfferButton, OfferDialog, OfferDismiss, useOfferCopy } from "@/cut/components/OfferDialog";
 import { useEngineUser } from "@/cut/lib/backend/hooks";
 import { useInvalidateOnSettle } from "@/cut/lib/hosted";
 import { track } from "@/lib/analytics";
@@ -27,26 +28,39 @@ export function minutesLeft(closesAt: string, now: number): number {
 }
 
 /** "3d left" past the day, "5h left" past the hour, "40m left" inside it. */
-export function timeLeftLabel(minutes: number): string {
-  if (minutes >= 24 * 60) return `${Math.floor(minutes / (24 * 60))}d left`;
-  if (minutes >= 60) return `${Math.floor(minutes / 60)}h left`;
-  return `${minutes}m left`;
+function timeLeftLabel(minutes: number, t: ReturnType<typeof useTranslations<"billing">>): string {
+  if (minutes >= 24 * 60) {
+    return t("subscribeBonus.daysLeft", { count: Math.floor(minutes / (24 * 60)) });
+  }
+  if (minutes >= 60) {
+    return t("subscribeBonus.hoursLeft", { count: Math.floor(minutes / 60) });
+  }
+  return t("subscribeBonus.minutesLeft", { count: minutes });
 }
 
 /** How long the landed credit lasts, as the sentence after the offer. */
-export function creditLifeClause(offer: { creditsExpireAt: string | null; creditsLifetimeDays: number | null }): string {
-  const valid = creditValidity({ expiresAt: offer.creditsExpireAt, lifetimeDays: offer.creditsLifetimeDays });
-  return valid ? ` ${valid}` : "";
+export function useCreditLifeClause(): (offer: {
+  creditsExpireAt: string | null;
+  creditsLifetimeDays: number | null;
+}) => string {
+  const { creditValidity } = useOfferCopy();
+  return (offer) => {
+    const valid = creditValidity({ expiresAt: offer.creditsExpireAt, lifetimeDays: offer.creditsLifetimeDays });
+    return valid ? ` ${valid}` : "";
+  };
 }
 
-/** The deadline as people read it in their own clock: "Sep 8, 3:14 PM". */
-export function formatDeadline(closesAt: string): string {
-  return new Date(closesAt).toLocaleString("en-US", {
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-    month: "short",
-  });
+/** The deadline as people read it in their own clock and language:
+ * "Sep 8, 3:14 PM". */
+export function useFormatDeadline(): (closesAt: string) => string {
+  const format = useFormatter();
+  return (closesAt) =>
+    format.dateTime(new Date(closesAt), {
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+      month: "short",
+    });
 }
 
 function seenBefore(offer: SubscribeBonus): boolean {
@@ -77,6 +91,9 @@ export function SubscribeBonusPill() {
 }
 
 function OpenOffer({ offer }: { offer: SubscribeBonus }) {
+  const t = useTranslations("billing");
+  const locale = useLocale();
+  const { subscribeOfferCopy } = useOfferCopy();
   const queryClient = useQueryClient();
   const checkout = useStartCheckout();
   // A bonus the app made presents itself once: the first time a tab sees it
@@ -105,7 +122,8 @@ function OpenOffer({ offer }: { offer: SubscribeBonus }) {
   }, [minutes, queryClient]);
   if (minutes === 0) return null;
 
-  const credits = formatCredits(offer.dollars);
+  const credits = formatCredits(offer.dollars, locale);
+  const timeLeft = timeLeftLabel(minutes, t);
   const subscribe = () => {
     track("subscribe_bonus_checkout_started", {
       dollars: Number(offer.dollars),
@@ -122,17 +140,17 @@ function OpenOffer({ offer }: { offer: SubscribeBonus }) {
       <button
         type="button"
         className={PILL}
-        aria-label={`${credits} with Pro, ${timeLeftLabel(minutes)}`}
+        aria-label={t("subscribeBonus.pillLabel", { credits, timeLeft })}
         onClick={() => setOpen(true)}
       >
         <Gift className="size-3.5" />
-        {compactCredits(offer.dollars)} credits with Pro · {timeLeftLabel(minutes)}
+        {t("subscribeBonus.pill", { credits: compactCredits(offer.dollars, locale), timeLeft })}
       </button>
       <OfferDialog
         open={open}
         onOpenChange={setOpen}
         banner="subscribe"
-        title={`Get ${credits} with Pro`}
+        title={t("claim.withProTitle", { credits })}
         closesAt={offer.closesAt}
         {...subscribeOfferCopy({
           credits,
@@ -141,11 +159,11 @@ function OpenOffer({ offer }: { offer: SubscribeBonus }) {
         })}
         cta={
           <OfferButton disabled={checkout.isPending} onClick={subscribe}>
-            {checkout.isPending ? "Starting…" : "Subscribe to Pro"}
+            {checkout.isPending ? t("subscribeBonus.starting") : t("subscribeToPro")}
           </OfferButton>
         }
-        secondary={<OfferDismiss onClick={() => setOpen(false)}>Not now</OfferDismiss>}
-        error={checkout.isError ? "Billing is unavailable right now." : null}
+        secondary={<OfferDismiss onClick={() => setOpen(false)}>{t("notNow")}</OfferDismiss>}
+        error={checkout.isError ? t("billingUnavailable") : null}
       />
     </>
   );

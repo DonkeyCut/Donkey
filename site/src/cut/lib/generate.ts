@@ -16,8 +16,7 @@ import {
   stockAssetInDoc,
   upsertRenderInDoc,
 } from "./genvideo/docWriter";
-import { NO_CREDITS_MESSAGE } from "./credits";
-import { readHostedError } from "./hostedError";
+import { NoCreditsError, readHostedFailure } from "./hostedError";
 import { CUT_APP_BASE } from "./nav";
 import { hostedFetch, hostedPost } from "./hosted";
 import { enrichAsset, importFileToProject, uploadProjectImage } from "./media";
@@ -26,6 +25,7 @@ import { useGenNotify } from "./genNotify";
 import { IMAGE_ASPECTS, useImageGen } from "./imageGen";
 import { useEditor } from "./store";
 import { mediaSlug, nearestAspect, type MediaAsset, type RenderRecord } from "./types";
+import { UserError, errorFields, type UserErrorParams } from "./userError";
 import {
   DEFAULT_VIDEO_RESOLUTION,
   aspectFramingNote,
@@ -53,6 +53,8 @@ export interface GenerateJob {
   startedAt: number;
   status: "running" | "done" | "error";
   error?: string;
+  errorCode?: string;
+  errorParams?: UserErrorParams;
   /** The project asset the finished generation landed as. */
   assetId?: string;
   /** The chat thread that launched this render, when it wasn't the panel.
@@ -276,8 +278,10 @@ interface GenerationResponse {
   metadata?: Record<string, unknown>;
 }
 
-const readError = (res: Response, fallback: string) =>
-  readHostedError(res, "Sign in to Donkey to generate media.", fallback);
+const readFailure = (res: Response, fallback: UserError) =>
+  readHostedFailure(res, new UserError("sign_in_to_generate_media", "Sign in to Donkey to generate media."), fallback);
+
+const videoFailed = () => new UserError("video_generation_failed", "Video generation failed.");
 
 const providerError = (error: unknown): string | null => {
   if (typeof error === "string" && error) return error;
@@ -339,7 +343,14 @@ function readPersistedJobs(): GenerateJob[] {
       .filter((j) => j?.id)
       .map((j) =>
         j.status === "running" && !j.poll
-          ? { ...j, status: "error" as const, error: "Interrupted by a reload before the render started." }
+          ? {
+              ...j,
+              status: "error" as const,
+              ...errorFields(
+                null,
+                new UserError("video_render_interrupted", "Interrupted by a reload before the render started."),
+              ),
+            }
           : j
       );
   } catch {
@@ -420,6 +431,7 @@ export const useGenerate = create<GenerateState>((set, get) => {
       startedAt: j.startedAt,
       status: j.status,
       ...(j.error !== undefined ? { error: j.error } : {}),
+      ...(j.errorCode !== undefined ? { errorCode: j.errorCode, errorParams: j.errorParams ?? {} } : {}),
       ...(j.assetId !== undefined ? { assetId: j.assetId } : {}),
     };
     const backend = jobBackend(j);
@@ -453,7 +465,12 @@ export const useGenerate = create<GenerateState>((set, get) => {
   };
 
   const fail = (id: string, err: unknown) =>
-    update(id, { status: "error", error: err instanceof Error ? err.message : String(err) });
+    update(id, {
+      status: "error",
+      errorCode: undefined,
+      errorParams: undefined,
+      ...errorFields(err, String(err)),
+    });
 
   // The job after it has settled, for callers that awaited the run.
   const settled = (id: string, fallback: GenerateJob): GenerateJob =>
@@ -507,7 +524,9 @@ export const useGenerate = create<GenerateState>((set, get) => {
           metadata: gen.metadata ?? {},
         },
       });
-      if (Date.now() > deadline) throw new Error("The video render is taking too long — try again.");
+      if (Date.now() > deadline) {
+        throw new UserError("video_render_timeout", "The video render is taking too long — try again.");
+      }
       await sleep(REFRESH_MS);
       const poll = await hostedPost("/api/inference/assets/refresh", {
         id: gen.id,
@@ -519,11 +538,14 @@ export const useGenerate = create<GenerateState>((set, get) => {
         providerPollingUrl: gen.providerPollingUrl,
         metadata: gen.metadata ?? {},
       });
-      if (!poll.ok) throw new Error(await readError(poll, "Video generation failed."));
+      if (!poll.ok) {
+        throw await readFailure(poll, videoFailed());
+      }
       gen = (await poll.json()) as GenerationResponse;
     }
     if (gen.status !== "completed") {
-      throw new Error(providerError(gen.error) ?? "Video generation failed.");
+      const reason = providerError(gen.error);
+      throw reason ? new Error(reason) : videoFailed();
     }
     // Owner deleted while the render finished: skip the import entirely so no
     // file is even written for media nobody will ever see.
@@ -538,17 +560,21 @@ export const useGenerate = create<GenerateState>((set, get) => {
       });
     } else if (out?.url) {
       const dl = await fetch(out.url);
-      if (!dl.ok) throw new Error("Could not download the generated video.");
+      if (!dl.ok) {
+        throw new UserError("video_download_failed", "Could not download the generated video.");
+      }
       file = new File([await dl.arrayBuffer()], fileName, {
         type: out.contentType ?? "video/mp4",
       });
     } else {
-      throw new Error("The provider returned no video.");
+      throw new UserError("video_output_missing", "The provider returned no video.");
     }
 
     const backend = jobBackend(job);
     const asset = await importFileToProject(job.projectId, file, backend);
-    if (!asset) throw new Error("Could not import the generated video.");
+    if (!asset) {
+      throw new UserError("video_import_failed", "Could not import the generated video.");
+    }
     // The owner may have been deleted during the import (the file write is a
     // round trip): drop the file we just wrote rather than leave it orphaned.
     if (aborted()) {
@@ -659,10 +685,15 @@ export const useGenerate = create<GenerateState>((set, get) => {
           ...(opts?.negativePrompt ? { negativePrompt: opts.negativePrompt } : {}),
         },
       });
-      if (!res.ok) throw new Error(await readError(res, "Video generation failed."));
+      if (!res.ok) {
+        throw await readFailure(res, videoFailed());
+      }
       return (await res.json()) as GenerationResponse;
     };
 
+    // The last rung's thrown failure, kept whole so the job records its code;
+    // the walk itself reports only the English.
+    let lastFailure: unknown = null;
     const settledRun = (async () => {
       try {
         const outcome = await walkLadder(
@@ -673,12 +704,17 @@ export const useGenerate = create<GenerateState>((set, get) => {
             // settles — a reload that adopts this in-flight job must still
             // know which rung (anchored or not) produced the take.
             update(job.id, { rung });
-            const gen = await submitRung(attempt);
-            // The backend took the submit — a render is genuinely in flight
-            // now (instant rejects throw above and never reach here). A later
-            // polling failure still fails the job, but it did start.
-            reportSubmit({ ok: true });
-            await finishVideo(job.id, gen, jobOpts?.onDone, Date.now());
+            try {
+              const gen = await submitRung(attempt);
+              // The backend took the submit — a render is genuinely in flight
+              // now (instant rejects throw above and never reach here). A later
+              // polling failure still fails the job, but it did start.
+              reportSubmit({ ok: true });
+              await finishVideo(job.id, gen, jobOpts?.onDone, Date.now());
+            } catch (err) {
+              lastFailure = err;
+              throw err;
+            }
           },
           {
             // The next rung is a fresh submission: drop the dead rung's poll
@@ -686,10 +722,12 @@ export const useGenerate = create<GenerateState>((set, get) => {
             onRungFailed: () => update(job.id, { poll: undefined }),
             // The balance fails every rung identically — stop there so a
             // render nobody can pay for fails fast, not once per rung.
-            fatal: (error) => error === NO_CREDITS_MESSAGE,
+            fatal: () => lastFailure instanceof NoCreditsError,
           }
         );
-        if (!outcome.ok) fail(job.id, new Error(outcome.error));
+        if (!outcome.ok) {
+          fail(job.id, lastFailure ?? videoFailed());
+        }
       } finally {
         releaseJobLease(job.id);
         // No rung was ever accepted: the render never started, so report the
@@ -768,10 +806,14 @@ export const useGenerate = create<GenerateState>((set, get) => {
             // The image model takes a real frame + detail via imageConfig; no prompt steering.
             parameters: { aspectRatio: aspect, imageSize: resolution },
           });
-          if (!res.ok) throw new Error(await readError(res, "Image generation failed."));
+          if (!res.ok) {
+            throw await readFailure(res, new UserError("image_generation_failed", "Image generation failed."));
+          }
           const gen = (await res.json()) as GenerationResponse;
           const out = gen.outputs.find((o) => o.dataBase64);
-          if (!out?.dataBase64) throw new Error("The provider returned no image.");
+          if (!out?.dataBase64) {
+            throw new UserError("image_output_missing", "The provider returned no image.");
+          }
 
           // Mark it generated so it surfaces in the generate panel; a stock
           // image imported from a tile sends no origin (plain import).
@@ -784,7 +826,7 @@ export const useGenerate = create<GenerateState>((set, get) => {
             {
               name: promptName(prompt),
               origin: "generated",
-              failMessage: "Could not add the image to the project.",
+              failMessage: new UserError("image_add_to_project_failed", "Could not add the image to the project."),
               backend,
             }
           );
@@ -852,6 +894,8 @@ export const useGenerate = create<GenerateState>((set, get) => {
         status: "running",
         startedAt: Date.now(),
         error: undefined,
+        errorCode: undefined,
+        errorParams: undefined,
         assetId: undefined,
         rung: undefined,
         poll: undefined,

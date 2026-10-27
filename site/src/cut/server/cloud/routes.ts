@@ -9,6 +9,7 @@ import { librarySharing } from "@/cut/server/cloud/librarySharing";
 import { type DonkeyAuthenticatedRequest } from "@/lib/donkey-api-auth";
 import { isDonkeySuperUser } from "@/lib/super-user";
 import { matchRouteTable, type RouteEntry } from "../http/match";
+import { accountCloud } from "./account";
 import { captionsCloud } from "./captions";
 import { chatsCloud } from "./chats";
 import { commandsCloud } from "./commands";
@@ -134,6 +135,7 @@ const CUT_CLOUD_ROUTES: CloudRoute[] = [
   { method: "PUT", path: "/api/cut-cloud/notes/:id", handler: (r, u, p) => notesCloud.put(u, p.id, r) },
   { method: "DELETE", path: "/api/cut-cloud/notes/:id", handler: (_r, u, p) => notesCloud.remove(u, p.id) },
   { method: "GET", path: "/api/cut-cloud/phone", handler: (_r, u) => phoneApi.get(u) },
+  { method: "PUT", path: "/api/cut-cloud/account/locale", handler: (r, u) => accountCloud.setLocale(u, r) },
 
   { method: "POST", path: "/api/cut-cloud/transcribe", handler: (r, u) => transcribeCloud.transcribe(u, r) },
   { method: "POST", path: "/api/cut-cloud/ai/captions", handler: (r, u) => captionsCloud.captions(u, r) },

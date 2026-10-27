@@ -6,6 +6,7 @@
 // Owned here: projects CRUD + folders, media bytes, image import, presign-get
 // (answered with blob URLs), exports, the export-jobs feed, and the library
 // shelf (./library.ts). Everything else is the driver's cloud proxy.
+import { creatorNames } from "../../defaultNames";
 import { resolveParent, settleParents, subtreeOf } from "../../folderTree";
 import { sanitizeGuideLines, sanitizeGuides } from "../../guides";
 import { OUTPUT_SPACES } from "@donkeycut/effects-kit";
@@ -19,6 +20,13 @@ import { dispatchLibraryRoute } from "./library";
 import * as store from "./opfs";
 import { registerBlobFile, registeredUrl, revokeRegistered } from "./registry";
 import { caught, err, json, serveFile } from "./respond";
+import { UserError } from "../../userError";
+
+// Refusals the page reads, coded so it words them; the engine answers the same.
+const PROJECT_NOT_FOUND = new UserError("project_not_found", "Project not found.");
+const FOLDER_NOT_FOUND = new UserError("folder_not_found", "Folder not found.");
+const FOLDER_NAME_REQUIRED = new UserError("folder_name_required", "Folder name required.");
+const EXPORT_NOT_READY = new UserError("export_not_ready", "Export not ready.");
 
 const mediaApiPath = (id: string, fileName: string) =>
   `/api/cut/projects/${id}/media/${encodeURIComponent(fileName)}`;
@@ -46,7 +54,8 @@ async function createProject(req: Request): Promise<Response> {
       aspect?: string;
     };
     const id = crypto.randomUUID().slice(0, 10);
-    const displayName = (name ?? "Untitled").trim() || "Untitled";
+    // This backend runs in the page, so it names in the page's language.
+    const displayName = name?.trim() || creatorNames().untitled;
     const folders = (await store.readIndex()).folders;
     const folder = folderId && folders.some((f) => f.id === folderId) ? folderId : null;
     const frame = normalizeAspect(aspect);
@@ -68,7 +77,7 @@ async function createProject(req: Request): Promise<Response> {
     store.askPersist();
     return json(await store.summarize(id, doc));
   } catch (e) {
-    return caught(e, "Could not create project.");
+    return caught(e, new UserError("project_create_failed", "Could not create project."));
   }
 }
 
@@ -78,7 +87,7 @@ async function createProject(req: Request): Promise<Response> {
 async function putProject(req: Request, id: string): Promise<Response> {
   try {
     const existing = await store.readDoc(id);
-    if (!existing) return err("Project not found.", 404);
+    if (!existing) return err(PROJECT_NOT_FOUND, 404);
     const body = (await req.json()) as Partial<ProjectDoc>;
     const doc: ProjectDoc = {
       ...existing,
@@ -120,17 +129,17 @@ async function putProject(req: Request, id: string): Promise<Response> {
     const revision = await store.writeDoc(id, doc);
     return json({ ok: true, updatedAt: doc.updatedAt, revision });
   } catch (e) {
-    return caught(e, "Could not save project.");
+    return caught(e, new UserError("project_save_failed", "Could not save project."));
   }
 }
 
 async function duplicateProject(id: string): Promise<Response> {
   try {
     const doc = await store.readDoc(id);
-    if (!doc) return err("Project not found.", 404);
+    if (!doc) return err(PROJECT_NOT_FOUND, 404);
     const newId = crypto.randomUUID().slice(0, 10);
     const now = Date.now();
-    const copy: ProjectDoc = { ...doc, id: newId, name: `${doc.name} copy`, createdAt: now, updatedAt: now };
+    const copy: ProjectDoc = { ...doc, id: newId, name: creatorNames().copy(doc.name), createdAt: now, updatedAt: now };
     await store.writeDoc(newId, copy);
     const srcMedia = await store.mediaDir(id);
     if (srcMedia) {
@@ -142,7 +151,7 @@ async function duplicateProject(id: string): Promise<Response> {
     }
     return json(await store.summarize(newId, copy));
   } catch (e) {
-    return caught(e, "Could not duplicate project.");
+    return caught(e, new UserError("project_duplicate_error", "Could not duplicate project."));
   }
 }
 
@@ -150,15 +159,15 @@ async function moveProject(req: Request, id: string): Promise<Response> {
   try {
     const { folderId } = (await req.json()) as { folderId: string | null };
     const doc = await store.readDoc(id);
-    if (!doc) return err("Project not found.", 404);
+    if (!doc) return err(PROJECT_NOT_FOUND, 404);
     if (folderId && !(await store.readIndex()).folders.some((f) => f.id === folderId)) {
-      return err("Folder not found.", 404);
+      return err(FOLDER_NOT_FOUND, 404);
     }
     doc.folderId = folderId ?? null;
     await store.writeDoc(id, doc);
     return json({ ok: true });
   } catch (e) {
-    return caught(e, "Could not move project.");
+    return caught(e, new UserError("project_move_failed", "Could not move project."));
   }
 }
 
@@ -166,7 +175,7 @@ async function createFolder(req: Request): Promise<Response> {
   try {
     const { name, parentId } = (await req.json()) as { name?: string; parentId?: string | null };
     const trimmed = (name ?? "").trim();
-    if (!trimmed) return err("Folder name required.", 500);
+    if (!trimmed) return err(FOLDER_NAME_REQUIRED, 500);
     const id = crypto.randomUUID().slice(0, 8);
     let folder: ProjectFolder | null = null;
     await store.updateIndex((idx) => {
@@ -180,7 +189,7 @@ async function createFolder(req: Request): Promise<Response> {
     });
     return json(folder);
   } catch (e) {
-    return caught(e, "Could not create folder.");
+    return caught(e, new UserError("folder_create_failed", "Could not create folder."));
   }
 }
 
@@ -190,7 +199,7 @@ async function updateFolder(req: Request, fid: string): Promise<Response> {
   try {
     const { name, parentId } = (await req.json()) as { name?: string; parentId?: string | null };
     const trimmed = name?.trim();
-    if (name !== undefined && !trimmed) return err("Folder name required.", 500);
+    if (name !== undefined && !trimmed) return err(FOLDER_NAME_REQUIRED, 500);
     let updated: ProjectFolder | null = null;
     await store.updateIndex((idx) => ({
       ...idx,
@@ -206,9 +215,9 @@ async function updateFolder(req: Request, fid: string): Promise<Response> {
           : f
       ),
     }));
-    return updated ? json(updated) : err("Folder not found.", 500);
+    return updated ? json(updated) : err(FOLDER_NOT_FOUND, 500);
   } catch (e) {
-    return caught(e, "Could not update folder.");
+    return caught(e, new UserError("folder_update_failed", "Could not update folder."));
   }
 }
 
@@ -231,7 +240,7 @@ async function deleteFolder(fid: string): Promise<Response> {
     }));
     return json({ ok: true });
   } catch (e) {
-    return caught(e, "Could not delete folder.");
+    return caught(e, new UserError("folder_delete_failed", "Could not delete folder."));
   }
 }
 
@@ -243,7 +252,7 @@ async function dropProject(id: string): Promise<void> {
 
 async function uploadMedia(req: Request, id: string): Promise<Response> {
   try {
-    if (!(await store.readDoc(id))) return err("Project not found.", 404);
+    if (!(await store.readDoc(id))) return err(PROJECT_NOT_FOUND, 404);
     const form = await req.formData();
     const file = form.get("file");
     if (!(file instanceof File)) return err("No file in upload.", 400);
@@ -251,13 +260,13 @@ async function uploadMedia(req: Request, id: string): Promise<Response> {
     registerBlobFile(mediaApiPath(id, fileName), file);
     return json({ fileName });
   } catch (e) {
-    return caught(e, "Upload failed.");
+    return caught(e, new UserError("upload_failed", "Upload failed."));
   }
 }
 
 async function importImage(req: Request, id: string): Promise<Response> {
   try {
-    if (!(await store.readDoc(id))) return err("Project not found.", 404);
+    if (!(await store.readDoc(id))) return err(PROJECT_NOT_FOUND, 404);
     const form = await req.formData();
     const file = form.get("file");
     if (!(file instanceof File)) return err("No image in upload.", 400);
@@ -289,7 +298,7 @@ async function importImage(req: Request, id: string): Promise<Response> {
       ...(origin ? { origin } : {}),
     });
   } catch (e) {
-    return caught(e, "Could not import the image.");
+    return caught(e, new UserError("image_import_failed", "Could not import the image."));
   }
 }
 
@@ -333,17 +342,17 @@ async function listProjectExports(id: string): Promise<Response> {
 
 async function exportJobStatus(jobId: string): Promise<Response> {
   const job = getBrowserExportJob(jobId);
-  if (!job) return err("Unknown export.", 404);
-  return json({ status: job.status, progress: job.progress, error: job.error, outName: job.outName });
+  if (!job) return err(new UserError("export_unknown", "Unknown export."), 404);
+  return json({ status: job.status, progress: job.progress, error: job.error, errorCode: job.errorCode, errorParams: job.errorParams, outName: job.outName });
 }
 
 async function exportJobFile(jobId: string, download: boolean): Promise<Response> {
   const job = getBrowserExportJob(jobId);
   if (!job || job.status !== "done" || !job.outName) {
-    return err("Export not ready.", 404);
+    return err(EXPORT_NOT_READY, 404);
   }
   const file = await store.readFileAt(await store.exportsDir(job.projectId), job.outName);
-  if (!file) return err("Export not ready.", 404);
+  if (!file) return err(EXPORT_NOT_READY, 404);
   return serveFile(file, job.outName, download);
 }
 
@@ -392,7 +401,7 @@ export async function dispatchBrowserRoute(
     if (rest.length === 2) {
       if (method === "HEAD" || method === "GET") {
         const file = await store.docFile(id);
-        if (!file) return err("Project not found.", 404);
+        if (!file) return err(PROJECT_NOT_FOUND, 404);
         const headers = { "x-cut-doc-version": String(file.lastModified) };
         if (method === "HEAD") return new Response(null, { headers });
         return new Response(file, { headers: { ...headers, "Content-Type": "application/json" } });
@@ -422,7 +431,7 @@ export async function dispatchBrowserRoute(
       const fileName = rest[3];
       if (method === "GET") {
         const file = await store.readFileAt(dir, fileName);
-        if (!file) return err(`${rest[2] === "media" ? "Media file" : "Export"} not found.`, 404);
+        if (!file) return err(rest[2] === "media" ? new UserError("media_file_not_found", "Media file not found.") : new UserError("export_not_found", "Export not found."), 404);
         const apiPath =
           rest[2] === "media" ? mediaApiPath(id, fileName) : exportApiPath(id, fileName);
         if (!registeredUrl(apiPath)) registerBlobFile(apiPath, file);

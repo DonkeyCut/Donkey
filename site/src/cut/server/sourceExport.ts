@@ -4,6 +4,7 @@ import { ALL_FORMATS, CustomSource, Input } from "mediabunny";
 import { prepareSourceRemux, prepareTrimRemux } from "../lib/sourceRemux";
 import type { SourceSegment } from "../lib/sourceExportPlan";
 import { runFfmpeg, type RenderHandle } from "./exportPipeline";
+import { UserError, errorFromBody } from "../lib/userError";
 
 /** The Mac and worker share the packet copier with browser exports. */
 export async function exportSourceFiles(job: RenderHandle, resolve: (file: string) => string, segments: SourceSegment[], codec: "h264" | "hevc", audioBitrate?: number) {
@@ -11,7 +12,11 @@ export async function exportSourceFiles(job: RenderHandle, resolve: (file: strin
   const sources: Awaited<ReturnType<typeof open>>[] = [];
   const readers: Input[] = [];
   const scratch: string[] = [];
-  const stop = () => { if (job.error) throw new Error(job.error); };
+  const stop = () => {
+    if (job.error) {
+      throw errorFromBody(job, job.error);
+    }
+  };
   const read = async (file: string) => {
     const source = await open(file, "r");
     sources.push(source);
@@ -23,7 +28,9 @@ export async function exportSourceFiles(job: RenderHandle, resolve: (file: strin
         while (filled < buffer.length) {
           stop();
           const { bytesRead } = await source.read(buffer, filled, buffer.length - filled, start + filled);
-          if (!bytesRead) throw new Error("Source file ended during export.");
+          if (!bytesRead) {
+            throw new UserError("source_export_truncated", "Source file ended during export.");
+          }
           filled += bytesRead;
         }
         return buffer;
@@ -41,7 +48,9 @@ export async function exportSourceFiles(job: RenderHandle, resolve: (file: strin
           let written = 0;
           while (written < data.length) {
             const { bytesWritten } = await target.write(data, written, data.length - written, position + written);
-            if (!bytesWritten) throw new Error("Could not write source export.");
+            if (!bytesWritten) {
+              throw new UserError("source_export_write_failed", "Could not write source export.");
+            }
             written += bytesWritten;
           }
         },
@@ -78,7 +87,9 @@ export async function exportSourceFiles(job: RenderHandle, resolve: (file: strin
       (seconds) => { job.progress = 0.3 + Math.min(0.5, seconds / duration * 0.5); });
     stop();
     const joined = await prepareTrimRemux(await read(videoPath), { file: videoPath, from: 0, to: duration }, codec, await read(audioPath));
-    if (!joined) throw new Error("Could not mux the source export audio.");
+    if (!joined) {
+      throw new UserError("source_export_mux_failed", "Could not mux the source export audio.");
+    }
     await write(joined, job.outPath, (ratio) => { job.progress = 0.8 + ratio * 0.2; });
     return true;
   } finally {

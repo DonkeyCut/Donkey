@@ -4,6 +4,7 @@ import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Loader2, X } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 import { DONKEY_DOWNLOAD_URL } from "@/app/_components/landing/data";
 import { track } from "@/lib/analytics";
@@ -72,6 +73,7 @@ async function permissionState(): Promise<PermissionState | null> {
 }
 
 export function ConnectGate({ children }: { children: ReactNode }) {
+  const t = useTranslations("editor.connectGate");
   // Settings pages (billing, usage, feature flags) never touch the engine, so
   // they skip the probe and the banner.
   const onSettings = (usePathname() ?? "").split("/").includes("settings");
@@ -155,10 +157,10 @@ export function ConnectGate({ children }: { children: ReactNode }) {
   // be undone in site settings.
   useEffect(() => {
     if (reached !== false || needsAsk || blocked || forcedGate()) return;
-    const t = setInterval(() => {
+    const timer = setInterval(() => {
       engineProbe().then(bindEngine, () => {});
     }, 3000);
-    return () => clearInterval(t);
+    return () => clearInterval(timer);
   }, [reached, needsAsk, blocked, bindEngine]);
 
   // The engine stopped answering mid-session: fall back to the cloud and raise
@@ -213,21 +215,18 @@ export function ConnectGate({ children }: { children: ReactNode }) {
       {banner && (
         <div className="relative flex h-8 shrink-0 items-center justify-center gap-3 bg-red-600 px-10 text-xs font-medium text-white">
           <span className="min-w-0 truncate">
-            This project is stored on this Mac, and{" "}
-            {blocked
-              ? "your browser is blocking this page from reaching the Donkey app."
-              : "Donkey Cut can’t reach the Donkey app."}
+            {blocked ? t("bannerBlocked") : t("bannerUnreachable")}
           </span>
           <button
             className="shrink-0 underline underline-offset-2"
             onClick={() => setHowOpen(true)}
             type="button"
           >
-            How to fix this
+            {t("howToFix")}
           </button>
           <button
-            aria-label="Dismiss"
-            title="Dismiss"
+            aria-label={t("dismiss")}
+            title={t("dismiss")}
             className="absolute right-2 grid size-5 place-items-center rounded-full text-white/80 hover:bg-white/20 hover:text-white"
             onClick={() => setDismissed(true)}
             type="button"
@@ -242,41 +241,24 @@ export function ConnectGate({ children }: { children: ReactNode }) {
           <DialogHeader>
             <DialogTitle>
               {blocked
-                ? "Connection blocked"
+                ? t("titleBlocked")
                 : needsAsk
-                  ? "Connect to the Donkey app"
-                  : "This project is stored on this Mac"}
+                  ? t("titleAsk")
+                  : t("titleStored")}
             </DialogTitle>
           </DialogHeader>
           <p className="text-sm text-muted-foreground">
             {blocked ? (
-              <>
-                This is a local project — its video and its edits live on this
-                Mac, and your browser is blocking this page from reaching the
-                Donkey app that opens them. Open the site settings from the icon
-                next to the address bar, turn on{" "}
-                <span className="font-medium text-foreground">Apps on device</span>,
-                then try again.
-              </>
+              t.rich("bodyBlocked", { em: (chunks) => <span className="font-medium text-foreground">{chunks}</span> })
             ) : needsAsk ? (
-              <>
-                This is a local project — it lives in the Donkey app on this
-                Mac. Your browser will ask for permission to connect to apps on
-                this device — choose{" "}
-                <span className="font-medium text-foreground">Allow</span>.
-              </>
+              t.rich("bodyAsk", { em: (chunks) => <span className="font-medium text-foreground">{chunks}</span> })
             ) : (
-              <>
-                This is a local project: its video and its edits live on this
-                Mac, and the Donkey app is what opens them. Install Donkey, or
-                open it if it&rsquo;s already installed — this page connects
-                automatically.
-              </>
+              t("bodyInstall")
             )}
           </p>
           {blocked && (
             <Image
-              alt="Chrome's site settings open over the address bar, with the Apps on device toggle"
+              alt={t("siteSettingsAlt")}
               className="w-full rounded-xl border shadow-sm"
               height={660}
               src="/cut/connect-site-settings.png"
@@ -293,12 +275,12 @@ export function ConnectGate({ children }: { children: ReactNode }) {
                   window.location.href = DONKEY_DOWNLOAD_URL;
                 }}
               >
-                Download for Mac
+                {t("download")}
               </Button>
             )}
             <Button onClick={() => void connect()} disabled={connecting}>
               {connecting && <Loader2 className="animate-spin" data-icon="inline-start" />}
-              {connecting ? "Connecting…" : needsAsk ? "Connect" : "Try again"}
+              {connecting ? t("connecting") : needsAsk ? t("connect") : t("tryAgain")}
             </Button>
           </DialogFooter>
         </DialogContent>

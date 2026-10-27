@@ -28,6 +28,7 @@ import { itemName } from "@/cut/lib/itemName";
 import { compatCoverIn, compatCovers } from "@/cut/lib/proxyNames";
 import type { AssetType } from "@/cut/lib/types";
 import { caught, decodeFileParam, dedupeName, err, HttpResponseError, inspirationFolderId, redirect, safeFileName, storableFileName } from "./util";
+import { UserError } from "@/cut/lib/userError";
 
 /** Cap on one signed-URL batch, matching the project media batch. */
 const PRESIGN_GET_BATCH_MAX = 500;
@@ -286,7 +287,7 @@ async function copyIntoProject(
   taken: Set<string>,
 ): Promise<string> {
   const src = await libraryMediaObject(userId, libFileName);
-  if (!src) throw new Error("Library asset not found.");
+  if (!src) throw new UserError("library_asset_not_found", "Library asset not found.");
   const over = await quotaCheck(userId, Number(src.bytes));
   if (over) throw new HttpResponseError(over);
   const dest = dedupeName(safeFileName(libFileName), taken);
@@ -398,7 +399,7 @@ export const libraryCloud = {
       if (!body.fileName || typeof body.bytes !== "number" || body.bytes <= 0) {
         return err("fileName and bytes are required.", 400);
       }
-      if (!libraryTypeOf(body.fileName)) return err("Unsupported file type.", 400);
+      if (!libraryTypeOf(body.fileName)) return err(new UserError("file_type_unsupported", "Unsupported file type."), 400);
       // A resumed upload already holds its claim: the client kept the bytes
       // (the iOS app's journal) and asks for a fresh URL under the same name.
       // A claim that completed in the meantime reports done and uploads
@@ -439,7 +440,7 @@ export const libraryCloud = {
       });
       return Response.json({ fileName, key, url });
     } catch (e) {
-      return caught(e, "Could not presign the upload.");
+      return caught(e, new UserError("upload_presign_failed", "Could not presign the upload."));
     }
   },
 
@@ -462,13 +463,13 @@ export const libraryCloud = {
         const folder = await prisma.cutFolder.findFirst({
           where: { id: folderId, userId, scope: "library" },
         });
-        if (!folder) return err("Folder not found.", 404);
+        if (!folder) return err(new UserError("folder_not_found", "Folder not found."), 404);
         destFolder = folderId;
       }
       const obj = await prisma.cutMediaObject.findFirst({
         where: { userId, r2Key: key },
       });
-      if (!obj) return err("Unknown upload.", 404);
+      if (!obj) return err(new UserError("upload_unknown", "Unknown upload."), 404);
       // A retried complete (the iOS app reconciling after an interrupted
       // sync) lands on the asset it already made instead of minting a twin.
       const already = await prisma.cutLibraryAsset.findFirst({
@@ -477,7 +478,7 @@ export const libraryCloud = {
       if (already) return Response.json(assetView(already, obj));
       const info = obj.uploadState === "complete" ? null : await head(key);
       if (obj.uploadState !== "complete" && !info)
-        return err("The upload never arrived.", 400);
+        return err(new UserError("upload_never_arrived", "The upload never arrived."), 400);
       // A cover that came up alongside the file: its own object, finished the
       // same way, named on the asset so the delete cascade takes it too.
       const posterObj = posterKey
@@ -543,7 +544,7 @@ export const libraryCloud = {
       });
       return Response.json(assetView(row, obj));
     } catch (e) {
-      return caught(e, "Could not complete the upload.");
+      return caught(e, new UserError("upload_complete_failed", "Could not complete the upload."));
     }
   },
 
@@ -557,13 +558,13 @@ export const libraryCloud = {
       const asset = await prisma.cutLibraryAsset.findFirst({
         where: { id: assetId, userId, deletedAt: null },
       });
-      if (!asset) throw new Error("Library asset not found.");
+      if (!asset) throw new UserError("library_asset_not_found", "Library asset not found.");
       const obj = await prisma.cutMediaObject.findUnique({
         where: { id: asset.mediaObjectId },
       });
-      if (!obj) throw new Error("Library asset not found.");
+      if (!obj) throw new UserError("library_asset_not_found", "Library asset not found.");
       if (!(await getProject(userId, projectId)))
-        throw new Error("Project not found.");
+        throw new UserError("project_not_found", "Project not found.");
       const fileName = await copyIntoProject(
         userId,
         projectId,
@@ -572,7 +573,7 @@ export const libraryCloud = {
       );
       return Response.json({ fileName });
     } catch (e) {
-      return caught(e, "Could not add from library.");
+      return caught(e, new UserError("library_add_failed", "Could not add from library."));
     }
   },
 
@@ -585,7 +586,7 @@ export const libraryCloud = {
         name?: string;
       };
       const src = await projectMediaObject(userId, projectId, fileName);
-      if (!src) throw new Error("Media file not found in project.");
+      if (!src) throw new UserError("project_media_not_found", "Media file not found in project.");
       const project = await getProject(userId, projectId);
       const docAsset = (
         project?.doc as { assets?: StoredAsset[] } | undefined
@@ -596,7 +597,7 @@ export const libraryCloud = {
         await takenLibraryNames(userId),
       );
       const obj = await libraryMediaObject(userId, dest);
-      if (!obj) throw new Error("Could not save to library.");
+      if (!obj) throw new UserError("library_save_failed", "Could not save to library.");
       const row = await prisma.cutLibraryAsset.create({
         data: {
           userId,
@@ -613,7 +614,7 @@ export const libraryCloud = {
       });
       return Response.json(assetView(row, obj));
     } catch (e) {
-      return caught(e, "Could not save to library.");
+      return caught(e, new UserError("library_save_failed", "Could not save to library."));
     }
   },
 
@@ -631,11 +632,11 @@ export const libraryCloud = {
       const asset = await prisma.cutLibraryAsset.findFirst({
         where: { id, userId, deletedAt: null },
       });
-      if (!asset) throw new Error("Library asset not found.");
+      if (!asset) throw new UserError("library_asset_not_found", "Library asset not found.");
       const obj = await prisma.cutMediaObject.findUnique({
         where: { id: asset.mediaObjectId },
       });
-      if (!obj) throw new Error("Library asset not found.");
+      if (!obj) throw new UserError("library_asset_not_found", "Library asset not found.");
       const positive = (v: unknown) =>
         typeof v === "number" && Number.isFinite(v) && v > 0 ? v : undefined;
       const meta = { ...((asset.meta ?? {}) as AssetMeta) };
@@ -660,7 +661,7 @@ export const libraryCloud = {
       });
       return Response.json(assetView({ ...asset, meta }, obj));
     } catch (e) {
-      return caught(e, "Could not update the library asset.");
+      return caught(e, new UserError("library_asset_update_failed", "Could not update the library asset."));
     }
   },
 
@@ -675,7 +676,7 @@ export const libraryCloud = {
         const folder = await prisma.cutFolder.findFirst({
           where: { id: folderId, userId, scope: "library" },
         });
-        if (!folder) throw new Error("Folder not found.");
+        if (!folder) throw new UserError("folder_not_found", "Folder not found.");
       }
       const asset = await prisma.cutLibraryAsset.findFirst({
         where: { id, userId, deletedAt: null },
@@ -688,7 +689,7 @@ export const libraryCloud = {
         return Response.json({ ok: true });
       }
       const template = await findTemplate(userId, id);
-      if (!template) throw new Error("Library item not found.");
+      if (!template) throw new UserError("library_item_not_found", "Library item not found.");
       const doc = template.doc as unknown as TemplateDoc;
       await prisma.cutTemplate.update({
         where: { id },
@@ -696,7 +697,7 @@ export const libraryCloud = {
       });
       return Response.json({ ok: true });
     } catch (e) {
-      return caught(e, "Could not move item.");
+      return caught(e, new UserError("library_item_move_failed", "Could not move item."));
     }
   },
 
@@ -710,12 +711,12 @@ export const libraryCloud = {
       const compat = compatCoverIn(asked);
       if (asked !== undefined && !compat) return err("compat is audio or video.", 400);
       const asset = await prisma.cutLibraryAsset.findFirst({ where: { id, userId, deletedAt: null } });
-      if (!asset) return err("Library asset not found.", 404);
+      if (!asset) return err(new UserError("library_asset_not_found", "Library asset not found."), 404);
       const obj = await prisma.cutMediaObject.findFirst({ where: { id: asset.mediaObjectId, userId } });
-      if (!obj) return err("Library asset not found.", 404);
+      if (!obj) return err(new UserError("library_asset_not_found", "Library asset not found."), 404);
       const view = assetView(asset, obj);
       const takes = view.type === "video" || (compat === "audio" && view.type === "audio");
-      if (!takes) return err("Only a video takes a playable copy.", 400);
+      if (!takes) return err(new UserError("playable_copy_video_only", "Only a video takes a playable copy."), 400);
       if (view.proxyFile && (!compat || compatCovers(view.proxyFile, compat))) return Response.json(view);
       const jobId = libraryProxyJobId(id);
       const existing = await prisma.cutRenderJob.findFirst({ where: { id: jobId, userId } });
@@ -738,7 +739,7 @@ export const libraryCloud = {
       wakeRenderWorker();
       return Response.json({ jobId });
     } catch (e) {
-      return caught(e, "Could not make the playable copy.");
+      return caught(e, new UserError("playable_copy_make_failed", "Could not make the playable copy."));
     }
   },
 
@@ -749,7 +750,7 @@ export const libraryCloud = {
       await deleteLibraryAssetCascade(userId, id, { tombstone: true });
       return Response.json({ ok: true });
     } catch (e) {
-      return caught(e, "Could not delete.");
+      return caught(e, new UserError("library_delete_failed", "Could not delete."));
     }
   },
 
@@ -791,7 +792,7 @@ export const libraryCloud = {
         expiresIn: mediaUrlLifetime(),
       });
     } catch (e) {
-      return caught(e, "Could not sign the library URLs.");
+      return caught(e, new UserError("library_urls_sign_failed", "Could not sign the library URLs."));
     }
   },
 
@@ -822,7 +823,7 @@ export const libraryCloud = {
         parentId?: string | null;
       };
       const trimmed = (name ?? "").trim();
-      if (!trimmed) throw new Error("Folder name required.");
+      if (!trimmed) throw new UserError("folder_name_required", "Folder name required.");
       const folders = await prisma.cutFolder.findMany({
         where: { userId, scope: "library" },
         select: { id: true, parentId: true },
@@ -837,7 +838,7 @@ export const libraryCloud = {
       });
       return Response.json(libraryFolderView(row));
     } catch (e) {
-      return caught(e, "Could not create folder.");
+      return caught(e, new UserError("folder_create_failed", "Could not create folder."));
     }
   },
 
@@ -850,12 +851,12 @@ export const libraryCloud = {
         parentId?: string | null;
       };
       const trimmed = name?.trim();
-      if (name !== undefined && !trimmed) throw new Error("Folder name required.");
+      if (name !== undefined && !trimmed) throw new UserError("folder_name_required", "Folder name required.");
       const folders = await prisma.cutFolder.findMany({
         where: { userId, scope: "library" },
         select: { id: true, parentId: true },
       });
-      if (!folders.some((f) => f.id === id)) throw new Error("Folder not found.");
+      if (!folders.some((f) => f.id === id)) throw new UserError("folder_not_found", "Folder not found.");
       const updated = await prisma.cutFolder.update({
         where: { id },
         data: {
@@ -867,7 +868,7 @@ export const libraryCloud = {
       });
       return Response.json(libraryFolderView(updated));
     } catch (e) {
-      return caught(e, "Could not update folder.");
+      return caught(e, new UserError("folder_update_failed", "Could not update folder."));
     }
   },
 
@@ -908,7 +909,7 @@ export const libraryCloud = {
       });
       return Response.json({ ok: true });
     } catch (e) {
-      return caught(e, "Could not delete folder.");
+      return caught(e, new UserError("folder_delete_failed", "Could not delete folder."));
     }
   },
 
@@ -922,8 +923,8 @@ export const libraryCloud = {
         projectId: string;
       } & TemplateInput;
       if (!(await getProject(userId, projectId)))
-        throw new Error("Project not found.");
-      if (templateEmpty(input)) throw new Error("Nothing to save.");
+        throw new UserError("project_not_found", "Project not found.");
+      if (templateEmpty(input)) throw new UserError("template_nothing_to_save", "Nothing to save.");
       // Every source is resolved and the whole batch checked against the quota
       // before the first copy, so the wall is met with nothing written; a
       // copy that still fails takes the ones before it back with it, since a
@@ -931,7 +932,7 @@ export const libraryCloud = {
       const sources = await Promise.all(
         input.media.map(async (m) => {
           const src = await projectMediaObject(userId, projectId, m.fileName);
-          if (!src) throw new Error("Media file not found in project.");
+          if (!src) throw new UserError("project_media_not_found", "Media file not found in project.");
           return { m, src };
         }),
       );
@@ -979,7 +980,7 @@ export const libraryCloud = {
       });
       return Response.json(templateView(row));
     } catch (e) {
-      return caught(e, "Could not save the template.");
+      return caught(e, new UserError("template_save_failed", "Could not save the template."));
     }
   },
 
@@ -991,7 +992,7 @@ export const libraryCloud = {
         keys?: string[];
         folderId?: string | null;
       };
-      if (templateEmpty(input)) throw new Error("Nothing to add.");
+      if (templateEmpty(input)) throw new UserError("template_nothing_to_add", "Nothing to add.");
       const media: TemplateMedia[] = [];
       for (const [i, m] of (input.media ?? []).entries()) {
         const key = keys?.[i];
@@ -1000,10 +1001,10 @@ export const libraryCloud = {
               where: { userId, r2Key: key },
             })
           : null;
-        if (!obj) throw new Error("Template media missing.");
+        if (!obj) throw new UserError("template_media_missing", "Template media missing.");
         if (obj.uploadState !== "complete") {
           const info = await head(key!);
-          if (!info) throw new Error("The upload never arrived.");
+          if (!info) throw new UserError("upload_never_arrived", "The upload never arrived.");
           await prisma.$transaction(async (tx) => {
             await tx.cutMediaObject.update({
               where: { id: obj.id },
@@ -1038,7 +1039,7 @@ export const libraryCloud = {
       });
       return Response.json(templateView(row));
     } catch (e) {
-      return caught(e, "Could not add the template.");
+      return caught(e, new UserError("template_add_failed", "Could not add the template."));
     }
   },
 
@@ -1048,9 +1049,9 @@ export const libraryCloud = {
     try {
       const { projectId } = (await req.json()) as { projectId: string };
       if (!(await getProject(userId, projectId)))
-        throw new Error("Project not found.");
+        throw new UserError("project_not_found", "Project not found.");
       const row = await findTemplate(userId, id);
-      if (!row) throw new Error("Template not found.");
+      if (!row) throw new UserError("template_not_found", "Template not found.");
       const template = templateView(row);
       // The whole batch against the quota before the first copy; a project
       // copy that still fails is unreferenced project media, which the sweep
@@ -1058,7 +1059,7 @@ export const libraryCloud = {
       let incoming = 0;
       for (const m of template.media) {
         const src = await libraryMediaObject(userId, m.fileName);
-        if (!src) throw new Error("Library asset not found.");
+        if (!src) throw new UserError("library_asset_not_found", "Library asset not found.");
         incoming += Number(src.bytes);
       }
       const over = await quotaCheck(userId, incoming);
@@ -1076,7 +1077,7 @@ export const libraryCloud = {
       }
       return Response.json({ template, media });
     } catch (e) {
-      return caught(e, "Could not add the template.");
+      return caught(e, new UserError("template_add_failed", "Could not add the template."));
     }
   },
 
@@ -1091,13 +1092,13 @@ export const libraryCloud = {
         extend: number;
       };
       const row = await findTemplate(userId, id);
-      if (!row) throw new Error("Template not found.");
+      if (!row) throw new UserError("template_not_found", "Template not found.");
       const src = await projectMediaObject(
         userId,
         projectId,
         input.media.fileName,
       );
-      if (!src) throw new Error("Media file not found in project.");
+      if (!src) throw new UserError("project_media_not_found", "Media file not found in project.");
       const dest = await copyIntoLibrary(
         userId,
         src,
@@ -1129,7 +1130,7 @@ export const libraryCloud = {
       });
       return Response.json(templateView(updated));
     } catch (e) {
-      return caught(e, "Could not add to the template.");
+      return caught(e, new UserError("template_append_failed", "Could not add to the template."));
     }
   },
 
@@ -1138,14 +1139,14 @@ export const libraryCloud = {
       const { name } = (await req.json()) as { name?: string };
       const next = itemName(name);
       const row = await findTemplate(userId, id);
-      if (!row) throw new Error("Template not found.");
+      if (!row) throw new UserError("template_not_found", "Template not found.");
       const updated = await prisma.cutTemplate.update({
         where: { id },
         data: { name: next },
       });
       return Response.json(templateView(updated));
     } catch (e) {
-      return caught(e, "Could not rename the template.");
+      return caught(e, new UserError("template_rename_failed", "Could not rename the template."));
     }
   },
 
@@ -1155,7 +1156,7 @@ export const libraryCloud = {
       if (row) await deleteTemplateCascade(userId, row);
       return Response.json({ ok: true });
     } catch (e) {
-      return caught(e, "Could not delete the template.");
+      return caught(e, new UserError("template_delete_failed", "Could not delete the template."));
     }
   },
 };

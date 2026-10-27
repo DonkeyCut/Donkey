@@ -7,6 +7,7 @@
 // cloud projects, and the number is the same either way. Pro accounts see
 // nothing here — 100 GB is enough that a meter would only take up room.
 import { Cloud, Loader2 } from "lucide-react";
+import { useLocale, useTranslations } from "next-intl";
 import {
   Tooltip,
   TooltipContent,
@@ -21,6 +22,8 @@ import { formatBytes } from "@/lib/bytes";
 import { usageLabel } from "./StoragePill";
 
 export function NavStorage() {
+  const t = useTranslations("home.navStorage");
+  const locale = useLocale();
   const upgrade = useUpgradeToPro();
   const pro = useProSubscription();
   // The meter has to move as media lands, so this reader polls. Both faces wait
@@ -50,20 +53,20 @@ export function NavStorage() {
             <span className="flex items-center gap-1.5 text-muted-foreground">
               <Cloud className="size-4" />
               <span className={cn("tabular-nums", frac >= 1 && "text-destructive")}>
-                {usageLabel(u.bytes, u.quotaBytes)}
+                {usageLabel(u.bytes, u.quotaBytes, locale)}
               </span>
             </span>
             <span className="flex items-center gap-1.5 group-hover:underline">
               {upgrade.isPending && <Loader2 className="size-3 animate-spin" />}
-              Get 100 GB
+              {t("get100")}
             </span>
           </TooltipTrigger>
-          <TooltipContent>Upgrade for 100 GB + AI credits</TooltipContent>
+          <TooltipContent>{t("upgradeTip")}</TooltipContent>
         </Tooltip>
       </TooltipProvider>
       {u.grace && (
         <p className="px-2 pt-1 text-xs leading-snug text-muted-foreground">
-          {`Your Pro plan ended. Upgrade or free ${formatBytes(u.grace.overBytes)} before your oldest projects are deleted.`}
+          {t("grace", { size: formatBytes(u.grace.overBytes, locale) })}
         </p>
       )}
     </div>

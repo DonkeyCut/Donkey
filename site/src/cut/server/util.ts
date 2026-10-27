@@ -1,13 +1,38 @@
 import { spawn } from "node:child_process";
 import { access, constants, rename, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { errorBody, errorFields, UserError, type ErrorBody, type ErrorFields } from "../lib/userError";
 
-/** A failure's message for the person. A full disk names itself in plain words;
+const DISK_FULL_CODES = new Set(["ENOSPC", "EDQUOT"]);
+
+/** A failure as the person reads it. A full disk names itself in plain words;
  * its raw text carries a code and a private path. */
-export function errorMessage(e: unknown, fallback: string): string {
+function personFailure(e: unknown): unknown {
   const code = (e as { code?: unknown } | null)?.code;
-  if (code === "ENOSPC" || code === "EDQUOT") return "This Mac is out of disk space. Free up space and try again.";
-  return e instanceof Error ? e.message : fallback;
+  if (typeof code === "string" && DISK_FULL_CODES.has(code)) {
+    return new UserError("disk_full", "This Mac is out of disk space. Free up space and try again.");
+  }
+  return e;
+}
+
+/** A failure's message for the person. */
+export function errorMessage(e: unknown, fallback: string): string {
+  const failure = personFailure(e);
+  return failure instanceof Error ? failure.message : fallback;
+}
+
+/** A failure's reply body for the person: its English, and its code when it
+ * has one, so the page words it in the reader's language.
+ *
+ *   Response.json(errorReply(e, new UserError("convert_failed", "Could not convert that file.")), { status: 500 })
+ */
+export function errorReply(e: unknown, fallback: UserError | string): ErrorBody {
+  return errorBody(personFailure(e), fallback);
+}
+
+/** The fields a job record keeps for a failure, the way errorReply words it. */
+export function errorRecord(e: unknown, fallback: UserError | string): ErrorFields {
+  return errorFields(personFailure(e), fallback);
 }
 
 /** Does a file/dir exist? (stat, coerced to a boolean.) */

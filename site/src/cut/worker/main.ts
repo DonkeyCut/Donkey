@@ -10,6 +10,7 @@ import { runTurnJob } from "./turnJob";
 import { describeRuntime, installHeadlessRuntime } from "../lib/headless/runtime";
 import { deleteObjects } from "./r2";
 import { failedJobFate, InputFault, staleRunningFate, TAB_EXPORT_SILENCE_MS } from "./settle";
+import { failureCode, UserError } from "../lib/userError";
 
 // The cloud render worker: a headless loop that claims CutRenderJob rows the
 // hosted API queues (export, preview, import_url, convert, proxy, agent_turn),
@@ -23,6 +24,12 @@ import { failedJobFate, InputFault, staleRunningFate, TAB_EXPORT_SILENCE_MS } fr
 // someone watches a progress bar. Parallelism comes from replicas instead
 // (max_instances / REPLICAS, wrangler.jsonc + cf/worker.ts).
 const MAX_RUNNING = 1;
+
+// The failures the loop itself writes to a row.
+const RAN_TOO_LONG = new UserError("job_timed_out", "The job ran too long and was stopped.");
+// A bare network rejection reads as "fetch failed" and says nothing to
+// whoever asked for the render. The row carries words instead.
+const UNREACHABLE = new UserError("render_unreachable", "Could not reach the service — the render stopped. Try it again.");
 const IDLE_POLL_MS = 2000;
 const WATCH_MS = 1000; // progress write + cancellation check cadence
 // Drain-and-exit: once the queue stays empty this long with nothing running,
@@ -133,7 +140,7 @@ function watchJob(id: string, entry: ActiveJob): ReturnType<typeof setInterval> 
           entry.handle.proc?.kill("SIGKILL");
           await prisma.cutRenderJob.updateMany({
             where: { id, state: "running" },
-            data: { state: "error", error: "The job ran too long and was stopped." },
+            data: { state: "error", error: RAN_TOO_LONG.message, result: { errorCode: RAN_TOO_LONG.code } },
           });
           return;
         }
@@ -219,11 +226,8 @@ async function runJob(job: ClaimedJob): Promise<void> {
     console.log(`[cut-worker] ${job.kind} ${job.id} done`);
   } catch (err) {
     const raw = err instanceof Error ? err.message : String(err);
-    // A bare network rejection reads as "fetch failed" and says nothing to
-    // whoever asked for the render. The row carries words instead.
-    const message = /^(fetch failed|network error|terminated)$/i.test(raw.trim())
-      ? "Could not reach the service — the render stopped. Try it again."
-      : raw;
+    const failure = /^(fetch failed|network error|terminated)$/i.test(raw.trim()) ? UNREACHABLE : err;
+    const message = failure === UNREACHABLE ? UNREACHABLE.message : raw;
     // A canceled job's row already says so; the running-state guard also
     // keeps this from resurrecting a row canceled between watcher ticks.
     const fate = failedJobFate({ canceled: entry.canceled, signaled, proc: entry.handle.proc });
@@ -237,12 +241,17 @@ async function runJob(job: ClaimedJob): Promise<void> {
         })
         .catch(() => {});
     } else if (fate === "error") {
-      // A failure on the job's input records which, for the route to read.
-      const fault = err instanceof InputFault ? { result: { fault: err.fault } } : {};
+      // A failure on the job's input records which, and a coded failure its
+      // code, for the route to read.
+      const coded = failureCode(failure);
+      const result = {
+        ...(err instanceof InputFault ? { fault: err.fault } : {}),
+        ...(coded ? { errorCode: coded.code, errorParams: coded.params } : {}),
+      };
       await prisma.cutRenderJob
         .updateMany({
           where: { id: job.id, state: "running" },
-          data: { state: "error", error: message, ...fault },
+          data: { state: "error", error: message, ...(Object.keys(result).length ? { result } : {}) },
         })
         .catch(() => {});
     }

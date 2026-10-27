@@ -1,6 +1,7 @@
 import { cloudBackend } from "@/cut/lib/backend/cloud";
 import { libraryShareApiPath, type LibraryShareTarget, type ShareSettings } from "@/cut/lib/librarySharing";
 import type { ShareFeatures } from "@/cut/lib/types";
+import { UserError } from "@/cut/lib/userError";
 
 export type ShareResource = { projectId: string } | { libraryTarget: LibraryShareTarget };
 export type SharingSettings = ShareSettings & { features?: ShareFeatures };
@@ -15,6 +16,6 @@ export async function requestSharing(resource: ShareResource, method = "GET", se
     ...(settings ? { headers: { "Content-Type": "application/json" }, body: JSON.stringify(settings) } : {}),
     cache: "no-store",
   });
-  if (!response.ok) throw new Error("Could not load or save sharing.");
+  if (!response.ok) throw new UserError("sharing_request_failed", "Could not load or save sharing.");
   return await response.json() as { share: SharingState | null };
 }

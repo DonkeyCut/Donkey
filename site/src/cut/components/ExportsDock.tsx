@@ -13,6 +13,7 @@ import {
   Loader2,
   X,
 } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { useElapsed } from "@/cut/hooks/useElapsed";
 import { downloadExport, revealExport } from "@/cut/lib/exportClient";
@@ -28,6 +29,7 @@ import {
 import { framedHref } from "@/cut/lib/hostBridge";
 import { projectHref, useCutBase } from "@/cut/lib/nav";
 import { cn } from "@/lib/utils";
+import { useDescribeError } from "@/i18n/describeError";
 import { exportsDockOpen, inFlightCount, type DockChoice } from "@/cut/lib/exportsDockView";
 
 /**
@@ -39,6 +41,7 @@ import { exportsDockOpen, inFlightCount, type DockChoice } from "@/cut/lib/expor
  * Cut app layout, above the per-project editor.
  */
 export function ExportsDock() {
+  const t = useTranslations("editor.exportsDock");
   const [choice, setChoice] = useState<DockChoice>(null);
 
   // Poll the feed while the dock is mounted (i.e. the whole time the app is up).
@@ -95,11 +98,11 @@ export function ExportsDock() {
     <div className="fixed right-4 bottom-4 z-50 max-h-[calc(100dvh-2rem)] w-72 max-w-[calc(100vw-2rem)] overflow-y-auto overscroll-contain rounded-xl border border-border bg-card shadow-lg">
       {(multi || !open || choice === "open") && (
         <div className="flex items-center gap-2 px-3 py-2">
-          <span className="text-xs font-semibold">Exports</span>
+          <span className="text-xs font-semibold">{t("title")}</span>
           <span className="flex-1 truncate text-[11px] text-muted-foreground tabular-nums">
-            {[running && `${running} running`, waiting && `${waiting} queued`]
+            {[running && t("running", { count: running }), waiting && t("queuedCount", { count: waiting })]
               .filter(Boolean)
-              .join(" · ") || `${items.length} done`}
+              .join(" · ") || t("doneCount", { count: items.length })}
           </span>
           {settled > 0 && (
             <Button
@@ -108,13 +111,13 @@ export function ExportsDock() {
               className="text-muted-foreground"
               onClick={() => useExports.getState().dismissSettled()}
             >
-              Clear all
+              {t("clearAll")}
             </Button>
           )}
           <Button
             variant="ghost"
             size="icon-xs"
-            aria-label={open ? "Collapse exports" : "Expand exports"}
+            aria-label={open ? t("collapse") : t("expand")}
             onClick={() => setChoice(open ? "closed" : "open")}
           >
             <ChevronDown className={cn("transition-transform", open && "rotate-180")} />
@@ -150,14 +153,15 @@ function StatusIcon({ status }: { status: string }) {
 }
 
 function ProjectName({ projectId, name }: { projectId: string; name?: string }) {
+  const t = useTranslations("editor.exportsDock");
   const base = useCutBase();
   return (
     <Link
       href={framedHref(projectHref(base, projectId, "projects"))}
       className="block truncate text-xs font-medium hover:underline"
-      title={name || "Untitled"}
+      title={name || t("untitled")}
     >
-      {name || "Untitled"}
+      {name || t("untitled")}
     </Link>
   );
 }
@@ -165,6 +169,8 @@ function ProjectName({ projectId, name }: { projectId: string; name?: string }) 
 function ExportRow({ job }: { job: ExportJob }) {
   // The job's own backend, not the globally bound one: the row must keep
   // working after the app rebinds to the other residency.
+  const t = useTranslations("editor.exportsDock");
+  const describeError = useDescribeError();
   const backend = exportBackend(job.residency);
   const caps = backend.caps;
   const elapsed = useElapsed(job.status === "running" ? job.startedAt ?? null : null);
@@ -174,10 +180,10 @@ function ExportRow({ job }: { job: ExportJob }) {
     job.status === "running"
       ? `${pct}%${elapsed ? ` · ${elapsed}` : ""}`
       : job.status === "queued"
-        ? "Queued"
+        ? t("queued")
         : job.status === "done"
-          ? "Ready"
-          : job.error || "Export failed";
+          ? t("ready")
+          : describeError(job, t("exportFailed"));
 
   return (
     <div className="relative flex items-center gap-2.5 px-3 py-2">
@@ -202,13 +208,13 @@ function ExportRow({ job }: { job: ExportJob }) {
               className="text-muted-foreground hover:text-destructive"
               onClick={() => useExports.getState().cancel(job.id)}
             >
-              Cancel
+              {t("cancel")}
             </Button>
             <Button
               variant="ghost"
               size="icon-xs"
-              aria-label="Dismiss"
-              title="Hide — the export keeps running"
+              aria-label={t("dismiss")}
+              title={t("hide")}
               onClick={() => useExports.getState().dismiss(job.id)}
             >
               <X />
@@ -223,8 +229,8 @@ function ExportRow({ job }: { job: ExportJob }) {
                   <Button
                     variant="ghost"
                     size="icon-xs"
-                    aria-label="Show in Finder"
-                    title="Show in Finder"
+                    aria-label={t("showInFinder")}
+                    title={t("showInFinder")}
                     onClick={() =>
                       void revealExport(job.projectId, job.outName!, backend).catch(() => {})
                     }
@@ -235,8 +241,8 @@ function ExportRow({ job }: { job: ExportJob }) {
                 <Button
                   variant="ghost"
                   size="icon-xs"
-                  aria-label="Download again"
-                  title="Download"
+                  aria-label={t("downloadAgain")}
+                  title={t("download")}
                   onClick={() => downloadExport(job.id, job.outName!, backend)}
                 >
                   <Download />
@@ -246,7 +252,7 @@ function ExportRow({ job }: { job: ExportJob }) {
             <Button
               variant="ghost"
               size="icon-xs"
-              aria-label="Dismiss"
+              aria-label={t("dismiss")}
               onClick={() => useExports.getState().dismiss(job.id)}
             >
               <X />
@@ -257,7 +263,7 @@ function ExportRow({ job }: { job: ExportJob }) {
           <Button
             variant="ghost"
             size="icon-xs"
-            aria-label="Dismiss"
+            aria-label={t("dismiss")}
             onClick={() => useExports.getState().dismiss(job.id)}
           >
             <X />
@@ -277,6 +283,8 @@ function ExportRow({ job }: { job: ExportJob }) {
 }
 
 function LocalRowView({ row }: { row: LocalRow }) {
+  const t = useTranslations("editor.exportsDock");
+  const describeError = useDescribeError();
   const rendering = row.status === "rendering";
   const pct = Math.round(Math.min(1, Math.max(0, row.progress ?? 0)) * 100);
   return (
@@ -291,17 +299,17 @@ function LocalRowView({ row }: { row: LocalRow }) {
           )}
         >
           {rendering
-            ? `Rendering… ${pct}%`
+            ? t("rendering", { pct })
             : row.status === "preparing"
-              ? "Preparing…"
-              : row.error || "Couldn't start export"}
+              ? t("preparing")
+              : describeError(row, t("startFailed"))}
         </div>
       </div>
       <Button
         variant="ghost"
         size="icon-xs"
-        aria-label="Dismiss"
-        title={row.status === "error" ? "Dismiss" : "Hide — the export keeps running"}
+        aria-label={t("dismiss")}
+        title={row.status === "error" ? t("dismiss") : t("hide")}
         onClick={() => useExports.getState().dismiss(row.id)}
       >
         <X />

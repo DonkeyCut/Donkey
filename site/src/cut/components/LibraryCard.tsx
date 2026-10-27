@@ -2,6 +2,7 @@
 
 import { useCallback, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { useLocale, useTranslations } from "next-intl";
 import { isLinkedAssetType, type AssetType } from "@/cut/lib/types";
 import { Film, Image as ImageIcon, Loader2, Music, Type } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -33,6 +34,7 @@ import { PICKED_RING } from "@/cut/lib/assetPick";
 import { formatElapsed } from "@/cut/lib/time";
 import { formatBytes } from "@/lib/bytes";
 import { cn } from "@/lib/utils";
+import { useDescribeError } from "@/i18n/describeError";
 
 export const LIBRARY_TILE_AREA = 180 * 320;
 export const LIBRARY_AUDIO_TILE_AREA = LIBRARY_TILE_AREA * 0.7 ** 2;
@@ -185,6 +187,9 @@ export function LibraryCard({
   onRename?: (name: string) => Promise<unknown>;
   onDragStartExtra?: (e: React.DragEvent) => void;
 }) {
+  const t = useTranslations("home.card");
+  const locale = useLocale();
+  const describeError = useDescribeError();
   // ⌘C over the card copies its mention token. A card inside the current
   // selection carries the whole set, the same rule its drag follows. A font is
   // used from the font menu, so it names nothing a prompt can point a tool
@@ -250,7 +255,7 @@ export function LibraryCard({
   // TTF · 42 KB — what the file is, and how much of it there is.
   const fontMeta = [
     fileKind(a.fileName),
-    sizeBytes != null && formatBytes(sizeBytes),
+    sizeBytes != null && formatBytes(sizeBytes, locale),
   ]
     .filter(Boolean)
     .join(" · ");
@@ -265,7 +270,7 @@ export function LibraryCard({
         if (!name || !onRename) return;
         setRenameError(undefined);
         onRename(name).catch((e: unknown) => {
-          setRenameError(e instanceof Error ? e.message : "Could not rename the file.");
+          setRenameError(describeError(e, t("renameFailed")));
           setTimeout(() => setRenameError(undefined), 6000);
         });
       }}
@@ -410,12 +415,12 @@ export function LibraryCard({
                           }
                         >
                           {proxyState.kind === "making" && <Loader2 className="size-3 animate-spin" />}
-                          {proxyState.kind === "making" ? "Preparing" : "Can't play"}
+                          {proxyState.kind === "making" ? t("preparing") : t("cantPlay")}
                         </TooltipTrigger>
                         <TooltipContent className="max-w-xs">
                           {proxyState.kind === "making"
-                            ? "Making a copy this browser can play"
-                            : proxyState.error}
+                            ? t("makingCopy")
+                            : describeError(proxyState)}
                         </TooltipContent>
                       </Tooltip>
                     </TooltipProvider>
@@ -469,7 +474,7 @@ export function LibraryCard({
                         a.type === "video" && "hidden group-hover:inline",
                       )}
                     >
-                      {formatBytes(sizeBytes)}
+                      {formatBytes(sizeBytes, locale)}
                     </span>
                   )}
                 </span>
@@ -477,7 +482,7 @@ export function LibraryCard({
             {a.type === "audio" && sizeBytes != null && (
               // Clear of the play circle, matching the face's duration pill.
               <span className="absolute bottom-3 left-12 rounded-md bg-[#2b4e42] px-1.5 py-0.5 font-mono text-[10px] text-[#d6eddf] tabular-nums opacity-0 transition-opacity group-hover:opacity-100">
-                {formatBytes(sizeBytes)}
+                {formatBytes(sizeBytes, locale)}
               </span>
             )}
             {bothShelves && (
@@ -516,7 +521,7 @@ export function LibraryCard({
                       />
                     }
                   >
-                    Rename failed
+                    {t("renameFailedBadge")}
                   </TooltipTrigger>
                   <TooltipContent className="max-w-xs">{renameError}</TooltipContent>
                 </Tooltip>

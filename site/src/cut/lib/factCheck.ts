@@ -1,6 +1,7 @@
 import type { FactCheckResponse } from "@/lib/inference/factCheck";
 import { hostedPost } from "./hosted";
-import { readHostedError } from "./hostedError";
+import { readHostedFailure } from "./hostedError";
+import { UserError } from "./userError";
 
 // Checking a video's claims against the web, through the hosted fact-check
 // route. The page, the cloud runner and the ChatGPT card all reach it with the
@@ -11,7 +12,11 @@ import { readHostedError } from "./hostedError";
 export async function checkFacts(input: { claims?: unknown; context?: unknown }): Promise<FactCheckResponse> {
   const res = await hostedPost("/api/inference/fact-check", { claims: input.claims, context: input.context });
   if (!res.ok) {
-    throw new Error(await readHostedError(res, "Sign in to Donkey to check facts.", `The fact check failed (${res.status}).`));
+    throw await readHostedFailure(
+      res,
+      new UserError("sign_in_to_check_facts", "Sign in to Donkey to check facts."),
+      new UserError("fact_check_failed", `The fact check failed (${res.status}).`, { status: res.status }),
+    );
   }
   return (await res.json()) as FactCheckResponse;
 }

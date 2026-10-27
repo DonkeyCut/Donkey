@@ -3,6 +3,7 @@
 import { useCallback, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Camera, Loader2, Trash2 } from "lucide-react";
+import { useLocale, useTranslations } from "next-intl";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { useDeleteKey } from "@/cut/hooks/useDeleteKey";
 import { useTabTitle } from "@/cut/hooks/useTabTitle";
@@ -16,7 +17,7 @@ import { formatDate } from "@/cut/lib/time";
 import { shapeBand } from "@/cut/lib/types";
 import { Marquee, useTilePicks } from "./desktopFolders";
 import { Lightbox } from "./Lightbox";
-import { DeleteConfirm, SelectionMenu, pickLabel, useSelectionMenu } from "./selectionMenu";
+import { DeleteConfirm, SelectionMenu, usePickWords, useSelectionMenu } from "./selectionMenu";
 import { LibraryCard } from "@/cut/components/LibraryCard";
 
 /** The phone's recordings, synced up from the iOS app: every cloud library
@@ -27,6 +28,9 @@ import { LibraryCard } from "@/cut/components/LibraryCard";
  * itself off what is said in it. Pruning picks the way every tile grid does:
  * click, ⌘ and ⇧ clicks, a sweep, then ⌫ or the right-click menu. */
 export function CameraRollView() {
+  const t = useTranslations("home");
+  const locale = useLocale();
+  const { pickLabel } = usePickWords();
   const client = useQueryClient();
   // The phone fills this page, so it re-reads on a timer and whenever the
   // window comes back to the front: a clip finishes uploading and takes its
@@ -41,7 +45,7 @@ export function CameraRollView() {
     [client]
   );
   useClipTitles(clips, patch);
-  useTabTitle("Camera Roll");
+  useTabTitle(t("tabs.cameraRoll"));
 
   const remove = async (set: LibraryAsset[]) => {
     setDeleting(null);
@@ -89,7 +93,7 @@ export function CameraRollView() {
       onContextMenu={ctx.onContextMenu}
     >
       <div className="mb-5 flex items-center justify-between gap-4">
-        <h1 className="text-lg font-semibold tracking-tight">Camera Roll</h1>
+        <h1 className="text-lg font-semibold tracking-tight">{t("tabs.cameraRoll")}</h1>
       </div>
 
       {!library.data && library.isPending ? (
@@ -100,9 +104,9 @@ export function CameraRollView() {
         <div className="grid w-full place-items-center rounded-2xl py-24">
           <div className="flex flex-col items-center gap-3 text-center">
             <Camera className="size-8 text-muted-foreground" />
-            <div className="text-base font-medium">Nothing from your phone yet.</div>
+            <div className="text-base font-medium">{t("cameraRoll.emptyTitle")}</div>
             <p className="text-sm text-muted-foreground">
-              Clips you record in the Donkey Cut iOS app sync here automatically.
+              {t("cameraRoll.emptyHint")}
             </p>
           </div>
         </div>
@@ -119,7 +123,7 @@ export function CameraRollView() {
                   key={a.id}
                   asset={a}
                   area={TILE_AREA}
-                  caption={formatDate(a.addedAt)}
+                  caption={formatDate(a.addedAt, locale, t("justNow"))}
                   selected={selected.has(a.id)}
                   dragGroup={pick}
                   onClick={(e) => {
@@ -140,7 +144,7 @@ export function CameraRollView() {
 
       <SelectionMenu menu={ctxSet.length > 0 ? ctx.menu : null} onClose={ctx.close}>
         <DropdownMenuItem variant="destructive" onClick={() => setDeleting(ctxSet)}>
-          <Trash2 /> Delete
+          <Trash2 /> {t("cameraRoll.delete")}
         </DropdownMenuItem>
       </SelectionMenu>
 
@@ -148,14 +152,10 @@ export function CameraRollView() {
         open={!!deleting}
         title={
           deleting
-            ? `Delete ${pickLabel([], deleting.map((a) => ({ name: a.title || a.name })), ["clip", "clips"], 0)}?`
+            ? t("cameraRoll.deleteTitle", { what: pickLabel([], deleting.map((a) => ({ name: a.title || a.name })), "clip", 0) })
             : ""
         }
-        description={
-          deleting?.length === 1
-            ? "The clip leaves your cloud Camera Roll and the phone it was shot on. Projects that already use it keep their own copy."
-            : "The clips leave your cloud Camera Roll and the phone they were shot on. Projects that already use them keep their own copy."
-        }
+        description={t("cameraRoll.deleteBody", { count: deleting?.length ?? 0 })}
         onClose={() => setDeleting(null)}
         onConfirm={() => deleting && void remove(deleting)}
       />

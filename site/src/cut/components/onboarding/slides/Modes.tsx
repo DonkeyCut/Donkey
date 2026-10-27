@@ -1,18 +1,20 @@
 "use client";
 
 import { Cloud, Laptop } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 import { TapedCard } from "@/app/_components/landing/LandingPrimitives";
 import { CheckBullet } from "@/cut/components/onboarding/CheckBullet";
 
 export function ModesSlide() {
+  const t = useTranslations("onboarding.modes");
   return (
     <div className="mx-auto w-full max-w-[760px]">
       <h2 className="text-center text-[clamp(24px,3vw,32px)] leading-[1.1] font-semibold tracking-[-0.02em] text-balance">
-        Works in the cloud or on your Mac
+        {t("title")}
       </h2>
       <p className="mx-auto mt-3 max-w-[560px] text-center text-[16px] leading-[1.5] text-foreground/70 italic">
-        Same editor. Choose what works for you.
+        {t("subtitle")}
       </p>
 
       {/* The landing's taped cards, so the two places to work are framed the
@@ -20,24 +22,20 @@ export function ModesSlide() {
       <div className="mt-7 grid gap-4 md:mt-10 md:grid-cols-2 md:gap-5">
         <Mode
           icon={<Cloud className="size-5" />}
-          title="In the cloud"
+          title={t("cloudTitle")}
           tape="coral"
-          points={["No install", "Works in any browser", "We handle rendering"]}
+          points={[t("cloudNoInstall"), t("cloudAnyBrowser"), t("cloudRendering")]}
         />
         <Mode
           icon={<Laptop className="size-5" />}
-          title="On your Mac"
+          title={t("macTitle")}
           tape="yellow"
-          points={[
-            "Your files stay local",
-            "Uses your Mac's hardware",
-            "Faster exports & AI features",
-          ]}
+          points={[t("macLocalFiles"), t("macHardware"), t("macFaster")]}
         />
       </div>
 
       <p className="mt-7 text-center text-[15px] leading-[1.5] text-foreground/70 md:mt-9">
-        Automatically switches between cloud and local when available.
+        {t("switching")}
       </p>
     </div>
   );

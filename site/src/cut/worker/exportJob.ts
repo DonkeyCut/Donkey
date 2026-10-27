@@ -9,6 +9,7 @@ import { prisma, registerObjectIn, storageTransaction, type ClaimedJob } from ".
 import { deleteObjects, downloadToFile, exportKey, mediaKey, mimeFor, uploadFile } from "./r2";
 import { overlayKey } from "../server/cloud/r2";
 import { STORAGE_FULL } from "../lib/operationFailure";
+import { UserError } from "../lib/userError";
 import { isTabExport, specMediaFiles, STEMS_MIME, stemsArchiveName } from "../lib/exportDelivery";
 import { runnerSession } from "./session";
 import type { DocExportAudio } from "../lib/exportPresets";
@@ -126,10 +127,13 @@ export async function runExportJob(
   const stored = job.spec as ExportJobSpec;
   const projectId = job.projectId ?? stored.spec?.projectId;
   if (!projectId) throw new Error("Export job has no project.");
-  if (stored.fromDoc && !stored.fromDoc.snapshot?.doc)
-    throw new Error("This render has no captured document. Queue the export again.");
+  if (stored.fromDoc && !stored.fromDoc.snapshot?.doc) {
+    throw new UserError("render_snapshot_missing", "This render has no captured document. Queue the export again.");
+  }
   // A tab render's claim carries no spec: the tab that made it draws it.
-  if (isTabExport(stored)) throw new Error("This export renders in the browser tab that started it.");
+  if (isTabExport(stored)) {
+    throw new UserError("render_in_tab", "This export renders in the browser tab that started it.");
+  }
   if (!stored.fromDoc && (!stored.spec || !Array.isArray(stored.spec.clips))) {
     throw new Error("Malformed export spec.");
   }
@@ -185,7 +189,9 @@ export async function runExportJob(
       where: { id: job.id },
       select: { state: true },
     });
-    if (live?.state !== "running") throw new Error("Canceled.");
+    if (live?.state !== "running") {
+      throw new UserError("render_canceled", "Canceled.");
+    }
 
     const mime = mimeFor(outName);
     if (body.mediaFrom === "overlays") {
@@ -202,7 +208,9 @@ export async function runExportJob(
     if (!preview && typeof stored.maxBytes === "number") {
       const size =
         (await stat(handle.outPath)).size + (handle.stemsPath ? (await stat(handle.stemsPath)).size : 0);
-      if (size > stored.maxBytes) throw new Error(STORAGE_FULL);
+      if (size > stored.maxBytes) {
+        throw new UserError("storage_quota_exceeded", STORAGE_FULL);
+      }
     }
     // The file and, when asked for, its stems: each its own object and row,
     // charged at its own size.

@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useTranslations } from "next-intl";
 import {
   ALL_EFFECT_IDS,
   AUDIO_EFFECT_IDS,
   audioFxBars,
-  EFFECT_LABELS,
   effectPreviewState,
   grainTileUrl,
   isAudioEffect,
@@ -31,12 +31,13 @@ import { usePlayheadFrame } from "@/cut/components/usePlayheadFrame";
 import { STOCK_SFX_CATEGORIES, stockTitle, type StockSfx, type StockSfxCategory } from "@/cut/lib/stock";
 import { STOCK_SFX } from "@/cut/lib/stockSfxManifest";
 import { useEditor } from "@/cut/lib/store";
-import { isEffectOverlay, TRANSITION_STYLE_LABELS, type EffectOverlay } from "@/cut/lib/types";
+import { isEffectOverlay, type EffectOverlay } from "@/cut/lib/types";
 import { useLocalPref } from "@/cut/lib/uiState";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { useLabels } from "@/i18n/labels";
 import "./grain.css";
 import { LightbarCanvas } from "./LightbarCanvas";
 
@@ -73,13 +74,10 @@ type EffectGroup = "moving" | "filters" | "audio";
  * rather than the Transitions tab: what it does, it does to the sound. */
 const CROSS_DISSOLVE = "audiocross" as const;
 
-const GROUPS = [
-  { id: "moving", label: "Moving" },
-  { id: "filters", label: "Filters" },
-  // "Sound", because the rail's own Audio tab is where music and voiceover
-  // live; this family is the treatments over whatever is already audible.
-  { id: "audio", label: "Sound" },
-] as const;
+// "Sound" names the audio family, because the rail's own Audio tab is where
+// music and voiceover live; this family is the treatments over whatever is
+// already audible.
+const GROUPS = ["moving", "filters", "audio"] as const;
 
 const MOVING: EffectId[] = ["zoom", "grain", "vhs", "glitch", "lightleak", "lightbars", "flash", "shake", "huecycle"];
 
@@ -87,13 +85,14 @@ const groupOf = (id: EffectId): EffectGroup =>
   isAudioEffect(id) ? "audio" : MOVING.includes(id) ? "moving" : "filters";
 
 export function EffectsPanel() {
+  const t = useTranslations("panels.effects");
   const live = useEditor((s) => {
     if (s.selection?.kind !== "overlay") return null;
     const o = s.overlays.find((x) => x.id === s.selection!.id);
     return o && isEffectOverlay(o) ? o : null;
   });
   const [group, setGroup] = useLocalPref<EffectGroup>("cut-effects-group", "moving", (v) =>
-    GROUPS.some((g) => g.id === v)
+    GROUPS.some((g) => g === v)
   );
   // The Sound family drills down: the root lists the sound groups, and an
   // open group replaces the segmented control with a back header. Kept across
@@ -142,12 +141,18 @@ export function EffectsPanel() {
               className="flex h-8 items-center gap-0.5 rounded-full pr-2.5 pl-1.5 text-[13px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
             >
               <ChevronLeft className="size-4" />
-              Sounds
+              {t("sounds")}
             </button>
-            <span className="truncate text-[13px] font-semibold tracking-tight">{soundGroup}</span>
+            <span className="truncate text-[13px] font-semibold tracking-tight">
+              {soundGroupLabel(t, soundGroup)}
+            </span>
           </div>
         ) : (
-          <SubTabs tabs={GROUPS} value={group} onChange={setGroup} />
+          <SubTabs
+            tabs={GROUPS.map((id) => ({ id, label: t(`groups.${id}`) }))}
+            value={group}
+            onChange={setGroup}
+          />
         )}
       </div>
 
@@ -182,6 +187,7 @@ function EffectTile({
   live: EffectOverlay | null;
   frame: string | null;
 }) {
+  const effectLabel = useLabels("effect");
   const { picked, pick } = useAssetPick(`effect:${id}`);
   const [hover, setHover] = useState(false);
   // A moving effect's whole point is its motion, so its swatch always plays,
@@ -230,7 +236,7 @@ function EffectTile({
         frame={frame}
         className={cn("w-full rounded-lg border border-border", marked && PICKED_RING)}
       />
-      <span className="leading-none">{EFFECT_LABELS[id]}</span>
+      <span className="leading-none">{effectLabel(id)}</span>
     </button>
   );
   return tile;
@@ -252,6 +258,7 @@ function SoundTile({
   live: EffectOverlay | null;
   index: number;
 }) {
+  const effectLabel = useLabels("effect");
   const { picked, pick } = useAssetPick(`effect:${id}`);
   const t = useSoundClock(index);
   const ref = useRef<HTMLDivElement | null>(null);
@@ -271,7 +278,7 @@ function SoundTile({
         ref.current = el;
       }}
       pickId={`effect:${id}`}
-      label={EFFECT_LABELS[id]}
+      label={effectLabel(id)}
       marked={marked}
       onChoose={choose}
       onDragStart={(e) => {
@@ -294,13 +301,14 @@ function SoundTile({
  * because what it does is done to the sound.
  */
 function CrossDissolveTile({ index }: { index: number }) {
+  const transitionLabel = useLabels("transition");
   const { picked, pick } = useAssetPick(`transition:${CROSS_DISSOLVE}`);
   const t = useSoundClock(index);
   const playing = useFxAudition((s) => s.effect === CROSS_DISSOLVE);
   return (
     <SoundCard
       pickId={`transition:${CROSS_DISSOLVE}`}
-      label={TRANSITION_STYLE_LABELS[CROSS_DISSOLVE]}
+      label={transitionLabel(CROSS_DISSOLVE)}
       marked={picked}
       onChoose={pick}
       onDragStart={(e) => {
@@ -357,6 +365,7 @@ function SoundCard({
    * before it. */
   trailing?: React.ReactNode;
 }) {
+  const t = useTranslations("panels.effects");
   const nameRef = useRef<HTMLSpanElement>(null);
   const [nameHint, setNameHint] = useState(false);
   return (
@@ -417,7 +426,7 @@ function SoundCard({
         </div>
         <button
           type="button"
-          aria-label={`${playing ? "Stop" : "Play"} ${label}`}
+          aria-label={playing ? t("stopSound", { name: label }) : t("playSound", { name: label })}
           onClick={onTogglePlay}
           className={cn(
             "absolute top-1.5 left-1.5 grid size-6 place-items-center rounded-full bg-background text-foreground shadow-sm ring-1 ring-border transition-opacity hover:scale-105 focus-visible:opacity-100",
@@ -448,6 +457,18 @@ const FAVORITES = "Favorites";
 const TREATMENTS = "Treatments";
 type SoundGroup = typeof FAVORITES | typeof TREATMENTS | StockSfxCategory;
 
+/** A sound group's name in the page's language. The group ids stay English:
+ * the open group is saved by id. */
+function soundGroupLabel(t: ReturnType<typeof useTranslations<"panels.effects">>, group: SoundGroup): string {
+  if (group === FAVORITES) {
+    return t("favorites");
+  }
+  if (group === TREATMENTS) {
+    return t("treatments");
+  }
+  return t(`sfxCategories.${group}`);
+}
+
 /**
  * The Sound family's shelf. The root is a search box over a list of groups —
  * the starred sounds, the treatments, then every sound family with its count
@@ -465,6 +486,9 @@ function SoundShelf({
   open: SoundGroup | null;
   onOpen: (g: SoundGroup | null) => void;
 }) {
+  const t = useTranslations("panels.effects");
+  const effectLabel = useLabels("effect");
+  const transitionLabel = useLabels("transition");
   const [query, setQuery] = useState("");
   const favoriteIds = useSoundFavorites((s) => s.ids);
   const families = STOCK_SFX_CATEGORIES.filter((c) => STOCK_SFX.some((x) => x.category === c));
@@ -502,7 +526,7 @@ function SoundShelf({
           soundGrid(items, true)
         ) : (
           <div className="py-2 text-[12px] text-muted-foreground">
-            Star a sound to keep it here.
+            {t("noFavorites")}
           </div>
         )}
       </ScrollArea>
@@ -525,8 +549,8 @@ function SoundShelf({
 
   let body: React.ReactNode;
   if (words.length > 0) {
-    const ids = AUDIO_EFFECT_IDS.filter((id) => matchesWords(EFFECT_LABELS[id].toLowerCase()));
-    const dissolve = matchesWords(TRANSITION_STYLE_LABELS[CROSS_DISSOLVE].toLowerCase());
+    const ids = AUDIO_EFFECT_IDS.filter((id) => matchesWords(effectLabel(id).toLowerCase()));
+    const dissolve = matchesWords(transitionLabel(CROSS_DISSOLVE).toLowerCase());
     const hits = STOCK_SFX.filter((x) =>
       matchesWords([x.id, x.category, x.prompt, ...x.tags].join(" ").toLowerCase())
     ).slice(0, SFX_SEARCH_LIMIT);
@@ -535,14 +559,14 @@ function SoundShelf({
       .filter(({ items }) => items.length > 0);
     body =
       ids.length === 0 && !dissolve && hits.length === 0 ? (
-        <div className="py-2 text-[12px] text-muted-foreground">No sounds match.</div>
+        <div className="py-2 text-[12px] text-muted-foreground">{t("noMatches")}</div>
       ) : (
         <>
           {(ids.length > 0 || dissolve) && (
-            <Section title={TREATMENTS}>{treatmentGrid(ids, dissolve)}</Section>
+            <Section title={t("treatments")}>{treatmentGrid(ids, dissolve)}</Section>
           )}
           {sections.map(({ c, items }) => (
-            <Section key={c} title={c}>
+            <Section key={c} title={soundGroupLabel(t, c)}>
               {soundGrid(items)}
             </Section>
           ))}
@@ -565,7 +589,7 @@ function SoundShelf({
             // search field's left edge and the chevron on its right.
             className="-mx-2 flex h-9 items-center gap-2 rounded-lg px-2 text-[12.5px] font-medium hover:bg-muted"
           >
-            <span className="flex-1 truncate text-left">{r.group}</span>
+            <span className="flex-1 truncate text-left">{soundGroupLabel(t, r.group)}</span>
             <span className="font-mono text-[10px] text-muted-foreground tabular-nums">{r.count}</span>
             <ChevronRight className="size-3.5 text-muted-foreground" />
           </button>
@@ -582,8 +606,8 @@ function SoundShelf({
           <Input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search sounds"
-            aria-label="Search sounds"
+            placeholder={t("searchSounds")}
+            aria-label={t("searchSounds")}
             className="h-8 pl-8 text-[12px]"
           />
         </div>
@@ -610,6 +634,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
  * a sound plays it — by click or by arrowing onto it — so a run through the
  * list is heard; picking it again stops it. */
 function SfxCard({ sound, fullName = false }: { sound: StockSfx; fullName?: boolean }) {
+  const t = useTranslations("panels.effects");
   const pickId = `stock:${sound.id}`;
   const { picked, pick } = useAssetPick(pickId);
   const projectId = useEditor((s) => s.projectId);
@@ -659,7 +684,7 @@ function SfxCard({ sound, fullName = false }: { sound: StockSfx; fullName?: bool
         <>
           <button
             type="button"
-            aria-label={`Add ${label} at the playhead`}
+            aria-label={t("addAtPlayhead", { name: label })}
             onClick={add}
             className="absolute right-1.5 bottom-1.5 grid size-6 place-items-center rounded-full bg-background text-foreground opacity-0 shadow-sm ring-1 ring-border transition-opacity group-hover:opacity-100 hover:scale-105"
           >
@@ -669,7 +694,7 @@ function SfxCard({ sound, fullName = false }: { sound: StockSfx; fullName?: bool
               that is not a favorite reads clean. */}
           <button
             type="button"
-            aria-label={`${starred ? "Remove" : "Add"} ${label} ${starred ? "from" : "to"} favorites`}
+            aria-label={starred ? t("removeFavorite", { name: label }) : t("addFavorite", { name: label })}
             aria-pressed={starred}
             onClick={() => useSoundFavorites.getState().toggle(sound.id)}
             className={cn(

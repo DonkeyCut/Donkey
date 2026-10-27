@@ -25,6 +25,7 @@ import {
 import { geminiModelRoles } from "@/lib/inference/gemini-models";
 import { isJsonObject, toJsonValue } from "@/lib/inference/json";
 import type { JsonValue } from "@/lib/inference/providers";
+import { UserError } from "@/cut/lib/userError";
 import { err } from "./util";
 
 // The client sends 16 kHz 16-bit mono PCM in chunks of at most 20 seconds; the
@@ -241,7 +242,7 @@ export const transcribeCloud = {
 
     const clientConfig = geminiClientConfig(process.env);
     if (!clientConfig.configured) {
-      return err("Transcription is not configured on this deployment.", 500);
+      return err(new UserError("transcription_unconfigured", "Transcription is not configured on this deployment."), 500);
     }
 
     // Inside the allowance the chunk is on the house — no balance check, so a
@@ -306,7 +307,7 @@ export const transcribeCloud = {
       const credit = creditErrorResponse(error);
       if (credit) return credit;
       const mapped = geminiApiError("Transcription failed.", error);
-      return err(mapped.message, mapped.statusCode ?? 502);
+      return err(new UserError("transcription_failed", mapped.message), mapped.statusCode ?? 502);
     }
 
     // The call succeeded and spent tokens; record and charge before judging
@@ -332,7 +333,7 @@ export const transcribeCloud = {
 
     const words = readWords(raw as JsonValue, audioSeconds);
     if (words === null) {
-      return err("The transcription model returned no word timings — try again.", 502);
+      return err(new UserError("transcription_no_timings", "The transcription model returned no word timings — try again."), 502);
     }
     return Response.json({ cues: groupWordsIntoCues(words) });
   },

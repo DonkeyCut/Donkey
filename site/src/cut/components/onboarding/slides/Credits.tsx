@@ -1,10 +1,10 @@
 "use client";
 
+import { useFormatter, useLocale, useTranslations } from "next-intl";
 import { useEffect, useRef } from "react";
 
 import { burstConfetti } from "@/cut/components/onboarding/confetti";
 import { creditCountLabel, creditsFromDollars } from "@/lib/credits/format-credits";
-import { formatCreditExpiry } from "@/lib/credits/top-up";
 
 // The signup grant already landed when the account was created, so this slide
 // never grants anything — it says what's there: the credits the grant carried,
@@ -18,6 +18,9 @@ export function CreditsSlide({
   credits: string;
   expiresAt: string | null;
 }) {
+  const t = useTranslations("onboarding.credits");
+  const format = useFormatter();
+  const locale = useLocale();
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
@@ -42,21 +45,22 @@ export function CreditsSlide({
             a couple of steps down and thin beside it. */}
         <h2 className="flex flex-wrap items-baseline justify-center gap-x-4 leading-[1.02] tracking-[-0.03em]">
           <span className="text-[clamp(40px,7.4vw,84px)] font-semibold text-coral tabular-nums">
-            {creditCountLabel(creditsFromDollars(credits, "down"))}
+            {creditCountLabel(creditsFromDollars(credits, "down"), locale)}
           </span>
           <span className="text-[clamp(26px,4.4vw,52px)] font-light">
-            on us
+            {t("onUs")}
           </span>
         </h2>
         {/* Ragged right on a narrow measure: the line breaks stay put instead
             of the last line floating in the middle of the slide. */}
         <p className="mx-auto mt-4 max-w-[460px] text-left text-[16px] leading-[1.55] text-foreground/70">
-          Already in your account — nothing to claim. Spend them on generated
-          video, audio and images.
+          {t("body")}
         </p>
         {expiresAt !== null && (
           <p className="mt-3 text-[13px] leading-[1.5] text-foreground/70">
-            Expires {formatCreditExpiry(new Date(expiresAt))}.
+            {t("expires", {
+              date: format.dateTime(new Date(expiresAt), { day: "numeric", month: "long", year: "numeric" }),
+            })}
           </p>
         )}
       </div>

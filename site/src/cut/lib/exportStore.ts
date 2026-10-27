@@ -7,6 +7,7 @@ import { getBackend, type CutBackend, type CutMode } from "./backend";
 import { browserBackend } from "./backend/browser";
 import { cloudBackend } from "./backend/cloud";
 import { localBackend } from "./backend/local";
+import { errorFields, UserError, type UserErrorParams } from "./userError";
 import {
   matchSourceSettings,
   cancelExportJob,
@@ -41,6 +42,9 @@ export interface ExportJob {
   progress: number; // 0..1
   outName?: string;
   error?: string;
+  /** The failure's code, beside `error`, for the dock to word it. */
+  errorCode?: string;
+  errorParams?: UserErrorParams;
   /** Epoch ms the encode began (elapsed clock) and the job was created (order). */
   startedAt?: number;
   createdAt?: number;
@@ -48,6 +52,8 @@ export interface ExportJob {
    * the server. */
   residency: CutMode;
 }
+
+const EXPORT_CANCELED = new UserError("export_canceled", "Export canceled.");
 
 /** The backend a dock row lives on; per-row actions hit this, never the
  * globally bound mode. */
@@ -68,6 +74,8 @@ export interface LocalRow {
   projectName?: string;
   status: "preparing" | "rendering" | "error";
   error?: string;
+  errorCode?: string;
+  errorParams?: UserErrorParams;
   /** 0..1 while rendering in this tab. */
   progress?: number;
   createdAt: number;
@@ -157,10 +165,10 @@ export const useExports = create<ExportsState>((set, get) => ({
       set((s) => ({ rendering: s.rendering.filter((id) => !gone.has(id)) }));
     };
     const fail = (err: unknown) => {
-      const msg = err instanceof Error ? err.message : String(err);
+      const failure = errorFields(err, String(err));
       set((s) => ({
         local: s.local.map((r) =>
-          r.id === localId ? { ...r, status: "error" as const, error: msg, abort: undefined } : r
+          r.id === localId ? { ...r, status: "error" as const, ...failure, abort: undefined } : r
         ),
       }));
     };
@@ -256,7 +264,7 @@ export const useExports = create<ExportsState>((set, get) => ({
     cancelExportJob(id, job ? exportBackend(job.residency) : undefined);
     set((s) => ({
       jobs: s.jobs.map((j) =>
-        j.id === id ? { ...j, status: "error", error: "Export canceled." } : j
+        j.id === id ? { ...j, status: "error", ...errorFields(EXPORT_CANCELED, "") } : j
       ),
     }));
     void get().refresh();

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef } from "react";
+import { useTranslations } from "next-intl";
 import { Copy, Loader2, Maximize2, Sparkles, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
@@ -42,10 +43,10 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 // References ride along as input images: drag any image or video in (stock
 // tile, media card, library clip, timeline clip) or mention it by @name.
 
-const ASPECT_WORD: Record<ImageAspect, string> = {
-  "16:9": "Landscape",
-  "9:16": "Portrait",
-  "1:1": "Square",
+const ASPECT_WORD: Record<ImageAspect, "landscape" | "portrait" | "square"> = {
+  "16:9": "landscape",
+  "9:16": "portrait",
+  "1:1": "square",
 };
 
 // The resolution tier fixes the long edge (4K caps at the model's 4096×4096 max);
@@ -62,6 +63,7 @@ function pixelDims(aspect: ImageAspect, resolution: ImageResolution): string {
 }
 
 export function ImageGenPanel({ projectId }: { projectId: string }) {
+  const t = useTranslations("media");
   const { prompt, aspect, resolution, refs } = useImageGen();
   const readOnly = useEditor((s) => s.readOnly);
   const signedIn = useSignedIn();
@@ -112,7 +114,7 @@ export function ImageGenPanel({ projectId }: { projectId: string }) {
   return (
     <div ref={attachTarget} {...targetProps} className="relative flex min-h-0 flex-1 flex-col">
       <div className="flex h-12 shrink-0 items-center pr-2.5 pl-4">
-        <span className="text-sm font-semibold tracking-tight">Generate image</span>
+        <span className="text-sm font-semibold tracking-tight">{t("generateImage.title")}</span>
       </div>
 
       <ScrollArea className="min-h-0 flex-1" contentClassName="flex flex-col gap-3 px-3.5 pb-4">
@@ -134,7 +136,7 @@ export function ImageGenPanel({ projectId }: { projectId: string }) {
           />
           <MentionTextarea
             className="min-h-[100px] w-full resize-y bg-transparent px-2.5 py-2 pr-9 text-[12.5px] leading-relaxed outline-none"
-            placeholder="A neon-lit street market at night, cinematic… Drop an image in or type @ to reference one."
+            placeholder={t("generateImage.placeholder")}
             value={prompt}
             onChange={(v) => useImageGen.getState().setPrompt(v)}
             candidates={candidates}
@@ -162,17 +164,17 @@ export function ImageGenPanel({ projectId }: { projectId: string }) {
         <div className="flex shrink-0 items-center gap-2">
           <PillSelect
             className="min-w-0 flex-1"
-            title="Aspect ratio"
+            title={t("generateImage.aspectRatio")}
             value={aspect}
-            display={ASPECT_WORD[aspect]}
+            display={t(`aspectWord.${ASPECT_WORD[aspect]}`)}
             options={(Object.keys(ASPECT_WORD) as ImageAspect[]).map((a) => ({
               value: a,
-              label: `${ASPECT_WORD[a]} · ${a}`,
+              label: t("generateImage.aspectOption", { word: t(`aspectWord.${ASPECT_WORD[a]}`), ratio: a }),
             }))}
             onChange={(v) => useImageGen.getState().setAspect(v)}
           />
           <PillSelect
-            title="Resolution"
+            title={t("generateImage.resolution")}
             value={resolution}
             display={resolution}
             options={(Object.keys(IMAGE_RESOLUTION_LABEL) as ImageResolution[]).map((r) => ({
@@ -189,16 +191,18 @@ export function ImageGenPanel({ projectId }: { projectId: string }) {
           onClick={button.onClick}
         >
           <Sparkles data-icon="inline-start" />
-          Generate image
+          {t("generateImage.button")}
         </Button>
 
         {signedIn === false && (
           <p className="shrink-0 text-[11px] leading-relaxed text-muted-foreground">
-            Generating runs on your Donkey account.{" "}
-            <a className="font-medium text-blue-600 hover:underline dark:text-blue-400" href={signInUrl()}>
-              Sign in
-            </a>{" "}
-            to continue.
+            {t.rich("signInToGenerate", {
+              link: (chunks) => (
+                <a className="font-medium text-blue-600 hover:underline dark:text-blue-400" href={signInUrl()}>
+                  {chunks}
+                </a>
+              ),
+            })}
           </p>
         )}
         </>)}
@@ -214,7 +218,7 @@ export function ImageGenPanel({ projectId }: { projectId: string }) {
 
         {generated.length > 0 && (
           <div className="flex shrink-0 flex-col gap-1.5">
-            <SectionTitle>Generated</SectionTitle>
+            <SectionTitle>{t("generateImage.generated")}</SectionTitle>
             {generated.map((a) => (
               <GeneratedTile
                 key={a.id}
@@ -244,6 +248,7 @@ function GeneratedTile({
   projectId: string;
   handle?: string;
 }) {
+  const t = useTranslations("media.generateImage");
   const tileRef = useRef<HTMLDivElement>(null);
   const pulse = useGenPulse("image", asset.id);
   const { picked, pick } = useAssetPick(asset.id);
@@ -287,7 +292,7 @@ function GeneratedTile({
       </div>
       <div className="absolute top-1 right-1 flex gap-1">
         <button
-          title="Expand"
+          title={t("expand")}
           className="grid size-5 place-items-center rounded-full bg-black/45 text-white opacity-0 transition-opacity group-hover:opacity-100 hover:bg-black/65"
           onClick={() =>
             useLightbox.getState().open({
@@ -308,7 +313,7 @@ function GeneratedTile({
           before={
             <>
               <DropdownMenuItem onClick={() => useImageGen.getState().openWith(asset.name)}>
-                <Sparkles /> Use this prompt
+                <Sparkles /> {t("useThisPrompt")}
               </DropdownMenuItem>
               <DropdownMenuItem
                 onClick={() =>
@@ -317,7 +322,7 @@ function GeneratedTile({
                     .catch(() => {})
                 }
               >
-                <Copy /> Copy reference
+                <Copy /> {t("copyReference")}
               </DropdownMenuItem>
             </>
           }
@@ -326,7 +331,7 @@ function GeneratedTile({
               variant="destructive"
               onClick={() => useEditor.getState().removeAsset(asset.id)}
             >
-              <Trash2 /> Delete
+              <Trash2 /> {t("delete")}
             </DropdownMenuItem>
           }
         />
@@ -339,6 +344,7 @@ function GeneratedTile({
 /** A generation in flight (or failed) as a compact status row with a live
  * elapsed clock while it renders. */
 function ImageJobRow({ job }: { job: GenerateJob }) {
+  const t = useTranslations("media.generateImage");
   const elapsed = useElapsed(job.status === "running" ? job.startedAt : null);
   return (
     <div className="group flex shrink-0 items-center gap-2">
@@ -355,17 +361,17 @@ function ImageJobRow({ job }: { job: GenerateJob }) {
         >
           {job.status === "running" ? (
             <>
-              Generating…{" "}
+              {t("generating")}{" "}
               {elapsed && <span className="tabular-nums text-muted-foreground/80">{elapsed}</span>}
             </>
           ) : (
-            <HostedErrorText error={job.error} />
+            <HostedErrorText error={job} />
           )}
         </div>
       </div>
       {job.status === "error" && (
         <button
-          title="Dismiss"
+          title={t("dismiss")}
           className={cn(cardIconButton, "opacity-0 group-hover:opacity-100")}
           onClick={() => useGenerate.getState().dismiss(job.id)}
         >

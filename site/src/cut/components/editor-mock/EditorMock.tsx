@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useTranslations } from "next-intl";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import "./editor-mock.css";
 
@@ -9,7 +10,7 @@ import { MockPreview } from "@/cut/components/editor-mock/MockPreview";
 import { MockSidePanel } from "@/cut/components/editor-mock/MockSidePanel";
 import { MockTimeline } from "@/cut/components/editor-mock/MockTimeline";
 import { MockTopBar } from "@/cut/components/editor-mock/MockTopBar";
-import { MOCK_PROJECTS, type MockProject } from "@/cut/components/editor-mock/mockData";
+import { mockProjects, onboardingProject } from "@/cut/components/editor-mock/mockData";
 import { cn } from "@/lib/utils";
 
 // The mock is authored at a fixed design size and scaled to its container's
@@ -29,8 +30,9 @@ const VIEWS = {
 export type EditorMockView = keyof typeof VIEWS;
 
 type Props = {
-  /** Show exactly this project instead of the landing's showcase pair. */
-  project?: MockProject;
+  /** Show exactly the onboarding project in place of the landing's showcase
+   * pair. */
+  project?: "onboarding";
   view?: EditorMockView;
   /** Which dimension the mock is sized by. "width" fills the container and
    * takes whatever height that implies; "height" fills a container of bounded
@@ -59,7 +61,13 @@ export function EditorMock({
   showSwitcher = true,
   frame = "lifted",
 }: Props) {
-  const projects = project ? [project] : MOCK_PROJECTS;
+  const t = useTranslations("mock");
+  // Built once per language: the projects are the catalog's words on fixed
+  // geometry.
+  const projects = useMemo(
+    () => (project === "onboarding" ? [onboardingProject(t)] : mockProjects(t)),
+    [project, t],
+  );
   const [active, setActive] = useState(0);
   const frameRef = useRef<HTMLDivElement>(null);
   const [box, setBox] = useState({ width: 0, height: 0 });
@@ -161,11 +169,7 @@ export function EditorMock({
           </div>
         </div>
       </div>
-      <figcaption className="sr-only">
-        The Donkey Cut editor with a finished project open: generated media in
-        the side panel, clips and music on the timeline, and the AI chat that
-        assembled them.
-      </figcaption>
+      <figcaption className="sr-only">{t("editorMock.caption")}</figcaption>
       {showSwitcher && (
         <div className="mt-6 flex flex-wrap justify-center gap-1.5">
           {projects.map((p, i) => (

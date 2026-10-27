@@ -106,7 +106,7 @@ test("a long thread goes up compacted, and a refused cloud save is told until on
     await flushCloudThreadSaves();
     expect(bodies[0].length).toBeLessThanOrEqual(CLOUD_THREAD_BUDGET);
     expect(JSON.parse(bodies[0]).messages[0].parts).toHaveLength(295);
-    expect(threadSaveFailure()).toContain("cloud");
+    expect(threadSaveFailure()?.message).toContain("cloud");
     await expect(putCloudThread(cloudBackend, "compact", thread)).rejects.toThrow();
     expect(warn.mock.calls.filter((c) => String(c[0]).includes("cloud"))).toHaveLength(1);
     status = 200;

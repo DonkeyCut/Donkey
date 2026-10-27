@@ -11,7 +11,11 @@ import {
   type ExportSpec,
 } from "../jobs";
 import { serveFileRange } from "../serveFile";
-import { errorMessage } from "../util";
+import { UserError, errorBody } from "../../lib/userError";
+import { errorReply } from "../util";
+
+const startFailed = () => new UserError("export_start_failed", "Export failed to start.");
+const notRunning = () => new UserError("export_not_running", "This export is no longer running.");
 
 /** Export rendering: start a job, poll it, cancel it, download the result. */
 export const exportApi = {
@@ -26,12 +30,12 @@ export const exportApi = {
       const form = await req.formData();
       const job = await createJob(form);
       if (job.status === "error") {
-        return Response.json({ error: job.error }, { status: 400 });
+        return Response.json(errorBody(job, startFailed()), { status: 400 });
       }
       return Response.json({ id: job.id });
     } catch (e) {
       return Response.json(
-        { error: errorMessage(e, "Export failed to start.") },
+        errorReply(e, startFailed()),
         { status: 500 }
       );
     }
@@ -49,11 +53,13 @@ export const exportApi = {
       };
       if (!body.projectId) return Response.json({ error: "Missing project." }, { status: 400 });
       const job = await createClientJob(body.projectId, body.container, body.name?.trim() || undefined, body.stems === true ? "fileAndStems" : "file");
-      if (job.status === "error") return Response.json({ error: job.error }, { status: 400 });
+      if (job.status === "error") {
+        return Response.json(errorBody(job, startFailed()), { status: 400 });
+      }
       return Response.json({ id: job.id, outName: job.outName });
     } catch (e) {
       return Response.json(
-        { error: errorMessage(e, "Export failed to start.") },
+        errorReply(e, startFailed()),
         { status: 500 }
       );
     }
@@ -68,8 +74,12 @@ export const exportApi = {
   /** The finished file, streamed straight into the project's exports folder. */
   async clientComplete(req: Request, { jobId }: { jobId: string }) {
     const job = await completeClientJob(jobId, req.body);
-    if (!job) return Response.json({ error: "This export is no longer running." }, { status: 409 });
-    if (job.status === "error") return Response.json({ error: job.error }, { status: 500 });
+    if (!job) {
+      return Response.json(errorBody(null, notRunning()), { status: 409 });
+    }
+    if (job.status === "error") {
+      return Response.json(errorBody(job, job.error ?? ""), { status: 500 });
+    }
     return Response.json({ id: job.id, outName: job.outName });
   },
 
@@ -77,10 +87,15 @@ export const exportApi = {
   async clientStems(req: Request, { jobId }: { jobId: string }) {
     try {
       const job = await completeClientStems(jobId, req.body);
-      if (!job) return Response.json({ error: "This export is no longer running." }, { status: 409 });
+      if (!job) {
+        return Response.json(errorBody(null, notRunning()), { status: 409 });
+      }
       return Response.json({ ok: true });
     } catch (e) {
-      return Response.json({ error: errorMessage(e, "Could not save the stems.") }, { status: 500 });
+      return Response.json(
+        errorReply(e, new UserError("export_stems_save_failed", "Could not save the stems.")),
+        { status: 500 }
+      );
     }
   },
 
@@ -91,11 +106,15 @@ export const exportApi = {
 
   async status(_req: Request, { jobId }: { jobId: string }) {
     const job = getJob(jobId);
-    if (!job) return Response.json({ error: "Unknown export." }, { status: 404 });
+    if (!job) {
+      return Response.json(errorBody(null, new UserError("export_unknown", "Unknown export.")), { status: 404 });
+    }
     return Response.json({
       status: job.status,
       progress: job.progress,
       error: job.error,
+      errorCode: job.errorCode,
+      errorParams: job.errorParams,
       outName: job.outName,
     });
   },

@@ -38,6 +38,7 @@ import {
 } from "./residency";
 import { probeMediaFile } from "./mediaRead";
 import { storedMediaUrl } from "./mediaSync";
+import { UserError, errorFromBody, replyError } from "./userError";
 import { reportSwallowed } from "./report";
 import { useEditor } from "./store";
 import { playheadAt } from "./playhead";
@@ -241,7 +242,7 @@ export function downloadLibraryAsset(
 
 async function fetchLibraryFrom(r: Residency): Promise<LibraryData> {
   const res = await backendFor(r).fetch("/api/cut/library");
-  if (!res.ok) throw new Error("Could not load the library.");
+  if (!res.ok) throw new UserError("library_load_failed", "Could not load the library.");
   const data = (await res.json()) as LibraryData;
   const shelf: LibraryData = {
     assets: (data.assets ?? []).map((a) => ({ ...a, residency: r })),
@@ -309,7 +310,7 @@ export async function fetchLibrary(opts?: {
     ),
   );
   const got = parts.filter((p): p is LibraryData => p !== null);
-  if (got.length === 0) throw new Error("Could not load the library.");
+  if (got.length === 0) throw new UserError("library_load_failed", "Could not load the library.");
   const byNewest = <T extends { addedAt: number }>(items: T[]) =>
     [...items].sort((a, b) => b.addedAt - a.addedAt);
   return {
@@ -362,11 +363,11 @@ export async function importUrlToLibrary(
   if (backend.kind === "cloud") {
     const started = await apiJson<{ jobId?: string }>(res);
     if (!res.ok || !started.jobId)
-      throw new Error(started.error ?? "Could not import that URL.");
+      throw replyError(res.status, started, new UserError("url_import_failed", "Could not import that URL."));
     const done = await pollCloudJob<{ assets?: LibraryAsset[] }>(
       started.jobId,
       backend,
-      "Could not import that URL.",
+      new UserError("url_import_failed", "Could not import that URL."),
       {
         onState: (state) =>
           onStage?.(state === "queued" ? "queued" : "downloading"),
@@ -375,7 +376,7 @@ export async function importUrlToLibrary(
     // The library holds media, so a source that turned out to be only words
     // fails here — the same line the engine's library import draws.
     if (!done.assets?.length)
-      throw new Error("That link has no media to import.");
+      throw new UserError("link_no_media", "That link has no media to import.");
     return done.assets.map((a) => ({ ...a, residency }));
   }
   const body = await apiJson<LibraryAsset[]>(res);
@@ -387,11 +388,11 @@ export async function importUrlToLibrary(
   // one, so the link gets a second chance there and the bytes come back down
   // to this Mac. The engine's own reason stands if that side can't do it
   // either: it is the shelf the user was importing to.
-  const reason = body.error ?? "Could not import that URL.";
+  const reason = replyError(res.status, body, new UserError("url_import_failed", "Could not import that URL."));
   try {
     return await importUrlThroughCloud(url, residency, onStage, key);
   } catch {
-    throw new Error(reason);
+    throw reason;
   }
 }
 
@@ -422,11 +423,11 @@ async function importUrlThroughCloud(
   });
   const started = await apiJson<{ jobId?: string }>(res);
   if (!res.ok || !started.jobId)
-    throw new Error(started.error ?? "Could not import that URL.");
+    throw replyError(res.status, started, new UserError("url_import_failed", "Could not import that URL."));
   const done = await pollCloudJob<{ assets?: LibraryAsset[] }>(
     started.jobId,
     cloudBackend,
-    "Could not import that URL.",
+    new UserError("url_import_failed", "Could not import that URL."),
     {
       onState: (state) =>
         onStage?.(state === "queued" ? "queued" : "downloading"),
@@ -435,7 +436,7 @@ async function importUrlThroughCloud(
   // The library holds media, so a source that turned out to be only words
   // fails here — the same line the engine's library import draws.
   if (!done.assets?.length)
-    throw new Error("That link has no media to import.");
+    throw new UserError("link_no_media", "That link has no media to import.");
   const landed: LibraryAsset[] = [];
   onStage?.("saving");
   try {
@@ -446,7 +447,7 @@ async function importUrlThroughCloud(
       // A page resuming this key after its earlier run landed the media
       // finds the staged copy already dropped: the shelf holds it.
       if (bytes.status === STAGED_GONE && landed.length === 0) return [];
-      if (!bytes.ok) throw new Error("Could not import that URL.");
+      if (!bytes.ok) throw new UserError("url_import_failed", "Could not import that URL.");
       const form = new FormData();
       form.append("file", await bytes.blob(), staged.fileName);
       form.append("name", staged.name);
@@ -473,7 +474,7 @@ async function importUrlThroughCloud(
       });
       const body = await apiJson<LibraryAsset>(saved);
       if (!saved.ok)
-        throw new Error(body.error ?? "Could not import that URL.");
+        throw replyError(saved.status, body, new UserError("url_import_failed", "Could not import that URL."));
       landed.push({ ...body, residency: target });
     }
   } catch (e) {
@@ -505,7 +506,7 @@ export async function createLibraryFolder(
     body: JSON.stringify({ name, parentId }),
   });
   const body = await apiJson<LibraryFolder>(res);
-  if (!res.ok) throw new Error(body.error ?? "Could not create folder.");
+  if (!res.ok) throw errorFromBody(body, new UserError("folder_create_failed", "Could not create folder."));
   return { ...body, residency };
 }
 
@@ -525,7 +526,7 @@ export async function updateLibraryFolder(
       body: JSON.stringify(patch),
     },
   );
-  if (!res.ok) throw new Error("Could not update folder.");
+  if (!res.ok) throw new UserError("folder_update_failed", "Could not update folder.");
   return { ...((await res.json()) as Omit<LibraryFolder, "residency">), residency };
 }
 
@@ -556,7 +557,7 @@ export async function deleteLibraryFolder(
   let tree: string[] = [];
   if (residency !== "cloud") {
     const listing = await backendFor(residency).fetch("/api/cut/library");
-    if (!listing.ok) throw new Error("Could not read the folder.");
+    if (!listing.ok) throw new UserError("folder_read_failed", "Could not read the folder.");
     tree = subtreeOf((await listing.json() as LibraryData).folders, id);
   }
   const res = await backendFor(residency).fetch(
@@ -565,7 +566,7 @@ export async function deleteLibraryFolder(
       method: "DELETE",
     },
   );
-  if (!res.ok) throw new Error("Could not delete folder.");
+  if (!res.ok) throw new UserError("folder_delete_failed", "Could not delete folder.");
   if (residency !== "cloud") {
     const { deleteLibraryFolderNotes } = await import("@/cut/lib/notes");
     await deleteLibraryFolderNotes(residency, tree);
@@ -585,7 +586,7 @@ export async function moveLibraryItem(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ id, folderId }),
   });
-  if (!res.ok) throw new Error("Could not move item.");
+  if (!res.ok) throw new UserError("library_item_move_failed", "Could not move item.");
 }
 
 /**
@@ -604,7 +605,7 @@ export async function carryAssetTo(
   const res = await backendFor(asset.residency).fetch(
     `/api/cut/library/media/${encodeURIComponent(asset.fileName)}`,
   );
-  if (!res.ok) throw new Error("Could not read that file off its shelf.");
+  if (!res.ok) throw new UserError("library_shelf_read_failed", "Could not read that file off its shelf.");
   // A font's cover is baked from its bytes on the way in, so the shelf it
   // lands on draws its own — always the current sheet. A LUT has none.
   const from = isLinkedAssetType(asset.type) ? undefined : libraryPosterUrl(asset);
@@ -643,16 +644,15 @@ async function checkFont(
   file: File,
 ): Promise<{ label: string; poster: Blob | null }> {
   if (file.size > MAX_FONT_BYTES) {
-    throw new Error(
-      `Fonts are limited to ${Math.round(MAX_FONT_BYTES / 1024 ** 2)}MB.`,
-    );
+    const limit = Math.round(MAX_FONT_BYTES / 1024 ** 2);
+    throw new UserError("font_too_large", `Fonts are limited to ${limit}MB.`, { limit });
   }
   const bytes = await file.arrayBuffer();
   const family = `lf-check-${file.size}`;
   try {
     await installFontFace(family, bytes);
   } catch {
-    throw new Error("That file isn't a font Cut can read.");
+    throw new UserError("font_unreadable", "That file isn't a font Cut can read.");
   }
   return {
     label: fontLabelFor(bytes, file.name),
@@ -670,18 +670,20 @@ async function checkLut(
 ): Promise<{ label: string; meta: LinkedUploadMeta }> {
   const maxBytes = CUT_COLOR.lutFileMaxBytes;
   if (file.size > maxBytes) {
-    throw new Error(
-      `LUT files are limited to ${Math.round(maxBytes / 1024 ** 2)}MB.`,
-    );
+    const limit = Math.round(maxBytes / 1024 ** 2);
+    throw new UserError("lut_too_large", `LUT files are limited to ${limit}MB.`, { limit });
   }
   const bytes = await file.arrayBuffer();
   let parsed: ReturnType<typeof parseLutFile>;
   try {
     parsed = parseLutFile(file.name, new TextDecoder().decode(bytes));
   } catch (e) {
-    throw new Error(
-      `That file isn't a LUT Cut can read. ${e instanceof Error ? e.message : ""}`.trim(),
-    );
+    // The parser's reason rides as a value; with none the sentence stands alone.
+    const reason = e instanceof Error ? e.message.trim() : "";
+    if (!reason) {
+      throw new UserError("lut_unreadable", "That file isn't a LUT Cut can read.");
+    }
+    throw new UserError("lut_unreadable_reason", `That file isn't a LUT Cut can read. ${reason}`, { reason });
   }
   return {
     label: lutFileName(file.name),
@@ -732,9 +734,7 @@ export async function uploadToLibrary(
       !meta ||
       (meta.type !== "image" && !isLinkedAssetType(meta.type) && !(meta.duration > 0))
     ) {
-      throw new Error(
-        "This image could not be read.",
-      );
+      throw new UserError("image_unreadable", "This image could not be read.");
     }
     const key = await presignedUpload(
       "/api/cut/library/presign",
@@ -766,7 +766,7 @@ export async function uploadToLibrary(
       }),
     });
     const body = await apiJson<LibraryAsset>(res);
-    if (!res.ok) throw new Error(body.error ?? "Upload failed.");
+    if (!res.ok) throw replyError(res.status, body, new UserError("upload_failed", "Upload failed."));
     return { ...body, residency };
   }
   const form = new FormData();
@@ -789,7 +789,7 @@ export async function uploadToLibrary(
           return uploadToLibrary(prepared, residency, { ...keep, name: keep.name ?? file.name });
         }, { ...keep, folderId: undefined });
       }
-      throw new Error("This image could not be read.");
+      throw new UserError("image_unreadable", "This image could not be read.");
     }
     form.append("meta", JSON.stringify(meta));
   } else if (linkedMeta) {
@@ -812,7 +812,7 @@ export async function uploadToLibrary(
       return uploadToLibrary(prepared, residency, { ...keep, name: keep.name ?? file.name });
     }, { ...keep, folderId: undefined });
   }
-  if (!res.ok) throw new Error(body.error ?? "Upload failed.");
+  if (!res.ok) throw replyError(res.status, body, new UserError("upload_failed", "Upload failed."));
   return { ...body, residency };
 }
 
@@ -820,7 +820,7 @@ export async function deleteFromLibrary(residency: Residency, id: string) {
   const res = await backendFor(residency).fetch(`/api/cut/library/${id}`, {
     method: "DELETE",
   });
-  if (!res.ok) throw new Error("Could not delete.");
+  if (!res.ok) throw new UserError("library_delete_failed", "Could not delete.");
 }
 
 /** Whether a library file on this shelf lands in the open project by a
@@ -850,14 +850,14 @@ async function copyLibraryFileToProject(
     });
     const body = await apiJson<{ fileName?: string }>(res);
     if (!res.ok || !body.fileName)
-      throw new Error(body.error ?? "Could not add from library.");
+      throw replyError(res.status, body, new UserError("library_add_failed", "Could not add from library."));
     return body.fileName;
   }
   const bytes = await backendFor(residency).fetch(
     `/api/cut/library/media/${encodeURIComponent(fileName)}`,
     { signal: opts?.signal },
   );
-  if (!bytes.ok) throw new Error("Could not read that library file.");
+  if (!bytes.ok) throw new UserError("library_file_read_failed", "Could not read that library file.");
   return uploadProjectMediaTo(
     target,
     projectId,
@@ -877,9 +877,9 @@ export async function importLibraryAsset(
   lib: LibraryAsset,
 ): Promise<MediaAsset> {
   if (lib.type === "font")
-    throw new Error("Fonts are used from the font menu, not the timeline.");
+    throw new UserError("font_not_for_timeline", "Fonts are used from the font menu, not the timeline.");
   if (isLinkedAssetType(lib.type))
-    throw new Error("A LUT is applied to a clip's color, from the Color panel.");
+    throw new UserError("lut_not_for_timeline", "A LUT is applied to a clip's color, from the Color panel.");
   // The project's media takes the name the shelf shows, so a phone
   // recording lands on the timeline under its title.
   const name = lib.title || lib.name;
@@ -959,7 +959,7 @@ async function repairLibraryAssetMeta(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(meta),
   });
-  if (!res.ok) throw new Error((await apiJson<unknown>(res)).error ?? "Could not update the library asset.");
+  if (!res.ok) throw errorFromBody(await apiJson<unknown>(res), new UserError("library_asset_update_failed", "Could not update the library asset."));
 }
 
 /** Copy a library asset into the open project and add it to the timeline at
@@ -986,7 +986,7 @@ export async function saveTemplate(
     body: JSON.stringify({ projectId, ...input }),
   });
   const body = await apiJson<LibraryTemplate>(res);
-  if (!res.ok) throw new Error(body.error ?? "Could not save the template.");
+  if (!res.ok) throw replyError(res.status, body, new UserError("template_save_failed", "Could not save the template."));
   return { ...body, residency };
 }
 
@@ -1011,7 +1011,7 @@ export async function carryTemplateTo(
       `/api/cut/library/media/${encodeURIComponent(m.fileName)}`,
     );
     if (!res.ok)
-      throw new Error("Could not read that template's media off its shelf.");
+      throw new UserError("template_media_read_failed", "Could not read that template's media off its shelf.");
     files.push(new File([await res.blob()], m.fileName));
   }
   const input = {
@@ -1054,7 +1054,7 @@ export async function carryTemplateTo(
     });
   }
   const body = await apiJson<LibraryTemplate>(res);
-  if (!res.ok) throw new Error(body.error ?? "Could not add the template.");
+  if (!res.ok) throw replyError(res.status, body, new UserError("template_add_failed", "Could not add the template."));
   await deleteTemplate(t.residency, t.id);
 }
 
@@ -1068,11 +1068,9 @@ export async function addAssetToLibraryTemplate(
   asset: MediaAsset,
 ): Promise<LibraryTemplateItem> {
   if (template.residency !== getBackend().kind) {
-    throw new Error(
-      template.residency === "cloud"
-        ? "That template is in the cloud; this project isn't."
-        : "That template is on this Mac; this project isn't.",
-    );
+    throw template.residency === "cloud"
+      ? new UserError("template_in_cloud", "That template is in the cloud; this project isn't.")
+      : new UserError("template_on_mac", "That template is on this Mac; this project isn't.");
   }
   const len = asset.type === "image" ? IMAGE_CLIP_SECONDS : asset.duration;
   const part =
@@ -1100,7 +1098,7 @@ export async function addAssetToLibraryTemplate(
     },
   );
   const body = await apiJson<LibraryTemplate>(res);
-  if (!res.ok) throw new Error(body.error ?? "Could not add to the template.");
+  if (!res.ok) throw replyError(res.status, body, new UserError("template_append_failed", "Could not add to the template."));
   return { ...body, residency: template.residency };
 }
 
@@ -1117,7 +1115,7 @@ export async function renameTemplate(
       body: JSON.stringify({ name }),
     },
   );
-  if (!res.ok) throw new Error("Could not rename the template.");
+  if (!res.ok) throw new UserError("template_rename_failed", "Could not rename the template.");
 }
 
 /** Rename a Library file on its own shelf. Every kind takes the same call. */
@@ -1135,11 +1133,11 @@ export async function renameLibraryAsset(
     },
   );
   if (res.ok) return;
-  const error = (await apiJson<unknown>(res)).error;
+  const body = await apiJson<unknown>(res);
   // An engine from before renames answers the route with nothing.
-  if (!error && residency === "local" && (res.status === 404 || res.status === 405))
-    throw new Error("Update the Donkey app to rename files on this Mac.");
-  throw new Error(error ?? "Could not rename the file.");
+  if (!body.error && residency === "local" && (res.status === 404 || res.status === 405))
+    throw new UserError("app_update_to_rename", "Update the Donkey app to rename files on this Mac.");
+  throw errorFromBody(body, new UserError("file_rename_failed", "Could not rename the file."));
 }
 
 export async function deleteTemplate(
@@ -1152,7 +1150,7 @@ export async function deleteTemplate(
       method: "DELETE",
     },
   );
-  if (!res.ok) throw new Error("Could not delete the template.");
+  if (!res.ok) throw new UserError("template_delete_failed", "Could not delete the template.");
 }
 
 /** Land a template's media in the open project, in `template.media` order, and
@@ -1173,7 +1171,7 @@ async function copyTemplateMediaToProject(
     );
     const body = await apiJson<{ media?: TemplateMedia[] }>(res);
     if (!res.ok || !body.media)
-      throw new Error(body.error ?? "Could not add the template.");
+      throw replyError(res.status, body, new UserError("template_add_failed", "Could not add the template."));
     return body.media;
   }
   const out: TemplateMedia[] = [];
@@ -1303,6 +1301,6 @@ export async function saveAssetToLibrary(
     }),
   });
   const body = await apiJson<LibraryAsset>(res);
-  if (!res.ok) throw new Error(body.error ?? "Could not save to library.");
+  if (!res.ok) throw replyError(res.status, body, new UserError("library_save_failed", "Could not save to library."));
   return { ...body, residency };
 }

@@ -2,9 +2,10 @@ import path from "node:path";
 import { LadderStoreNotConfiguredError } from "./ladderStore";
 import { MediaNotConfiguredError } from "./mediaCdn";
 import { R2NotConfiguredError } from "./r2";
+import { errorBody, UserError } from "@/cut/lib/userError";
 
-export const err = (message: string, status: number) =>
-  Response.json({ error: message }, { status });
+export const err = (failure: string | UserError, status: number) =>
+  Response.json(errorBody(failure, ""), { status });
 
 /** A refusal raised deep inside a helper — a quota wall met halfway through a
  * copy — carrying the exact response the route should answer with, so the
@@ -15,7 +16,7 @@ export class HttpResponseError extends Error {
   }
 }
 
-export const caught = (e: unknown, fallback: string, status = 500) => {
+export const caught = (e: unknown, fallback: string | UserError, status = 500) => {
   if (e instanceof HttpResponseError) return e.response;
   if (e instanceof R2NotConfiguredError) return err(e.message, 500);
   // The real reason belongs in the server's logs, not in a response an
@@ -23,13 +24,13 @@ export const caught = (e: unknown, fallback: string, status = 500) => {
   // 5xx also keeps the client's retry — a 4xx reads as "stop asking".
   if (e instanceof MediaNotConfiguredError) {
     console.error(e.message);
-    return err("Cloud media is unavailable.", 500);
+    return err(new UserError("cloud_media_unavailable", "Cloud media is unavailable."), 500);
   }
   if (e instanceof LadderStoreNotConfiguredError) {
     console.error(e.message);
-    return err("Streaming is unavailable.", 500);
+    return err(new UserError("streaming_unavailable", "Streaming is unavailable."), 500);
   }
-  return err(e instanceof Error ? e.message : fallback, status);
+  return Response.json(errorBody(e, fallback), { status });
 };
 
 export const redirect = (url: string, headers: Record<string, string> = {}) =>

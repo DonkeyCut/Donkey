@@ -18,6 +18,7 @@ import {
 } from "mediabunny";
 import { WORKING_VIDEO_CODECS } from "./exportRender";
 import { createRasterCanvas, type RasterSurface } from "./raster";
+import { UserError } from "./userError";
 
 export interface CanvasVideoEncoder {
   canvas: RasterSurface;
@@ -43,13 +44,13 @@ export async function openCanvasVideo(opts: {
     width: opts.width,
     height: opts.height,
   });
-  if (!codec) throw new Error("No video encoder is available.");
+  if (!codec) throw new UserError("video_encoder_unavailable", "No video encoder is available.");
   const canvas = createRasterCanvas(opts.width, opts.height);
   const ctx = canvas.getContext(
     "2d",
     opts.readback ? { willReadFrequently: true } : undefined
   ) as CanvasRenderingContext2D | null;
-  if (!ctx) throw new Error("No drawing surface for the encode.");
+  if (!ctx) throw new UserError("encode_surface_unavailable", "No drawing surface for the encode.");
   const target = new BufferTarget();
   const output = new Output({ format: new Mp4OutputFormat(), target });
   const source = new CanvasSource(canvas as HTMLCanvasElement, {
@@ -68,7 +69,7 @@ export async function openCanvasVideo(opts: {
     finish: async () => {
       await output.finalize();
       const buffer = target.buffer;
-      if (!buffer) throw new Error("The encode produced nothing.");
+      if (!buffer) throw new UserError("encode_empty", "The encode produced nothing.");
       return new Blob([buffer], { type: "video/mp4" });
     },
     cancel: () => output.cancel().catch(() => {}),

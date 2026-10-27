@@ -2,6 +2,7 @@
 
 import type { ReactNode } from "react";
 import { Download, Ellipsis, ExternalLink, Pencil, Plus, Share2, Trash2 } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 
@@ -10,12 +11,12 @@ import { cn } from "@/lib/utils";
  * readable behind it. Each action shows when its handler is given, always in
  * the same order. */
 export function CardActionsMenu({
-  label = "More actions",
+  label,
   icon,
   sheet = false,
   className,
   onUse,
-  useTitle = "Add to timeline",
+  useTitle,
   onShare,
   shareDisabled,
   onRename,
@@ -46,12 +47,13 @@ export function CardActionsMenu({
   extra?: ReactNode;
   onDelete?: () => void;
 }) {
+  const t = useTranslations("home.cardMenu");
   const middle = !!(onShare || onRename || onDownload || downloadHref || onOpenOriginal || extra);
   if (!onUse && !middle && !onDelete) return null;
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
-        aria-label={label}
+        aria-label={label ?? t("moreActions")}
         className={cn(
           "grid size-6 place-items-center rounded-full text-white opacity-0 transition-opacity group-hover:opacity-100 data-[state=open]:opacity-100",
           sheet ? "bg-white/10 hover:bg-white/20" : "bg-black/40 hover:bg-black/60",
@@ -70,35 +72,35 @@ export function CardActionsMenu({
         {onUse && (
           <>
             <DropdownMenuItem onClick={onUse}>
-              <Plus /> {useTitle}
+              <Plus /> {useTitle ?? t("addToTimeline")}
             </DropdownMenuItem>
             {(middle || onDelete) && <DropdownMenuSeparator />}
           </>
         )}
         {onShare && (
           <DropdownMenuItem disabled={shareDisabled} onClick={onShare}>
-            <Share2 /> Share
+            <Share2 /> {t("share")}
           </DropdownMenuItem>
         )}
         {onRename && (
           <DropdownMenuItem onClick={onRename}>
-            <Pencil /> Rename
+            <Pencil /> {t("rename")}
           </DropdownMenuItem>
         )}
         {downloadHref ? (
           <DropdownMenuItem render={<a href={downloadHref} />}>
-            <Download /> Download
+            <Download /> {t("download")}
           </DropdownMenuItem>
         ) : onDownload ? (
           <DropdownMenuItem disabled={downloadDisabled} onClick={onDownload}>
-            <Download /> Download
+            <Download /> {t("download")}
           </DropdownMenuItem>
         ) : null}
         {onOpenOriginal && (
           // An imported clip keeps the link it came from, so the post it was
           // cut out of is one click away.
           <DropdownMenuItem onClick={onOpenOriginal}>
-            <ExternalLink /> Open original
+            <ExternalLink /> {t("openOriginal")}
           </DropdownMenuItem>
         )}
         {extra}
@@ -106,7 +108,7 @@ export function CardActionsMenu({
           <>
             {middle && <DropdownMenuSeparator />}
             <DropdownMenuItem variant="destructive" onClick={onDelete}>
-              <Trash2 /> Delete
+              <Trash2 /> {t("delete")}
             </DropdownMenuItem>
           </>
         )}

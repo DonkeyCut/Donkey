@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Check, ChevronDown, Globe, Link as LinkIcon, Lock, X } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -24,7 +25,9 @@ import { requestSharing, type ShareResource } from "@/cut/lib/sharingClient";
 import { librarySharePath, shareEmailSchema, type ShareSettings as AccessSettings } from "@/cut/lib/librarySharing";
 import { refreshShareCard, refreshShareLadder } from "@/cut/lib/exportClient";
 import { useCutBase } from "@/cut/lib/nav";
-import { isTimelineId, TIMELINE_IDS, TIMELINE_LABELS, type ShareFeatures, type TimelineId } from "@/cut/lib/types";
+import { isTimelineId, TIMELINE_IDS, type ShareFeatures, type TimelineId } from "@/cut/lib/types";
+import { useDescribeError } from "@/i18n/describeError";
+import { useLabels } from "@/i18n/labels";
 
 // One sharing dialog for projects, library folders, and assets. Changes save immediately.
 
@@ -42,13 +45,9 @@ const NO_FEATURES: ShareFeatures = {
 
 type FeatureKey = Exclude<keyof ShareFeatures, "timeline">;
 
-const FEATURE_ROWS: { key: FeatureKey; label: string; hint: string }[] = [
-  { key: "chat", label: "Chat", hint: "AI chat threads and their cards" },
-  { key: "media", label: "Media", hint: "Uploaded files beyond the timeline" },
-  { key: "genai", label: "AI generations", hint: "Generated video, image, and audio" },
-  { key: "subtitles", label: "Subtitles", hint: "The transcript panel" },
-  { key: "details", label: "Details", hint: "Caption, tags, and notes" },
-];
+// The switches under "Also share", in order; each names itself through
+// `features.<key>` in the editor catalog.
+const FEATURE_ROWS: FeatureKey[] = ["chat", "media", "genai", "subtitles", "details"];
 
 /** The share link for a share id: the viewer route lives beside the app
  * subtree, so the app base minus its /app segment is the share base. */
@@ -57,6 +56,9 @@ function shareLink(base: string, shareId: string): string {
 }
 
 export function ShareDialog(props: ShareResource & { onClose: () => void }) {
+  const t = useTranslations("editor.shareDialog");
+  const describeError = useDescribeError();
+  const timelineLabel = useLabels("timeline");
   const { onClose } = props;
   const projectId = "projectId" in props ? props.projectId : null;
   const libraryTarget = "libraryTarget" in props ? props.libraryTarget : null;
@@ -94,7 +96,7 @@ export function ShareDialog(props: ShareResource & { onClose: () => void }) {
     setError(null);
     try {
       const body = await requestSharing(props, "PUT", next);
-      if (!body.share) throw new Error("Could not save sharing.");
+      if (!body.share) throw new Error(t("saveFailed"));
       const saved = { ...body.share, features: body.share.features ?? NO_FEATURES };
       // Sharing for the first time: build the link's preview card now, so the
       // first person to open the link sees the cut rather than a placeholder,
@@ -109,7 +111,7 @@ export function ShareDialog(props: ShareResource & { onClose: () => void }) {
       if (seq === saveSeq.current) setShare(saved);
       return saved;
     } catch {
-      setError("Could not save sharing.");
+      setError(t("saveFailed"));
       return null;
     } finally {
       mutationBusy.current = false;
@@ -133,7 +135,7 @@ export function ShareDialog(props: ShareResource & { onClose: () => void }) {
     const email = draft.trim().toLowerCase();
     if (!email) return;
     if (!shareEmailSchema.safeParse(email).success) {
-      setError("That doesn't look like an email address.");
+      setError(t("invalidEmail"));
       return;
     }
     setDraft("");
@@ -178,7 +180,7 @@ export function ShareDialog(props: ShareResource & { onClose: () => void }) {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     } catch {
-      setError("Could not copy the link. Try again.");
+      setError(t("copyFailed"));
     }
   };
 
@@ -191,7 +193,7 @@ export function ShareDialog(props: ShareResource & { onClose: () => void }) {
       await requestSharing(props, "DELETE");
       setShare(null);
     } catch {
-      setError("Could not remove the share.");
+      setError(t("removeFailed"));
     } finally {
       mutationBusy.current = false;
       setSaving(false);
@@ -204,17 +206,17 @@ export function ShareDialog(props: ShareResource & { onClose: () => void }) {
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Share {libraryTarget?.kind ?? "project"}</DialogTitle>
+          <DialogTitle>{t("title", { kind: libraryTarget?.kind ?? "project" })}</DialogTitle>
         </DialogHeader>
         <div className="flex flex-col gap-4">
           <div className="flex flex-col gap-1.5">
             <span className="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
-              People
+              {t("people")}
             </span>
             <input
               className="w-full rounded-lg border border-input bg-transparent px-2.5 py-2 text-[12.5px] outline-none focus:border-ring disabled:opacity-60"
               type="email"
-              placeholder="Invite by email, press Enter"
+              placeholder={t("invitePlaceholder")}
               disabled={busy}
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
@@ -235,7 +237,7 @@ export function ShareDialog(props: ShareResource & { onClose: () => void }) {
                     {email}
                     <button
                       disabled={busy}
-                      aria-label={`Remove ${email}`}
+                      aria-label={t("removeEmail", { email })}
                       className="grid size-4 place-items-center rounded-full text-muted-foreground hover:bg-foreground/10 hover:text-foreground"
                       onClick={() => removeEmail(email)}
                     >
@@ -249,7 +251,7 @@ export function ShareDialog(props: ShareResource & { onClose: () => void }) {
 
           <div className="flex flex-col gap-1.5">
             <span className="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
-              General access
+              {t("generalAccess")}
             </span>
             <DropdownMenu>
               <DropdownMenuTrigger
@@ -263,12 +265,12 @@ export function ShareDialog(props: ShareResource & { onClose: () => void }) {
                 )}
                 <span className="min-w-0 flex-1">
                   <span className="block font-medium">
-                    {current.access === "public" ? "Anyone with the link" : "Restricted"}
+                    {current.access === "public" ? t("public") : t("restricted")}
                   </span>
                   <span className="block text-[11px] text-muted-foreground">
                     {current.access === "public"
-                      ? "Anyone can view — no sign-in needed"
-                      : "Only people you invite can view, signed in"}
+                      ? t("publicHint")
+                      : t("restrictedHint")}
                   </span>
                 </span>
                 <ChevronDown className="size-3.5 text-muted-foreground" />
@@ -277,9 +279,9 @@ export function ShareDialog(props: ShareResource & { onClose: () => void }) {
                 <DropdownMenuItem onClick={() => setAccess("restricted")}>
                   <Lock />
                   <span className="flex-1">
-                    Restricted
+                    {t("restricted")}
                     <span className="block text-[10.5px] text-muted-foreground">
-                      Only people you invite can view, signed in
+                      {t("restrictedHint")}
                     </span>
                   </span>
                   {current.access === "restricted" && (
@@ -289,9 +291,9 @@ export function ShareDialog(props: ShareResource & { onClose: () => void }) {
                 <DropdownMenuItem onClick={() => setAccess("public")}>
                   <Globe />
                   <span className="flex-1">
-                    Anyone with the link
+                    {t("public")}
                     <span className="block text-[10.5px] text-muted-foreground">
-                      Anyone can view — no sign-in needed
+                      {t("publicHint")}
                     </span>
                   </span>
                   {current.access === "public" && (
@@ -305,8 +307,8 @@ export function ShareDialog(props: ShareResource & { onClose: () => void }) {
           {projectId && (
             <div className="flex min-h-9 items-center justify-between gap-2.5">
               <span className="text-[13px]">
-                Timeline
-                <span className="block text-[10.5px] text-muted-foreground">What viewers watch</span>
+                {t("timeline")}
+                <span className="block text-[10.5px] text-muted-foreground">{t("timelineHint")}</span>
               </span>
               <Select
                 value={current.features.timeline ?? "main"}
@@ -315,13 +317,13 @@ export function ShareDialog(props: ShareResource & { onClose: () => void }) {
                   if (isTimelineId(v)) void setTimeline(v);
                 }}
               >
-                <SelectTrigger className="w-fit min-w-28" aria-label="Timeline">
+                <SelectTrigger className="w-fit min-w-28" aria-label={t("timeline")}>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent align="end">
                   {TIMELINE_IDS.map((id) => (
                     <SelectItem key={id} value={id}>
-                      {TIMELINE_LABELS[id]}
+                      {timelineLabel(id)}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -332,23 +334,22 @@ export function ShareDialog(props: ShareResource & { onClose: () => void }) {
           {projectId ? <details className="group">
             <summary className="cursor-pointer list-none text-[11px] font-medium tracking-wide text-muted-foreground uppercase select-none">
               <span className="inline-flex items-center gap-1">
-                Also share
+                {t("alsoShare")}
                 <ChevronDown className="size-3 transition-transform group-open:rotate-180" />
               </span>
             </summary>
             <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
-              Viewers always get the preview and timeline, read-only. Switch
-              on anything else they should see.
+              {t("alsoShareHint")}
             </p>
             <div className="mt-1 flex flex-col">
-              {FEATURE_ROWS.map(({ key, label, hint }) => (
+              {FEATURE_ROWS.map((key) => (
                 <label
                   key={key}
                   className="flex min-h-9 cursor-pointer items-center justify-between gap-2.5"
                 >
                   <span className="text-[13px]">
-                    {label}
-                    <span className="block text-[10.5px] text-muted-foreground">{hint}</span>
+                    {t(`features.${key}.label`)}
+                    <span className="block text-[10.5px] text-muted-foreground">{t(`features.${key}.hint`)}</span>
                   </span>
                   <Switch
                     checked={current.features[key]}
@@ -361,23 +362,23 @@ export function ShareDialog(props: ShareResource & { onClose: () => void }) {
           </details> : (
             <p className="text-[11px] leading-relaxed text-muted-foreground">
               {libraryTarget?.kind === "folder"
-                ? "Viewers can browse and download this folder’s contents, including subfolders. Changes to the folder appear on the shared link."
-                : "Viewers can preview and download this asset."}
+                ? t("folderHint")
+                : t("assetHint")}
             </p>
           )}
 
-          {(error || query.error) && <p role="alert" className="text-sm text-red-600">{error ?? query.error?.message}</p>}
-          {query.isError && <Button variant="outline" onClick={() => void query.refetch()}>Try again</Button>}
+          {(error || query.error) && <p role="alert" className="text-sm text-red-600">{error ?? describeError(query.error)}</p>}
+          {query.isError && <Button variant="outline" onClick={() => void query.refetch()}>{t("tryAgain")}</Button>}
         </div>
         <DialogFooter className="mt-1 flex-col gap-2 sm:flex-col">
           <Button className="w-full" disabled={busy} onClick={() => void copyLink()}>
             {copied ? (
               <>
-                <Check data-icon="inline-start" /> Copied
+                <Check data-icon="inline-start" /> {t("copied")}
               </>
             ) : (
               <>
-                <LinkIcon data-icon="inline-start" /> Copy link
+                <LinkIcon data-icon="inline-start" /> {t("copyLink")}
               </>
             )}
           </Button>
@@ -391,7 +392,7 @@ export function ShareDialog(props: ShareResource & { onClose: () => void }) {
             disabled={busy || !share}
             onClick={() => void removeShare()}
           >
-            Stop sharing
+            {t("stopSharing")}
           </Button>
         </DialogFooter>
       </DialogContent>

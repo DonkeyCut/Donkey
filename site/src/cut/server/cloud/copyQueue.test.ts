@@ -40,6 +40,8 @@ const prisma = {
   cutProject: { findFirst: mock(async () => project) },
   cutMediaObject: { findMany: mock(async ({ where }: { where: Parameters<typeof matches>[1] }) => objects.filter((o) => matches(o, where))) },
   cutChatThread: { findMany: mock(async () => []) },
+  // The duplicate is named in the owner's saved language.
+  user: { findUnique: mock(async () => ({ locale: "en" })) },
   $transaction: mock(async (fn: (t: typeof tx) => Promise<unknown>) => fn(tx)),
 };
 await stubModule<typeof import("@/lib/prisma")>("@/lib/prisma", import.meta.url, { prisma: prisma as never });

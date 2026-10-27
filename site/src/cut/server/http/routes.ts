@@ -1,5 +1,5 @@
 import { matchRouteTable } from "./match";
-import { errorMessage } from "../util";
+import { errorReply } from "../util";
 import { aiApi } from "./ai";
 import { localSceneLease } from "../ai/sceneLease";
 import { convertApi } from "./convert";
@@ -148,7 +148,7 @@ export async function runCutRoute(
   try {
     return await match.handler(req, match.params);
   } catch (error) {
-    return Response.json({ error: errorMessage(error, "The request failed.") }, { status: 500 });
+    return Response.json(errorReply(error, "The request failed."), { status: 500 });
   }
 }
 

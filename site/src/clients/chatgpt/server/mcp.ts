@@ -33,6 +33,13 @@ import {
 } from "@/clients/chatgpt/server/projects";
 import { widgetHtml } from "@/clients/chatgpt/widget.generated";
 import { searchLinksOf, splitToolDisplay } from "@/cut/lib/toolDisplay";
+import { mcpLocale } from "@/clients/chatgpt/server/locale";
+import { DEFAULT_LOCALE } from "@/i18n/locales";
+import { prisma } from "@/lib/prisma";
+import type { Messages } from "@/i18n/namespaces";
+import { translatorFor } from "@/i18n/translator";
+import { createTranslator } from "use-intl/core";
+import englishMessages from "@/i18n/messages/en/chatgpt.json";
 
 const idSchema = z.string().min(1).max(128);
 const readOnlyAnnotations = {
@@ -111,10 +118,17 @@ function liftDisplay(view: ProjectView): void {
 }
 
 type Identity = { userId: string; scopes: string[]; grantId: string };
+type ChatgptTranslator = Awaited<ReturnType<typeof translatorFor<"chatgpt">>>;
+type StatusTool = keyof Messages["chatgpt"]["status"];
+
+// The English source, for servers built without a request (tests, evals).
+const ENGLISH = createTranslator({ locale: "en", messages: { chatgpt: englishMessages }, namespace: "chatgpt" });
+
 export function createChatgptServer(
   identity: Identity,
   config: ChatgptConfig,
   projects = projectTools(identity, config),
+  t: ChatgptTranslator = ENGLISH,
 ) {
   const server = new McpServer(
     { name: "donkey-cut", title: "Donkey Cut", version: "1.1.0" },
@@ -133,9 +147,10 @@ export function createChatgptServer(
       { type: "oauth2", scopes: ["projects:read", "projects:write"] },
     ],
   };
-  const status = (invoking: string, invoked: string) => ({
-    "openai/toolInvocation/invoking": invoking,
-    "openai/toolInvocation/invoked": invoked,
+  // The status lines ChatGPT shows the person under a call, in their language.
+  const status = (tool: StatusTool) => ({
+    "openai/toolInvocation/invoking": t(`status.${tool}.invoking`),
+    "openai/toolInvocation/invoked": t(`status.${tool}.invoked`),
   });
   const scopeChallenge = (scope: string, text: string) => ({
     isError: true,
@@ -252,7 +267,7 @@ export function createChatgptServer(
       inputSchema: z.object({ name: z.string().min(1).max(120), aspect: z.string().max(16).optional() }),
       outputSchema: viewSchema,
       annotations: editAnnotations,
-      _meta: { ...editMetadata, ...status("Creating the project", "Project created") },
+      _meta: { ...editMetadata, ...status("createProject") },
     },
     ({ name, aspect }) => editing(() => runTool(() => projects.create(name, aspect))),
   );
@@ -271,7 +286,7 @@ export function createChatgptServer(
       }),
       outputSchema: viewSchema,
       annotations: { ...editAnnotations, openWorldHint: true },
-      _meta: { ...editMetadata, "openai/fileParams": ["files"], ...status("Importing footage", "Footage imported") },
+      _meta: { ...editMetadata, "openai/fileParams": ["files"], ...status("importMedia") },
     },
     ({ projectId, files, urls, audio_only }) =>
       editing(() =>
@@ -298,7 +313,7 @@ export function createChatgptServer(
       }),
       outputSchema: viewSchema,
       annotations: readOnlyAnnotations,
-      _meta: { ...readMetadata, ...status("Reading the project", "Project read") },
+      _meta: { ...readMetadata, ...status("inspectProject") },
     },
     ({ projectId, commands }) => runTool(() => projects.inspect(projectId, commands?.map((c) => ({ name: c.name, input: c.input ?? {} })))),
   );
@@ -312,7 +327,7 @@ export function createChatgptServer(
       inputSchema: z.object({}),
       outputSchema: z.object({ commands: z.array(z.object({ name: z.string(), summary: z.string(), reads: z.literal(true).optional() })) }),
       annotations: readOnlyAnnotations,
-      _meta: { ...readMetadata, ...status("Listing commands", "Commands listed") },
+      _meta: { ...readMetadata, ...status("listCommands") },
     },
     () => {
       const commands = commandIndex();
@@ -334,7 +349,7 @@ export function createChatgptServer(
         unknown: z.array(z.string()),
       }),
       annotations: readOnlyAnnotations,
-      _meta: { ...readMetadata, ...status("Describing commands", "Commands described") },
+      _meta: { ...readMetadata, ...status("describeCommands") },
     },
     ({ names }) => {
       const { found, unknown } = describeCommands(names);
@@ -354,7 +369,7 @@ export function createChatgptServer(
       inputSchema: z.object({}),
       outputSchema: z.object({ skills: z.array(z.string()) }),
       annotations: readOnlyAnnotations,
-      _meta: { ...readMetadata, ...status("Listing guides", "Guides listed") },
+      _meta: { ...readMetadata, ...status("listSkills") },
     },
     () => ({
       content: [{ type: "text" as const, text: SKILL_INDEX.join("\n") }],
@@ -370,7 +385,7 @@ export function createChatgptServer(
       inputSchema: z.object({ name: z.string().min(1).max(64) }),
       outputSchema: z.object({ name: z.string(), guide: z.string() }),
       annotations: readOnlyAnnotations,
-      _meta: { ...readMetadata, ...status("Reading the guide", "Guide read") },
+      _meta: { ...readMetadata, ...status("readSkill") },
     },
     ({ name }) => {
       const doc = readSkill(name);
@@ -392,7 +407,7 @@ export function createChatgptServer(
       }),
       outputSchema: viewSchema,
       annotations: { ...editAnnotations, destructiveHint: true },
-      _meta: { ...editMetadata, ...status("Editing the project", "Project edited") },
+      _meta: { ...editMetadata, ...status("editProject") },
     },
     ({ projectId, commands, label }) =>
       editing(() => runTool(() => projects.edit(projectId, commands.map((c) => ({ name: c.name, input: c.input ?? {} })), label))),
@@ -406,7 +421,7 @@ export function createChatgptServer(
       inputSchema: z.object({ projectId: idSchema }),
       outputSchema: viewSchema,
       annotations: editAnnotations,
-      _meta: { ...editMetadata, ...status("Undoing", "Undone") },
+      _meta: { ...editMetadata, ...status("undo") },
     },
     ({ projectId }) => editing(() => runTool(() => projects.undo(projectId))),
   );
@@ -419,7 +434,7 @@ export function createChatgptServer(
       inputSchema: z.object({ projectId: idSchema }),
       outputSchema: viewSchema,
       annotations: editAnnotations,
-      _meta: { ...editMetadata, ...status("Redoing", "Redone") },
+      _meta: { ...editMetadata, ...status("redo") },
     },
     ({ projectId }) => editing(() => runTool(() => projects.redo(projectId))),
   );
@@ -438,7 +453,7 @@ export function createChatgptServer(
       }),
       outputSchema: viewSchema,
       annotations: editAnnotations,
-      _meta: { ...editMetadata, ...status("Exporting the video", "Export started") },
+      _meta: { ...editMetadata, ...status("exportVideo") },
     },
     ({ projectId, preset, loudness, stems }) =>
       editing(() => runTool(() => projects.exportVideo(projectId, preset ?? "original", { loudness, stems }))),
@@ -452,7 +467,7 @@ export function createChatgptServer(
       inputSchema: z.object({ jobId: idSchema }),
       outputSchema: viewSchema,
       annotations: readOnlyAnnotations,
-      _meta: { ...readMetadata, ...status("Checking the export", "Export checked") },
+      _meta: { ...readMetadata, ...status("exportStatus") },
     },
     ({ jobId }) => runTool(() => projects.exportStatus(jobId)),
   );
@@ -465,7 +480,7 @@ export function createChatgptServer(
       inputSchema: z.object({ jobId: idSchema }),
       outputSchema: viewSchema,
       annotations: readOnlyAnnotations,
-      _meta: { ...readMetadata, ...status("Checking the job", "Job checked") },
+      _meta: { ...readMetadata, ...status("jobStatus") },
     },
     ({ jobId }) => runTool(() => projects.jobStatus(jobId)),
   );
@@ -478,7 +493,7 @@ export function createChatgptServer(
       inputSchema: z.object({}),
       outputSchema: viewSchema,
       annotations: readOnlyAnnotations,
-      _meta: { ...readMetadata, ...status("Reading the account", "Account read") },
+      _meta: { ...readMetadata, ...status("accountStatus") },
     },
     () => runTool(() => projects.account()),
   );
@@ -517,7 +532,7 @@ function describeProjectView(view: ProjectView): string {
   if (view.account) {
     const { credits, storageBytes, storageQuotaBytes, plan } = view.account;
     const storage = typeof storageQuotaBytes !== "number" ? `${mb(storageBytes)} MB used` : `${mb(storageBytes)} of ${mb(storageQuotaBytes)} MB used`;
-    return `Plan: ${plan}. AI credit balance: ${formatCredits(credits)}. Cloud storage: ${storage}. Editing, previews and exports spend no credits.`;
+    return `Plan: ${plan}. AI credit balance: ${formatCredits(credits, DEFAULT_LOCALE)}. Cloud storage: ${storage}. Editing, previews and exports spend no credits.`;
   }
   if (view.view === "projects") {
     if (!view.projects.length) {
@@ -610,7 +625,13 @@ export async function mcpEndpoint(request: Request) {
     return rateLimitResponse(rateLimit.retryAfterSeconds);
   }
 
-  const handler = chatgptHttpHandler(identity, config);
+  const locale = await mcpLocale(request, identity.userId);
+  const handler = chatgptHttpHandler(
+    identity,
+    config,
+    projectTools(identity, config, prisma, locale),
+    await translatorFor(locale, "chatgpt"),
+  );
   try {
     const response = await handler.fetch(request);
     // Materialize the body before closing the per-request handler.
@@ -636,9 +657,10 @@ export function chatgptHttpHandler(
   identity: Identity,
   config: ChatgptConfig,
   projects?: ReturnType<typeof projectTools>,
+  t?: ChatgptTranslator,
 ) {
   return createMcpHandler(
-    () => createChatgptServer(identity, config, projects),
+    () => createChatgptServer(identity, config, projects, t),
     {
       onerror: (error) =>
         console.warn("[chatgpt] mcp request rejected", error.message),

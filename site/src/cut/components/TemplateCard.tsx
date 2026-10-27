@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useTranslations } from "next-intl";
 import {
   Captions,
   ChevronDown,
@@ -28,11 +29,10 @@ import { CardActionsMenu } from "@/cut/components/CardActionsMenu";
 import { cardIconButton } from "@/cut/components/iconButton";
 import { formatTime } from "@/cut/lib/time";
 import {
-  EFFECT_LABELS,
   retimeOf,
   type SpeedNode,
 } from "@donkeycut/effects-kit";
-import { SHAPE_LABELS } from "@/cut/lib/types";
+import { useLabels } from "@/i18n/labels";
 import type { LibraryTemplate, TemplateMedia } from "@/cut/lib/types";
 import { cn } from "@/lib/utils";
 import { PICKED_RING } from "@/cut/lib/assetPick";
@@ -87,6 +87,9 @@ export function TemplateCard({
    * filling its grid cell with "fill". Absent, the card is a row. */
   tile?: number | "fill";
 }) {
+  const tc = useTranslations("media.templateCard");
+  const shapeLabel = useLabels("shape");
+  const effectLabel = useLabels("effect");
   const refDrop = useAssetDrop((r) => onRefDrop?.(r));
   // ⌘C over the card copies its mention token, so a saved arrangement can be
   // named in a prompt the same way a clip or an effect is.
@@ -122,13 +125,13 @@ export function TemplateCard({
   }[] = [
     ...t.layers.map((l) => ({
       icon: t.media[l.media]?.type === "image" ? ImageIcon : Film,
-      label: t.media[l.media]?.name ?? "Media",
+      label: t.media[l.media]?.name ?? tc("media"),
       time: speedLen(l),
       media: t.media[l.media],
     })),
     ...t.audio.map((a) => ({
       icon: Music,
-      label: t.media[a.media]?.name ?? "Audio",
+      label: t.media[a.media]?.name ?? tc("audio"),
       time: speedLen(a),
       media: t.media[a.media],
     })),
@@ -136,19 +139,19 @@ export function TemplateCard({
       icon: Type,
       label:
         o.kind === "shape"
-          ? SHAPE_LABELS[o.shape]
+          ? shapeLabel(o.shape)
           : o.kind === "sticker"
-            ? "Sticker"
+            ? tc("sticker")
             : o.kind === "effect"
-              ? EFFECT_LABELS[o.effect]
-              : o.text || "Title",
+              ? effectLabel(o.effect)
+              : o.text || tc("title"),
       time: o.end - o.start,
     })),
     ...(t.cues.length
       ? [
           {
             icon: Captions,
-            label: `${t.cues.length} caption${t.cues.length === 1 ? "" : "s"}`,
+            label: tc("captions", { count: t.cues.length }),
           },
         ]
       : []),
@@ -167,8 +170,7 @@ export function TemplateCard({
   );
   const metaEl = (
     <div className="flex items-center gap-0.5 text-[10.5px] whitespace-nowrap text-muted-foreground">
-      {formatTime(t.duration)} · {itemCount} item
-      {itemCount === 1 ? "" : "s"}
+      {tc("meta", { duration: formatTime(t.duration), count: itemCount })}
       <ChevronDown
         className={cn("size-3 transition-transform", expanded && "rotate-180")}
       />
@@ -176,12 +178,12 @@ export function TemplateCard({
   );
   const actionsEl = (
     <CardActionsMenu
-      label="Template options"
+      label={tc("options")}
       // A tile floats the scrim pill in its corner; a light row takes the
       // row's own control.
       className={tile ? "absolute top-1.5 right-1.5" : cardIconButton}
       onUse={onAdd}
-      useTitle={addTitle ?? "Add"}
+      useTitle={addTitle ?? tc("add")}
       onRename={onRename && (() => setRenaming(true))}
       extra={extraMenu}
       onDelete={onDelete}

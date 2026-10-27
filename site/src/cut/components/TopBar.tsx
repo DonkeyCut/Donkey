@@ -3,6 +3,7 @@
 import { DonkeyMark } from "@/components/DonkeyMark";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useTranslations } from "next-intl";
 import { useQueryClient } from "@tanstack/react-query";
 import { Check, ChevronDown, ChevronLeft, CloudUpload, ExternalLink, Loader2, Maximize2, Mic, Monitor, MoreHorizontal, Ratio, Share2, Smartphone, Sparkles, Square, Upload, Video } from "lucide-react";
 import { ChatStatusBadge, type ChatStatus } from "./ChatStatusBadge";
@@ -31,6 +32,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cloudBackend } from "@/cut/lib/backend/cloud";
+import { useDescribeError } from "@/i18n/describeError";
 import { cloudUsageQueryKey, useCutMode } from "@/cut/lib/backend/hooks";
 import { browserBackend } from "@/cut/lib/backend/browser";
 import { localBackend } from "@/cut/lib/backend/local";
@@ -42,8 +44,9 @@ import { projectDuration, useEditor } from "@/cut/lib/store";
 import { useEnvironment } from "@/cut/lib/environment";
 import { openThroughHost, projectPageUrl, requestHostFullscreen, useHostDisplayMode } from "@/cut/lib/hostBridge";
 import { useLocalPref } from "@/cut/lib/uiState";
-import { ASPECT_PRESETS, aspectLabel, aspectOrientation, normalizeAspect, parseRatio, type Aspect } from "@/cut/lib/types";
+import { ASPECT_PRESETS, aspectOrientation, normalizeAspect, parseRatio, type Aspect } from "@/cut/lib/types";
 import { COLOR_PRESETS, ColorPicker } from "@/cut/components/ColorField";
+import type { Messages } from "@/i18n/namespaces";
 import { cn } from "@/lib/utils";
 import { CreditsPill } from "./CreditsPill";
 import { RecordDialog, type RecordMode } from "./RecordDialog";
@@ -55,6 +58,14 @@ function AspectIcon({ aspect, className }: { aspect: Aspect; className?: string 
   const o = aspectOrientation(aspect);
   const Icon = o === "square" ? Square : o === "landscape" ? Monitor : Smartphone;
   return <Icon className={className} />;
+}
+
+type AspectKey = keyof Messages["editor"]["topBar"]["aspects"];
+
+/** An aspect preset's catalog key: its ratio with the colon spelled "x"
+ * ("16:9" → "16x9"). */
+function aspectKey(aspect: Aspect): AspectKey {
+  return aspect.replace(":", "x") as AspectKey;
 }
 
 /**
@@ -93,6 +104,9 @@ export function TopBar({
    * bytes never touch this browser, so the indicator calls it a copy. */
   copying?: number;
 }) {
+  const t = useTranslations("editor.topBar");
+  const tColor = useTranslations("inspector.colorField");
+  const describeError = useDescribeError();
   const base = useCutBase();
   const back = backTarget(base, from, folder);
   // Something to render, which footage is only one way to have: a cut of
@@ -284,14 +298,15 @@ export function TopBar({
   // disk copies, so they report nothing.
   const cloudUploading = (uploading > 0 || copying > 0) && cutMode === "cloud";
   const transferLabel =
-    uploading > 0
-      ? uploading === 1
-        ? "Uploading"
-        : `Uploading ${uploading} files`
-      : copying === 1
-        ? "Copying"
-        : `Copying ${copying} files`;
-  const finishingLabel = uploading > 0 ? "Finishing uploads…" : "Finishing copies…";
+    uploading > 0 ? t("uploading", { count: uploading }) : t("copying", { count: copying });
+  const finishingLabel = uploading > 0 ? t("finishingUploads") : t("finishingCopies");
+  // A preset's name and ratio ("Widescreen · 16:9"); any other ratio is custom.
+  const aspectName = (value: Aspect) => {
+    const preset = ASPECT_PRESETS.find((p) => p.value === value);
+    return preset
+      ? t("aspectPreset", { name: t(`aspects.${aspectKey(preset.value)}`), ratio: preset.value })
+      : t("customAspect", { ratio: value });
+  };
   // An import whose bytes never landed is absent from the saved document, so
   // its clip disappears on the next open. The Media panel shows this for a
   // dropped file, but a stock or library import lives on the timeline and has
@@ -325,7 +340,7 @@ export function TopBar({
       }
       const src = cutMode === "browser" ? browserBackend : localBackend;
       const newId = await copyProjectAcross(src, cloudBackend, projectId, {
-        onProgress: (done, total) => setMoveProgress(`Moving media ${done}/${total}…`),
+        onProgress: (done, total) => setMoveProgress(t("movingMedia", { done, total })),
       });
       await src
         .fetch(`/api/cut/projects/${projectId}`, { method: "DELETE" })
@@ -335,9 +350,7 @@ export function TopBar({
       clearProjectThreads(projectId);
       window.location.href = projectHref(base, newId, "projects", null);
     } catch (e) {
-      setMoveError(
-        e instanceof Error && e.message ? e.message : "Could not move the project."
-      );
+      setMoveError(describeError(e, t("moveFailed")));
       setMoving(false);
       setMoveProgress(null);
     }
@@ -363,12 +376,12 @@ export function TopBar({
         <Button
           variant="ghost"
           size={compact ? "icon-sm" : "sm"}
-          aria-label="Share"
-          title={cutMode === "browser" ? "Move to Cloud to share" : "Share"}
+          aria-label={t("share")}
+          title={cutMode === "browser" ? t("moveToShare") : t("share")}
           onClick={() => (cutMode === "browser" ? setMoveOpen(true) : setShareOpen(true))}
         >
           <Share2 data-icon={compact ? undefined : "inline-start"} />
-          {!compact && "Share"}
+          {!compact && t("share")}
         </Button>
       )}
       {canMoveToCloud && (
@@ -382,31 +395,31 @@ export function TopBar({
                 <Button
                   variant="ghost"
                   size={compact ? "icon-sm" : "sm"}
-                  aria-label="Move to Cloud"
+                  aria-label={t("moveToCloud")}
                   onClick={() => setMoveOpen(true)}
                 >
                   <CloudUpload data-icon={compact ? undefined : "inline-start"} />
-                  {!compact && "Cloud"}
+                  {!compact && t("cloud")}
                 </Button>
               }
             />
-            <TooltipContent side="bottom">Move to Cloud</TooltipContent>
+            <TooltipContent side="bottom">{t("moveToCloud")}</TooltipContent>
           </Tooltip>
         </TooltipProvider>
       )}
       <ActionTip
         label={
           failedImports > 0
-            ? "Retry the failed imports first"
+            ? t("retryImportsFirst")
             : cloudUploading
               ? finishingLabel
-              : "Export"
+              : t("export")
         }
       >
         <Button
           variant="ghost"
           size={icons ? "icon-sm" : "sm"}
-          aria-label="Export"
+          aria-label={t("export")}
           // A render reads the saved document, which an import still uploading
           // (or one that failed) is deliberately absent from — exporting now
           // would quietly leave it out of the video.
@@ -418,32 +431,32 @@ export function TopBar({
           }}
         >
           <Upload data-icon={icons ? undefined : "inline-start"} />
-          {!icons && "Export"}
+          {!icons && t("export")}
         </Button>
       </ActionTip>
       {chatgpt && (
-        <ActionTip label="Open in Donkey Cut">
+        <ActionTip label={t("openInCut")}>
           <Button
             variant="ghost"
             size={icons ? "icon-sm" : "sm"}
-            aria-label="Open in Donkey Cut"
+            aria-label={t("openInCut")}
             onClick={() => openThroughHost(projectPageUrl())}
           >
             <ExternalLink data-icon={icons ? undefined : "inline-start"} />
-            {!icons && "Open"}
+            {!icons && t("open")}
           </Button>
         </ActionTip>
       )}
       {chatgpt && hostMode !== "fullscreen" && (
-        <ActionTip label="Fullscreen">
+        <ActionTip label={t("fullscreen")}>
           <Button
             variant="ghost"
             size={icons ? "icon-sm" : "sm"}
-            aria-label="Fullscreen"
+            aria-label={t("fullscreen")}
             onClick={requestHostFullscreen}
           >
             <Maximize2 data-icon={icons ? undefined : "inline-start"} />
-            {!icons && "Fullscreen"}
+            {!icons && t("fullscreen")}
           </Button>
         </ActionTip>
       )}
@@ -451,15 +464,15 @@ export function TopBar({
         variant={aiOpen ? "default" : "outline"}
         size="sm"
         className="ai-toggle relative"
-        aria-label="Chat"
+        aria-label={t("chat")}
         aria-pressed={aiOpen}
-        title="Chat (⌘J)"
+        title={t("chatShortcut", { key: "⌘J" })}
         onClick={() => {
           const s = useEditor.getState();
           s.setAiOpen(!s.aiOpen);
         }}
       >
-        <Sparkles data-icon="inline-start" /> Chat
+        <Sparkles data-icon="inline-start" /> {t("chat")}
         {!aiOpen && <ChatStatusBadge status={chatStatus} />}
       </Button>}
     </>
@@ -484,7 +497,7 @@ export function TopBar({
         {!chatgpt && <Button
           variant="ghost"
           size="icon-sm"
-          aria-label={`Back to ${back.tab}`}
+          aria-label={t("backTo", { tab: back.tab })}
           nativeButton={false}
           render={<Link href={back.href} />}
         >
@@ -506,7 +519,7 @@ export function TopBar({
         ) : (
           <button
             className="ml-1.5 max-w-64 cursor-text truncate rounded-md px-2 py-1 text-sm font-medium tracking-tight hover:bg-muted"
-            title="Rename project"
+            title={t("rename")}
             onClick={() => {
               setDraft(projectName);
               setEditing(true);
@@ -524,14 +537,14 @@ export function TopBar({
           {failedImports > 0 ? (
             <>
               <span className="text-destructive">
-                {failedImports === 1 ? "1 import failed" : `${failedImports} imports failed`}
+                {t("importsFailed", { count: failedImports })}
               </span>
               <button
                 type="button"
                 className="font-medium underline underline-offset-2"
                 onClick={retryFailedUploads}
               >
-                Retry
+                {t("retry")}
               </button>
             </>
           ) : cloudUploading ? (
@@ -541,13 +554,13 @@ export function TopBar({
             </>
           ) : saveState === "saving" || saveState === "dirty" ? (
             <>
-              <Loader2 className="size-3 animate-spin" /> Saving
+              <Loader2 className="size-3 animate-spin" /> {t("saving")}
             </>
           ) : saveState === "error" ? (
-            <span className="text-destructive">Couldn’t save</span>
+            <span className="text-destructive">{t("saveFailed")}</span>
           ) : (
             <>
-              <Check className="size-3" /> Saved
+              <Check className="size-3" /> {t("saved")}
             </>
           )}
         </span>
@@ -567,7 +580,7 @@ export function TopBar({
                 >
                   <AspectIcon aspect={p.value} />
                   <span className="flex-1">
-                    {p.name} · {p.value}
+                    {aspectName(p.value)}
                     {p.sublabel && (
                       <span className="block text-[10.5px] text-muted-foreground">{p.sublabel}</span>
                     )}
@@ -586,7 +599,7 @@ export function TopBar({
               >
                 <Ratio />
                 <span className="flex-1">
-                  {normalizeAspect(savedCustom) ? `Custom · ${savedCustom}` : "Custom…"}
+                  {normalizeAspect(savedCustom) ? t("customAspect", { ratio: savedCustom }) : t("customEllipsis")}
                 </span>
                 {showCustomEditor && <Check className="size-3.5 text-muted-foreground" />}
               </DropdownMenuItem>
@@ -594,13 +607,13 @@ export function TopBar({
               <DropdownMenuSub>
                 <DropdownMenuSubTrigger>
                   <span className="size-4 shrink-0 rounded-[4px] ring-1 ring-border" style={{ background }} />
-                  <span className="flex-1">Background</span>
+                  <span className="flex-1">{t("background")}</span>
                 </DropdownMenuSubTrigger>
                 <DropdownMenuSubContent className="w-56">
                   {COLOR_PRESETS.map((c) => (
                     <DropdownMenuItem key={c.hex} onClick={() => { useEditor.getState().pushHistory(); useEditor.getState().setBackground(c.hex); }}>
                       <span className="size-4 shrink-0 rounded-[4px] ring-1 ring-border" style={{ background: c.hex }} />
-                      <span className="flex-1">{c.name}</span>
+                      <span className="flex-1">{tColor(`presets.${c.id}`)}</span>
                       {background.toUpperCase() === c.hex && <Check className="size-3.5 text-muted-foreground" />}
                     </DropdownMenuItem>
                   ))}
@@ -625,7 +638,7 @@ export function TopBar({
                 "aspect-switch flex items-center gap-1 rounded-full border bg-card px-3 py-1.5 text-xs font-medium shadow-xs",
                 customInvalid ? "border-destructive text-destructive" : "border-border"
               )}
-              title={customInvalid ? "Up to an 8:1 shape" : undefined}
+              title={customInvalid ? t("aspectLimit") : undefined}
               // The session ends when focus leaves the pill entirely. Moving
               // between the two fields (or to the chevron) stays inside it, so a
               // half-typed side is never settled out from under the user.
@@ -639,7 +652,7 @@ export function TopBar({
             >
               <Ratio className="size-3.5 text-muted-foreground" />
               <input
-                aria-label="Width"
+                aria-label={t("width")}
                 aria-invalid={customInvalid}
                 inputMode="decimal"
                 className="w-10 bg-transparent text-center outline-none"
@@ -653,7 +666,7 @@ export function TopBar({
               />
               <span className="text-muted-foreground">:</span>
               <input
-                aria-label="Height"
+                aria-label={t("height")}
                 aria-invalid={customInvalid}
                 inputMode="decimal"
                 className="w-10 bg-transparent text-center outline-none"
@@ -667,7 +680,7 @@ export function TopBar({
               />
               <DropdownMenu>
                 <DropdownMenuTrigger
-                  aria-label="Aspect ratio presets"
+                  aria-label={t("aspectPresets")}
                   className="grid place-items-center text-muted-foreground transition-colors hover:text-foreground"
                 >
                   <ChevronDown className="size-3" />
@@ -679,7 +692,7 @@ export function TopBar({
             <DropdownMenu>
               <DropdownMenuTrigger className="aspect-switch flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-xs font-medium text-muted-foreground shadow-xs transition-colors hover:text-foreground">
                 <AspectIcon aspect={aspect} className="size-3.5" />
-                {aspectLabel(aspect)}
+                {aspectName(aspect)}
                 <ChevronDown className="size-3" />
               </DropdownMenuTrigger>
               {aspectMenu}
@@ -689,15 +702,15 @@ export function TopBar({
         {!chatgpt && <DropdownMenu>
           <DropdownMenuTrigger className="record-switch flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-xs font-medium text-muted-foreground shadow-xs transition-colors hover:text-foreground">
             <span className="size-2 rounded-full bg-red-500" aria-hidden />
-            Record
+            {t("record")}
             <ChevronDown className="size-3" />
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" style={{ width: "12rem" }}>
             <DropdownMenuItem onClick={() => setRecordMode("camera")}>
-              <Video /> Record camera
+              <Video /> {t("recordCamera")}
             </DropdownMenuItem>
             <DropdownMenuItem onClick={() => setRecordMode("audio")}>
-              <Mic /> Record audio
+              <Mic /> {t("recordAudio")}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>}
@@ -744,7 +757,7 @@ export function TopBar({
           ) : (
             <DropdownMenu>
               <DropdownMenuTrigger
-                render={<Button variant="ghost" size="icon-sm" className="relative" aria-label="More actions" title="More actions" />}
+                render={<Button variant="ghost" size="icon-sm" className="relative" aria-label={t("moreActions")} title={t("moreActions")} />}
               >
                 <MoreHorizontal />
                 {!aiOpen && <ChatStatusBadge status={chatStatus} />}
@@ -752,12 +765,12 @@ export function TopBar({
               <DropdownMenuContent align="end" className="w-48">
                 {cutMode === "cloud" && !chatgpt && (
                   <DropdownMenuItem onClick={() => setShareOpen(true)}>
-                    <Share2 /> Share
+                    <Share2 /> {t("share")}
                   </DropdownMenuItem>
                 )}
                 {canMoveToCloud && (
                   <DropdownMenuItem onClick={() => setMoveOpen(true)}>
-                    <CloudUpload /> Move to Cloud
+                    <CloudUpload /> {t("moveToCloud")}
                   </DropdownMenuItem>
                 )}
                 <DropdownMenuItem
@@ -768,7 +781,7 @@ export function TopBar({
                     s.setExportOpen(true);
                   }}
                 >
-                  <Upload /> {cloudUploading ? finishingLabel : "Export"}
+                  <Upload /> {cloudUploading ? finishingLabel : t("export")}
                 </DropdownMenuItem>
                 {!chatgpt && <DropdownMenuItem
                   onClick={() => {
@@ -777,7 +790,7 @@ export function TopBar({
                   }}
                 >
                   <Sparkles />
-                  <span className="relative flex-1">Chat{!aiOpen && <ChatStatusBadge status={chatStatus} />}</span>
+                  <span className="relative flex-1">{t("chat")}{!aiOpen && <ChatStatusBadge status={chatStatus} />}</span>
                   {aiOpen && <Check className="size-3.5 text-muted-foreground" />}
                 </DropdownMenuItem>}
               </DropdownMenuContent>
@@ -795,18 +808,16 @@ export function TopBar({
         <Dialog open onOpenChange={(open) => !open && !moving && setMoveOpen(false)}>
           <DialogContent className="sm:max-w-sm">
             <DialogHeader>
-              <DialogTitle>Move to Cloud</DialogTitle>
+              <DialogTitle>{t("moveToCloud")}</DialogTitle>
             </DialogHeader>
             <p className="text-sm text-muted-foreground">
-              Copies this project and its media to the cloud, then removes it
-              from {cutMode === "browser" ? "this browser" : "this Mac"}.
-              Exports rendered here stay behind.
+              {t("moveBody", { from: cutMode === "browser" ? "browser" : "mac" })}
             </p>
             {moveError && <p className="text-sm text-red-600">{moveError}</p>}
             <DialogFooter className="mt-2">
               <Button disabled={moving} className="w-full" onClick={() => void moveToCloud()}>
                 {moving && <Loader2 className="animate-spin" data-icon="inline-start" />}
-                {moving ? (moveProgress ?? "Moving…") : "Move to Cloud"}
+                {moving ? (moveProgress ?? t("moving")) : t("moveToCloud")}
               </Button>
             </DialogFooter>
           </DialogContent>

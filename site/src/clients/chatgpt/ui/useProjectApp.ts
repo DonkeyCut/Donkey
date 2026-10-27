@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { App } from "@modelcontextprotocol/ext-apps";
+import { useTranslations } from "use-intl";
+import type { Messages } from "@/i18n/namespaces";
+import { useSetWidgetLocale } from "./intl";
 import { editorSchema, playbackSchema, viewSchema, type Editor, type Playback, type ProjectView } from "../contracts";
 
 type ToolResult = { isError?: boolean; structuredContent?: unknown; _meta?: Record<string, unknown>; content?: unknown[] };
@@ -7,6 +10,17 @@ type ToolResult = { isError?: boolean; structuredContent?: unknown; _meta?: Reco
  * link long spent, when ChatGPT shows the card again after a reload; a call
  * the card makes gets a link minted for it. */
 type Origin = "card" | "call";
+
+/** What went wrong, named by its message in the widget's catalog so the card
+ * draws it in whatever language the host speaks. */
+export type CardProblem = { key: keyof Messages["chatgpt"]["widget"]["problems"]; name?: string };
+
+/** A failure `receive` raises, carrying its problem to the caller's catch. */
+class CardError extends Error {
+  constructor(readonly problem: CardProblem["key"]) {
+    super(problem);
+  }
+}
 
 /** The host carries authentication; the iframe only calls the MCP Apps bridge. */
 export function useProjectApp() {
@@ -21,22 +35,24 @@ export function useProjectApp() {
   const [editorRequest, setEditorRequest] = useState<string | null>(null);
   const requested = useRef<string | null>(null);
   const reconnecting = useRef(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<CardProblem | null>(null);
+  const t = useTranslations("chatgpt.widget");
+  const setLocale = useSetWidgetLocale();
   const [busy, setBusy] = useState(false);
   const [visible, setVisible] = useState(!document.hidden);
   const [pollMs, setPollMs] = useState(2000);
   const recoveries = useRef(0);
 
   const receive = useCallback((result: ToolResult, origin: Origin) => {
-    if (result.isError) throw new Error("Donkey Cut could not complete this request. Try again.");
+    if (result.isError) throw new CardError("requestFailed");
     const parsed = viewSchema.safeParse(result.structuredContent);
-    if (!parsed.success) throw new Error("The preview response could not be read.");
+    if (!parsed.success) throw new CardError("unreadable");
     // An editable project is the editor. Its link is good for one minute, so
     // the card's own result counts it only inside that minute.
     const editable = parsed.data.canEdit && parsed.data.project ? parsed.data.project.id : null;
     const embed = editorSchema.safeParse(result._meta?.editor);
     const link = embed.success && (origin !== "card" || embed.data.expiresAt > Date.now()) ? embed.data : null;
-    if (origin === "call" && editable && !link) throw new Error("Donkey Cut could not open the editor. Try again.");
+    if (origin === "call" && editable && !link) throw new CardError("editorFailed");
     const media = playbackSchema.safeParse(result._meta?.playback);
     const interval = result._meta?.pollMs;
     if (typeof interval === "number" && interval >= 1000 && interval <= 30000) setPollMs(interval);
@@ -56,7 +72,7 @@ export function useProjectApp() {
       epoch.current++;
       recoveries.current = 0;
       setBusy(false);
-      try { receive(result, "card"); } catch (e) { setError((e as Error).message); }
+      try { receive(result, "card"); } catch (e) { setError({ key: e instanceof CardError ? e.problem : "generic" }); }
     };
     // ChatGPT overlays its composer on the bottom of a fullscreen card and
     // reports the covered band as a safe-area inset; the editor frame gets
@@ -64,6 +80,7 @@ export function useProjectApp() {
     const applyContext = (context: ReturnType<App["getHostContext"]>) => {
       if (!context) return;
       if (context.theme) document.documentElement.dataset.theme = context.theme;
+      if (context.locale) setLocale(context.locale);
       const full = context.displayMode === "fullscreen";
       if (context.displayMode) setFullscreen(full);
       // Measured from ChatGPT's desktop fullscreen when the host reports no inset.
@@ -76,7 +93,7 @@ export function useProjectApp() {
       console.debug("[donkeycut] host context", context);
       applyContext(context ?? { theme: "light" });
       setReady(true);
-    }).catch(() => { if (live) setError("Connect this preview from ChatGPT to continue."); });
+    }).catch(() => { if (live) setError({ key: "connect" }); });
     const visibility = () => setVisible(!document.hidden);
     document.addEventListener("visibilitychange", visibility);
     return () => {
@@ -85,7 +102,7 @@ export function useProjectApp() {
       document.removeEventListener("visibilitychange", visibility);
       void app.close().catch(() => {});
     };
-  }, [receive]);
+  }, [receive, setLocale]);
 
   const run = useCallback(async (name: string, args: Record<string, string>, manual = true, origin: Origin = "call") => {
     const app = appRef.current;
@@ -98,7 +115,7 @@ export function useProjectApp() {
       const result = await app.callServerTool({ name, arguments: args }).catch((): ToolResult => ({ isError: true }));
       if (current === epoch.current && appRef.current === app) receive(result, origin);
     } catch (e) {
-      if (current === epoch.current && appRef.current === app) setError(e instanceof Error ? e.message : "Request failed.");
+      if (current === epoch.current && appRef.current === app) setError({ key: e instanceof CardError ? e.problem : "generic" });
     } finally { if (current === epoch.current && appRef.current === app) setBusy(false); }
   }, [ready, receive]);
 
@@ -120,21 +137,21 @@ export function useProjectApp() {
 
   const playbackFailed = useCallback(() => {
     if (!projectId || !jobId) return;
-    if (recoveries.current++ >= 1) { setError("Video could not load. Try opening the project again."); return; }
+    if (recoveries.current++ >= 1) { setError({ key: "videoFailed" }); return; }
     setPlayback(null);
     void run("get_preview_status", { projectId, jobId }, false);
   }, [projectId, jobId, run]);
 
-  const openLink = async (url: string, failure: string) => {
+  const openLink = async (url: string) => {
     if (!appRef.current) return;
-    try { const result = await appRef.current.openLink({ url }); if (result.isError) setError(failure); }
-    catch { setError(failure); }
+    try { const result = await appRef.current.openLink({ url }); if (result.isError) setError({ key: "openFailed" }); }
+    catch { setError({ key: "openFailed" }); }
   };
-  const openDonkey = () => { if (view?.project) void openLink(view.project.url, "Could not open Donkey Cut."); };
+  const openDonkey = () => { if (view?.project) void openLink(view.project.url); };
   /** The framed editor asking for a tab: opening the project on donkeycut.com,
    * and saving an export, which the card's sandbox blocks in the frame. */
   const openFromFrame = useCallback((url: string) => {
-    void openLink(url, "Could not open Donkey Cut.");
+    void openLink(url);
   }, []);
   /** A captions file made inside the frame: its bytes go with the request, so
    * the host needs nothing from this origin to save it. */
@@ -145,8 +162,8 @@ export function useProjectApp() {
       const result = await app.downloadFile({
         contents: [{ type: "resource", resource: { uri: `file:///${name}`, mimeType, text } }],
       });
-      if (result.isError) setError(`Could not save ${name}.`);
-    } catch { setError(`Could not save ${name}.`); }
+      if (result.isError) setError({ key: "saveFailed", name });
+    } catch { setError({ key: "saveFailed", name }); }
   }, []);
 
   useEffect(() => {
@@ -167,7 +184,7 @@ export function useProjectApp() {
   /** The way forward from a project the account no longer has: a new cloud
    * project, opened here in its place. Its result carries the editor link,
    * so it opens like any other. */
-  const createProject = () => { void run("create_project", { name: "Untitled" }); };
+  const createProject = () => { void run("create_project", { name: t("untitled") }); };
 
   // The editor's own button asks for the whole window; the host grants what it supports.
   const requestFullscreen = useCallback(async () => {

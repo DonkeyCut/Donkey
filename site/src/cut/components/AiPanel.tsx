@@ -33,6 +33,7 @@ import {
   X,
 } from "lucide-react";
 import Markdown, { type Components } from "react-markdown";
+import { useFormatter, useLocale, useTranslations } from "next-intl";
 import { baseMarkdownComponents } from "./markdownComponents";
 import { LiveElapsed } from "./Elapsed";
 import { SceneCard } from "./SceneCard";
@@ -60,6 +61,7 @@ import {
   deleteStoredThread,
   isStoredThread,
   loadProjectThreads,
+  flushThreadSaves,
   readActiveChat,
   readQueuedRows,
   readRawThreads,
@@ -112,7 +114,7 @@ import { resolvePlayheadTokens, syncTimes, type TimeMark } from "@/cut/lib/timeM
 import { productionDeps } from "@/cut/lib/pi/prodDeps";
 import { withChatProject } from "@/cut/lib/projectChatTools";
 import { runAiTool } from "@/cut/lib/aiTools";
-import { editorChatActive, holdEditorChat } from "@/cut/lib/editorWork";
+import { editorChatActive, flushEditorSave, holdEditorChat } from "@/cut/lib/editorWork";
 import { nextSyncMs } from "@/cut/lib/syncCadence";
 import { recoverSceneCall } from "@/cut/lib/chatRecovery";
 import { countChunks, replayChatStream } from "@/cut/lib/chatReplay";
@@ -150,6 +152,12 @@ import { RECORD_RUNNING_TTL_MS, ToolOutputAssets } from "./ChatAssets";
 import { attachedRefKeys, cardIsAttached } from "@/cut/lib/chatCards";
 import { HostedErrorText, openCreditsWall } from "./hostedError";
 import { useMicTranscription } from "@/cut/lib/micTranscribe";
+import { registerLanguageSink } from "@/cut/lib/interfaceLanguage";
+import { UserError } from "@/cut/lib/userError";
+import { useChatError } from "./chatError";
+import { switchLocale } from "@/i18n/localeCookie";
+import type { Locale } from "@/i18n/locales";
+import { useUpdateLocale } from "@/queries/accountProfile";
 
 // Chat attachments are asset refs — anything in the project, the library, or
 // the stock catalog. They arrive by drag (media cards, library clips, stock
@@ -168,6 +176,14 @@ interface ModelsInfo {
 interface EngineSend {
   context: unknown;
   route: EngineRoute | undefined;
+}
+
+/** A failure the engine coded for the reader: the English message it ended
+ * the stream with, and the code and values of its errors-catalog message. */
+interface ChatFailure {
+  message: string;
+  code: string;
+  params: Record<string, string | number>;
 }
 
 /** A saved chat thread, persisted per project in localStorage. */
@@ -194,6 +210,10 @@ interface ChatThread {
 
 
 const THREAD_LIMIT = 30;
+
+// The title older threads stored when their first message had no text; the
+// list words it, and an empty title, in the page's language.
+const UNTITLED_THREAD = "New chat";
 
 // Which reply each thread has been read up to, per project: a small store
 // over localStorage, so the panel reads it as a snapshot and any writer —
@@ -446,17 +466,27 @@ const PROVIDER_LABEL: Record<string, string> = {
   claude: "Claude Code",
   codex: "Codex",
   gemini: "Gemini",
-  test: "Testing",
 };
 
+/** A provider's group name: product names as they are, the hermetic test
+ * provider in the page's language. */
+function providerLabel(id: string, t: ReturnType<typeof useTranslations<"chat.panel">>): string {
+  if (id === "test") {
+    return t("providerTesting");
+  }
+  return PROVIDER_LABEL[id] ?? id;
+}
+
+// The prompt chips on an empty thread, by message id (chat.panel.suggestions).
+// A chip sends its text in the page's language; the model reads any.
 const SUGGESTIONS = [
-  "What's in this video?",
-  "Add transitions between clips",
-  "Improve my title",
-  "Watch and create subtitles",
-  "Rewrite subtitles for social",
-  "Write my post caption + tags",
-];
+  "whatsInVideo",
+  "addTransitions",
+  "improveTitle",
+  "createSubtitles",
+  "rewriteSubtitles",
+  "writeCaption",
+] as const;
 
 export function AiPanel({
   projectId,
@@ -469,6 +499,8 @@ export function AiPanel({
   onClose: () => void;
   onStatusChange: (projectId: string, status: ChatStatus) => void;
 }) {
+  const t = useTranslations("chat.panel");
+  const format = useFormatter();
   const [info, setInfo] = useState<ModelsInfo | null>(null);
   const engineUp = useLocalCompute();
   const readOnly = useEditor((s) => s.readOnly);
@@ -741,7 +773,7 @@ export function AiPanel({
   const mergedInfo = useMemo<ModelsInfo | null>(() => {
     const gemini =
       signedIn === false
-        ? { available: false, note: "sign in to Donkey to chat", installed: true }
+        ? { available: false, note: t("signInToChat"), installed: true }
         : (info?.providers.gemini ?? { available: true, note: "", installed: true });
     // With no engine on this Mac the CLI providers don't exist: their groups
     // hide, and the saved-model fallback effect moves a CLI selection over to
@@ -753,7 +785,7 @@ export function AiPanel({
     }
     if (!info) return null;
     return { ...info, providers: { ...info.providers, gemini } };
-  }, [info, signedIn, engineUp]);
+  }, [info, signedIn, engineUp, t]);
 
   return (
     // A column beside the editor, as it has always been. Docking costs the
@@ -773,7 +805,7 @@ export function AiPanel({
           variant="ghost"
           size="sm"
           className="ai-threads"
-          title="Past threads"
+          title={t("pastThreads")}
           aria-pressed={historyOpen}
           onClick={toggleHistory}
         >
@@ -789,13 +821,13 @@ export function AiPanel({
             variant="ghost"
             size="sm"
             className="ai-new-thread"
-            title="New chat"
+            title={t("newChat")}
             onClick={newChat}
           >
             <Plus />
           </Button>
         )}
-        <Button variant="ghost" size="sm" title="Close (⌘J)" onClick={onClose}>
+        <Button variant="ghost" size="sm" title={t("closeShortcut", { key: "⌘J" })} onClick={onClose}>
           <X />
         </Button>
       </div>
@@ -817,20 +849,20 @@ export function AiPanel({
                 variant="ghost"
                 size="icon-sm"
                 className="hidden max-[620px]:inline-flex"
-                aria-label="Back to chat"
-                title="Back to chat"
+                aria-label={t("backToChat")}
+                title={t("backToChat")}
                 onClick={() => setHistoryOpen(false)}
               >
                 <ChevronLeft />
               </Button>
               <span className="text-sm font-semibold tracking-tight">
-                Threads
+                {t("threads")}
               </span>
               <div className="flex-1" />
               <Button
                 variant="ghost"
                 size="sm"
-                title="Close"
+                title={t("close")}
                 className="max-[620px]:hidden"
                 onClick={() => setHistoryOpen(false)}
               >
@@ -840,21 +872,21 @@ export function AiPanel({
             <div className="ai-thread-items flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto p-2">
               {threads.length === 0 ? (
                 <p className="px-2 py-3 text-[11.5px] leading-relaxed text-muted-foreground">
-                  No past threads yet.
+                  {t("noPastThreads")}
                 </p>
               ) : (
-                threads.map((t) => (
+                threads.map((thread) => (
                   <button
-                    key={t.id}
+                    key={thread.id}
                     className="group relative flex w-full items-center gap-2 rounded-lg py-2 pr-9 pl-2.5 text-left transition-colors hover:bg-muted"
-                    onClick={() => openThread(t)}
+                    onClick={() => openThread(thread)}
                   >
                     <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                       <span className="truncate text-[12px] font-medium">
-                        {t.title}
+                        {thread.title && thread.title !== UNTITLED_THREAD ? thread.title : t("newChat")}
                       </span>
                       <span className="text-[10.5px] text-muted-foreground">
-                        {new Date(t.updatedAt).toLocaleString([], {
+                        {format.dateTime(new Date(thread.updatedAt), {
                           month: "short",
                           day: "numeric",
                           hour: "numeric",
@@ -863,16 +895,16 @@ export function AiPanel({
                       </span>
                     </span>
                     <span className="grid size-3.5 shrink-0 place-items-center">
-                      {runningThreads[t.id] ? (
+                      {runningThreads[thread.id] ? (
                         <CircleDashed
                           role="img"
-                          aria-label="Working"
+                          aria-label={t("working")}
                           className="size-3.5 animate-spin text-muted-foreground"
                         />
-                      ) : unread(t) ? (
+                      ) : unread(thread) ? (
                         <span
                           role="img"
-                          aria-label="Completed"
+                          aria-label={t("completed")}
                           className="size-2 rounded-full bg-blue-500"
                         />
                       ) : null}
@@ -880,12 +912,12 @@ export function AiPanel({
                     {!readOnly && (
                     <span
                       role="button"
-                      aria-label="Delete thread"
-                      title="Delete thread"
+                      aria-label={t("deleteThread")}
+                      title={t("deleteThread")}
                       className="absolute top-1/2 right-1.5 grid size-6 -translate-y-1/2 place-items-center rounded-md text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:bg-black/10 hover:text-red-600"
                       onClick={(e) => {
                         e.stopPropagation();
-                        deleteThread(t.id);
+                        deleteThread(thread.id);
                       }}
                     >
                       <Trash2 className="size-3.5" />
@@ -981,7 +1013,7 @@ function sessionChat(id: string, messages: UIMessage[] | undefined) {
   type Bound = ChatEvents & { transport: ChatTransport<UIMessage> };
   let bound: Bound | null = null;
   const transport = () => {
-    if (!bound) throw new Error("The chat is not ready yet.");
+    if (!bound) throw new UserError("chat_not_ready", "The chat is not ready yet.");
     return bound.transport;
   };
   const chat = new Chat<UIMessage>({
@@ -1032,6 +1064,9 @@ function ChatSession({
   /** What every running thread of the project is working on, by thread id. */
   runningAsks: Record<string, string>;
 }) {
+  const t = useTranslations("chat.panel");
+  const chatError = useChatError();
+  const locale = useLocale();
   const [input, setInput] = useState("");
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const caps = useCutCaps();
@@ -1118,6 +1153,12 @@ function ChatSession({
   useEffect(() => {
     attachmentsRef.current = attachments;
   }, [attachments]);
+  // The intake outlives renders; it words its refusals through the newest
+  // translator.
+  const wordingRef = useRef({ t, chatError });
+  useEffect(() => {
+    wordingRef.current = { t, chatError };
+  });
   useEffect(() => {
     const el = composerBoxRef.current;
     if (!el) return;
@@ -1129,12 +1170,10 @@ function ChatSession({
       expect: setIncoming,
       acceptFrame: () => {
         if (attachmentsRef.current.filter(isFrame).length < cap) return true;
-        showNotice(
-          `Renders read up to ${cap} reference frames — remove one to add another.`,
-        );
+        showNotice(wordingRef.current.t("frameCapacity", { count: cap }));
         return false;
       },
-      notice: showNotice,
+      notice: (failure) => showNotice(wordingRef.current.chatError(failure)),
     });
   }, [readOnly, visible]);
   const sessionKeyRef = useRef<string | null>(null);
@@ -1220,7 +1259,7 @@ function ChatSession({
             res = await fetch(input, init);
             if (res.ok) return res;
           }
-          throw new Error((await apiJson(res)).error ?? `The engine replied ${res.status}.`);
+          throw new Error((await apiJson(res)).error ?? t("engineReplied", { status: res.status }));
         },
         // The engine origin is discovered asynchronously; await it per request
         // (not at mount) so an early send still targets the local engine rather
@@ -1246,6 +1285,7 @@ function ChatSession({
               providerSession: sessionFor(currentModel()),
               route,
               handled: handledSince(messages),
+              locale,
             },
           };
         },
@@ -1272,6 +1312,7 @@ function ChatSession({
             threadId,
             model: currentModel(),
             messages: options.messages,
+            locale,
             abortSignal: signal,
             deps: productionDeps(projectId, signal),
           });
@@ -1317,7 +1358,7 @@ function ChatSession({
         return replay && countChunks(replay, (mark) => { streamed.current = mark; });
       },
     };
-  }, [threadId, projectId, currentModel, sessionFor, setClientTools, prepareReplay, attachReplay, registerBrowserTurn, queryClient]);
+  }, [threadId, projectId, currentModel, sessionFor, setClientTools, prepareReplay, attachReplay, registerBrowserTurn, queryClient, locale, t]);
 
   // The session owns its Chat so the thread's record can follow the chat's
   // own state (recordThread, below) rather than this component's renders: a
@@ -1364,7 +1405,7 @@ function ChatSession({
       const thread: ChatThread = {
         ...previous,
         id: threadId,
-        title: (firstUser ? messageText(firstUser) : "").slice(0, 80) || "New chat",
+        title: (firstUser ? messageText(firstUser) : "").slice(0, 80),
         updatedAt: Date.now(),
         completedMessageId: completedMessageId.current,
         turnSettled: turnSettled.current,
@@ -1381,6 +1422,11 @@ function ChatSession({
       }).catch(() => {});
     },
     onData: (part) => {
+      // A coded failure arrives ahead of the error that ends the stream, so
+      // the error line can read in the page's language.
+      if (part.type === "data-failure") {
+        setFailure(part.data as ChatFailure);
+      }
       if (part.type === "data-session") {
         const d = part.data as {
           sessionKey?: string;
@@ -1488,14 +1534,16 @@ function ChatSession({
   );
 
   const browserRunning = useSyncExternalStore(watchBrowserChatTurns, () => browserChatRunning(projectId, threadId), () => false);
-  const [sendError, setSendError] = useState<string | null>(null);
+  // A failed send, worded at render in the page's language.
+  const [sendError, setSendError] = useState<unknown>(null);
+  const [failure, setFailure] = useState<ChatFailure | null>(null);
   const [requests] = useState(() => new ChatRequests());
   const requestPending = useSyncExternalStore(requests.subscribe, requests.snapshot, () => false);
   const dispatchChat = useCallback((request: () => Promise<void>) => {
     void requests.run(request).catch((error: unknown) => {
-      setSendError(error instanceof Error ? error.message : String(error));
+      setSendError(error);
     });
-  }, [requests]);
+  }, [requests, setSendError]);
   const busy = requestPending || status === "submitted" || status === "streaming" || browserRunning;
   useEffect(() => {
     toolAbort.current = new AbortController();
@@ -1533,7 +1581,7 @@ function ChatSession({
     // stands until a live session replaces it.
     const thread: ChatThread = {
       id: threadId,
-      title: (firstUser ? messageText(firstUser) : "").slice(0, 80) || "New chat",
+      title: (firstUser ? messageText(firstUser) : "").slice(0, 80),
       updatedAt: Date.now(),
       messages: recoverSceneCall(live, threadId, useEditor.getState().genvideo),
       sessions: { ...providerSessions.current },
@@ -1573,6 +1621,27 @@ function ChatSession({
     recorder.current?.flush();
     flushCloudThreadSaves();
   }, [busy]);
+
+  // set_interface_language in this thread's turn: the language waits for the
+  // turn to settle, then the saves land, the account keeps it, and the page
+  // reloads in it.
+  const updateLocale = useUpdateLocale();
+  const pendingLocale = useRef<Locale | null>(null);
+  useEffect(() => registerLanguageSink(threadId, (next) => {
+    pendingLocale.current = next;
+  }), [threadId]);
+  useEffect(() => {
+    const next = pendingLocale.current;
+    if (busy || !next) {
+      return;
+    }
+    pendingLocale.current = null;
+    void (async () => {
+      await Promise.all([flushThreadSaves(), flushCloudThreadSaves(), flushEditorSave(projectId)]);
+      await updateLocale.mutateAsync(next);
+      switchLocale(next);
+    })().catch((error: unknown) => setSendError(error));
+  }, [busy, projectId, updateLocale]);
   useEffect(() => {
     const receive = () => {
       if (chatThreadDeleted(projectId, threadId)) {
@@ -1856,9 +1925,10 @@ function ChatSession({
     : true;
   const unavailableMessage = (): string => {
     const p = provider(model);
-    if (p === "gemini") return "Sign in to your Donkey account to chat with Gemini.";
+    if (p === "gemini") return t("signInForGemini");
     const note = info?.providers[p]?.note?.trim();
-    return note ? `${PROVIDER_LABEL[p]}: ${note}` : `${PROVIDER_LABEL[p]} isn't available.`;
+    const name = providerLabel(p, t);
+    return note ? t("providerNote", { provider: name, note }) : t("providerUnavailable", { provider: name });
   };
   const send = (text: string) => {
     // Inline @mentions attach their assets alongside the dropped chips. The
@@ -2141,18 +2211,16 @@ function ChatSession({
           {messages.length === 0 && !hasSceneRun && (
             <div className="flex flex-col gap-3 pt-6">
               <p className="text-[12.5px] leading-relaxed text-muted-foreground">
-                I can see your whole project — clips, titles, subtitles, publish
-                metadata — and edit it for you. Select something and tell me
-                what to change, or ask anything about the cut.
+                {t("intro")}
               </p>
               <div className="flex flex-wrap gap-1.5">
-                {SUGGESTIONS.map((sug) => (
+                {SUGGESTIONS.map((id) => (
                   <button
-                    key={sug}
+                    key={id}
                     className="ai-suggestion rounded-full border border-border px-2.5 py-1 text-[11.5px] text-muted-foreground transition-colors hover:border-input hover:text-foreground"
-                    onClick={() => send(sug)}
+                    onClick={() => send(t(`suggestions.${id}`))}
                   >
-                    {sug}
+                    {t(`suggestions.${id}`)}
                   </button>
                 ))}
               </div>
@@ -2168,18 +2236,21 @@ function ChatSession({
           <ThreadRenders threadId={threadId} />
           {busy && (
             <div className="ai-busy mt-1 flex items-center gap-1.5 text-[11.5px] text-muted-foreground">
-              <CircleDashed className="size-3 animate-spin" /> Working…{" "}
+              <CircleDashed className="size-3 animate-spin" /> {t("workingEllipsis")}{" "}
               <LiveElapsed />
             </div>
           )}
-          {((error && !retryDisconnect) || sendError) && (
+          {((error && !retryDisconnect) || sendError !== null) && (
             <div className="ai-error mt-2 flex items-start gap-2 rounded-lg bg-red-50 px-2.5 py-2 text-[11.5px] leading-relaxed text-red-700">
               <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
               <span className="min-w-0 break-words">
                 {error ? (
-                  <HostedErrorText error={error.message} link={false} />
+                  <HostedErrorText
+                    error={failure?.message === error.message ? chatError(new UserError(failure.code, failure.message, failure.params)) : error.message}
+                    link={false}
+                  />
                 ) : (
-                  sendError
+                  chatError(sendError)
                 )}
               </span>
             </div>
@@ -2214,8 +2285,9 @@ function ChatSession({
               >
                 <TriangleAlert className="size-3 shrink-0" />
                 <span>
-                  Insufficient credits —{" "}
-                  <span className="font-medium underline">reload credits</span>
+                  {t.rich("insufficientCredits", {
+                    link: (chunks) => <span className="font-medium underline">{chunks}</span>,
+                  })}
                 </span>
               </button>
             )}
@@ -2240,7 +2312,7 @@ function ChatSession({
                 )}
               >
                 <TriangleAlert className="size-3 shrink-0" />
-                <span>{saveFailure}</span>
+                <span>{chatError(saveFailure)}</span>
               </div>
             )}
             {trayVisible && (
@@ -2318,7 +2390,7 @@ function ChatSession({
           >
             {dropActive && (
               <div className="px-3 pt-2 text-[11.5px] font-medium text-[#0a84ff]">
-                Drop to attach
+                {t("dropToAttach")}
               </div>
             )}
             {mic.state === "idle" ? (
@@ -2344,7 +2416,7 @@ function ChatSession({
                   className="ai-input max-h-56 w-full resize-none overflow-y-auto bg-transparent px-3 pt-2 text-[12.5px] leading-relaxed outline-none placeholder:text-muted-foreground/70"
                   rows={5}
                   autoGrow
-                  placeholder="Ask about your video, or tell me what to change… @ references files, folders, and notes"
+                  placeholder={t("composerPlaceholder")}
                   value={input}
                   onChange={setInput}
                   candidates={candidates}
@@ -2371,7 +2443,7 @@ function ChatSession({
                       variant="ghost"
                       size="sm"
                       className="ai-mic text-muted-foreground"
-                      title="Dictate"
+                      title={t("dictate")}
                       disabled={busy}
                       onClick={() => void mic.start()}
                     >
@@ -2383,7 +2455,7 @@ function ChatSession({
                       variant="outline"
                       size="sm"
                       className="ai-stop"
-                      title="Stop"
+                      title={t("stop")}
                       onClick={() => {
                         // stop() settles to 'ready', which the drain reads as
                         // a clean finish — park the queue here so it stays put
@@ -2393,7 +2465,7 @@ function ChatSession({
                           setQueuePaused(true);
                         userStopped.current = true;
                         toolAbort.current.abort();
-                        if (provider(model) !== "gemini") void cancelEngineChat(projectId, threadId).catch((error) => showNotice(String(error)));
+                        if (provider(model) !== "gemini") void cancelEngineChat(projectId, threadId).catch((error) => showNotice(chatError(error)));
                         cancelBrowserChat(projectId, threadId);
                         void stop();
                       }}
@@ -2404,7 +2476,7 @@ function ChatSession({
                     <Button
                       size="sm"
                       className="ai-send"
-                      title="Send (Enter)"
+                      title={t("sendShortcut", { key: "Enter" })}
                       disabled={!input.trim() && attachments.length === 0}
                       onClick={() => send(input)}
                     >
@@ -2420,7 +2492,7 @@ function ChatSession({
         </div>
         {mic.error && (
           <p className="mt-1.5 px-1 text-[10.5px] leading-relaxed text-amber-700">
-            {mic.error}
+            {chatError(mic.error)}
           </p>
         )}
       </div>
@@ -2433,6 +2505,7 @@ function ChatSession({
  * asset, double-click to expand, drag onto the timeline, "…" menu for more
  * actions. */
 function MessageAssetCard({ asset }: { asset: AssetRef }) {
+  const t = useTranslations("chat.panel");
   // The reveal waits out the double-click window, so expanding doesn't also
   // jump the side panel to the asset.
   const clickTimer = useRef<number | undefined>(undefined);
@@ -2451,7 +2524,7 @@ function MessageAssetCard({ asset }: { asset: AssetRef }) {
     >
       <button
         className="flex w-full flex-col gap-1 text-left"
-        title={`${asset.name} — click to show · drag to the timeline`}
+        title={t("assetCardHint", { name: asset.name })}
         draggable
         onDragStart={(e) => {
           // Project assets keep the timeline-placement payload; the ref rides
@@ -2484,7 +2557,7 @@ function MessageAssetCard({ asset }: { asset: AssetRef }) {
         <DropdownMenuTrigger
           render={
             <button
-              aria-label="Asset options"
+              aria-label={t("assetOptions")}
               className="absolute top-1 right-1 grid size-5 place-items-center rounded-md bg-black/55 text-white opacity-0 transition-opacity group-hover/chip:opacity-100 hover:bg-black/75"
             />
           }
@@ -2497,12 +2570,12 @@ function MessageAssetCard({ asset }: { asset: AssetRef }) {
               useLightbox.getState().open(lightboxItemFromRef(asset))
             }
           >
-            <Maximize2 /> Expand
+            <Maximize2 /> {t("expand")}
           </DropdownMenuItem>
           <DropdownMenuItem
             onClick={() => window.open(asset.url, "_blank", "noopener")}
           >
-            <ExternalLink /> Open file
+            <ExternalLink /> {t("openFile")}
           </DropdownMenuItem>
           {asset.scope === "project" && (
             <DropdownMenuItem
@@ -2515,7 +2588,7 @@ function MessageAssetCard({ asset }: { asset: AssetRef }) {
                 });
               }}
             >
-              <FolderPlus /> Add to Library
+              <FolderPlus /> {t("addToLibrary")}
             </DropdownMenuItem>
           )}
         </DropdownMenuContent>
@@ -2526,12 +2599,13 @@ function MessageAssetCard({ asset }: { asset: AssetRef }) {
 
 /** Copy-to-clipboard affordance revealed on message hover. */
 function MessageCopy({ text }: { text: string }) {
+  const t = useTranslations("chat.panel");
   const [copied, setCopied] = useState(false);
   if (!text) return null;
   return (
     <button
-      aria-label="Copy message"
-      title="Copy"
+      aria-label={t("copyMessage")}
+      title={t("copy")}
       className={cn(
         "ai-msg-copy",
         cardIconButton,
@@ -2663,6 +2737,7 @@ function splitThoughtSegments(text: string): TextSegment[] {
 /** A pulled post's own words, clamped to a few lines when the source ran
  * long, with a chevron to unfold the full text in place. */
 function SourceQuote({ text }: { text: string }) {
+  const t = useTranslations("chat.panel");
   const [expanded, setExpanded] = useState(false);
   const [clamped, setClamped] = useState(false);
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -2685,7 +2760,7 @@ function SourceQuote({ text }: { text: string }) {
       {(clamped || expanded) && (
         <button
           type="button"
-          aria-label={expanded ? "Collapse source text" : "Expand source text"}
+          aria-label={expanded ? t("collapseSource") : t("expandSource")}
           onClick={() => setExpanded((v) => !v)}
           className="mt-1 flex cursor-pointer items-center rounded text-muted-foreground/70 transition-colors hover:text-foreground"
         >
@@ -2762,6 +2837,7 @@ function ToolChipGroup({ parts }: { parts: ToolPartView[] }) {
 /** A run of 3+ settled tool chips folded behind one summary row. Opening it
  * reveals the individual chips, each still expandable to its payload. */
 function ToolRunGroup({ groups }: { groups: ToolPartView[][] }) {
+  const t = useTranslations("chat.panel");
   const calls = groups.reduce((n, g) => n + g.length, 0);
   // A failure the turn went back and made good is not a failure of the run: a
   // tool that errored and then ran clean got where it was going, so the header
@@ -2785,7 +2861,7 @@ function ToolRunGroup({ groups }: { groups: ToolPartView[][] }) {
       >
         <Wrench className="size-3 shrink-0" />
         <span>
-          {calls} tool call{calls === 1 ? "" : "s"}
+          {t("toolCalls", { count: calls })}
         </span>
         {failed ? (
           <TriangleAlert className="size-3" />
@@ -2805,11 +2881,12 @@ function ToolRunGroup({ groups }: { groups: ToolPartView[][] }) {
 
 /** A collapsed disclosure for a reasoning block, styled like the tool row. */
 function ThoughtBlock({ text }: { text: string }) {
+  const t = useTranslations("chat.panel");
   return (
     <details className="ai-thought group max-w-full">
       <summary className="flex cursor-pointer list-none items-center gap-1.5 rounded-md border border-border px-2 py-1 text-[11px] text-muted-foreground transition-colors select-none hover:bg-muted/60 [&::-webkit-details-marker]:hidden">
         <Brain className="size-3 shrink-0" />
-        <span>Thought</span>
+        <span>{t("thought")}</span>
         <ChevronDown className="ml-auto size-3 transition-transform group-open:rotate-180" />
       </summary>
       <div className="ai-md mt-1 max-w-full px-2 text-[12px] leading-relaxed text-muted-foreground">
@@ -2994,6 +3071,7 @@ const MessageView = memo(function MessageView({
  * — the cards up-thread flip to their result, but this line is what says
  * "something is still happening" without scrolling. */
 function ThreadRenders({ threadId }: { threadId: string }) {
+  const t = useTranslations("chat.panel");
   const jobs = useGenerate((s) => s.jobs);
   const records = useEditor((s) => s.renders);
   const live = jobs.filter(
@@ -3021,9 +3099,7 @@ function ThreadRenders({ threadId }: { threadId: string }) {
   return (
     <div className="ai-renders mt-1 flex items-center gap-1.5 text-[11.5px] text-muted-foreground">
       <CircleDashed className="size-3 animate-spin" />
-      Rendering {running.length === 1
-        ? "a video"
-        : `${running.length} videos`}…{" "}
+      {t("renderingVideos", { count: running.length })}{" "}
       {elapsed && <span className="tabular-nums">{elapsed}</span>}
     </div>
   );
@@ -3038,6 +3114,9 @@ function ModelSelector({
   model: string;
   onSelect: (id: string) => void;
 }) {
+  const t = useTranslations("chat.panel");
+  // Model names are product names; the hidden test model is described.
+  const modelLabel = (m: (typeof AI_MODELS)[number]) => (m.provider === "test" ? t("testModel") : m.label);
   // Favorites follow the catalog: a retired id becomes its replacement, an
   // unknown id drops, and one replacement standing in for two ids lists once.
   const [favs, setFavs] = useState<string[]>(() => {
@@ -3078,7 +3157,8 @@ function ModelSelector({
     // when the user sends.
     .filter((group) => group.models.length > 0 && group.installed);
   const flat = groups.flatMap((group) => group.models);
-  const currentLabel = models.find((m) => m.id === model)?.label ?? model;
+  const current = models.find((m) => m.id === model);
+  const currentLabel = current ? modelLabel(current) : model;
 
   const toggleFav = (id: string) => {
     const next = favs.includes(id)
@@ -3108,7 +3188,7 @@ function ModelSelector({
             <DropdownMenuGroup key={group.provider}>
               {gi > 0 && <DropdownMenuSeparator />}
               <DropdownMenuLabel className="flex items-center gap-1.5 text-[10.5px] tracking-wider text-muted-foreground uppercase">
-                <Sparkles className="size-3" /> {PROVIDER_LABEL[group.provider]}
+                <Sparkles className="size-3" /> {providerLabel(group.provider, t)}
               </DropdownMenuLabel>
               {group.models.map((m) => (
                 <DropdownMenuItem
@@ -3116,13 +3196,13 @@ function ModelSelector({
                   className="ai-model-item gap-2"
                   onClick={() => onSelect(m.id)}
                 >
-                  <span className="flex-1 text-[12px]">{m.label}</span>
+                  <span className="flex-1 text-[12px]">{modelLabel(m)}</span>
                   {model === m.id && (
                     <Check className="size-3.5 text-[#0a84ff]" />
                   )}
                   <button
                     className="rounded p-0.5 hover:bg-muted"
-                    title={favs.includes(m.id) ? "Unfavorite" : "Favorite"}
+                    title={favs.includes(m.id) ? t("unfavorite") : t("favorite")}
                     onClick={(e) => {
                       e.stopPropagation();
                       e.preventDefault();

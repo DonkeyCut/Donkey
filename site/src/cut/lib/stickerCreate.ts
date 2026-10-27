@@ -15,6 +15,7 @@ import { hostedPost } from "./hosted";
 import { enrichAsset, uploadProjectImage } from "./media";
 import { useEditor } from "./store";
 import { mediaSlug, type MediaAsset } from "./types";
+import { UserError, errorFromBody } from "./userError";
 
 /** The die-cut framing that makes a generation come back sticker-shaped: one
  * centered subject on a plain background the cutout pass can lift it off. */
@@ -55,11 +56,13 @@ export async function createCustomSticker(
   });
   if (!res.ok) {
     const body = (await res.json().catch(() => ({}))) as { error?: string };
-    throw new Error(body.error ?? "Image generation failed.");
+    throw errorFromBody(body, new UserError("image_generation_failed", "Image generation failed."));
   }
   const gen = (await res.json()) as { outputs: { dataBase64?: string; contentType?: string }[] };
   const out = gen.outputs?.find((o) => o.dataBase64);
-  if (!out?.dataBase64) throw new Error("The provider returned no image.");
+  if (!out?.dataBase64) {
+    throw new UserError("image_output_missing", "The provider returned no image.");
+  }
   const source = new Blob([bytesFromBase64(out.dataBase64)], {
     type: out.contentType ?? "image/png",
   });

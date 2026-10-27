@@ -2,14 +2,17 @@
 
 import { DonkeyMark } from "@/components/DonkeyMark";
 import { useState } from "react";
+import { useTranslations } from "next-intl";
+import { useDescribeError } from "@/i18n/describeError";
 import { Copy, Loader2, Sparkles } from "lucide-react";
 import { authHrefFor } from "@/app/_components/landing/useAppEntryHref";
 import { ChatStatusBadge, type ChatStatus } from "./ChatStatusBadge";
 import { Button } from "@/components/ui/button";
 import { apiFetch } from "@/cut/lib/backend";
-import { quotaErrorMessage } from "@/cut/lib/backend/cloud";
 import { projectHref, useCutBase } from "@/cut/lib/nav";
+import { OperationError, operationFailure } from "@/cut/lib/operationFailure";
 import { useEditor } from "@/cut/lib/store";
+import { errorFromBody } from "@/cut/lib/userError";
 import { authClient } from "@/lib/auth-client";
 
 // Chrome for the read-only share view: logo, project name, a "View only"
@@ -18,6 +21,8 @@ import { authClient } from "@/lib/auth-client";
 // session: signed-out clicks route through sign-in with this share URL as the
 // callback.
 export function ViewerTopBar({ chatStatus }: { chatStatus: ChatStatus }) {
+  const t = useTranslations("editor.viewerTopBar");
+  const describeError = useDescribeError();
   const aiOpen = useEditor((s) => s.aiOpen);
   const base = useCutBase();
   const projectName = useEditor((s) => s.projectName);
@@ -40,16 +45,19 @@ export function ViewerTopBar({ chatStatus }: { chatStatus: ChatStatus }) {
         | { jobId?: string; error?: string }
         | null;
       if (!res.ok || !body?.jobId) {
-        throw new Error(
-          quotaErrorMessage(res.status, body) ?? body?.error ?? "Could not copy the project."
-        );
+        // A refusal with a code (a full cloud quota) reads in the page's language.
+        const failure = operationFailure(res.status, body);
+        if (failure?.code === "storage_quota_exceeded") {
+          throw new OperationError(failure);
+        }
+        throw errorFromBody(body, t("copyFailed"));
       }
       // Copies drain through a queue one at a time; poll the job until this
       // one lands.
       for (;;) {
         await new Promise((r) => setTimeout(r, 2000));
         const st = await apiFetch(`/api/cut/copy/${body.jobId}`);
-        if (!st.ok) throw new Error("Could not copy the project.");
+        if (!st.ok) throw new Error(t("copyFailed"));
         const job = (await st.json()) as {
           state: string;
           newProjectId?: string;
@@ -59,10 +67,10 @@ export function ViewerTopBar({ chatStatus }: { chatStatus: ChatStatus }) {
           window.location.href = projectHref(base, job.newProjectId, "projects");
           return;
         }
-        if (job.state === "error") throw new Error(job.error ?? "Could not copy the project.");
+        if (job.state === "error") throw errorFromBody(job, t("copyFailed"));
       }
     } catch (e) {
-      setCopyError(e instanceof Error ? e.message : "Could not copy the project.");
+      setCopyError(describeError(e, t("copyFailed")));
       setCopying(false);
     }
   };
@@ -77,7 +85,7 @@ export function ViewerTopBar({ chatStatus }: { chatStatus: ChatStatus }) {
           {projectName}
         </span>
         <span className="ml-1 rounded-full border border-border px-2 py-0.5 text-[10.5px] font-medium text-muted-foreground">
-          View only
+          {t("viewOnly")}
         </span>
       </div>
       <div className="flex items-center gap-2">
@@ -87,14 +95,14 @@ export function ViewerTopBar({ chatStatus }: { chatStatus: ChatStatus }) {
             variant="ghost"
             size="sm"
             className="ai-toggle relative"
-            aria-label="Chat"
-            title="Chat (⌘J)"
+            aria-label={t("chat")}
+            title={t("chatShortcut", { key: "⌘J" })}
             onClick={() => {
               const s = useEditor.getState();
               s.setAiOpen(!s.aiOpen);
             }}
           >
-            <Sparkles data-icon="inline-start" /> Chat
+            <Sparkles data-icon="inline-start" /> {t("chat")}
             {!aiOpen && <ChatStatusBadge status={chatStatus} />}
           </Button>
         )}
@@ -104,7 +112,7 @@ export function ViewerTopBar({ chatStatus }: { chatStatus: ChatStatus }) {
           ) : (
             <Copy data-icon="inline-start" />
           )}
-          {copying ? "Copying…" : "Copy project"}
+          {copying ? t("copying") : t("copyProject")}
         </Button>
       </div>
     </header>

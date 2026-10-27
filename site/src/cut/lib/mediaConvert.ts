@@ -28,6 +28,7 @@ import {
   UnreadableMediaError,
 } from "./mediaRead";
 import type { ConvertMode } from "./convertMode";
+import { errorFromBody, UserError } from "./userError";
 import { useEditor } from "./store";
 import type { MediaAsset } from "./types";
 
@@ -137,7 +138,7 @@ export async function convertAssetToMp4(
   asset: MediaAsset,
   opts: ConvertOptions = {}
 ): Promise<ConvertOutcome> {
-  if (asset.type === "image") throw new Error("Images have nothing to convert.");
+  if (asset.type === "image") throw new UserError("convert_image_refused", "Images have nothing to convert.");
   const backend = opts.backend ?? getBackend();
   const made = await convertProjectFile(
     projectId,
@@ -196,6 +197,9 @@ interface ServerConvert {
   error?: string;
 }
 
+// A conversion that failed with nothing more to say.
+const convertFailed = () => new UserError("convert_failed", "Could not convert that file.");
+
 const fromServer = (body: ServerConvert): FileConversion => ({
   fileName: body.fileName!,
   reencoded: !!body.transcodedVideo || !!body.transcodedAudio,
@@ -220,18 +224,18 @@ async function convertOnBackend(
   let body: ServerConvert;
   if (backend.kind === "cloud") {
     const started = (await res.json().catch(() => ({}))) as { jobId?: string; error?: string };
-    if (!res.ok || !started.jobId) throw new Error(started.error ?? "Could not convert that file.");
+    if (!res.ok || !started.jobId) throw errorFromBody(started, convertFailed());
     body = await pollCloudJob(
       started.jobId,
       backend,
-      "Could not convert that file.",
-      { timedOut: "The conversion took too long." }
+      convertFailed(),
+      { timedOut: new UserError("convert_timed_out", "The conversion took too long.") }
     );
   } else {
     body = (await res.json().catch(() => ({}))) as ServerConvert;
-    if (!res.ok) throw new Error(body.error ?? "Could not convert that file.");
+    if (!res.ok) throw errorFromBody(body, convertFailed());
   }
-  if (!body.fileName) throw new Error(body.error ?? "Could not convert that file.");
+  if (!body.fileName) throw errorFromBody(body, convertFailed());
   return fromServer(body);
 }
 
@@ -256,10 +260,10 @@ async function convertNearThePage(
     catch { /* The browser still needs a decoder; hosted preparation supplies it. */ }
   }
   const response = resolveRegisteredBlob(source.url) ?? await fetch(source.url).then((res) => {
-    if (!res.ok) throw new Error(`Could not read ${source.name}.`);
+    if (!res.ok) throw new UserError("file_read_failed", `Could not read ${source.name}.`, { name: source.name });
     return res.blob();
   });
-  if (!response) throw new Error(`Could not read ${source.name}.`);
+  if (!response) throw new UserError("file_read_failed", `Could not read ${source.name}.`, { name: source.name });
   return withCloudPreparedMedia(
     new File([response], source.fileName, { type: response.type }),
     (prepared) => land(projectId, source, prepared, opts),
@@ -333,10 +337,10 @@ async function convertInProcess(
       (track === video || track === audio) &&
       (reason === "undecodable_source_codec" || reason === "no_encodable_target_codec")
     )) throw new ConversionUnavailableError("This media needs hosted conversion.");
-    if (!conversion.isValid) throw new Error(`Could not convert ${source.name}.`);
+    if (!conversion.isValid) throw new UserError("file_convert_failed", `Could not convert ${source.name}.`, { name: source.name });
     await conversion.execute();
     const buffer = output.target.buffer;
-    if (!buffer) throw new Error(`Could not convert ${source.name}.`);
+    if (!buffer) throw new UserError("file_convert_failed", `Could not convert ${source.name}.`, { name: source.name });
     const made = await land(projectId, source, new Blob([buffer], { type: "video/mp4" }), opts);
     return { ...made, reencoded };
   } finally {
@@ -358,8 +362,8 @@ async function convertOnTheMac(
   if (opts.mode === "reencode") form.append("mode", opts.mode);
   const res = await engineFetch("/api/cut/convert", { method: "POST", body: form });
   if (!res.ok) {
-    const body = (await res.json().catch(() => ({}))) as { error?: string };
-    throw new Error(body.error ?? `Could not convert ${source.name}.`);
+    const body: unknown = await res.json().catch(() => null);
+    throw errorFromBody(body, new UserError("file_convert_failed", `Could not convert ${source.name}.`, { name: source.name }));
   }
   // The handoff only happens for footage this process cannot decode, which is
   // footage the Mac had to re-encode.

@@ -14,6 +14,7 @@ import type { UIMessage } from "ai";
 import { AI_SKILLS } from "../../../src/cut/server/ai/catalog";
 import { geminiModelRoleNames, resolveGeminiModel } from "../../../src/lib/inference/gemini-models";
 import { streamCutChat, dropPiSession, type CutAgentDeps } from "../../../src/cut/lib/pi/cutAgent";
+import { DEFAULT_LOCALE } from "../../../src/i18n/locales";
 import type { TurnIntent } from "../../../src/cut/lib/turnJudge";
 import { EDITOR_STATE, SAFE_TOOLS, serveSafeTool } from "./fixtures";
 import { judgeReply, replyShapeNotes } from "./graders";
@@ -214,6 +215,7 @@ export async function runCase(c: EvalCase, cfg: RunConfig): Promise<CaseResult> 
     threadId,
     model: cfg.complexModel,
     messages: messages as unknown as UIMessage[],
+    locale: DEFAULT_LOCALE,
     deps,
   });
   try {

@@ -12,11 +12,12 @@
 // the press starts the Pro checkout, which carries the offer to the webhook.
 import { useSearchParams } from "next/navigation";
 import { Loader2 } from "lucide-react";
+import { useFormatter, useLocale, useTranslations } from "next-intl";
 import { useEffect, useState } from "react";
-import { claimOfferCopy, OfferButton, OfferDialog, OfferDismiss, subscribeOfferCopy } from "@/cut/components/OfferDialog";
+import { OfferButton, OfferDialog, OfferDismiss, useOfferCopy } from "@/cut/components/OfferDialog";
 import { useEngineUser } from "@/cut/lib/backend/hooks";
 import { track } from "@/lib/analytics";
-import { formatCreditExpiry } from "@/lib/credits/top-up";
+import { formatCredits } from "@/lib/credits/format-credits";
 import { ApiError } from "@/queries/apiClient";
 import { useStartCheckout } from "@/queries/billing";
 import { useClaimCreditOffer, useCreditOffer } from "@/queries/credits";
@@ -55,6 +56,10 @@ function AddressedDialog() {
 }
 
 function OpenDialog({ token, onClose }: { token: string; onClose: () => void }) {
+  const t = useTranslations("billing");
+  const format = useFormatter();
+  const locale = useLocale();
+  const { claimOfferCopy, subscribeOfferCopy } = useOfferCopy();
   const offer = useCreditOffer(token);
   const claim = useClaimCreditOffer();
   const checkout = useStartCheckout();
@@ -78,64 +83,72 @@ function OpenDialog({ token, onClose }: { token: string; onClose: () => void }) 
   let body: React.ReactNode;
   let terms: React.ReactNode = null;
   let cta: React.ReactNode;
-  let secondary: React.ReactNode = <OfferDismiss onClick={onClose}>Not now</OfferDismiss>;
+  let secondary: React.ReactNode = <OfferDismiss onClick={onClose}>{t("notNow")}</OfferDismiss>;
+  // The amount in the page's language, from the offer's dollars.
+  const credits = offer.data ? formatCredits(offer.data.dollars, locale) : "";
   if (offer.isError) {
     const status = offer.error instanceof ApiError ? offer.error.status : null;
     title =
-      status === 410 ? "This offer has expired" : status === 409 ? "You already have Pro" : "This link is no longer valid";
+      status === 410
+        ? t("claim.expiredTitle")
+        : status === 409
+          ? t("claim.alreadyProTitle")
+          : t("claim.invalidTitle");
     body =
       status === 403
-        ? "This offer belongs to a different account. Sign in with the address the email was sent to."
+        ? t("claim.wrongAccount")
         : status === 410
-          ? "The claim window for this offer has closed."
+          ? t("claim.windowClosed")
           : status === 409
-            ? "This offer is for accounts without a Pro subscription."
-            : "The offer it pointed to is gone.";
-    cta = <OfferButton onClick={onClose}>OK</OfferButton>;
+            ? t("claim.proOnly")
+            : t("claim.gone");
+    cta = <OfferButton onClick={onClose}>{t("ok")}</OfferButton>;
     secondary = null;
   } else if (done) {
-    title = `${offer.data.credits} added to your account`;
-    body = `They’re ready to spend.${
-      done.expiresAt ? ` They expire ${formatCreditExpiry(new Date(done.expiresAt))}.` : ""
-    }`;
-    cta = <OfferButton onClick={onClose}>Start editing</OfferButton>;
+    title = t("claim.addedTitle", { credits });
+    body = done.expiresAt
+      ? t("claim.readyExpires", {
+          date: format.dateTime(new Date(done.expiresAt), { day: "numeric", month: "long", year: "numeric" }),
+        })
+      : t("claim.ready");
+    cta = <OfferButton onClick={onClose}>{t("claim.startEditing")}</OfferButton>;
     secondary = null;
   } else if (offer.data.claim === "subscribe") {
-    title = `Get ${offer.data.credits} with Pro`;
+    title = t("claim.withProTitle", { credits });
     ({ body, terms } = subscribeOfferCopy({
-      credits: offer.data.credits,
+      credits,
       expiresAt: null,
       lifetimeDays: offer.data.lifetimeDays,
     }));
     cta = (
       <OfferButton disabled={checkout.isPending} onClick={subscribe}>
         {checkout.isPending && <Loader2 className="animate-spin" data-icon="inline-start" />}
-        Subscribe to Pro
+        {t("subscribeToPro")}
       </OfferButton>
     );
   } else {
-    title = `${offer.data.credits} are waiting`;
+    title = t("claim.waitingTitle", { credits });
     ({ body, terms } = claimOfferCopy({
-      credits: offer.data.credits,
+      credits,
       closesAt: offer.data.closesAt,
       lifetimeDays: offer.data.lifetimeDays,
     }));
     cta = (
       <OfferButton disabled={claim.isPending} onClick={() => claim.mutate(token)}>
         {claim.isPending && <Loader2 className="animate-spin" data-icon="inline-start" />}
-        Claim {offer.data.credits}
+        {t("claim.claimButton", { credits })}
       </OfferButton>
     );
   }
 
   const error = checkout.isError
-    ? "Billing is unavailable right now."
+    ? t("billingUnavailable")
     : claim.isError
       ? claim.error instanceof ApiError && claim.error.status === 403
-        ? "This offer belongs to a different account. Sign in with the address the email was sent to."
+        ? t("claim.wrongAccount")
         : claim.error instanceof ApiError && claim.error.status === 410
-          ? "The claim window for this offer has closed."
-          : "That didn’t go through. Try again."
+          ? t("claim.windowClosed")
+          : t("claim.failed")
       : null;
 
   return (

@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { useRef } from "react";
 import { Info, RotateCcw } from "lucide-react";
 import { useEditor } from "@/cut/lib/store";
@@ -42,12 +43,13 @@ export function InfoTip({
   side?: "top" | "bottom";
   children: React.ReactNode;
 }) {
+  const t = useTranslations("inspector.controls");
   return (
     <TooltipProvider>
       <Tooltip>
         <TooltipTrigger
           className="grid size-4 place-items-center text-muted-foreground/70 transition-colors hover:text-foreground"
-          aria-label={`About ${label.toLowerCase()}`}
+          aria-label={t("about", { label: label.toLowerCase() })}
         >
           <Info className="size-3.5" />
         </TooltipTrigger>

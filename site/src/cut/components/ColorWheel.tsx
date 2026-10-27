@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { useRef } from "react";
 import { GRADE_MAX } from "@donkeycut/effects-kit";
 
@@ -23,6 +24,7 @@ export function ColorWheel({
   onCommit: (v: [number, number]) => void;
   className?: string;
 }) {
+  const t = useTranslations("inspector.controls");
   const ref = useRef<HTMLDivElement>(null);
   const dragging = useRef(false);
   const last = useRef<[number, number]>(value);
@@ -45,7 +47,7 @@ export function ColorWheel({
       <div
         ref={ref}
         role="slider"
-        aria-label={`${label} color`}
+        aria-label={t("wheelColor", { label })}
         aria-valuemin={0}
         aria-valuemax={GRADE_MAX}
         aria-valuenow={Math.round(Math.hypot(value[0], value[1]))}

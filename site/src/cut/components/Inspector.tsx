@@ -1,6 +1,7 @@
 "use client";
 
 import { useQueryClient } from "@tanstack/react-query";
+import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { AlignCenter, AlignHorizontalSpaceAround, AlignLeft, AlignRight, AlignVerticalSpaceAround, ChevronLeft, ChevronRight, Diamond, FlipHorizontal2, FlipVertical2, Frame, House, Italic, Link2, Link2Off, Loader2, type LucideIcon, Palette, PanelRightClose, PanelRightOpen, PanelTopClose, PenTool, Plus, Scissors, Smile, Sparkles, StretchHorizontal, Trash2, Type, User, Volume2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -57,7 +58,6 @@ import {
   EDGE_BLUR_MAX,
   EDGE_DISTANCE_MAX,
   EASE_IDS,
-  EASE_LABELS,
   type EaseId,
   edgeOwnReach,
   edgePreset,
@@ -219,6 +219,9 @@ import {
 } from "@/cut/lib/textMotion";
 import { getPreviewCanvas } from "@/cut/lib/previewCanvas";
 import { cn } from "@/lib/utils";
+import { useDescribeError } from "@/i18n/describeError";
+import { useLabels } from "@/i18n/labels";
+import type { Messages } from "@/i18n/namespaces";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Field, ResetButton, Row, Section, SegGroup, SegToggle, Tip, useSliderCheckpoint, Value } from "@/cut/components/panelBits";
 import { ColorPanel } from "@/cut/components/ColorPanel";
@@ -310,6 +313,7 @@ const tenthDeg = (v: number) => Math.round(v * 10) / 10;
 const formatDeg = (v: number) => `${tenthDeg(v)}°`;
 
 function ShowTimelineButton() {
+  const t = useTranslations("inspector.rail");
   const open = useEditor((s) => s.timelineOpen);
   if (open) return null;
   return (
@@ -317,37 +321,39 @@ function ShowTimelineButton() {
       <TooltipProvider>
         <Tooltip>
           <TooltipTrigger
-            aria-label="Show timeline"
+            aria-label={t("showTimeline")}
             onClick={() => useEditor.getState().setTimelineOpen(true)}
             className="grid size-8 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
           >
             <PanelTopClose className="size-4" />
           </TooltipTrigger>
-          <TooltipContent side="top">Show timeline</TooltipContent>
+          <TooltipContent side="top">{t("showTimeline")}</TooltipContent>
         </Tooltip>
       </TooltipProvider>
     </div>
   );
 }
 
-/** A view the rail opens beside Home. */
-type RailTab = { id: string; label: string; Icon: LucideIcon };
+/** A view the rail opens beside Home; it names itself under
+ * `inspector.rail.tabs`. */
+type RailTab = { id: RailTabId; Icon: LucideIcon };
+type RailTabId = "color" | "cutout" | "frame" | "animate" | "audio";
 
 /** The video clip's deep views, in rail order under Home. */
 const CLIP_TABS: readonly RailTab[] = [
-  { id: "color", label: "Color", Icon: Palette },
-  { id: "cutout", label: "Cutout", Icon: Scissors },
-  { id: "frame", label: "Frame", Icon: Frame },
-  { id: "animate", label: "Animation", Icon: Sparkles },
-  { id: "audio", label: "Audio", Icon: Volume2 },
+  { id: "color", Icon: Palette },
+  { id: "cutout", Icon: Scissors },
+  { id: "frame", Icon: Frame },
+  { id: "animate", Icon: Sparkles },
+  { id: "audio", Icon: Volume2 },
 ];
 
 /** An overlay's one deep view: its animation. */
-const ANIM_TAB: RailTab = { id: "animate", label: "Animation", Icon: Sparkles };
+const ANIM_TAB: RailTab = { id: "animate", Icon: Sparkles };
 
 /** The deep views a selection of video clips shares. */
 const GROUP_CLIP_TABS: readonly RailTab[] = [
-  { id: "color", label: "Color", Icon: Palette },
+  { id: "color", Icon: Palette },
   ANIM_TAB,
 ];
 
@@ -487,12 +493,13 @@ function InspectorRail({
   // A running matte bake shows on the Cutout tab itself, so the work stays
   // visible from any view.
   const baking = useMatteBakes((s) => !!clipId && s.jobs[clipId]?.status === "running");
+  const t = useTranslations("inspector.rail");
   return (
     <div className="pointer-events-auto flex min-h-0 flex-col items-center rounded-xl border bg-background p-1 shadow-md">
       <ScrollArea className="min-h-0 w-full" viewportClassName="overscroll-contain" contentClassName="flex flex-col items-center gap-1">
-        <RailButton id="home" label="Home" Icon={House} active={view === "main"} onClick={() => onPick("main")} />
-        {tabs.map(({ id, label, Icon }) => (
-          <RailButton key={id} id={id} label={label} Icon={Icon} active={view === id} onClick={() => onPick(id)}>
+        <RailButton id="home" label={t("home")} Icon={House} active={view === "main"} onClick={() => onPick("main")} />
+        {tabs.map(({ id, Icon }) => (
+          <RailButton key={id} id={id} label={t(`tabs.${id}`)} Icon={Icon} active={view === id} onClick={() => onPick(id)}>
             {id === "cutout" && baking && (
               <Loader2 className="absolute top-1 right-1 size-2.5 animate-spin" />
             )}
@@ -502,7 +509,7 @@ function InspectorRail({
       <div className="my-1 h-px w-5 shrink-0 bg-border" />
       <RailButton
         id="toggle"
-        label={open ? "Hide panel" : "Show panel"}
+        label={open ? t("hidePanel") : t("showPanel")}
         Icon={open ? PanelRightClose : PanelRightOpen}
         active={false}
         onClick={onToggle}
@@ -603,14 +610,26 @@ function InlineName({
 /** An element panel's title: the element's name, renamed in place. The
  * timeline chip and chat references show the same name. */
 function ElementTitle({ overlay: o }: { overlay: Overlay }) {
+  const t = useTranslations("inspector.titles");
+  const shapeLabel = useLabels("shape");
+  const effectLabel = useLabels("effect");
   const update = useEditor((s) => s.updateOverlay);
+  // What the element is, standing in for a name: a title's text, a shape's
+  // kind, an effect's name, or "Sticker", in the page's language.
+  const kindName = isTextOverlay(o)
+    ? overlayName({ ...o, name: undefined } as Overlay)
+    : isShapeOverlay(o)
+      ? shapeLabel(o.shape)
+      : isEffectOverlay(o)
+        ? effectLabel(o.effect)
+        : t("sticker");
   return (
     <div className="flex h-10 shrink-0 items-center px-3.5">
       <InlineName
         key={o.id}
-        label="Element name"
+        label={t("elementName")}
         name={o.name}
-        fallback={overlayName({ ...o, name: undefined } as Overlay) || "Text"}
+        fallback={kindName || t("text")}
         onRename={(name) => update(o.id, { name })}
       />
     </div>
@@ -632,13 +651,14 @@ function ClipHead({
   time: string;
   onRename: (name: string | undefined) => void;
 }) {
+  const t = useTranslations("inspector.titles");
   return (
     <div className="mb-1.5 flex h-10 shrink-0 items-center justify-between gap-2 border-b border-border">
       <InlineName
         key={clip.id}
-        label="Clip name"
+        label={t("clipName")}
         name={clip.name}
-        fallback={fileName?.trim() || "Clip"}
+        fallback={fileName?.trim() || t("clip")}
         onRename={onRename}
       />
       <Value className="shrink-0 text-muted-foreground">{time}</Value>
@@ -683,16 +703,17 @@ function LayoutButtons({
   /** Narrow the box to the source's own shape, dropping the margins. */
   onSourceAspect?: () => void;
 }) {
+  const t = useTranslations("inspector.layout");
   const currentId =
     (Object.keys(LAYOUTS) as LayoutId[]).find((id) => LAYOUTS[id].label === regionLabel(rect)) ??
     "full";
   return (
     <>
     <div className="flex items-center justify-between gap-2 py-1">
-      <span className="text-[11.5px] font-medium text-muted-foreground">Layout</span>
+      <span className="text-[11.5px] font-medium text-muted-foreground">{t("title")}</span>
       <Select
         value={currentId}
-        items={Object.fromEntries((Object.keys(LAYOUTS) as LayoutId[]).map((id) => [id, LAYOUTS[id].label]))}
+        items={Object.fromEntries((Object.keys(LAYOUTS) as LayoutId[]).map((id) => [id, t(`layouts.${id}`)]))}
         onValueChange={(id) => {
           const L = LAYOUTS[id as LayoutId];
           onPick(id === "full" ? undefined : { ...L.rect }, L.fit);
@@ -704,19 +725,19 @@ function LayoutButtons({
         <SelectContent>
           {(Object.keys(LAYOUTS) as LayoutId[]).map((id) => (
             <SelectItem key={id} value={id} className="text-[12px]">
-              {LAYOUTS[id].label}
+              {t(`layouts.${id}`)}
             </SelectItem>
           ))}
         </SelectContent>
       </Select>
     </div>
     {onSourceAspect && (
-      <Row label="Shape">
+      <Row label={t("shape")}>
         <button
           className="clip-source-aspect rounded-md border border-input px-2 py-0.5 text-[11.5px] text-muted-foreground transition-colors hover:text-foreground"
           onClick={onSourceAspect}
         >
-          Match source
+          {t("matchSource")}
         </button>
       </Row>
     )}
@@ -750,6 +771,7 @@ function ClipColumn({ clip, tab }: { clip: VideoClip; tab: string }) {
 /** Header for a view: its name, with a back chevron when the view sits
  * inside another one. The band the Color view opens with. */
 function SubviewHead({ title, onBack }: { title: string; onBack?: () => void }) {
+  const t = useTranslations("inspector.titles");
   return (
     <div
       className={cn(
@@ -760,7 +782,7 @@ function SubviewHead({ title, onBack }: { title: string; onBack?: () => void }) 
       {onBack && (
         <button
           type="button"
-          aria-label="Back"
+          aria-label={t("back")}
           className="grid size-6 place-items-center rounded text-muted-foreground transition-colors hover:text-foreground"
           onClick={onBack}
         >
@@ -775,9 +797,10 @@ function SubviewHead({ title, onBack }: { title: string; onBack?: () => void }) 
 /** The Frame view: what the clip's box does — its pose keyframes, border,
  * shadow, and mask. */
 function ClipFramePanel({ clip }: { clip: VideoClip }) {
+  const t = useTranslations("inspector.rail");
   return (
     <>
-      <SubviewHead title="Frame" />
+      <SubviewHead title={t("tabs.frame")} />
       <div className="flex flex-col gap-1 px-3.5 pb-4">
         <ClipTransformSection clip={clip} />
         <CameraCardSection clip={clip} />
@@ -804,6 +827,7 @@ function ClipAudioPanel({ clip }: { clip: VideoClip }) {
     if (phase === "commit") ck.end();
   };
   const [view, setView] = usePanelState<"main" | "sound">(clip.id, "audioView", "main");
+  const t = useTranslations("inspector.clipAudio");
   if (view === "sound") {
     return (
       <SoundQualityPanel itemId={clip.id} sound={clip.sound} write={writeSound} onBack={() => setView("main")} />
@@ -811,11 +835,11 @@ function ClipAudioPanel({ clip }: { clip: VideoClip }) {
   }
   return (
     <>
-      <SubviewHead title="Audio" />
+      <SubviewHead title={t("title")} />
       <div className="flex flex-col gap-1 px-3.5 pb-4">
-        <Row label="Volume">
+        <Row label={t("volume")}>
           <ValueSlider
-            label="Volume"
+            label={t("volume")}
             sliderClassName="clip-volume data-horizontal:w-24"
             valueClassName="w-9 text-muted-foreground"
             value={volume}
@@ -832,7 +856,7 @@ function ClipAudioPanel({ clip }: { clip: VideoClip }) {
             }}
           />
         </Row>
-        <Row label="Mute audio">
+        <Row label={t("mute")}>
           <Switch
             checked={clip.muted}
             onCheckedChange={(v) => updateClip(clip.id, { muted: v })}
@@ -841,10 +865,7 @@ function ClipAudioPanel({ clip }: { clip: VideoClip }) {
         {asset?.type === "video" && <ClipSoundSource clip={clip} asset={asset} />}
         {asset?.type === "video" && (!assetIsSilent(asset) || !!asset.soundFrom) && <ClipSplitEdit clip={clip} />}
         {asset && !assetIsSilent(asset) && (
-          <Row
-            label="Beats"
-            info="Beat markers detected from the clip's sound, drawn as dots along its bar. Every drag and trim snaps to them; drag a dot to move it, double-click removes it, ⌥-click the clip adds one."
-          >
+          <Row label={t("beats")} info={t("beatsInfo")}>
             <BeatsControl asset={asset} />
           </Row>
         )}
@@ -867,6 +888,8 @@ const CAMERA_SOUND = "camera";
  * recording with no clear match is refused and the reason shown.
  */
 function ClipSoundSource({ clip, asset }: { clip: VideoClip; asset: MediaAsset }) {
+  const t = useTranslations("inspector.clipAudio");
+  const describeError = useDescribeError();
   const assets = useEditor((s) => s.assets);
   const recordings = useMemo(
     () => assets.filter((a) => a.type === "audio" && !a.upload && a.duration > 0),
@@ -884,15 +907,12 @@ function ClipSoundSource({ clip, asset }: { clip: VideoClip; asset: MediaAsset }
     }
     setSyncing(true);
     void bindRecording(asset.id, id, clip)
-      .catch((e: unknown) => setRefusal(e instanceof Error ? e.message : "Could not line the recording up."))
+      .catch((e: unknown) => setRefusal(describeError(e, t("syncFailed"))))
       .finally(() => setSyncing(false));
   };
   return (
     <>
-      <Row
-        label="Sound"
-        info="Where this video's sound comes from. Pick an audio file recorded alongside it (a lav or a recorder) and it is lined up by matching it against the camera's sound; every clip of this video then plays the recording, through any trim, speed or split."
-      >
+      <Row label={t("sound")} info={t("soundInfo")}>
         {syncing && <Loader2 className="size-3.5 animate-spin text-muted-foreground" />}
         <Select value={bound ? bound.id : CAMERA_SOUND} onValueChange={(v) => pick(String(v))} disabled={syncing}>
           <SelectTrigger className="clip-sound-source h-8 w-36 text-[12px]">
@@ -900,7 +920,7 @@ function ClipSoundSource({ clip, asset }: { clip: VideoClip; asset: MediaAsset }
           </SelectTrigger>
           <SelectContent>
             <SelectItem value={CAMERA_SOUND} className="text-[12px]">
-              Camera
+              {t("camera")}
             </SelectItem>
             {recordings.map((r) => (
               <SelectItem key={r.id} value={r.id} className="text-[12px]">
@@ -909,12 +929,13 @@ function ClipSoundSource({ clip, asset }: { clip: VideoClip; asset: MediaAsset }
             ))}
           </SelectContent>
         </Select>
-        <ResetButton title="Use the camera's sound" show={!!bound} onClick={() => pick(CAMERA_SOUND)} />
+        <ResetButton title={t("useCameraSound")} show={!!bound} onClick={() => pick(CAMERA_SOUND)} />
       </Row>
       {bound && asset.soundFrom && (
         <p className="pb-1 text-[11.5px] text-muted-foreground">
-          Synced {asset.soundFrom.offset >= 0 ? "+" : "−"}
-          {Math.abs(asset.soundFrom.offset).toFixed(3)} s · every clip of this video plays it
+          {t("synced", {
+            offset: `${asset.soundFrom.offset >= 0 ? "+" : "−"}${Math.abs(asset.soundFrom.offset).toFixed(3)}`,
+          })}
         </p>
       )}
       {refusal && <p className="pb-1 text-[11.5px] text-destructive">{refusal}</p>}
@@ -922,9 +943,13 @@ function ClipSoundSource({ clip, asset }: { clip: VideoClip; asset: MediaAsset }
   );
 }
 
-const formatSplit = (v: number) => (v > 0 ? `${v.toFixed(2)} s` : "Off");
-const parseSplitInput = (raw: string) =>
-  /^off$/i.test(raw.trim()) ? 0 : parseNumberInput(raw.replace(/\s*s$/i, ""));
+/** A split edit's readout: its seconds, or the word for none. Typing that
+ * word (or "off") clears it. */
+const formatSplit = (v: number, off: string) => (v > 0 ? `${v.toFixed(2)} s` : off);
+const parseSplitInput = (raw: string, off: string) =>
+  /^off$/i.test(raw.trim()) || raw.trim().toLowerCase() === off.toLowerCase()
+    ? 0
+    : parseNumberInput(raw.replace(/\s*s$/i, ""));
 
 /**
  * The clip's split edit: its sound running ahead of the picture (a J-cut)
@@ -932,6 +957,8 @@ const parseSplitInput = (raw: string) =>
  * and the clip's place on the timeline stay put.
  */
 function ClipSplitEdit({ clip }: { clip: VideoClip }) {
+  const t = useTranslations("inspector.clipAudio");
+  const off = t("off");
   const updateClip = useEditor((s) => s.updateClip);
   const [leadDraft, setLeadDraft] = useState<number | null>(null);
   const [tailDraft, setTailDraft] = useState<number | null>(null);
@@ -951,8 +978,8 @@ function ClipSplitEdit({ clip }: { clip: VideoClip }) {
       min={0}
       max={SPLIT_EDIT_MAX_S}
       step={0.05}
-      format={formatSplit}
-      parse={parseSplitInput}
+      format={(v) => formatSplit(v, off)}
+      parse={(raw) => parseSplitInput(raw, off)}
       onDraft={onDraft}
       onCommit={(v) => {
         updateClip(clip.id, write(v));
@@ -962,17 +989,11 @@ function ClipSplitEdit({ clip }: { clip: VideoClip }) {
   );
   return (
     <>
-      <Row
-        label="Sound lead"
-        info="J-cut: this clip's sound starts this long before its picture, under the clip before it. A tenth to half a second softens a dialogue cut; a second or two hands one scene into the next."
-      >
-        {slider("Sound lead", lead, setLeadDraft, (v) => ({ audioLead: v > 0 ? v : undefined }))}
+      <Row label={t("soundLead")} info={t("soundLeadInfo")}>
+        {slider(t("soundLead"), lead, setLeadDraft, (v) => ({ audioLead: v > 0 ? v : undefined }))}
       </Row>
-      <Row
-        label="Sound tail"
-        info="L-cut: this clip's sound carries on this long past its picture, under the clip after it."
-      >
-        {slider("Sound tail", tail, setTailDraft, (v) => ({ audioTail: v > 0 ? v : undefined }))}
+      <Row label={t("soundTail")} info={t("soundTailInfo")}>
+        {slider(t("soundTail"), tail, setTailDraft, (v) => ({ audioTail: v > 0 ? v : undefined }))}
       </Row>
     </>
   );
@@ -1010,6 +1031,7 @@ function SoundQualitySections({
   sound: ClipSound | undefined;
   write: (sound: ClipSound | undefined, phase: "draft" | "commit") => void;
 }) {
+  const t = useTranslations("inspector.sound");
   const set = (next: ClipSound | undefined, phase: "draft" | "commit") =>
     write(normalizeSound(next), phase);
   const eq = SOUND_EQ_BANDS.map((_, i) => sound?.eq?.[i] ?? 0);
@@ -1063,10 +1085,10 @@ function SoundQualitySections({
     <>
       <SoundPresetsRow itemId={itemId} sound={sound} onApply={(s) => set(s, "commit")} />
       <Section
-        title="Equalizer"
+        title={t("equalizer")}
         aside={
           <ResetButton
-            title="Flatten equalizer"
+            title={t("flattenEqualizer")}
             show={!!sound?.eq}
             onClick={() => set({ ...sound, eq: undefined }, "commit")}
           />
@@ -1079,7 +1101,7 @@ function SoundQualitySections({
           {EQ_GROUPS.map((group) => (
             <div key={group}>
               <div className="mb-0.5 text-[9.5px] leading-none tracking-wider text-muted-foreground/50 uppercase">
-                {group}
+                {t(`eqGroups.${group}`)}
               </div>
               <div className={EQ_ROWS}>
                 {SOUND_EQ_BANDS.map((b, i) =>
@@ -1103,7 +1125,7 @@ function SoundQualitySections({
         </div>
       </Section>
       <Section
-        title="Compressor"
+        title={t("compressor")}
         enabled={!!comp}
         onEnabledChange={(on) =>
           set(
@@ -1118,14 +1140,14 @@ function SoundQualitySections({
         {comp && (
           <>
             {dbRow(
-              "Threshold",
+              t("threshold"),
               comp.threshold,
               cr.threshold,
               (v) => setComp({ threshold: v }, "draft"),
               (v) => setComp({ threshold: v }, "commit"),
             )}
             {dbRow(
-              "Ratio",
+              t("ratio"),
               comp.ratio,
               cr.ratio,
               (v) => setComp({ ratio: v }, "draft"),
@@ -1135,7 +1157,7 @@ function SoundQualitySections({
               0.1,
             )}
             {dbRow(
-              "Attack",
+              t("attack"),
               comp.attack,
               cr.attack,
               (v) => setComp({ attack: v }, "draft"),
@@ -1145,7 +1167,7 @@ function SoundQualitySections({
               0.5,
             )}
             {dbRow(
-              "Release",
+              t("release"),
               comp.release,
               cr.release,
               (v) => setComp({ release: v }, "draft"),
@@ -1158,7 +1180,7 @@ function SoundQualitySections({
         )}
       </Section>
       <Section
-        title="Limiter"
+        title={t("limiter")}
         enabled={!!sound?.limiter}
         onEnabledChange={(on) =>
           set(
@@ -1169,7 +1191,7 @@ function SoundQualitySections({
       >
         {sound?.limiter &&
           dbRow(
-            "Ceiling",
+            t("ceiling"),
             sound.limiter.ceiling,
             SOUND_LIMITER_RANGE.ceiling,
             (v) => set({ ...sound, limiter: { ceiling: v } }, "draft"),
@@ -1180,24 +1202,32 @@ function SoundQualitySections({
   );
 }
 
+type SoundT = ReturnType<typeof useTranslations<"inspector.sound">>;
+type SoundPresetId = keyof Messages["inspector"]["sound"]["presets"];
+
+/** A shipped sound preset's name in the page's language. */
+const soundPresetName = (t: SoundT, id: string) => t(`presets.${id as SoundPresetId}`);
+
 /** What a clip's treatment reads as on the row that opens it. */
-const soundSummary = (sound: ClipSound | undefined) => {
+const soundSummary = (t: SoundT, sound: ClipSound | undefined) => {
   const s = normalizeSound(sound);
-  if (!s) return "Off";
-  return SOUND_PRESETS.find((p) => p.sound && sameSound(p.sound, s))?.name ?? "On";
+  if (!s) return t("off");
+  const preset = SOUND_PRESETS.find((p) => p.sound && sameSound(p.sound, s));
+  return preset ? soundPresetName(t, preset.id) : t("on");
 };
 
 /** The row on an audio panel that opens the Sound quality view, reading
  * what the clip carries. */
 export function SoundQualityRow({ sound, onOpen }: { sound: ClipSound | undefined; onOpen: () => void }) {
+  const t = useTranslations("inspector.sound");
   return (
-    <Row label="Sound quality">
+    <Row label={t("title")}>
       <button
         type="button"
         className="sound-quality-open flex h-8 items-center gap-1 rounded-md border border-input px-2.5 text-[11.5px] font-medium text-muted-foreground transition-colors hover:text-foreground"
         onClick={onOpen}
       >
-        {soundSummary(sound)}
+        {soundSummary(t, sound)}
         <ChevronRight className="size-3.5 shrink-0" />
       </button>
     </Row>
@@ -1216,9 +1246,10 @@ export function SoundQualityPanel({
   write: (sound: ClipSound | undefined, phase: "draft" | "commit") => void;
   onBack: () => void;
 }) {
+  const t = useTranslations("inspector.sound");
   return (
     <>
-      <SubviewHead title="Sound quality" onBack={onBack} />
+      <SubviewHead title={t("title")} onBack={onBack} />
       <div className="flex flex-col gap-1 px-3.5 pb-4">
         <SoundQualitySections itemId={itemId} sound={sound} write={write} />
       </div>
@@ -1239,6 +1270,7 @@ function SoundPresetsRow({
   sound: ClipSound | undefined;
   onApply: (sound: ClipSound | undefined) => void;
 }) {
+  const t = useTranslations("inspector.sound");
   const [naming, setNaming] = useState(false);
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
@@ -1284,7 +1316,7 @@ function SoundPresetsRow({
     // Flat is the shipped "nothing applied" treatment; it reads as Off.
     ...SOUND_PRESETS.map((p) => ({
       key: `shipped:${p.id}`,
-      label: p.sound ? p.name : "Off",
+      label: p.sound ? soundPresetName(t, p.id) : t("off"),
       sound: p.sound,
     })),
     ...saved.map((p) => ({
@@ -1305,12 +1337,12 @@ function SoundPresetsRow({
   const value = current?.key ?? CUSTOM;
   const items = Object.fromEntries([
     ...options.map((o) => [o.key, o.label]),
-    [CUSTOM, "Custom"],
+    [CUSTOM, t("custom")],
   ]);
 
   return (
     <>
-      <Row label="Preset">
+      <Row label={t("preset")}>
         <Select
           value={value}
           items={items}
@@ -1335,15 +1367,15 @@ function SoundPresetsRow({
               className="text-[12px]"
               disabled={value !== CUSTOM}
             >
-              Custom
+              {t("custom")}
             </SelectItem>
           </SelectContent>
         </Select>
         {current?.saved ? (
           <button
             type="button"
-            title={`Delete ${current.label}`}
-            aria-label={`Delete preset ${current.label}`}
+            title={t("deleteNamed", { name: current.label })}
+            aria-label={t("deletePresetNamed", { name: current.label })}
             className="grid size-5 shrink-0 place-items-center rounded text-muted-foreground transition-colors hover:text-foreground"
             onClick={() => {
               const p = current.saved!;
@@ -1351,7 +1383,7 @@ function SoundPresetsRow({
               patchLibrary(client, (prev) => ({
                 ...prev,
                 templates: prev.templates.filter(
-                  (t) => !(t.id === p.id && t.residency === p.residency)
+                  (item) => !(item.id === p.id && item.residency === p.residency)
                 ),
               }));
             }}
@@ -1361,19 +1393,19 @@ function SoundPresetsRow({
         ) : (
           <button
             type="button"
-            title="Save preset"
+            title={t("savePreset")}
             className="shrink-0 text-[11.5px] text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
             disabled={!sound}
             onClick={() => setNaming(true)}
           >
-            Save
+            {t("save")}
           </button>
         )}
       </Row>
       <Dialog open={naming} onOpenChange={(o) => !o && setNaming(false)}>
         <DialogContent className="sm:max-w-sm">
           <DialogHeader>
-            <DialogTitle>Save sound preset</DialogTitle>
+            <DialogTitle>{t("saveDialogTitle")}</DialogTitle>
           </DialogHeader>
           <form
             onSubmit={(e) => {
@@ -1383,14 +1415,14 @@ function SoundPresetsRow({
           >
             <Input
               autoFocus
-              placeholder="Preset name"
+              placeholder={t("presetName")}
               value={name}
               onChange={(e) => setName(e.target.value)}
             />
             <DialogFooter className="mt-4">
               <Button type="submit" disabled={busy || !name.trim()} className="w-full">
                 {busy && <Loader2 className="animate-spin" data-icon="inline-start" />}
-                Save preset
+                {t("savePreset")}
               </Button>
             </DialogFooter>
           </form>
@@ -1400,6 +1432,7 @@ function SoundPresetsRow({
   );
 }
 function ClipPanel({ clip }: { clip: VideoClip }) {
+  const t = useTranslations("inspector.clip");
   const asset = useEditor((s) => s.assets.find((a) => a.id === clip.assetId));
   const aspect = useEditor((s) => s.aspect);
   const updateClip = useEditor((s) => s.updateClip);
@@ -1456,10 +1489,10 @@ function ClipPanel({ clip }: { clip: VideoClip }) {
         {asset?.block && (
           // A blocked-out shot's whole picture is its colour, so that is the
           // one thing there is to set on it by hand.
-          <Row label="Color">
+          <Row label={t("color")}>
             <ColorField
               value={asset.block.color || BLOCK_COLOR}
-              label="Block color"
+              label={t("blockColor")}
               onBegin={() => useEditor.getState().pushHistory()}
               onLive={(c) =>
                 useEditor.getState().updateAsset(asset.id, { block: { ...asset.block!, color: c } })
@@ -1470,9 +1503,9 @@ function ClipPanel({ clip }: { clip: VideoClip }) {
             />
           </Row>
         )}
-        <Row label="Trim">
+        <Row label={t("trim")}>
           <ScrubValue
-            label="Trim start"
+            label={t("trimStart")}
             value={clip.in}
             min={0}
             max={clip.out - MIN_TRIM}
@@ -1484,7 +1517,7 @@ function ClipPanel({ clip }: { clip: VideoClip }) {
           />
           <Value className="text-muted-foreground">–</Value>
           <ScrubValue
-            label="Trim end"
+            label={t("trimEnd")}
             value={clip.out}
             min={clip.in + MIN_TRIM}
             max={maxOut}
@@ -1495,14 +1528,14 @@ function ClipPanel({ clip }: { clip: VideoClip }) {
             onCommit={(v) => useEditor.getState().setClipTrim(clip.id, clip.in, v)}
           />
           <ResetButton
-            title="Reset trim"
+            title={t("resetTrim")}
             show={Number.isFinite(maxOut) && (clip.in > 1e-3 || clip.out < maxOut - 1e-3)}
             onClick={() => useEditor.getState().setClipTrim(clip.id, 0, maxOut)}
           />
         </Row>
-        <Row label="Starts at">
+        <Row label={t("startsAt")}>
           <ScrubValue
-            label="Starts at"
+            label={t("startsAt")}
             value={clip.start}
             min={0}
             max={Infinity}
@@ -1516,9 +1549,9 @@ function ClipPanel({ clip }: { clip: VideoClip }) {
             }}
           />
         </Row>
-        <Row label="Speed">
+        <Row label={t("speed")}>
           <ValueSlider
-            label="Speed"
+            label={t("speed")}
             sliderClassName="clip-speed data-horizontal:w-24"
             valueClassName="w-9 text-muted-foreground"
             value={speed}
@@ -1537,7 +1570,7 @@ function ClipPanel({ clip }: { clip: VideoClip }) {
             }}
           />
           <ResetButton
-            title="Reset speed"
+            title={t("resetSpeed")}
             show={curved || Math.abs(speed - 1) > 1e-4}
             onClick={() => {
               useEditor.getState().setClipSpeed(clip.id, 1);
@@ -1545,12 +1578,12 @@ function ClipPanel({ clip }: { clip: VideoClip }) {
             }}
           />
         </Row>
-        <Row label="Speed Curve">
+        <Row label={t("speedCurve")}>
           <Button
             variant={curveOpen ? "secondary" : "outline"}
             size="sm"
             className="h-6 px-2 text-[11px]"
-            title="Shape the speed across the footage with nodes"
+            title={t("speedCurveHint")}
             onClick={() => {
               if (curveOpen) {
                 setCurveOpen(false);
@@ -1562,15 +1595,15 @@ function ClipPanel({ clip }: { clip: VideoClip }) {
               setCurveOpen(true);
             }}
           >
-            {curveOpen ? "Editing" : curved ? "Edit" : "Add"}
+            {curveOpen ? t("curveEditing") : curved ? t("curveEdit") : t("curveAdd")}
           </Button>
           {curved && (
             <span className="text-[11px] tabular-nums text-muted-foreground">
-              {clip.speedCurve!.length} nodes
+              {t("nodes", { count: clip.speedCurve!.length })}
             </span>
           )}
         </Row>
-        <Row label="Reverse">
+        <Row label={t("reverse")}>
           <Switch
             checked={!!clip.reverse}
             onCheckedChange={(v) => useEditor.getState().setClipReverse(clip.id, v)}
@@ -1579,7 +1612,7 @@ function ClipPanel({ clip }: { clip: VideoClip }) {
 
         {/* Picture */}
         <div className="my-1.5 h-px bg-border" />
-        <Row label="Hidden">
+        <Row label={t("hidden")}>
           <Switch
             checked={!!clip.hidden}
             onCheckedChange={(v) => updateClip(clip.id, { hidden: v })}
@@ -1587,7 +1620,7 @@ function ClipPanel({ clip }: { clip: VideoClip }) {
         </Row>
         {/* A camera card places the footage itself (Frame view). */}
         {!clip.card && (<>
-        <Row label="Framing">
+        <Row label={t("framing")}>
           <div className="clip-framing flex rounded-lg border border-input p-0.5">
             {(["fit", "fill"] as const).map((mode) => (
               <button
@@ -1601,14 +1634,14 @@ function ClipPanel({ clip }: { clip: VideoClip }) {
                 aria-pressed={(clip.fit ?? "fit") === mode}
                 onClick={() => updateClip(clip.id, { fit: mode, panX: 0, panY: 0 })}
               >
-                {mode === "fit" ? "Fit" : "Fill"}
+                {mode === "fit" ? t("fit") : t("fill")}
               </button>
             ))}
           </div>
         </Row>
-        <Row label="Zoom">
+        <Row label={t("zoom")}>
           <ValueSlider
-            label="Zoom"
+            label={t("zoom")}
             sliderClassName="clip-zoom data-horizontal:w-24"
             valueClassName="w-9 text-muted-foreground"
             value={clipZoom(clip)}
@@ -1632,7 +1665,7 @@ function ClipPanel({ clip }: { clip: VideoClip }) {
             }}
           />
           <ResetButton
-            title="Reset zoom"
+            title={t("resetZoom")}
             show={clipZoom(clip) > 1}
             onClick={() => updateClip(clip.id, { zoom: undefined, panX: 0, panY: 0 })}
           />
@@ -1642,9 +1675,9 @@ function ClipPanel({ clip }: { clip: VideoClip }) {
           const value = clip[axis] ?? 0;
           if (!free && value === 0) return null;
           return (
-            <Row key={axis} label={axis === "panX" ? "Pan X" : "Pan Y"}>
+            <Row key={axis} label={axis === "panX" ? t("panX") : t("panY")}>
               <ValueSlider
-                label={axis === "panX" ? "Pan X" : "Pan Y"}
+                label={axis === "panX" ? t("panX") : t("panY")}
                 sliderClassName="clip-pan data-horizontal:w-24"
                 valueClassName="w-9 text-muted-foreground"
                 value={value}
@@ -1666,7 +1699,7 @@ function ClipPanel({ clip }: { clip: VideoClip }) {
                 }}
               />
               <ResetButton
-                title="Center"
+                title={t("center")}
                 show={value !== 0}
                 onClick={() => updateClip(clip.id, { [axis]: 0 })}
               />
@@ -1674,9 +1707,9 @@ function ClipPanel({ clip }: { clip: VideoClip }) {
           );
         })}
         </>)}
-        <Row label="Rotation">
+        <Row label={t("rotation")}>
           <ValueSlider
-            label="Rotation"
+            label={t("rotation")}
             sliderClassName="clip-rotation data-horizontal:w-24"
             valueClassName="w-9 text-muted-foreground"
             value={clip.rotation ?? 0}
@@ -1700,17 +1733,17 @@ function ClipPanel({ clip }: { clip: VideoClip }) {
             }}
           />
           <ResetButton
-            title="Reset rotation"
+            title={t("resetRotation")}
             show={!!clip.rotation}
             onClick={() => updateClip(clip.id, { rotation: undefined })}
           />
         </Row>
-        <Row label="Flip">
+        <Row label={t("flip")}>
           <div className="clip-flip flex rounded-lg border border-input p-0.5">
             {(
               [
-                ["flipH", "Flip horizontal", FlipHorizontal2],
-                ["flipV", "Flip vertical", FlipVertical2],
+                ["flipH", t("flipHorizontal"), FlipHorizontal2],
+                ["flipV", t("flipVertical"), FlipVertical2],
               ] as const
             ).map(([key, label, Icon]) => (
               <TooltipProvider key={key}>
@@ -1734,9 +1767,9 @@ function ClipPanel({ clip }: { clip: VideoClip }) {
             ))}
           </div>
         </Row>
-        <Row label="Opacity">
+        <Row label={t("opacity")}>
           <ValueSlider
-            label="Opacity"
+            label={t("opacity")}
             sliderClassName="clip-opacity data-horizontal:w-24"
             valueClassName="w-9 text-muted-foreground"
             value={clip.opacity ?? 1}
@@ -1759,7 +1792,7 @@ function ClipPanel({ clip }: { clip: VideoClip }) {
             }}
           />
           <ResetButton
-            title="Reset opacity"
+            title={t("resetOpacity")}
             show={(clip.opacity ?? 1) < 1}
             onClick={() => updateClip(clip.id, { opacity: undefined })}
           />
@@ -1838,17 +1871,18 @@ function ClipGeneratedAudio({ clip }: { clip: VideoClip }) {
     return first ? first.volume : 1;
   });
   const genVol = genVolDraft ?? genVolStore;
+  const t = useTranslations("inspector.clipAudio");
   return (
     <div className="mt-2 flex flex-col gap-1 border-t border-border pt-3">
       <GenerateSubtitlesAudio
         selectCueIds={selectClipCueIds}
         ensureCues={ensureClipCues}
-        label="Generate audio for clip"
+        label={t("generateForClip")}
       />
       {genAudioIds.length > 0 && (
-        <Row label="Volume">
+        <Row label={t("volume")}>
           <ValueSlider
-            label="Generated audio volume"
+            label={t("generatedVolume")}
             sliderClassName="clip-gen-volume data-horizontal:w-24"
             valueClassName="w-9 text-muted-foreground"
             value={genVol}
@@ -1882,14 +1916,16 @@ function ClipGeneratedAudio({ clip }: { clip: VideoClip }) {
  * clear it. The dots themselves live on the clip bars — dragged, added
  * (⌥-click), and removed (double-click) there. */
 function BeatsControl({ asset }: { asset: MediaAsset }) {
+  const t = useTranslations("inspector.beats");
   const busy = useSyncExternalStore(subscribeBeatsBusy, () => beatsBusyFor(asset.id), () => false);
   const grid = asset.beats;
   return (
     <>
       {grid && (
         <Value className="whitespace-nowrap text-muted-foreground">
-          {grid.beats.length}
-          {grid.bpm > 0 ? `·${Math.round(grid.bpm)} BPM` : " beats"}
+          {grid.bpm > 0
+            ? t("countBpm", { count: grid.beats.length, bpm: Math.round(grid.bpm) })
+            : t("count", { count: grid.beats.length })}
         </Value>
       )}
       <Button
@@ -1903,11 +1939,11 @@ function BeatsControl({ asset }: { asset: MediaAsset }) {
         }}
       >
         {busy && <Loader2 className="size-3.5 animate-spin" />}
-        Detect
+        {t("detect")}
       </Button>
       {grid && (
         <ResetButton
-          title="Clear beats"
+          title={t("clear")}
           show
           onClick={() => {
             useEditor.getState().pushHistory();
@@ -1920,6 +1956,8 @@ function BeatsControl({ asset }: { asset: MediaAsset }) {
 }
 
 function AudioPanel({ clip }: { clip: AudioClip }) {
+  const t = useTranslations("inspector.clip");
+  const ta = useTranslations("inspector.clipAudio");
   const asset = useEditor((s) => s.assets.find((a) => a.id === clip.assetId));
   const updateAudioTransient = useEditor((s) => s.updateAudioTransient);
   const ck = useSliderCheckpoint();
@@ -1959,9 +1997,9 @@ function AudioPanel({ clip }: { clip: AudioClip }) {
           time={formatTime(len)}
           onRename={(name) => useEditor.getState().updateAudio(clip.id, { name })}
         />
-        <Row label="Trim">
+        <Row label={t("trim")}>
           <ScrubValue
-            label="Trim start"
+            label={t("trimStart")}
             value={clip.in}
             min={0}
             max={clip.out - MIN_TRIM}
@@ -1973,7 +2011,7 @@ function AudioPanel({ clip }: { clip: AudioClip }) {
           />
           <Value className="text-muted-foreground">–</Value>
           <ScrubValue
-            label="Trim end"
+            label={t("trimEnd")}
             value={clip.out}
             min={clip.in + MIN_TRIM}
             max={asset?.duration ?? clip.out}
@@ -1984,14 +2022,14 @@ function AudioPanel({ clip }: { clip: AudioClip }) {
             onCommit={(v) => commitAudio({ out: v })}
           />
           <ResetButton
-            title="Reset trim"
+            title={t("resetTrim")}
             show={!!asset && (clip.in > 1e-3 || clip.out < asset.duration - 1e-3)}
             onClick={() => asset && commitAudio({ in: 0, out: asset.duration })}
           />
         </Row>
-        <Row label="Starts at">
+        <Row label={t("startsAt")}>
           <ScrubValue
-            label="Starts at"
+            label={t("startsAt")}
             value={clip.start}
             min={0}
             max={Infinity}
@@ -2002,9 +2040,9 @@ function AudioPanel({ clip }: { clip: AudioClip }) {
             onCommit={(v) => commitAudio({ start: v })}
           />
         </Row>
-        <Row label="Speed">
+        <Row label={t("speed")}>
           <ValueSlider
-            label="Speed"
+            label={t("speed")}
             sliderClassName="audio-speed data-horizontal:w-24"
             valueClassName="w-9 text-muted-foreground"
             value={speed}
@@ -2020,20 +2058,20 @@ function AudioPanel({ clip }: { clip: AudioClip }) {
             onCommit={(v) => commitAudio({ speed: Math.abs(v - 1) < 1e-4 ? undefined : v, speedCurve: undefined })}
           />
           <ResetButton
-            title="Reset speed"
+            title={t("resetSpeed")}
             show={Math.abs(speed - 1) > 1e-4 || !!clip.speedCurve}
             onClick={() => commitAudio({ speed: undefined, speedCurve: undefined })}
           />
         </Row>
-        <Row label="Reverse">
+        <Row label={t("reverse")}>
           <Switch
             checked={!!clip.reverse}
             onCheckedChange={(v) => commitAudio({ reverse: v || undefined })}
           />
         </Row>
-        <Row label="Volume">
+        <Row label={ta("volume")}>
           <ValueSlider
-            label="Volume"
+            label={ta("volume")}
             sliderClassName="data-horizontal:w-24"
             valueClassName="w-9 text-muted-foreground"
             value={clip.volume}
@@ -2047,9 +2085,9 @@ function AudioPanel({ clip }: { clip: AudioClip }) {
             onCommit={(v) => commitAudio({ volume: v })}
           />
         </Row>
-        <Row label="Fade in">
+        <Row label={ta("fadeIn")}>
           <ValueSlider
-            label="Fade in"
+            label={ta("fadeIn")}
             sliderClassName="fade-in-slider data-horizontal:w-24"
             valueClassName="w-9 text-muted-foreground"
             value={clip.fadeIn ?? 0}
@@ -2062,9 +2100,9 @@ function AudioPanel({ clip }: { clip: AudioClip }) {
             onCommit={(v) => commitAudio({ fadeIn: v })}
           />
         </Row>
-        <Row label="Fade out">
+        <Row label={ta("fadeOut")}>
           <ValueSlider
-            label="Fade out"
+            label={ta("fadeOut")}
             sliderClassName="fade-out-slider data-horizontal:w-24"
             valueClassName="w-9 text-muted-foreground"
             value={clip.fadeOut ?? 0}
@@ -2078,36 +2116,37 @@ function AudioPanel({ clip }: { clip: AudioClip }) {
           />
         </Row>
         <Row
-          label="Duck others"
+          label={ta("duck")}
           info={
             clip.duck !== undefined
-              ? `While this clip plays, everything else drops to ${Math.round(clip.duck * 100)}% volume.`
-              : "While this clip plays, drop everything else to this volume."
+              ? ta("duckInfoSet", { percent: Math.round(clip.duck * 100) })
+              : ta("duckInfo")
           }
         >
           <ValueSlider
-            label="Duck others"
+            label={ta("duck")}
             sliderClassName="duck-slider data-horizontal:w-24"
             valueClassName="w-9 text-muted-foreground"
             value={clip.duck ?? 1}
             min={0}
             max={1}
             step={0.05}
-            format={(v) => (v >= 0.999 ? "Off" : formatPercent(v))}
-            parse={(raw) => (raw.trim().toLowerCase() === "off" ? 1 : parsePercentInput(raw))}
+            format={(v) => (v >= 0.999 ? ta("off") : formatPercent(v))}
+            parse={(raw) =>
+              raw.trim().toLowerCase() === "off" || raw.trim().toLowerCase() === ta("off").toLowerCase()
+                ? 1
+                : parsePercentInput(raw)
+            }
             onDraft={(v) => setAudio({ duck: v < 0.999 ? v : undefined })}
             onCommit={(v) => commitAudio({ duck: v < 0.999 ? v : undefined })}
           />
         </Row>
         {asset && !assetIsSilent(asset) && (
-          <Row
-            label="Beats"
-            info="Beat markers detected from the music, drawn as dots on the clip. Every drag and trim snaps to them; drag a dot to move it, double-click removes it, ⌥-click the clip adds one."
-          >
+          <Row label={ta("beats")} info={ta("musicBeatsInfo")}>
             <BeatsControl asset={asset} />
           </Row>
         )}
-        <Row label="Hidden">
+        <Row label={t("hidden")}>
           <Switch
             checked={!!clip.hidden}
             onCheckedChange={(v) => useEditor.getState().updateAudio(clip.id, { hidden: v })}
@@ -2127,6 +2166,7 @@ export const LETTER_SPACINGS = [-2, 0, 2, 5, 10, 20];
 export const TEXT_WIDTHS = [0, 25, 50, 75, 100];
 
 function TextPanel({ overlay: o }: { overlay: TextOverlay }) {
+  const t = useTranslations("inspector.text");
   const update = useEditor((s) => s.updateOverlay);
   const sizeCk = useSliderCheckpoint();
   const radiusCk = useSliderCheckpoint();
@@ -2197,8 +2237,8 @@ function TextPanel({ overlay: o }: { overlay: TextOverlay }) {
               <Button
                 variant="ghost"
                 size="icon-sm"
-                aria-label="Insert emoji"
-                title="Insert emoji"
+                aria-label={t("insertEmoji")}
+                title={t("insertEmoji")}
                 className="absolute top-1.5 right-1.5 text-muted-foreground"
               >
                 <Smile />
@@ -2218,7 +2258,7 @@ function TextPanel({ overlay: o }: { overlay: TextOverlay }) {
         <div className="mt-1 flex items-center gap-2">
           <SegGroup>
             <SegToggle
-              label="Italic"
+              label={t("italic")}
               active={!!o.italic}
               onClick={() => update(o.id, { italic: o.italic ? undefined : true })}
             >
@@ -2235,7 +2275,7 @@ function TextPanel({ overlay: o }: { overlay: TextOverlay }) {
             ).map(([a, Icon]) => (
               <SegToggle
                 key={a}
-                label={`Align ${a}`}
+                label={t(`align.${a}`)}
                 active={(o.align ?? "center") === a}
                 onClick={() => update(o.id, { align: a === "center" ? undefined : a })}
               >
@@ -2244,7 +2284,7 @@ function TextPanel({ overlay: o }: { overlay: TextOverlay }) {
             ))}
           </SegGroup>
           <NumberField
-            label="Text size"
+            label={t("textSize")}
             className="ml-auto w-[74px]"
             icon={<Type />}
             value={o.size}
@@ -2266,9 +2306,9 @@ function TextPanel({ overlay: o }: { overlay: TextOverlay }) {
           />
         </div>
         <div className="mt-1 grid grid-cols-2 gap-2">
-          <Field label="Line height">
+          <Field label={t("lineHeight")}>
             <NumberField
-              label="Line height"
+              label={t("lineHeight")}
               icon={<AlignVerticalSpaceAround />}
               value={o.lineHeight ?? 1.25}
               min={0.8}
@@ -2293,9 +2333,9 @@ function TextPanel({ overlay: o }: { overlay: TextOverlay }) {
               }}
             />
           </Field>
-          <Field label="Letter spacing">
+          <Field label={t("letterSpacing")}>
             <NumberField
-              label="Letter spacing"
+              label={t("letterSpacing")}
               icon={<AlignHorizontalSpaceAround />}
               value={(o.letterSpacing ?? 0) * 100}
               min={LETTER_SPACING_MIN * 100}
@@ -2321,20 +2361,20 @@ function TextPanel({ overlay: o }: { overlay: TextOverlay }) {
             />
           </Field>
         </div>
-        <Field label="Text width">
-          <NumberField label="Text box width" icon={<StretchHorizontal />}
+        <Field label={t("textWidth")}>
+          <NumberField label={t("textBoxWidth")} icon={<StretchHorizontal />}
             value={(o.wrapWidth ?? 0) * 100} min={0} max={200} step={1} presets={TEXT_WIDTHS}
-            format={(v) => v === 0 ? "Auto" : `${Math.round(v)}%`}
+            format={(v) => v === 0 ? t("auto") : `${Math.round(v)}%`}
             parse={(raw) => parseNumberInput(raw.replace(/%$/, ""))}
             onDraft={(v) => { widthCk.begin(); useEditor.getState().updateOverlayTransient(o.id, { wrapWidth: v > 0 ? v / 100 : undefined }); }}
             onCommit={(v) => { widthCk.begin(); useEditor.getState().updateOverlayTransient(o.id, { wrapWidth: v > 0 ? v / 100 : undefined }); widthCk.end(); }}
           />
         </Field>
         <TextTextureRow overlay={o} />
-        <Row label="Color">
+        <Row label={t("color")}>
           <ColorField
             value={o.color}
-            label="Text color"
+            label={t("textColor")}
             onBegin={() => useEditor.getState().pushHistory()}
             onLive={(c) => useEditor.getState().updateOverlayTransient(o.id, { color: c })}
             onCommit={(c) => update(o.id, { color: c })}
@@ -2342,7 +2382,7 @@ function TextPanel({ overlay: o }: { overlay: TextOverlay }) {
         </Row>
         <TransformRows overlay={o} />
         <Section
-          title="Outline"
+          title={t("outline")}
           enabled={!!o.stroke}
           onEnabledChange={(v) =>
             update(o.id, { stroke: v ? { color: "#111114", width: 0.04 } : undefined })
@@ -2350,10 +2390,10 @@ function TextPanel({ overlay: o }: { overlay: TextOverlay }) {
         >
           {o.stroke && (
             <>
-              <Row label="Color">
+              <Row label={t("color")}>
                 <ColorField
                   value={o.stroke.color}
-                  label="Outline color"
+                  label={t("outlineColor")}
                   onBegin={() => useEditor.getState().pushHistory()}
                   onLive={(c) =>
                     useEditor.getState().updateOverlayTransient(o.id, {
@@ -2363,9 +2403,9 @@ function TextPanel({ overlay: o }: { overlay: TextOverlay }) {
                   onCommit={(c) => update(o.id, { stroke: { ...o.stroke!, color: c } })}
                 />
               </Row>
-              <Row label="Width">
+              <Row label={t("width")}>
                 <ValueSlider
-                  label="Outline width"
+                  label={t("outlineWidth")}
                   sliderClassName="data-horizontal:w-24"
                   valueClassName="w-9 text-muted-foreground"
                   value={o.stroke.width * 100}
@@ -2395,20 +2435,20 @@ function TextPanel({ overlay: o }: { overlay: TextOverlay }) {
         </Section>
         <ShadowSection id={o.id} shadow={o.shadow} onToggle={(v) => update(o.id, { shadow: v })} />
         <Section
-          title="Backdrop"
+          title={t("backdrop")}
           enabled={o.plate}
           onEnabledChange={(v) => update(o.id, { plate: v })}
         >
           <>
-            <Row label="Color">
+            <Row label={t("color")}>
               <ColorField
                 value={o.plateColor ?? PLATE_COLOR}
-                label="Backdrop color"
+                label={t("backdropColor")}
                 onBegin={() => useEditor.getState().pushHistory()}
                 onLive={(c) => useEditor.getState().updateOverlayTransient(o.id, { plateColor: c })}
                 onCommit={(c) => update(o.id, { plateColor: c })}
                 opacity={{
-                  label: "Backdrop opacity",
+                  label: t("backdropOpacity"),
                   value: o.plateOpacity ?? PLATE_OPACITY,
                   onDraft: (v) => {
                     opacityCk.begin();
@@ -2422,9 +2462,9 @@ function TextPanel({ overlay: o }: { overlay: TextOverlay }) {
                 }}
               />
             </Row>
-            <Row label="Radius">
+            <Row label={t("radius")}>
               <ValueSlider
-                label="Backdrop radius"
+                label={t("backdropRadius")}
                 sliderClassName="data-horizontal:w-24"
                 valueClassName="w-9 text-muted-foreground"
                 value={o.plateRadius ?? PLATE_RADIUS}
@@ -2456,6 +2496,7 @@ function TextPanel({ overlay: o }: { overlay: TextOverlay }) {
 /** Named text-style presets from the shared Library: chips that apply a saved
  * look to the selected title, plus saving the current look under a name. */
 export function StylePresetsRow({ overlay: o, peers }: { overlay: TextOverlay; peers?: readonly TextOverlay[] }) {
+  const t = useTranslations("inspector.styles");
   const [presets, setPresets] = useState<StylePreset[] | null>(null);
   const [naming, setNaming] = useState(false);
   const [name, setName] = useState("");
@@ -2511,7 +2552,7 @@ export function StylePresetsRow({ overlay: o, peers }: { overlay: TextOverlay; p
   return (
     <div className="mb-1.5">
       <div className="mb-1 flex items-center justify-between">
-        <span className="text-[13px] text-muted-foreground">Styles</span>
+        <span className="text-[13px] text-muted-foreground">{t("title")}</span>
         {!naming && (
           <div className="flex items-center gap-3">
             {canUpdate && (
@@ -2520,7 +2561,7 @@ export function StylePresetsRow({ overlay: o, peers }: { overlay: TextOverlay; p
                   disabled={busy}
                   className="text-[11.5px] text-muted-foreground transition-colors hover:text-foreground"
                 >
-                  Update style
+                  {t("update")}
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
                   {presets.map((p) => (
@@ -2536,7 +2577,7 @@ export function StylePresetsRow({ overlay: o, peers }: { overlay: TextOverlay; p
               className="text-[11.5px] text-muted-foreground transition-colors hover:text-foreground"
               onClick={() => setNaming(true)}
             >
-              Save style
+              {t("save")}
             </button>
           </div>
         )}
@@ -2546,7 +2587,7 @@ export function StylePresetsRow({ overlay: o, peers }: { overlay: TextOverlay; p
           <input
             autoFocus
             className="h-7 min-w-0 flex-1 rounded-md border border-input bg-transparent px-2 text-[12px] outline-none focus:border-ring"
-            placeholder="Style name"
+            placeholder={t("name")}
             value={name}
             onChange={(e) => setName(e.target.value)}
             onKeyDown={(e) => {
@@ -2555,7 +2596,7 @@ export function StylePresetsRow({ overlay: o, peers }: { overlay: TextOverlay; p
             }}
           />
           <Button size="sm" variant="outline" disabled={busy || !name.trim()} onClick={() => void save()}>
-            Save
+            {t("saveButton")}
           </Button>
         </div>
       )}
@@ -2565,7 +2606,7 @@ export function StylePresetsRow({ overlay: o, peers }: { overlay: TextOverlay; p
             <span key={`${p.residency}:${p.id}`} className="group relative">
               <button
                 type="button"
-                title={`Apply ${p.name}`}
+                title={t("apply", { name: p.name })}
                 className={cn(
                   "flex items-center gap-1.5 rounded-md border border-input px-2 py-1 text-[11.5px] transition-colors hover:border-ring",
                   p === worn && PICKED_RING
@@ -2595,8 +2636,8 @@ export function StylePresetsRow({ overlay: o, peers }: { overlay: TextOverlay; p
               </button>
               <button
                 type="button"
-                title={`Delete ${p.name}`}
-                aria-label={`Delete style ${p.name}`}
+                title={t("delete", { name: p.name })}
+                aria-label={t("deleteStyle", { name: p.name })}
                 className="absolute -top-1.5 -right-1.5 hidden size-4 place-items-center rounded-full bg-black/60 text-[9px] text-white group-hover:grid"
                 onClick={() => {
                   void deleteStylePreset(p).catch(() => {});
@@ -2690,6 +2731,7 @@ function MoveStrengthSlider({ overlay: o, label, peers }: { overlay: Overlay; la
  * nothing. With no effect picked the rows sit greyed, so the panel floor
  * keeps its height while the reader scrolls the grid. */
 function WordSettings({ overlay: o, peers }: { overlay: Overlay; peers?: readonly Overlay[] }) {
+  const t = useTranslations("inspector.anim");
   const ck = useSliderCheckpoint();
   const anim = o.anim ?? {};
   const words = anim.words;
@@ -2710,9 +2752,9 @@ function WordSettings({ overlay: o, peers }: { overlay: Overlay; peers?: readonl
   return (
     <>
       {knobs.size && (
-        <Row label="Word size">
+        <Row label={t("wordSize")}>
           <ValueSlider
-            label="Word size"
+            label={t("wordSize")}
             sliderClassName="data-horizontal:w-24"
             valueClassName="w-9 text-muted-foreground"
             value={wordSwell(words)}
@@ -2732,9 +2774,9 @@ function WordSettings({ overlay: o, peers }: { overlay: Overlay; peers?: readonl
         </Row>
       )}
       {knobs.dim && (
-        <Row label="Faded to">
+        <Row label={t("fadedTo")}>
           <ValueSlider
-            label="Faded to"
+            label={t("fadedTo")}
             sliderClassName="data-horizontal:w-24"
             valueClassName="w-9 text-muted-foreground"
             value={wordDim(words)}
@@ -2754,10 +2796,10 @@ function WordSettings({ overlay: o, peers }: { overlay: Overlay; peers?: readonl
         </Row>
       )}
       {knobs.color && (
-        <Row label="Word color">
+        <Row label={t("wordColor")}>
           <ColorField
             value={wordAccent(words, isTextOverlay(o) ? o.color : WORD_ACCENT_DEFAULT)}
-            label="Word color"
+            label={t("wordColor")}
             onBegin={() => useEditor.getState().pushHistory()}
             onLive={setColor}
             onCommit={setColor}
@@ -2771,6 +2813,7 @@ function WordSettings({ overlay: o, peers }: { overlay: Overlay; peers?: readonl
 /** The typing bar of a typewriter entrance: on or off, whether it blinks once
  * typing stops, how many times, whether it goes after, and its color. */
 function CaretSettings({ overlay: o, peers }: { overlay: Overlay; peers?: readonly Overlay[] }) {
+  const t = useTranslations("inspector.anim");
   const ck = useSliderCheckpoint();
   const anim = o.anim ?? {};
   const edge = anim.in;
@@ -2803,7 +2846,7 @@ function CaretSettings({ overlay: o, peers }: { overlay: Overlay; peers?: readon
   };
   return (
     <>
-      <Row label="Caret">
+      <Row label={t("caret")}>
         <Switch
           checked={!!caret}
           onCheckedChange={(v) => {
@@ -2813,21 +2856,21 @@ function CaretSettings({ overlay: o, peers }: { overlay: Overlay; peers?: readon
         />
       </Row>
       {caret && (
-        <Row label="Blink">
+        <Row label={t("blink")}>
           <Switch checked={caretBlink} onCheckedChange={(v) => toggle({ blink: v })} />
         </Row>
       )}
       {caret && caretBlink && (
-        <Row label="Blinks">
+        <Row label={t("blinks")}>
           <ValueSlider
-            label="Blinks"
+            label={t("blinks")}
             sliderClassName="data-horizontal:w-24"
             valueClassName="w-9 text-muted-foreground"
             value={caretBlinks}
             min={0}
             max={CARET_BLINKS_MAX}
             step={1}
-            format={(v) => (v === 0 ? "All" : `${Math.round(v)}`)}
+            format={(v) => (v === 0 ? t("allBlinks") : `${Math.round(v)}`)}
             parse={parseNumberInput}
             onDraft={(v) => {
               ck.begin();
@@ -2841,15 +2884,15 @@ function CaretSettings({ overlay: o, peers }: { overlay: Overlay; peers?: readon
         </Row>
       )}
       {caret && (!caretBlink || caretBlinks > 0) && (
-        <Row label="Then hide">
+        <Row label={t("thenHide")}>
           <Switch checked={caretHide} onCheckedChange={(v) => toggle({ hide: v })} />
         </Row>
       )}
       {caret && (
-        <Row label="Caret color">
+        <Row label={t("caretColor")}>
           <ColorField
             value={caretColor}
-            label="Caret color"
+            label={t("caretColor")}
             onBegin={() => useEditor.getState().pushHistory()}
             onLive={setColor}
             onCommit={setColor}
@@ -2874,6 +2917,7 @@ function pickedHit(o: Overlay, anim: OverlayAnim, style: string): OverlayHit {
 
 /** The hit's moment inside the element, its length, and whether it darkens. */
 function HitSettings({ overlay: o, peers }: { overlay: Overlay; peers?: readonly Overlay[] }) {
+  const t = useTranslations("inspector.anim");
   const ck = useSliderCheckpoint();
   const anim = o.anim ?? {};
   const hit = anim.hit;
@@ -2888,9 +2932,9 @@ function HitSettings({ overlay: o, peers }: { overlay: Overlay; peers?: readonly
   };
   return (
     <>
-      <Row label="At">
+      <Row label={t("at")}>
         <ValueSlider
-          label="At"
+          label={t("at")}
           sliderClassName="data-horizontal:w-24"
           valueClassName="w-9 text-muted-foreground"
           value={hitAt}
@@ -2907,9 +2951,9 @@ function HitSettings({ overlay: o, peers }: { overlay: Overlay; peers?: readonly
           }}
         />
       </Row>
-      <Row label="Duration">
+      <Row label={t("duration")}>
         <ValueSlider
-          label="Duration"
+          label={t("duration")}
           sliderClassName="data-horizontal:w-24"
           valueClassName="w-9 text-muted-foreground"
           value={hitSeconds}
@@ -2927,7 +2971,7 @@ function HitSettings({ overlay: o, peers }: { overlay: Overlay; peers?: readonly
           }}
         />
       </Row>
-      <Row label="Darken">
+      <Row label={t("darken")}>
         <Switch
           checked={hitDarken}
           disabled={!hit}
@@ -2942,31 +2986,24 @@ function HitSettings({ overlay: o, peers }: { overlay: Overlay; peers?: readonly
   );
 }
 
-/** What each text weight is called in the weight menu. */
-const WEIGHT_LABELS: Record<TextWeight, string> = {
-  400: "Regular",
-  500: "Medium",
-  600: "Semibold",
-  700: "Bold",
-  800: "Extra bold",
-  900: "Black",
-};
-
-/** A title's weight, from regular to black. */
+/** A title's weight, from regular to black; each weight names itself under
+ * `inspector.text.weights`. */
 function WeightSelect({ value, onChange }: { value: TextWeight; onChange: (w: TextWeight) => void }) {
+  const t = useTranslations("inspector.text");
+  const weightLabel = (w: TextWeight) => t(`weights.${w}`);
   return (
     <Select
       value={String(value)}
-      items={Object.fromEntries(TEXT_WEIGHTS.map((w) => [String(w), WEIGHT_LABELS[w]]))}
+      items={Object.fromEntries(TEXT_WEIGHTS.map((w) => [String(w), weightLabel(w)]))}
       onValueChange={(v) => onChange(Number(v) as TextWeight)}
     >
-      <SelectTrigger aria-label="Weight" size="sm" className="w-24 text-[12px]">
+      <SelectTrigger aria-label={t("weight")} size="sm" className="w-24 text-[12px]">
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
         {TEXT_WEIGHTS.map((w) => (
           <SelectItem key={w} value={String(w)} className="text-[12px]">
-            {WEIGHT_LABELS[w]}
+            {weightLabel(w)}
           </SelectItem>
         ))}
       </SelectContent>
@@ -2991,6 +3028,7 @@ function nextCycleFont(o: TextOverlay, faces: CycleFace[]): string {
  * font, weight, size and tracking, and a button to add another. The first
  * face added starts a cycle across the title's whole length. */
 function FontCycleFaces({ overlay: o, peers }: { overlay: TextOverlay; peers?: readonly Overlay[] }) {
+  const t = useTranslations("inspector.fontCycle");
   const ck = useSliderCheckpoint();
   const anim = o.anim ?? {};
   const fontCycle = anim.fonts;
@@ -3019,18 +3057,18 @@ function FontCycleFaces({ overlay: o, peers }: { overlay: TextOverlay; peers?: r
             <Button
               variant="ghost"
               size="icon-sm"
-              aria-label="Remove face"
+              aria-label={t("removeFace")}
               onClick={() => commit(faces.filter((_, j) => j !== i))}
             >
               <X />
             </Button>
           </div>
-          <Row label="Weight">
+          <Row label={t("weight")}>
             <div className="flex items-center gap-1.5">
               <WeightSelect value={face.weight ?? o.weight} onChange={(weight) => commit(setFace(i, { weight }))} />
               <SegGroup>
                 <SegToggle
-                  label="Italic"
+                  label={t("italic")}
                   active={face.italic ?? !!o.italic}
                   onClick={() => commit(setFace(i, { italic: !(face.italic ?? !!o.italic) }))}
                 >
@@ -3039,9 +3077,9 @@ function FontCycleFaces({ overlay: o, peers }: { overlay: TextOverlay; peers?: r
               </SegGroup>
             </div>
           </Row>
-          <Row label="Size">
+          <Row label={t("size")}>
             <ValueSlider
-              label="Size"
+              label={t("size")}
               sliderClassName="data-horizontal:w-24"
               valueClassName="w-9 text-muted-foreground"
               value={face.scale ?? 1}
@@ -3061,9 +3099,9 @@ function FontCycleFaces({ overlay: o, peers }: { overlay: TextOverlay; peers?: r
               }}
             />
           </Row>
-          <Row label="Tracking">
+          <Row label={t("tracking")}>
             <ValueSlider
-              label="Tracking"
+              label={t("tracking")}
               sliderClassName="data-horizontal:w-24"
               valueClassName="w-9 text-muted-foreground"
               value={(face.tracking ?? o.letterSpacing ?? 0) * 100}
@@ -3083,9 +3121,9 @@ function FontCycleFaces({ overlay: o, peers }: { overlay: TextOverlay; peers?: r
             />
           </Row>
           {/* Hold: how long this face shows; 0 follows the cycle's rate. */}
-          <Row label="Hold">
+          <Row label={t("hold")}>
             <ValueSlider
-              label="Hold"
+              label={t("hold")}
               sliderClassName="data-horizontal:w-24"
               valueClassName="w-9 text-muted-foreground"
               value={face.hold ?? 0}
@@ -3093,7 +3131,7 @@ function FontCycleFaces({ overlay: o, peers }: { overlay: TextOverlay; peers?: r
               max={CYCLE_HOLD_MAX}
               step={1 / 60}
               snap={[0]}
-              format={(v) => (v > 0 ? `${v.toFixed(2)}s` : "Rate")}
+              format={(v) => (v > 0 ? `${v.toFixed(2)}s` : t("rate"))}
               parse={parseNumberInput}
               onDraft={(v) => {
                 ck.begin();
@@ -3114,7 +3152,7 @@ function FontCycleFaces({ overlay: o, peers }: { overlay: TextOverlay; peers?: r
         onClick={() => commit([...faces, { font: nextCycleFont(o, faces) }])}
       >
         <Plus />
-        Add face
+        {t("addFace")}
       </Button>
     </div>
   );
@@ -3124,6 +3162,7 @@ function FontCycleFaces({ overlay: o, peers }: { overlay: TextOverlay; peers?: r
  * many times a second the face changes, and the music beats that can time
  * every face instead. */
 function FontCycleSettings({ overlay: o, peers }: { overlay: Overlay; peers?: readonly Overlay[] }) {
+  const t = useTranslations("inspector.fontCycle");
   const ck = useSliderCheckpoint();
   const anim = o.anim ?? {};
   const cycle = anim.fonts;
@@ -3189,7 +3228,7 @@ function FontCycleSettings({ overlay: o, peers }: { overlay: Overlay; peers?: re
   const timeToBeats = () => {
     if (!cycle || !beatSource) return;
     const elDur = o.end - o.start;
-    const beats = clipBeatTimes(beatSource.clip, beatSource.asset).map((t) => t - o.start);
+    const beats = clipBeatTimes(beatSource.clip, beatSource.asset).map((at) => at - o.start);
     const edges = tidySwitches(
       beatSwitches(beats, fontCycleBeatStep, fontCycleAt, fontCycleAt + fontCycleSeconds),
       elDur
@@ -3198,10 +3237,10 @@ function FontCycleSettings({ overlay: o, peers }: { overlay: Overlay; peers?: re
     if (problem) {
       setBeatNote(
         problem.kind === "few"
-          ? "No beat of that clip lands inside the cycle."
+          ? t("beatsFew")
           : problem.kind === "many"
-            ? `That is ${problem.faces} face changes; a cycle holds ${FONT_CYCLE_FACES_MAX}. Pick a longer step.`
-            : `One face would hold ${problem.seconds.toFixed(2)}s, past the ${CYCLE_HOLD_MAX}s limit.`
+            ? t("beatsMany", { faces: problem.faces, max: FONT_CYCLE_FACES_MAX })
+            : t("beatsLong", { seconds: problem.seconds.toFixed(2), max: CYCLE_HOLD_MAX })
       );
       return;
     }
@@ -3212,15 +3251,12 @@ function FontCycleSettings({ overlay: o, peers }: { overlay: Overlay; peers?: re
 
   return (
     <>
-      {slider("At", fontCycleAt, 0, Math.max(0, dur - 0.05), 0.05, secs, "at")}
-      {slider("Duration", fontCycleSeconds, 0.05, Math.max(0.05, dur - fontCycleAt), 0.05, secs, "seconds")}
-      {slider("Rate", fontCycleRate, FONT_CYCLE_RATE_MIN, FONT_CYCLE_RATE_MAX, 1, (v) => `${Math.round(v)}/s`, "rate")}
-      <Row
-        label="Beats"
-        info="Time every face to the music: a new face on each beat of the picked clip inside the cycle, the faces repeating in order. Detect beats on the music clip first. Each face's Hold shows the result."
-      >
+      {slider(t("at"), fontCycleAt, 0, Math.max(0, dur - 0.05), 0.05, secs, "at")}
+      {slider(t("duration"), fontCycleSeconds, 0.05, Math.max(0.05, dur - fontCycleAt), 0.05, secs, "seconds")}
+      {slider(t("rate"), fontCycleRate, FONT_CYCLE_RATE_MIN, FONT_CYCLE_RATE_MAX, 1, (v) => `${Math.round(v)}/s`, "rate")}
+      <Row label={t("beats")} info={t("beatsInfo")}>
         {beatClips.length === 0 ? (
-          <span className="text-[12px] text-muted-foreground">Detect beats on a clip</span>
+          <span className="text-[12px] text-muted-foreground">{t("detectFirst")}</span>
         ) : (
           <Select value={beatSource?.clip.id} onValueChange={(v) => setFontCycleBeats(String(v))} disabled={!cycle}>
             <SelectTrigger className="h-8 w-36 text-[12px]">
@@ -3237,26 +3273,26 @@ function FontCycleSettings({ overlay: o, peers }: { overlay: Overlay; peers?: re
         )}
       </Row>
       {beatClips.length > 0 && (
-        <Row label="Each face">
+        <Row label={t("eachFace")}>
           <div className="flex items-center gap-1.5">
             <Select
               value={String(fontCycleBeatStep)}
               onValueChange={(v) => setFontCycleBeatStep(Number(v))}
               disabled={!cycle}
             >
-              <SelectTrigger className="h-8 w-20 text-[12px]" aria-label="Beats per face">
+              <SelectTrigger className="h-8 w-20 text-[12px]" aria-label={t("beatsPerFace")}>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
                 {CYCLE_BEAT_STEPS.map((step) => (
                   <SelectItem key={step} value={String(step)} className="text-[12px]">
-                    {step === 0.5 ? "½ beat" : step === 1 ? "1 beat" : `${step} beats`}
+                    {step === 0.5 ? t("halfBeat") : t("beatStep", { count: step })}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
             <Button variant="secondary" size="sm" disabled={!cycle} onClick={timeToBeats}>
-              Time
+              {t("time")}
             </Button>
           </div>
         </Row>
@@ -3283,6 +3319,7 @@ function SlotTabs<T extends string>({
   isSet: (id: T) => boolean;
   onPick: (id: T) => void;
 }) {
+  const t = useTranslations("inspector.anim.slots");
   return (
     <div className="mx-3.5 flex shrink-0 rounded-lg bg-muted p-0.5 text-[11.5px] font-medium">
       {tabs.map((id) => (
@@ -3296,7 +3333,7 @@ function SlotTabs<T extends string>({
           )}
           onClick={() => onPick(id)}
         >
-          {id}
+          {t(id as AnimSlot)}
         </button>
       ))}
     </div>
@@ -3310,6 +3347,7 @@ const CLIP_ANIM_SLOTS = ["in", "out"] as const;
  * the timeline draws it, the Transitions tab marks it, and the assistant's
  * set_animation writes the same one — and plays itself on the footage. */
 export function ClipAnimationPanel({ clip, peers }: { clip: VideoClip; peers?: readonly VideoClip[] }) {
+  const t = useTranslations("inspector.anim");
   const [picked, setSlot] = usePanelState<"in" | "out">(clip.id, "animSlot", "in");
   const slot = picked === "out" ? "out" : "in";
   const tilesScroll = useRememberedScroll(clip.id, `anim:${slot}`);
@@ -3342,7 +3380,7 @@ export function ClipAnimationPanel({ clip, peers }: { clip: VideoClip; peers?: r
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="shrink-0 bg-card pb-2">
         <div className="flex h-10 shrink-0 items-center px-3.5 text-sm font-semibold tracking-tight">
-          Animation
+          {t("title")}
         </div>
         <SlotTabs
           tabs={CLIP_ANIM_SLOTS}
@@ -3362,9 +3400,9 @@ export function ClipAnimationPanel({ clip, peers }: { clip: VideoClip; peers?: r
         <ClipAnimationTiles clip={clip} which={slot} value={anim?.style} onPick={pick} />
       </ScrollArea>
       <div className="shrink-0 border-t border-border bg-card px-3.5 py-0.5">
-        <Row label="Duration">
+        <Row label={t("duration")}>
           <ValueSlider
-            label="Duration"
+            label={t("duration")}
             sliderClassName="data-horizontal:w-24"
             valueClassName="w-9 text-muted-foreground"
             value={secondsDraft ?? anim?.seconds ?? ANIM_DEFAULT_SECONDS}
@@ -3394,6 +3432,7 @@ export function ClipAnimationPanel({ clip, peers }: { clip: VideoClip; peers?: r
  * the same grid, one at a time — the tiles are big enough to read the motion,
  * which a stack of grids would not be. */
 export function AnimationPanel({ overlay: o, peers }: { overlay: Overlay; peers?: readonly Overlay[] }) {
+  const t = useTranslations("inspector.anim");
   const anim = o.anim ?? {};
   // The active slot holds for the session, like every settings view's tab.
   const [picked, setSlot] = usePanelState<AnimSlot>(o.id, "animSlot", "in");
@@ -3500,7 +3539,7 @@ export function AnimationPanel({ overlay: o, peers }: { overlay: Overlay; peers?
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="shrink-0 bg-card pb-2">
         <div className="flex h-10 shrink-0 items-center px-3.5 text-sm font-semibold tracking-tight">
-          Animation
+          {t("title")}
         </div>
         <SlotTabs
           tabs={tabs}
@@ -3562,6 +3601,8 @@ export function AnimationPanel({ overlay: o, peers }: { overlay: Overlay; peers?
  * put with the slot unset, greyed rather than gone, because a bar that comes
  * and goes moves the grid under the pointer. */
 function AnimationToolbar({ overlay: o, slot, peers }: { overlay: Overlay; slot: AnimSlot; peers?: readonly Overlay[] }) {
+  const t = useTranslations("inspector.anim");
+  const easeLabel = useLabels("ease");
   const ck = useSliderCheckpoint();
   const anim = o.anim ?? {};
   // The ramp fits the shortest element it lands on.
@@ -3572,7 +3613,7 @@ function AnimationToolbar({ overlay: o, slot, peers }: { overlay: Overlay; slot:
     <div className="shrink-0 border-t border-border bg-card px-3.5 py-0.5">{children}</div>
   );
 
-  if (slot === "move") return bar(<MoveStrengthSlider overlay={o} label="Strength" peers={peers} />);
+  if (slot === "move") return bar(<MoveStrengthSlider overlay={o} label={t("strength")} peers={peers} />);
 
   if (slot === "words") return bar(<WordSettings overlay={o} peers={peers} />);
 
@@ -3587,9 +3628,9 @@ function AnimationToolbar({ overlay: o, slot, peers }: { overlay: Overlay; slot:
       writeOverlayAnim(o, anim, { loop: { ...anim.loop, speed } }, peers);
     };
     return bar(
-      <Row label="Speed">
+      <Row label={t("speed")}>
         <ValueSlider
-          label="Speed"
+          label={t("speed")}
           sliderClassName="data-horizontal:w-24"
           valueClassName="w-9 text-muted-foreground"
           value={anim.loop?.speed ?? 1}
@@ -3639,6 +3680,11 @@ function AnimationToolbar({ overlay: o, slot, peers }: { overlay: Overlay; slot:
   const edgeFadeShare = typeof edge?.fade === "number" ? edge.fade : 1;
   // How soft it starts: the slot's own, else the style's far-end defocus.
   const edgeBlur = edge?.blur ?? (edge ? ((edge.preset ?? edgePreset(edge.style))?.animate.blur?.[0]?.v ?? 0) : 0);
+  // An edge's curve: the style's own, or any ease by name.
+  const edgeEaseItems: Record<string, string> = {
+    style: t("styleOwnEase"),
+    ...Object.fromEntries(EASE_IDS.map((id) => [id, easeLabel(id)])),
+  };
   const writeEdge = (patch: Partial<OverlayEdge>) => {
     if (!edge) return;
     ck.begin();
@@ -3646,9 +3692,9 @@ function AnimationToolbar({ overlay: o, slot, peers }: { overlay: Overlay; slot:
   };
   return bar(
     <>
-      <Row label="Duration">
+      <Row label={t("duration")}>
         <ValueSlider
-          label="Duration"
+          label={t("duration")}
           sliderClassName="data-horizontal:w-24"
           valueClassName="w-9 text-muted-foreground"
           value={edge?.seconds ?? OVERLAY_ANIM_DEFAULT_SECONDS}
@@ -3667,9 +3713,9 @@ function AnimationToolbar({ overlay: o, slot, peers }: { overlay: Overlay; slot:
         />
       </Row>
       {stagger !== undefined && (
-        <Row label="Stagger">
+        <Row label={t("stagger")}>
           <ValueSlider
-            label="Stagger"
+            label={t("stagger")}
             sliderClassName="data-horizontal:w-24"
             valueClassName="w-9 text-muted-foreground"
             value={stagger}
@@ -3688,7 +3734,7 @@ function AnimationToolbar({ overlay: o, slot, peers }: { overlay: Overlay; slot:
         </Row>
       )}
       {stagger !== undefined && (
-        <Row label="Shuffle">
+        <Row label={t("shuffle")}>
           <Switch
             checked={edgeOrder !== "reading"}
             onCheckedChange={(v) => {
@@ -3700,10 +3746,10 @@ function AnimationToolbar({ overlay: o, slot, peers }: { overlay: Overlay; slot:
       )}
       {ownReach > 0 && (
         // The curve the move travels on, over the style's own.
-        <Row label="Ease">
+        <Row label={t("ease")}>
           <Select
             value={edgeEase}
-            items={EDGE_EASE_ITEMS}
+            items={edgeEaseItems}
             onValueChange={(id) => {
               const rest = { ...edge! };
               delete rest.ease;
@@ -3716,7 +3762,7 @@ function AnimationToolbar({ overlay: o, slot, peers }: { overlay: Overlay; slot:
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {Object.entries(EDGE_EASE_ITEMS).map(([id, label]) => (
+              {Object.entries(edgeEaseItems).map(([id, label]) => (
                 <SelectItem key={id} value={id} className="text-[12px]">
                   {label}
                 </SelectItem>
@@ -3726,7 +3772,7 @@ function AnimationToolbar({ overlay: o, slot, peers }: { overlay: Overlay; slot:
         </Row>
       )}
       {edgeFades && (
-        <Row label="Fade">
+        <Row label={t("fade")}>
           <Switch
             checked={edgeFade}
             onCheckedChange={(v) => {
@@ -3740,9 +3786,9 @@ function AnimationToolbar({ overlay: o, slot, peers }: { overlay: Overlay; slot:
         </Row>
       )}
       {edgeFades && edgeFade && (
-        <Row label="Fade length">
+        <Row label={t("fadeLength")}>
           <ValueSlider
-            label="Fade length"
+            label={t("fadeLength")}
             sliderClassName="data-horizontal:w-24"
             valueClassName="w-9 text-muted-foreground"
             value={edgeFadeShare}
@@ -3761,16 +3807,16 @@ function AnimationToolbar({ overlay: o, slot, peers }: { overlay: Overlay; slot:
       )}
       {edgeSequence && isTextOverlay(o) && (
         // An order read off a reference: the letters as they arrive.
-        <Row label="Order">
-          <span className="truncate text-xs text-muted-foreground" title="Letters in the order they move">
+        <Row label={t("order")}>
+          <span className="truncate text-xs text-muted-foreground" title={t("orderHint")}>
             {edgeSequence.map((i) => [...o.text][i] ?? "").join(" ")}
           </span>
         </Row>
       )}
       {ownReach > 0 && (
-        <Row label="Distance">
+        <Row label={t("distance")}>
           <ValueSlider
-            label="Distance"
+            label={t("distance")}
             sliderClassName="data-horizontal:w-24"
             valueClassName="w-9 text-muted-foreground"
             value={edgeDistance}
@@ -3789,9 +3835,9 @@ function AnimationToolbar({ overlay: o, slot, peers }: { overlay: Overlay; slot:
         </Row>
       )}
       {edge && (
-        <Row label="Blur">
+        <Row label={t("blur")}>
           <ValueSlider
-            label="Blur"
+            label={t("blur")}
             sliderClassName="data-horizontal:w-24"
             valueClassName="w-9 text-muted-foreground"
             value={edgeBlur}
@@ -3813,12 +3859,6 @@ function AnimationToolbar({ overlay: o, slot, peers }: { overlay: Overlay; slot:
   );
 }
 
-/** An edge's curve: the style's own, or any ease by name. */
-const EDGE_EASE_ITEMS: Record<string, string> = {
-  style: "Style's own",
-  ...Object.fromEntries(EASE_IDS.map((id) => [id, EASE_LABELS[id]])),
-};
-
 /** Rotation and opacity, shared by every overlay kind. Neutral values store
  * as absence so untouched elements carry nothing. */
 /** The element twin of the clip panels' Hidden row: parked on the timeline,
@@ -3826,9 +3866,10 @@ const EDGE_EASE_ITEMS: Record<string, string> = {
  * (the effect panel, which has no Transform, mounts it alone), so the
  * timeline chip always has an inspector fallback. */
 function HiddenRow({ overlay: o }: { overlay: Overlay }) {
+  const t = useTranslations("inspector.clip");
   const update = useEditor((s) => s.updateOverlay);
   return (
-    <Row label="Hidden">
+    <Row label={t("hidden")}>
       <Switch
         checked={!!o.hidden}
         onCheckedChange={(v) => update(o.id, { hidden: v || undefined })}
@@ -3853,13 +3894,14 @@ function PositionRow({
   ck: { begin: () => void; end: () => void };
   onSet: (axis: "x" | "y", pct: number) => void;
 }) {
+  const t = useTranslations("inspector.transform");
   return (
-    <Row label="Position">
+    <Row label={t("position")}>
       {(["x", "y"] as const).map((axis) => (
         <span key={axis} className="flex items-center gap-1">
           <span className="text-[11px] text-muted-foreground/70 uppercase">{axis}</span>
           <ScrubValue
-            label={`${axis.toUpperCase()} position`}
+            label={t("axisPosition", { axis: axis.toUpperCase() })}
             className="w-9 text-muted-foreground"
             value={pose[axis] * 100}
             min={min}
@@ -3906,13 +3948,14 @@ function KeyAxisRow({
   parse: (s: string) => number | null;
   ck: { begin: () => void; end: () => void };
 }) {
+  const t = useTranslations("inspector.transform");
   return (
     <Row label={label}>
       {axes.map((axis) => (
         <span key={axis.name} className="flex items-center gap-1">
           <span className="text-[11px] text-muted-foreground/70 uppercase">{axis.name}</span>
           <ScrubValue
-            label={`${label} ${axis.name}`}
+            label={t("axisLabel", { label, axis: axis.name })}
             className="w-10 text-muted-foreground"
             value={axis.value}
             min={min}
@@ -3941,6 +3984,7 @@ function KeyAxisRow({
 /** One caption's own settings: where it sits, and which of its words are set
  * apart in the track's emphasis style (the Subtitles panel styles it). */
 function CuePanel({ cue }: { cue: SubtitleCue }) {
+  const t = useTranslations("inspector.cue");
   const subtitles = useEditor((s) => s.subtitles);
   const posCk = useSliderCheckpoint();
   const own = cue.x !== undefined && cue.y !== undefined;
@@ -3954,8 +3998,8 @@ function CuePanel({ cue }: { cue: SubtitleCue }) {
   return (
     <div className="flex flex-col gap-1 px-3.5 pt-2 pb-4">
       <Section
-        title="Own position"
-        info="A caption sits where its track does. With its own position it moves alone, here or by Option-dragging it in the preview."
+        title={t("ownPosition")}
+        info={t("ownPositionInfo")}
         enabled={own}
         onEnabledChange={(on) => {
           useEditor.getState().pushHistory();
@@ -3965,8 +4009,8 @@ function CuePanel({ cue }: { cue: SubtitleCue }) {
         <PositionRow pose={pose} min={2} max={98} ck={posCk} onSet={setPos} />
       </Section>
       <Section
-        title="Emphasis"
-        info="Set words apart in the track's emphasis style, which the Subtitles panel's Options tab sets."
+        title={t("emphasis")}
+        info={t("emphasisInfo")}
       >
         <div className="cue-emphasis flex flex-wrap gap-1 pb-1.5">
           {words.map((w, i) => (
@@ -3992,6 +4036,7 @@ function CuePanel({ cue }: { cue: SubtitleCue }) {
 }
 
 function TransformRows({ overlay: o }: { overlay: Overlay }) {
+  const t = useTranslations("inspector.transform");
   const rotationCk = useSliderCheckpoint();
   const opacityCk = useSliderCheckpoint();
   const scaleCk = useSliderCheckpoint();
@@ -4027,13 +4072,13 @@ function TransformRows({ overlay: o }: { overlay: Overlay }) {
     useEditor.getState().updateOverlayTransient(o.id, { [axis]: v });
   };
   return (
-    <Section title="Transform">
+    <Section title={t("title")}>
       <KeyframeControls overlay={o} />
       <PositionRow pose={pose} min={clampPos(-Infinity, o) * 100} max={clampPos(Infinity, o) * 100} ck={posCk} onSet={setPos} />
       {keyed && (
-        <Row label="Scale">
+        <Row label={t("scale")}>
           <ValueSlider
-            label="Scale"
+            label={t("scale")}
             sliderClassName="data-horizontal:w-20"
             valueClassName="w-12 text-muted-foreground"
             value={keyPose.scale}
@@ -4063,7 +4108,7 @@ function TransformRows({ overlay: o }: { overlay: Overlay }) {
       )}
       {keyed && (
         <KeyAxisRow
-          label="Stretch"
+          label={t("stretch")}
           axes={[
             { name: "W", value: keyPose.scaleX ?? 1, set: (v) => setKey({ scaleX: v }) },
             { name: "H", value: keyPose.scaleY ?? 1, set: (v) => setKey({ scaleY: v }) },
@@ -4078,7 +4123,7 @@ function TransformRows({ overlay: o }: { overlay: Overlay }) {
       )}
       {keyed && (
         <KeyAxisRow
-          label="Tilt"
+          label={t("tilt")}
           axes={[
             { name: "X", value: keyPose.tiltX ?? 0, set: (v) => setKey({ tiltX: Math.round(v) }) },
             { name: "Y", value: keyPose.tiltY ?? 0, set: (v) => setKey({ tiltY: Math.round(v) }) },
@@ -4091,9 +4136,9 @@ function TransformRows({ overlay: o }: { overlay: Overlay }) {
           ck={tiltCk}
         />
       )}
-      <Row label="Rotation">
+      <Row label={t("rotation")}>
         <ValueSlider
-          label="Rotation"
+          label={t("rotation")}
           sliderClassName="data-horizontal:w-24"
           valueClassName="w-9 text-muted-foreground"
           value={keyed ? pose.rotation : (o.rotation ?? 0)}
@@ -4115,9 +4160,9 @@ function TransformRows({ overlay: o }: { overlay: Overlay }) {
           }}
         />
       </Row>
-      <Row label="Opacity">
+      <Row label={t("opacity")}>
         <ValueSlider
-          label="Opacity"
+          label={t("opacity")}
           sliderClassName="data-horizontal:w-24"
           valueClassName="w-9 text-muted-foreground"
           value={keyed ? pose.opacity : (o.opacity ?? 1)}
@@ -4195,6 +4240,7 @@ export function KeyRow({
   onRemove: (tLocal: number) => void;
   onSeek: (t: number) => void;
 }) {
+  const tr = useTranslations("inspector.keys");
   const inWindow = now >= element.start - 1e-6 && now <= element.end + 1e-6;
   const tLocal = Math.max(
     0,
@@ -4204,14 +4250,14 @@ export function KeyRow({
   const prev = [...keys].sort((a, b) => a.t - b.t).reverse().find((k) => k.t < tLocal - KEY_EPSILON);
   const next = [...keys].sort((a, b) => a.t - b.t).find((k) => k.t > tLocal + KEY_EPSILON);
   return (
-    <Row label="Keyframes">
+    <Row label={tr("title")}>
       <Button
         size="sm"
         variant="ghost"
         className="size-7 p-0"
         disabled={!inWindow}
-        title={here >= 0 ? "Update the key here" : "Add a key at the playhead"}
-        aria-label={here >= 0 ? "Update the key here" : "Add a key at the playhead"}
+        title={here >= 0 ? tr("update") : tr("add")}
+        aria-label={here >= 0 ? tr("update") : tr("add")}
         onClick={() => onAdd(tLocal)}
       >
         <Diamond
@@ -4227,8 +4273,8 @@ export function KeyRow({
         variant="ghost"
         className="size-7 p-0"
         disabled={!prev}
-        title="Previous key"
-        aria-label="Previous key"
+        title={tr("previous")}
+        aria-label={tr("previous")}
         onClick={() => prev && onSeek(element.start + prev.t)}
       >
         <ChevronLeft className="size-3.5" />
@@ -4238,8 +4284,8 @@ export function KeyRow({
         variant="ghost"
         className="size-7 p-0"
         disabled={!next}
-        title="Next key"
-        aria-label="Next key"
+        title={tr("next")}
+        aria-label={tr("next")}
         onClick={() => next && onSeek(element.start + next.t)}
       >
         <ChevronRight className="size-3.5" />
@@ -4252,8 +4298,8 @@ export function KeyRow({
         // edge. The pull-right lands this glyph on the same edge as their text.
         className="-mr-1.5 size-7 p-0 text-muted-foreground"
         disabled={here < 0}
-        title="Remove the key here"
-        aria-label="Remove the key here"
+        title={tr("remove")}
+        aria-label={tr("remove")}
         onClick={() => onRemove(tLocal)}
       >
         <Trash2 className="size-3.5" />
@@ -4316,6 +4362,7 @@ interface MaskTarget {
  * rests in its region, so the rows appear with the first key.
  */
 function ClipTransformSection({ clip }: { clip: VideoClip }) {
+  const tr = useTranslations("inspector.transform");
   const clips = useEditor((s) => s.clips);
   const assets = useEditor((s) => s.assets);
   const now = usePreviewTime();
@@ -4334,7 +4381,7 @@ function ClipTransformSection({ clip }: { clip: VideoClip }) {
   const setKey = (patch: Partial<Omit<OverlayKey, "t">>) =>
     st().setClipKey(clip.id, tLocal, patch, { transient: true });
   return (
-    <Section title="Transform">
+    <Section title={tr("title")}>
       <KeyRow
         element={el}
         now={now}
@@ -4353,9 +4400,9 @@ function ClipTransformSection({ clip }: { clip: VideoClip }) {
             ck={posCk}
             onSet={(axis, pct) => setKey({ [axis]: pct / 100 })}
           />
-          <Row label="Scale">
+          <Row label={tr("scale")}>
             <ValueSlider
-              label="Scale"
+              label={tr("scale")}
               sliderClassName="data-horizontal:w-24"
               valueClassName="w-9 text-muted-foreground"
               value={pose.scale}
@@ -4377,9 +4424,9 @@ function ClipTransformSection({ clip }: { clip: VideoClip }) {
               }}
             />
           </Row>
-          <Row label="Rotation">
+          <Row label={tr("rotation")}>
             <ValueSlider
-              label="Rotation"
+              label={tr("rotation")}
               sliderClassName="data-horizontal:w-24"
               valueClassName="w-9 text-muted-foreground"
               value={pose.rotation}
@@ -4401,9 +4448,9 @@ function ClipTransformSection({ clip }: { clip: VideoClip }) {
               }}
             />
           </Row>
-          <Row label="Opacity">
+          <Row label={tr("opacity")}>
             <ValueSlider
-              label="Opacity"
+              label={tr("opacity")}
               sliderClassName="data-horizontal:w-24"
               valueClassName="w-9 text-muted-foreground"
               value={pose.opacity}
@@ -4456,6 +4503,7 @@ function OverlayMaskSection({ overlay: o }: { overlay: Overlay }) {
  * switch turns the style on with visible defaults; off returns the clip to a
  * plain box. */
 function ClipBorderSection({ clip }: { clip: VideoClip }) {
+  const t = useTranslations("inspector.box");
   const widthCk = useSliderCheckpoint();
   const radiusCk = useSliderCheckpoint();
   const bs = clip.boxStyle;
@@ -4464,8 +4512,8 @@ function ClipBorderSection({ clip }: { clip: VideoClip }) {
     st().updateClipTransient(clip.id, { boxStyle: { ...st().clips.find((c) => c.id === clip.id)?.boxStyle, ...patch } });
   return (
     <Section
-      title="Border"
-      info="Round the clip's corners and stroke a border along its box edge. Sizes are design pixels, matched between preview and export."
+      title={t("border")}
+      info={t("borderInfo")}
       enabled={!!bs}
       onEnabledChange={(v) =>
         st().updateClip(clip.id, {
@@ -4475,9 +4523,9 @@ function ClipBorderSection({ clip }: { clip: VideoClip }) {
     >
       {bs && (
         <>
-          <Row label="Width">
+          <Row label={t("width")}>
             <ScrubValue
-              label="Border width"
+              label={t("borderWidth")}
               className="w-9 text-muted-foreground"
               value={bs.borderWidth ?? 0}
               min={0}
@@ -4496,9 +4544,9 @@ function ClipBorderSection({ clip }: { clip: VideoClip }) {
               }}
             />
           </Row>
-          <Row label="Radius">
+          <Row label={t("radius")}>
             <ScrubValue
-              label="Corner radius"
+              label={t("cornerRadius")}
               className="w-9 text-muted-foreground"
               value={bs.radius ?? 0}
               min={0}
@@ -4517,10 +4565,10 @@ function ClipBorderSection({ clip }: { clip: VideoClip }) {
               }}
             />
           </Row>
-          <Row label="Color">
+          <Row label={t("color")}>
             <ColorField
               value={bs.borderColor ?? "#FFFFFF"}
-              label="Border color"
+              label={t("borderColor")}
               onBegin={() => st().pushHistory()}
               onLive={(c) => write({ borderColor: c })}
               onCommit={(c) => st().updateClip(clip.id, { boxStyle: { ...bs, borderColor: c } })}
@@ -4535,6 +4583,7 @@ function ClipBorderSection({ clip }: { clip: VideoClip }) {
 /** The clip's drop shadow: cast by whatever shape the clip really shows — the
  * box, its rounded corners, and its mask together. */
 function ClipShadowSection({ clip }: { clip: VideoClip }) {
+  const t = useTranslations("inspector.box");
   const blurCk = useSliderCheckpoint();
   const offsetCk = useSliderCheckpoint();
   const opacityCk = useSliderCheckpoint();
@@ -4548,8 +4597,8 @@ function ClipShadowSection({ clip }: { clip: VideoClip }) {
   };
   return (
     <Section
-      title="Shadow"
-      info="Cast a drop shadow from the clip's shape — its box, corners, and mask together, so a circle-masked clip throws a circular shadow. Sizes are design pixels, matched between preview and export."
+      title={t("shadow")}
+      info={t("shadowInfo")}
       enabled={!!sh}
       onEnabledChange={(v) =>
         st().updateClip(clip.id, {
@@ -4563,9 +4612,9 @@ function ClipShadowSection({ clip }: { clip: VideoClip }) {
     >
       {sh && (
         <>
-          <Row label="Blur">
+          <Row label={t("blur")}>
             <ScrubValue
-              label="Shadow blur"
+              label={t("shadowBlur")}
               className="w-9 text-muted-foreground"
               value={sh.blur}
               min={0}
@@ -4584,12 +4633,12 @@ function ClipShadowSection({ clip }: { clip: VideoClip }) {
               }}
             />
           </Row>
-          <Row label="Offset">
+          <Row label={t("offset")}>
             {(["x", "y"] as const).map((axis) => (
               <span key={axis} className="flex items-center gap-1">
                 <span className="text-[11px] text-muted-foreground/70 uppercase">{axis}</span>
                 <ScrubValue
-                  label={`Shadow ${axis.toUpperCase()} offset`}
+                  label={t("shadowOffset", { axis: axis.toUpperCase() })}
                   className="w-9 text-muted-foreground"
                   value={sh[axis] ?? 0}
                   min={-120}
@@ -4610,9 +4659,9 @@ function ClipShadowSection({ clip }: { clip: VideoClip }) {
               </span>
             ))}
           </Row>
-          <Row label="Opacity">
+          <Row label={t("opacity")}>
             <ValueSlider
-              label="Shadow opacity"
+              label={t("shadowOpacity")}
               sliderClassName="data-horizontal:w-24"
               valueClassName="w-9 text-muted-foreground"
               value={sh.opacity ?? 0.35}
@@ -4632,10 +4681,10 @@ function ClipShadowSection({ clip }: { clip: VideoClip }) {
               }}
             />
           </Row>
-          <Row label="Color">
+          <Row label={t("color")}>
             <ColorField
               value={sh.color ?? "#000000"}
-              label="Shadow color"
+              label={t("shadowColor")}
               onBegin={() => st().pushHistory()}
               onLive={(c) => write({ color: c })}
               onCommit={(c) => write({ color: c })}
@@ -4674,6 +4723,7 @@ function ClipMaskSection({ clip }: { clip: VideoClip }) {
  * same contract as Transform; otherwise they edit the mask's resting fields.
  */
 function MaskSection({ target }: { target: MaskTarget }) {
+  const tr = useTranslations("inspector.mask");
   const now = usePreviewTime();
   const seek = useEditor((s) => s.seek);
   const posCk = useSliderCheckpoint();
@@ -4738,8 +4788,8 @@ function MaskSection({ target }: { target: MaskTarget }) {
   };
   return (
     <Section
-      title="Mask"
-      info="Use a shape, draw with Pen, or isolate the Subject."
+      title={tr("title")}
+      info={tr("info")}
       enabled={!!m}
       onEnabledChange={(v) => target.set(v ? { kind: "rect" } : undefined)}
       aside={
@@ -4751,21 +4801,21 @@ function MaskSection({ target }: { target: MaskTarget }) {
             onClick={m.kind === "pen" ? redraw : reset}
             disabled={drawing}
           >
-            {m.kind === "pen" ? "Redraw" : "Reset"}
+            {m.kind === "pen" ? tr("redraw") : tr("reset")}
           </Button>
         ) : undefined
       }
     >
       {m && geom && (
         <>
-          <div className="grid grid-cols-4 gap-1.5 py-1" role="radiogroup" aria-label="Mask shape">
+          <div className="grid grid-cols-4 gap-1.5 py-1" role="radiogroup" aria-label={tr("shape")}>
             {MASK_SHAPES.map((s) => (
               <button
                 key={s.id}
                 type="button"
                 role="radio"
                 aria-checked={m.kind === s.id}
-                title={s.label}
+                title={tr(`shapes.${s.id}`)}
                 className={cn(
                   "flex flex-col items-center gap-1 rounded-md border px-1 pb-1 pt-2 text-[10px] leading-none transition-colors",
                   m.kind === s.id
@@ -4793,15 +4843,14 @@ function MaskSection({ target }: { target: MaskTarget }) {
                 }}
               >
                 <MaskShapeIcon kind={s.id} />
-                <span className="w-full truncate text-center">{s.label}</span>
+                <span className="w-full truncate text-center">{tr(`shapes.${s.id}`)}</span>
               </button>
             ))}
           </div>
           {!subject && !drawing && <TrackRow id={target.id} use="mask" />}
           {drawing && (
             <p className="px-1 py-1.5 text-[11.5px] leading-snug text-muted-foreground">
-              Click the picture to place corners. Click the first corner, double-click, or press
-              Enter to close the outline.
+              {tr("penHint")}
             </p>
           )}
           {!subject && !drawing && (
@@ -4816,12 +4865,12 @@ function MaskSection({ target }: { target: MaskTarget }) {
             />
           )}
           {!subject && !drawing && (
-            <Row label="Position">
+            <Row label={tr("position")}>
               {(["x", "y"] as const).map((axis) => (
                 <span key={axis} className="flex items-center gap-1">
                   <span className="text-[11px] text-muted-foreground/70 uppercase">{axis}</span>
                   <ScrubValue
-                    label={`Mask ${axis.toUpperCase()} offset`}
+                    label={tr("axisOffset", { axis: axis.toUpperCase() })}
                     className="w-9 text-muted-foreground"
                     value={geom[axis] * 100}
                     min={-100}
@@ -4846,7 +4895,7 @@ function MaskSection({ target }: { target: MaskTarget }) {
             </Row>
           )}
           {sizeAxes.length > 0 && !drawing && (
-            <Row label="Size">
+            <Row label={tr("size")}>
               {sizeAxes.map((axis, i) => (
                 <span key={axis} className="flex items-center gap-1">
                   {i === 1 && (
@@ -4854,9 +4903,9 @@ function MaskSection({ target }: { target: MaskTarget }) {
                       variant="ghost"
                       size="icon"
                       className={cn("size-6", sizeLinked ? "text-foreground" : "text-muted-foreground/60")}
-                      aria-label={sizeLinked ? "Unlink width and height" : "Link width and height"}
+                      aria-label={sizeLinked ? tr("unlinkSize") : tr("linkSize")}
                       aria-pressed={sizeLinked}
-                      title={sizeLinked ? "Sizes move together" : "Sizes move on their own"}
+                      title={sizeLinked ? tr("sizesLinked") : tr("sizesFree")}
                       onClick={() => setLinked(!sizeLinked)}
                     >
                       {sizeLinked ? <Link2 className="size-3.5" /> : <Link2Off className="size-3.5" />}
@@ -4864,7 +4913,7 @@ function MaskSection({ target }: { target: MaskTarget }) {
                   )}
                   <span className="text-[11px] text-muted-foreground/70 uppercase">{axis}</span>
                   <ScrubValue
-                    label={`Mask ${axis === "w" ? "width" : "height"}`}
+                    label={axis === "w" ? tr("width") : tr("height")}
                     className="w-9 text-muted-foreground"
                     value={geom[axis] * 100}
                     min={1}
@@ -4888,9 +4937,9 @@ function MaskSection({ target }: { target: MaskTarget }) {
             </Row>
           )}
           {!subject && !drawing && (
-            <Row label="Rotation">
+            <Row label={tr("rotation")}>
               <ValueSlider
-                label="Mask rotation"
+                label={tr("maskRotation")}
                 sliderClassName="data-horizontal:w-24"
                 valueClassName="w-9 text-muted-foreground"
                 value={geom.rotation}
@@ -4914,9 +4963,9 @@ function MaskSection({ target }: { target: MaskTarget }) {
             </Row>
           )}
           {!drawing && (
-          <Row label="Feather">
+          <Row label={tr("feather")}>
             <ValueSlider
-              label="Feather"
+              label={tr("feather")}
               sliderClassName="data-horizontal:w-24"
               valueClassName="w-9 text-muted-foreground"
               value={geom.feather}
@@ -4938,9 +4987,9 @@ function MaskSection({ target }: { target: MaskTarget }) {
           </Row>
           )}
           {maskHasRadius(m.kind) && (
-            <Row label="Radius">
+            <Row label={tr("radius")}>
               <ValueSlider
-                label="Mask corner radius"
+                label={tr("cornerRadius")}
                 sliderClassName="data-horizontal:w-24"
                 valueClassName="w-9 text-muted-foreground"
                 value={geom.radius}
@@ -4962,11 +5011,11 @@ function MaskSection({ target }: { target: MaskTarget }) {
             </Row>
           )}
           {!drawing && (
-            <Row label="Invert">
+            <Row label={tr("invert")}>
               <Switch
                 checked={!!m.invert}
                 onCheckedChange={(v) => target.set({ ...m, invert: v || undefined })}
-                aria-label="Invert mask"
+                aria-label={tr("invertMask")}
               />
             </Row>
           )}
@@ -4977,6 +5026,7 @@ function MaskSection({ target }: { target: MaskTarget }) {
 }
 
 function ShapePanel({ overlay: o }: { overlay: ShapeOverlay }) {
+  const t = useTranslations("inspector.shape");
   const update = useEditor((s) => s.updateOverlay);
   const fillCk = useSliderCheckpoint();
   const radiusCk = useSliderCheckpoint();
@@ -4987,17 +5037,17 @@ function ShapePanel({ overlay: o }: { overlay: ShapeOverlay }) {
     <>
       <ElementTitle overlay={o} />
       <div className="flex flex-col gap-1 px-3.5 pb-4">
-        <Row label={boxShape ? "Fill" : "Color"}>
+        <Row label={boxShape ? t("fill") : t("color")}>
           <ColorField
             value={o.fill}
-            label={boxShape ? "Fill color" : "Shape color"}
+            label={boxShape ? t("fillColor") : t("shapeColor")}
             onBegin={() => useEditor.getState().pushHistory()}
             onLive={(c) => useEditor.getState().updateOverlayTransient(o.id, { fill: c })}
             onCommit={(c) => update(o.id, { fill: c })}
             opacity={
               boxShape
                 ? {
-                    label: "Fill opacity",
+                    label: t("fillOpacity"),
                     value: o.fillOpacity ?? 1,
                     onDraft: (v) => {
                       fillCk.begin();
@@ -5018,9 +5068,9 @@ function ShapePanel({ overlay: o }: { overlay: ShapeOverlay }) {
           />
         </Row>
         {o.shape === "rect" && (
-          <Row label="Corner radius">
+          <Row label={t("cornerRadius")}>
             <ValueSlider
-              label="Corner radius"
+              label={t("cornerRadius")}
               sliderClassName="data-horizontal:w-24"
               valueClassName="w-9 text-muted-foreground"
               value={o.radius ?? 0}
@@ -5049,7 +5099,7 @@ function ShapePanel({ overlay: o }: { overlay: ShapeOverlay }) {
         )}
         {boxShape && (
           <Section
-            title="Outline"
+            title={t("outline")}
             enabled={!!o.stroke}
             onEnabledChange={(v) =>
               update(o.id, { stroke: v ? { color: "#111114", width: 6 } : undefined })
@@ -5057,10 +5107,10 @@ function ShapePanel({ overlay: o }: { overlay: ShapeOverlay }) {
           >
             {o.stroke && (
               <>
-                <Row label="Color">
+                <Row label={t("color")}>
                   <ColorField
                     value={o.stroke.color}
-                    label="Outline color"
+                    label={t("outlineColor")}
                     onBegin={() => useEditor.getState().pushHistory()}
                     onLive={(c) =>
                       useEditor.getState().updateOverlayTransient(o.id, {
@@ -5070,9 +5120,9 @@ function ShapePanel({ overlay: o }: { overlay: ShapeOverlay }) {
                     onCommit={(c) => update(o.id, { stroke: { ...o.stroke!, color: c } })}
                   />
                 </Row>
-                <Row label="Width">
+                <Row label={t("width")}>
                   <ValueSlider
-                    label="Outline width"
+                    label={t("outlineWidth")}
                     sliderClassName="data-horizontal:w-24"
                     valueClassName="w-9 text-muted-foreground"
                     value={o.stroke.width}
@@ -5115,6 +5165,7 @@ function ShapePanel({ overlay: o }: { overlay: ShapeOverlay }) {
  * and an add button while there is room. Each mark takes the fill or one of
  * these. */
 function InksRow({ overlay: o }: { overlay: ShapeOverlay }) {
+  const t = useTranslations("inspector.shape");
   const update = useEditor((s) => s.updateOverlay);
   const inks = o.inks ?? [];
 
@@ -5122,24 +5173,24 @@ function InksRow({ overlay: o }: { overlay: ShapeOverlay }) {
   const swap = (i: number, c: string) => inks.map((x, j) => (j === i ? c : x));
   const write = (next: string[]) => update(o.id, { inks: next.length > 0 ? next : undefined });
   return (
-    <Row label="Inks">
+    <Row label={t("inks")}>
       <div className="flex flex-col items-end gap-1">
         {inks.map((ink, i) => (
           <div key={i} className="flex items-center gap-1">
             <ColorField
               value={ink}
-              label={`Ink ${i + 1}`}
+              label={t("ink", { n: i + 1 })}
               onBegin={() => useEditor.getState().pushHistory()}
               onLive={(c) => useEditor.getState().updateOverlayTransient(o.id, { inks: swap(i, c) })}
               onCommit={(c) => update(o.id, { inks: swap(i, c) })}
             />
-            <Button variant="ghost" size="icon-xs" aria-label={`Remove ink ${i + 1}`} onClick={() => write(inks.filter((_, j) => j !== i))}>
+            <Button variant="ghost" size="icon-xs" aria-label={t("removeInk", { n: i + 1 })} onClick={() => write(inks.filter((_, j) => j !== i))}>
               <X />
             </Button>
           </div>
         ))}
         {inks.length < DOODLE_INKS_MAX && (
-          <Button variant="ghost" size="icon-xs" aria-label="Add ink" onClick={() => write([...inks, DOODLE_INKS[inks.length % DOODLE_INKS.length]])}>
+          <Button variant="ghost" size="icon-xs" aria-label={t("addInk")} onClick={() => write([...inks, DOODLE_INKS[inks.length % DOODLE_INKS.length]])}>
             <Plus />
           </Button>
         )}
@@ -5159,6 +5210,7 @@ function ShadowSection({
   shadow: boolean | ShadowSpec | undefined;
   onToggle: (on: boolean) => void;
 }) {
+  const t = useTranslations("inspector.box");
   const update = useEditor((s) => s.updateOverlay);
   const shadowCk = useSliderCheckpoint();
   const spec: ShadowSpec = typeof shadow === "object" ? shadow : {};
@@ -5173,26 +5225,26 @@ function ShadowSection({
     shadowCk.end();
   };
   return (
-    <Section title="Shadow" enabled={!!shadow} onEnabledChange={onToggle}>
+    <Section title={t("shadow")} enabled={!!shadow} onEnabledChange={onToggle}>
       <>
-        <Row label="Color">
+        <Row label={t("color")}>
           <ColorField
             value={spec.color ?? "#000000"}
-            label="Shadow color"
+            label={t("shadowColor")}
             onBegin={() => useEditor.getState().pushHistory()}
             onLive={(c) => useEditor.getState().updateOverlayTransient(id, { shadow: { ...spec, color: c } })}
             onCommit={(c) => update(id, { shadow: { ...spec, color: c } })}
             opacity={{
-              label: "Shadow opacity",
+              label: t("shadowOpacity"),
               value: spec.opacity ?? 0.65,
               onDraft: (v) => draft({ opacity: v }),
               onCommit: (v) => commit({ opacity: v }),
             }}
           />
         </Row>
-        <Row label="Blur">
+        <Row label={t("blur")}>
           <ValueSlider
-            label="Shadow blur"
+            label={t("shadowBlur")}
             sliderClassName="data-horizontal:w-24"
             valueClassName="w-9 text-muted-foreground"
             value={spec.blur ?? SHADOW.blur}
@@ -5206,9 +5258,9 @@ function ShadowSection({
             onCommit={(v) => commit({ blur: v })}
           />
         </Row>
-        <Row label="Offset">
+        <Row label={t("offset")}>
           <ValueSlider
-            label="Shadow offset"
+            label={t("shadowOffsetY")}
             sliderClassName="data-horizontal:w-24"
             valueClassName="w-9 text-muted-foreground"
             value={spec.offsetY ?? SHADOW.offsetY}
@@ -5230,6 +5282,7 @@ function ShadowSection({
 /** A shape's pattern fill: stripes in the fill color, with line, gap and
  * angle sliders. Off is a solid fill. */
 function PatternSection({ overlay: o }: { overlay: ShapeOverlay }) {
+  const t = useTranslations("inspector.shape");
   const update = useEditor((s) => s.updateOverlay);
   const patternCk = useSliderCheckpoint();
   const pattern = o.pattern ?? STRIPES_DEFAULT;
@@ -5260,15 +5313,15 @@ function PatternSection({ overlay: o }: { overlay: ShapeOverlay }) {
   );
   return (
     <Section
-      title="Pattern"
+      title={t("pattern")}
       enabled={!!o.pattern}
       onEnabledChange={(v) => update(o.id, { pattern: v ? STRIPES_DEFAULT : undefined })}
     >
       {o.pattern && (
         <>
-          <Row label="Line">{slider("Stripe line width", pattern.width, STRIPE_LINE_MIN, STRIPE_LINE_MAX, 0.5, (v) => ({ width: v }))}</Row>
-          <Row label="Gap">{slider("Stripe gap", pattern.gap, 0, STRIPE_GAP_MAX, 0.5, (v) => ({ gap: v }))}</Row>
-          <Row label="Angle">{slider("Stripe angle", pattern.angle ?? 0, -90, 90, 1, (v) => ({ angle: Math.round(v) || undefined }))}</Row>
+          <Row label={t("line")}>{slider(t("stripeWidth"), pattern.width, STRIPE_LINE_MIN, STRIPE_LINE_MAX, 0.5, (v) => ({ width: v }))}</Row>
+          <Row label={t("gap")}>{slider(t("stripeGap"), pattern.gap, 0, STRIPE_GAP_MAX, 0.5, (v) => ({ gap: v }))}</Row>
+          <Row label={t("angle")}>{slider(t("stripeAngle"), pattern.angle ?? 0, -90, 90, 1, (v) => ({ angle: Math.round(v) || undefined }))}</Row>
         </>
       )}
     </Section>
@@ -5285,6 +5338,7 @@ function writeFlash(id: string, patch: FlashPulse, how: PulseWrite) {
 }
 
 function EffectPanel({ overlay: o }: { overlay: EffectOverlay }) {
+  const t = useTranslations("inspector.effect");
   const amountCk = useSliderCheckpoint();
   return (
     <>
@@ -5304,9 +5358,9 @@ function EffectPanel({ overlay: o }: { overlay: EffectOverlay }) {
               <FlashFadeRow pulse={o} write={(patch, how) => writeFlash(o.id, patch, how)} />
             </>
           )}
-          <Row label="Amount">
+          <Row label={t("amount")}>
             <ValueSlider
-              label="Effect amount"
+              label={t("effectAmount")}
               sliderClassName="data-horizontal:w-24"
               valueClassName="w-9 text-muted-foreground"
               value={o.amount ?? 0.5}
@@ -5335,25 +5389,17 @@ function EffectPanel({ overlay: o }: { overlay: EffectOverlay }) {
   );
 }
 
-/** What a glitch's kinds are called in the panel; "mix" is the random
- * schedule, stored as absence. */
-const GLITCH_LABELS: Record<GlitchKind | "mix", string> = {
-  mix: "Mix",
-  smear: "Smear",
-  split: "Split",
-  tint: "Tint",
-  blowout: "Blowout",
-  rgb: "RGB split",
-};
-
-/** A glitch's kind: the random mix, or one kind pinned to every frame. */
+/** A glitch's kind: the random mix, or one kind pinned to every frame. The
+ * kinds name themselves under `inspector.effect.glitchKinds`; "mix" is the
+ * random schedule, stored as absence. */
 function GlitchKindRow({ overlay: o }: { overlay: EffectOverlay }) {
+  const t = useTranslations("inspector.effect");
   const kinds = ["mix", ...GLITCH_KINDS] as const;
   return (
-    <Row label="Kind">
+    <Row label={t("kind")}>
       <Select
         value={o.glitch ?? "mix"}
-        items={Object.fromEntries(kinds.map((k) => [k, GLITCH_LABELS[k]]))}
+        items={Object.fromEntries(kinds.map((k) => [k, t(`glitchKinds.${k}`)]))}
         onValueChange={(v) => useEditor.getState().updateOverlay(o.id, { glitch: v === "mix" ? undefined : (v as GlitchKind) })}
       >
         <SelectTrigger className="h-8 w-36 text-[12px]">
@@ -5362,7 +5408,7 @@ function GlitchKindRow({ overlay: o }: { overlay: EffectOverlay }) {
         <SelectContent>
           {kinds.map((k) => (
             <SelectItem key={k} value={k} className="text-[12px]">
-              {GLITCH_LABELS[k]}
+              {t(`glitchKinds.${k}`)}
             </SelectItem>
           ))}
         </SelectContent>
@@ -5371,16 +5417,15 @@ function GlitchKindRow({ overlay: o }: { overlay: EffectOverlay }) {
   );
 }
 
-/** What each light leak course is called in the panel. */
-const LEAK_LABELS: Record<LeakCourse, string> = { drift: "Drift", burn: "Burn", scorch: "Scorch", film: "Film", char: "Char" };
-
 /** A light leak's course: a drifting glow for the whole element, the film
  * burn played once across it, the scorch flashing hot tones through it, the
- * film-strip flash over a cut, or the burn's dark climb. */
+ * film-strip flash over a cut, or the burn's dark climb. Each course names
+ * itself under `inspector.effect.leakCourses`. */
 function LeakCourseRow({ overlay: o }: { overlay: EffectOverlay }) {
+  const t = useTranslations("inspector.effect");
   const leak = o.leak ?? "drift";
   return (
-    <Row label="Course">
+    <Row label={t("course")}>
       <div className="flex w-44 rounded-lg border border-input p-0.5 text-[11.5px] font-medium">
         {LEAK_COURSES.map((c) => (
           <button
@@ -5393,7 +5438,7 @@ function LeakCourseRow({ overlay: o }: { overlay: EffectOverlay }) {
             )}
             onClick={() => useEditor.getState().updateOverlay(o.id, { leak: c === "drift" ? undefined : c })}
           >
-            {LEAK_LABELS[c]}
+            {t(`leakCourses.${c as LeakCourse}`)}
           </button>
         ))}
       </div>
@@ -5401,14 +5446,13 @@ function LeakCourseRow({ overlay: o }: { overlay: EffectOverlay }) {
   );
 }
 
-/** What each text texture is called in the panel. */
-const TEXT_TEXTURE_LABELS: Record<TextTexture | "none", string> = { none: "None", stipple: "Stipple" };
-
-/** The grain a title wears inside its letters, or none. */
+/** The grain a title wears inside its letters, or none; each names itself
+ * under `inspector.text.textures`. */
 function TextTextureRow({ overlay: o }: { overlay: TextOverlay }) {
+  const t = useTranslations("inspector.text");
   const texture = o.texture ?? "none";
   return (
-    <Row label="Texture">
+    <Row label={t("texture")}>
       <div className="flex w-36 rounded-lg border border-input p-0.5 text-[11.5px] font-medium">
         {(["none", ...TEXT_TEXTURES] as const).map((c) => (
           <button
@@ -5421,7 +5465,7 @@ function TextTextureRow({ overlay: o }: { overlay: TextOverlay }) {
             )}
             onClick={() => useEditor.getState().updateOverlay(o.id, { texture: c === "none" ? undefined : c })}
           >
-            {TEXT_TEXTURE_LABELS[c]}
+            {t(`textures.${c as TextTexture | "none"}`)}
           </button>
         ))}
       </div>
@@ -5441,7 +5485,10 @@ const PUCK = 20;
  * three steps — a zoom is a choice of how close, and a slider of it is a
  * decision nobody wants to make twice.
  */
+type ZoomLevelId = keyof Messages["inspector"]["effect"]["zoomLevels"];
+
 function ZoomTarget({ overlay: o }: { overlay: EffectOverlay }) {
+  const t = useTranslations("inspector.effect");
   const aspect = useEditor((s) => s.aspect);
   const frame = frameOf(aspect);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -5514,7 +5561,7 @@ function ZoomTarget({ overlay: o }: { overlay: EffectOverlay }) {
         />
       </div>
       <div className="flex w-full flex-col">
-        <Row label="Depth" grow>
+        <Row label={t("depth")} grow>
           {/* The segmented control the rest of the inspector uses — bordered
               box, dark pill on the chosen one — stretched over the row's
               free width. */}
@@ -5532,14 +5579,14 @@ function ZoomTarget({ overlay: o }: { overlay: EffectOverlay }) {
                 )}
                 onClick={() => useEditor.getState().updateOverlay(o.id, { amount: l.amount })}
               >
-                {l.label}
+                {t(`zoomLevels.${l.id as ZoomLevelId}`)}
               </button>
             ))}
           </div>
         </Row>
-        <Row label="Speed">
+        <Row label={t("speed")}>
           <ValueSlider
-            label="Zoom speed"
+            label={t("zoomSpeed")}
             sliderClassName="data-horizontal:w-24"
             valueClassName="w-9 text-muted-foreground"
             value={ramp}
@@ -5565,6 +5612,7 @@ function ZoomTarget({ overlay: o }: { overlay: EffectOverlay }) {
 }
 
 function StickerPanel({ overlay: o }: { overlay: StickerOverlay }) {
+  const t = useTranslations("inspector.sticker");
   const widthCk = useSliderCheckpoint();
   const asset = useEditor((s) =>
     o.assetId ? s.assets.find((a) => a.id === o.assetId) : undefined
@@ -5578,9 +5626,9 @@ function StickerPanel({ overlay: o }: { overlay: StickerOverlay }) {
             {asset.name}
           </div>
         ) : null}
-        <Row label="Size">
+        <Row label={t("size")}>
           <ValueSlider
-            label="Sticker size"
+            label={t("stickerSize")}
             sliderClassName="data-horizontal:w-24"
             valueClassName="w-9 text-muted-foreground"
             value={o.w}

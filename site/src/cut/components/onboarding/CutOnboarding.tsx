@@ -1,6 +1,7 @@
 "use client";
 
 import { DonkeyMark } from "@/components/DonkeyMark";
+import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, ArrowRight } from "lucide-react";
 
@@ -60,6 +61,7 @@ const doneHere = (userId: string): boolean =>
 // connect gate; nothing here grants, switches, or configures anything. The one
 // thing it writes is what it asks for: where the account heard about us.
 export function CutOnboarding() {
+  const t = useTranslations("onboarding.sequence");
   const base = useCutBase();
   // Mounted inside a SessionGate, so the account is already bound. Read from
   // the binding rather than the session object, which answers null while the
@@ -291,7 +293,7 @@ export function CutOnboarding() {
     <div
       role="dialog"
       aria-modal="true"
-      aria-label="Welcome to Donkey Cut"
+      aria-label={t("dialogLabel")}
       className="fixed inset-0 z-[80] flex flex-col bg-cream font-system text-foreground antialiased dark:bg-background"
     >
       <div className="flex shrink-0 items-center justify-between px-6 py-2 md:px-10 md:py-2.5">
@@ -306,7 +308,7 @@ export function CutOnboarding() {
             onClick={() => finish(true)}
             className="text-foreground/70"
           >
-            Skip
+            {t("skip")}
           </Button>
         ) : null}
       </div>
@@ -345,7 +347,7 @@ export function CutOnboarding() {
           onClick={back}
           className={cn("gap-1.5 text-foreground/70", step === 0 && "invisible")}
         >
-          <ArrowLeft className="size-4" /> Back
+          <ArrowLeft className="size-4" /> {t("back")}
         </Button>
 
         <div className="flex items-center gap-1.5">
@@ -373,10 +375,10 @@ export function CutOnboarding() {
           )}
         >
           {done ? (
-            "Done"
+            t("done")
           ) : (
             <>
-              Next
+              {t("next")}
               <ArrowRight className="size-4" />
             </>
           )}

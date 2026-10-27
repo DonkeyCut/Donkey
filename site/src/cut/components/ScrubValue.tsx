@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { snapNear } from "@/lib/snap";
@@ -53,6 +54,7 @@ export function ScrubValue({
    * is where a scrub starts from. */
   mixed?: boolean;
 }) {
+  const t = useTranslations("inspector.controls");
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const [preview, setPreview] = useState<number | null>(null);
@@ -157,7 +159,7 @@ export function ScrubValue({
       type="button"
       disabled={disabled}
       aria-label={label}
-      title={disabled ? undefined : "Drag to adjust · click to type"}
+      title={disabled ? undefined : t("dragOrType")}
       className={cn(
         "touch-none select-none text-right font-mono text-[11.5px] tabular-nums underline decoration-transparent decoration-dotted underline-offset-3 transition-colors",
         disabled
@@ -216,7 +218,7 @@ export function ScrubValue({
         }
       }}
     >
-      {preview != null ? format(preview) : mixed ? <span className="font-sans italic">Mixed</span> : format(value)}
+      {preview != null ? format(preview) : mixed ? <span className="font-sans italic">{t("mixed")}</span> : format(value)}
     </button>
   );
 }

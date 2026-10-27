@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useTranslations } from "next-intl";
 import { Captions, ChevronDown, Loader2, Pause, Play } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -23,6 +24,7 @@ import {
 import { generateSubtitlesReadout } from "@/cut/lib/voiceover";
 import { cn } from "@/lib/utils";
 import { PICKED_RING } from "@/cut/lib/assetPick";
+import { useDescribeError } from "@/i18n/describeError";
 
 // Shared speech preferences (speaker voice, spoken language) for every surface
 // that generates audio (Audio tab, Subtitles tab, clip settings). Module-level
@@ -75,11 +77,12 @@ export function useSpeechLanguage(): string {
 
 /** A small round persona portrait, used in the trigger and each grid tile. */
 function VoiceAvatar({ id, style, className }: { id: string; style: string; className?: string }) {
+  const t = useTranslations("panels.voicePicker");
   return (
     // eslint-disable-next-line @next/next/no-img-element -- bundled static portrait on a client-only page
     <img
       src={voicePortraitUrl(id)}
-      alt={`${id}, a ${style.toLowerCase()} voice`}
+      alt={t("portraitAlt", { name: id, style: style.toLowerCase() })}
       loading="lazy"
       className={cn("object-cover", className)}
     />
@@ -106,7 +109,7 @@ const ORDERED_VOICES = [...SPEECH_VOICES].sort((a, b) =>
  * voice choice.
  */
 export function VoicePicker({
-  title = "Speaker voice",
+  title,
   direction,
   onError,
 }: {
@@ -117,9 +120,11 @@ export function VoicePicker({
   /** Surfaced when a live (direction) preview fails — e.g. no credits. */
   onError?: (e: unknown) => void;
 }) {
+  const t = useTranslations("panels.voicePicker");
   const voice = useSpeakerVoice();
   const language = useSpeechLanguage();
   const selected = SPEECH_VOICES.find((v) => v.id === voice) ?? SPEECH_VOICES[0];
+  const selectedStyle = t(`styles.${selected.id}` as Parameters<typeof t>[0]);
   const [open, setOpen] = useState(false);
   const [sampling, setSampling] = useState<null | "loading" | "playing">(null);
   const audio = useRef<HTMLAudioElement | null>(null);
@@ -181,13 +186,13 @@ export function VoicePicker({
 
   return (
     <div className="voice-picker flex flex-col gap-1.5">
-      <SectionTitle>{title}</SectionTitle>
+      <SectionTitle>{title ?? t("speakerVoice")}</SectionTitle>
       <div className="flex items-stretch gap-2">
         <button
           type="button"
           className="voice-sample grid size-[34px] shrink-0 place-items-center rounded-lg border border-input text-foreground transition-colors hover:bg-muted"
-          title={direction?.trim() ? "Hear this voice with your direction" : "Hear this voice"}
-          aria-label="Play a sample of the selected voice"
+          title={direction?.trim() ? t("hearWithDirection") : t("hearVoice")}
+          aria-label={t("playSample")}
           onClick={() => void sample()}
         >
           {sampling === "loading" ? (
@@ -208,12 +213,12 @@ export function VoicePicker({
         <DropdownMenuTrigger className="voice-select flex min-w-0 flex-1 items-center gap-2.5 overflow-hidden rounded-lg border border-input bg-transparent pr-2.5 text-left outline-none transition-colors focus:border-ring">
           <VoiceAvatar
             id={selected.id}
-            style={selected.style}
+            style={selectedStyle}
             className="size-8 shrink-0 bg-muted"
           />
           <span className="min-w-0 flex-1 truncate text-[12.5px]">
             <span className="font-semibold">{selected.name}</span>{" "}
-            <span className="text-muted-foreground">· {selected.style}</span>
+            <span className="text-muted-foreground">· {selectedStyle}</span>
           </span>
           <ChevronDown className="size-4 shrink-0 text-muted-foreground" />
         </DropdownMenuTrigger>
@@ -228,13 +233,14 @@ export function VoicePicker({
               <div key={i} className="voice-grid grid grid-cols-5 gap-2">
                 {group.map((v) => {
                   const isSelected = v.id === voice;
+                  const style = t(`styles.${v.id}` as Parameters<typeof t>[0]);
                   return (
                     <button
                       key={v.id}
                       type="button"
                       className="voice-tile group flex flex-col gap-1 text-left"
                       aria-pressed={isSelected}
-                      title={`${v.name} · ${v.style}`}
+                      title={t("tileTitle", { name: v.name, style })}
                       onClick={() => {
                         voicePref.write(v.id);
                         setOpen(false);
@@ -252,12 +258,12 @@ export function VoicePicker({
                             : "border-input group-hover:border-transparent group-hover:ring-2 group-hover:ring-[#0a84ff]/40"
                         )}
                       >
-                        <VoiceAvatar id={v.id} style={v.style} className="size-full" />
+                        <VoiceAvatar id={v.id} style={style} className="size-full" />
                       </span>
                       <span className="min-w-0 px-0.5 leading-tight">
                         <span className="block truncate text-[11px] font-semibold">{v.name}</span>
                         <span className="block truncate text-[10px] text-muted-foreground">
-                          {v.style}
+                          {style}
                         </span>
                       </span>
                     </button>
@@ -287,7 +293,7 @@ function scopedCueIds(s: EditorState, select?: (s: EditorState) => string[]): st
 export function GenerateSubtitlesAudio({
   selectCueIds,
   ensureCues,
-  label = "Generate audio for subtitles",
+  label,
 }: {
   selectCueIds?: (s: EditorState) => string[];
   /** Makes cues exist when the scope has none, matched to that scope (e.g.
@@ -296,6 +302,8 @@ export function GenerateSubtitlesAudio({
   ensureCues?: () => Promise<void>;
   label?: string;
 }) {
+  const t = useTranslations("panels.voicePicker");
+  const describeError = useDescribeError();
   const voice = useSpeakerVoice();
   const language = useSpeechLanguage();
   const signedOut = useSignedIn() === false;
@@ -317,16 +325,16 @@ export function GenerateSubtitlesAudio({
           await ensureCues();
         } else {
           if (useEditor.getState().subtitleStatus === "running") {
-            throw new Error("Subtitles are still generating — try again in a moment.");
+            throw new Error(t("subtitlesStillGenerating"));
           }
           await useEditor.getState().generateSubtitles();
           const after = useEditor.getState();
           if (after.subtitleStatus === "error") {
-            throw new Error(after.subtitleError ?? "Transcription failed.");
+            throw new Error(after.subtitleError ?? t("transcriptionFailed"));
           }
         }
         if (scopedCueIds(useEditor.getState(), selectCueIds).length === 0) {
-          throw new Error("No speech found to voice.");
+          throw new Error(t("noSpeech"));
         }
       }
       const { asset } = await generateSubtitlesReadout(voice, {
@@ -336,7 +344,7 @@ export function GenerateSubtitlesAudio({
       useGenNotify.getState().landed("audio", asset.id);
     } catch (e) {
       setError({
-        text: e instanceof Error ? e.message : "Voice generation failed.",
+        text: describeError(e, t("voiceFailed")),
       });
     } finally {
       setBusy(false);
@@ -346,7 +354,7 @@ export function GenerateSubtitlesAudio({
 
   return (
     <div className="subtitles-audio flex flex-col gap-2.5">
-      <VoicePicker title="Generated audio" />
+      <VoicePicker title={t("generatedAudio")} />
       <Button
         variant="outline"
         className="voice-readout w-full"
@@ -354,22 +362,24 @@ export function GenerateSubtitlesAudio({
         title={
           cueCount === 0
             ? hasVideo
-              ? "Transcribe the speech, then voice it onto the soundtrack"
-              : "Add a video to the timeline first"
-            : "Voice the subtitle text and drop it on the soundtrack"
+              ? t("transcribeThenVoice")
+              : t("addVideoFirst")
+            : t("voiceSubtitles")
         }
         onClick={() => void generate()}
       >
         {busy ? <Loader2 className="animate-spin" /> : <Captions data-icon="inline-start" />}
-        {label}
+        {label ?? t("generateForSubtitles")}
       </Button>
       {signedOut ? (
         <p className="voice-signin text-[11px] leading-relaxed text-muted-foreground">
-          Voiceovers run on your Donkey account.{" "}
-          <a className="font-medium text-blue-600 hover:underline dark:text-blue-400" href={signInUrl()}>
-            Sign in
-          </a>{" "}
-          to continue.
+          {t.rich("signIn", {
+            link: (chunks) => (
+              <a className="font-medium text-blue-600 hover:underline dark:text-blue-400" href={signInUrl()}>
+                {chunks}
+              </a>
+            ),
+          })}
         </p>
       ) : (
         error && (

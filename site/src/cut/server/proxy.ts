@@ -4,6 +4,7 @@ import { hasVp9Encoder, runFfmpeg, videoEncoder, vtQuality, type RenderHandle } 
 import { assertGraphSafe } from "./filterGraph";
 import { streamCodecs } from "./convert";
 import { videoDimensions } from "./util";
+import { UserError } from "../lib/userError";
 import type { CompatCover } from "../lib/proxyNames";
 
 /**
@@ -134,13 +135,13 @@ export function probeProxySource(file: string): Promise<ProxySource> {
     let out = "";
     const timer = setTimeout(() => {
       p.kill("SIGKILL");
-      reject(new Error("Media inspection timed out."));
+      reject(new UserError("media_inspect_timed_out", "Media inspection timed out."));
     }, 30_000);
     timer.unref();
     p.stdout.on("data", (d) => (out += d));
     p.on("close", (code) => {
       clearTimeout(timer);
-      if (code !== 0) return reject(new Error("Could not inspect this media file."));
+      if (code !== 0) return reject(new UserError("media_inspect_failed", "Could not inspect this media file."));
       try {
         const streams = (JSON.parse(out).streams ?? []) as {
           codec_type?: string;
@@ -151,7 +152,7 @@ export function probeProxySource(file: string): Promise<ProxySource> {
           side_data_list?: { rotation?: number }[];
         }[];
         const video = streams.find((s) => s.codec_type === "video");
-        if (!video) return reject(new Error("That file carries no video."));
+        if (!video) return reject(new UserError("media_no_video", "That file carries no video."));
         resolve({
           matrix: proxyMatrixOf(video.color_space),
           fullRange: video.color_range === "pc",
@@ -294,8 +295,8 @@ export async function makeCompatProxy(
   opts: CompatArgs & { onProgress?: (seconds: number) => void }
 ): Promise<ProxyOutcome> {
   const codecs = await streamCodecs(src);
-  if (opts.cover === "video" && !codecs.video) throw new Error("That file carries no video.");
-  if (opts.cover === "video" && !(await hasVp9Encoder())) throw new Error("This machine's ffmpeg has no VP9 encoder.");
+  if (opts.cover === "video" && !codecs.video) throw new UserError("media_no_video", "That file carries no video.");
+  if (opts.cover === "video" && !(await hasVp9Encoder())) throw new UserError("proxy_no_vp9_encoder", "This machine's ffmpeg has no VP9 encoder.");
   const [source, dims, h264] = await Promise.all([
     codecs.video ? probeProxySource(src) : Promise.resolve(null),
     codecs.video ? videoDimensions(src) : Promise.resolve(null),

@@ -2,10 +2,12 @@
 
 import { useEffect } from "react";
 import { Check, Mic, X } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { cn } from "@/lib/utils";
 import { useCutCaps } from "@/cut/lib/backend/hooks";
 import { useMicTranscription, type MicController } from "@/cut/lib/micTranscribe";
 import { LiveWaveform } from "./RecordDialog";
+import { useChatError } from "./chatError";
 
 // Shared voice-dictation UI, used by every prompt input (the AI chat composer
 // and the image / video / audio generation prompts). The capture + on-device
@@ -33,6 +35,7 @@ export function DictationBody({
   mic: MicController;
   className?: string;
 }) {
+  const t = useTranslations("chat.dictation");
   const shown = [text.trim(), mic.partial].filter(Boolean).join(" ");
   const finishing = mic.state === "finishing";
   // Confirm only means something once capture is live; while the graph is
@@ -61,7 +64,7 @@ export function DictationBody({
     <div className={cn("flex min-h-[72px] flex-col", className)}>
       <div className="min-h-0 flex-1 overflow-y-auto px-3 pt-2.5">
         <p className="text-[12.5px] leading-relaxed text-muted-foreground/80 italic">
-          {shown || "Listening…"}
+          {shown || t("listening")}
         </p>
       </div>
       <div className="flex items-center gap-2 px-2 pt-1 pb-2">
@@ -75,12 +78,12 @@ export function DictationBody({
           // Without the app the take is transcribed after the stop, which is a
           // round trip the meter's empty slot can say out loud.
           <div className="flex-1 px-1 text-[11px] text-muted-foreground/70">
-            {finishing ? "Transcribing…" : null}
+            {finishing ? t("transcribing") : null}
           </div>
         )}
         <button
           type="button"
-          title="Cancel"
+          title={t("cancel")}
           disabled={finishing}
           onClick={mic.cancel}
           className="grid size-7 place-items-center rounded-lg bg-muted text-muted-foreground transition-colors hover:bg-muted/70 disabled:opacity-50"
@@ -89,7 +92,7 @@ export function DictationBody({
         </button>
         <button
           type="button"
-          title="Use transcription"
+          title={t("useTranscription")}
           disabled={!ready}
           onClick={() => void mic.confirm()}
           className="grid size-7 place-items-center rounded-lg bg-[#0a84ff] text-white transition-colors hover:bg-[#0a84ff]/90 disabled:opacity-50"
@@ -115,8 +118,10 @@ export function DictationControl({
   buttonClassName?: string;
   disabled?: boolean;
 }) {
+  const t = useTranslations("chat.dictation");
+  const chatError = useChatError();
   const caps = useCutCaps();
-  const mic = useMicTranscription((t) => onResult(appendTranscript(text, t)));
+  const mic = useMicTranscription((transcript) => onResult(appendTranscript(text, transcript)));
   if (!caps.liveMic) return null;
   return (
     <>
@@ -128,7 +133,7 @@ export function DictationControl({
       {mic.state === "idle" && (
         <button
           type="button"
-          title="Dictate"
+          title={t("dictate")}
           disabled={disabled}
           onClick={() => void mic.start()}
           className={cn(
@@ -141,7 +146,7 @@ export function DictationControl({
       )}
       {mic.error && mic.state === "idle" && (
         <div className="absolute right-1 bottom-full z-30 mb-1 max-w-[240px] rounded-md bg-popover px-2 py-1 text-[10.5px] leading-snug text-amber-700 shadow-md">
-          {mic.error}
+          {chatError(mic.error)}
         </div>
       )}
     </>

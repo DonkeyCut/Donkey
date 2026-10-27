@@ -15,6 +15,7 @@ import { projectWriteMode, withProjectDoc } from "./genvideo/docWriter";
 import type { RefAsset, Shot, VideoEvent, VideoPhase, VideoProject } from "./genvideo/types";
 import { useEditor } from "./store";
 import { isLinkedAssetType, nearestAspect } from "./types";
+import { errorFields, type UserErrorParams } from "./userError";
 import { defaultVideoAspects } from "./videoModels";
 
 // Brief-to-video ("generate a video") controller. It owns one VideoOrchestrator
@@ -57,6 +58,8 @@ export interface SceneRun {
    * it made (sheets, frames, takes), rendered in the chat card in order. */
   feed: SceneFeedItem[];
   error?: string;
+  errorCode?: string;
+  errorParams?: UserErrorParams;
   /** When the run began (planning), for the elapsed clock. */
   startedAt: number;
   /** When rendering began (approval) — the render timer counts from here, not
@@ -446,6 +449,8 @@ function applyEvent(projectId: string, e: VideoEvent): void {
       case "error":
         note(e.message);
         run.error = e.message;
+        run.errorCode = e.errorCode;
+        run.errorParams = e.errorParams;
         break;
     }
     return { run };
@@ -565,10 +570,20 @@ function syncFromProject(projectId: string): void {
   }
 }
 
-function fail(projectId: string, message: string): void {
+function fail(projectId: string, failure: unknown): void {
+  const fields = errorFields(failure, String(failure));
   useGenScene.setState((s) =>
     s.run && s.run.projectId === projectId
-      ? { run: { ...s.run, status: "failed", error: message, endedAt: Date.now() } }
+      ? {
+          run: {
+            ...s.run,
+            status: "failed",
+            errorCode: undefined,
+            errorParams: undefined,
+            ...fields,
+            endedAt: Date.now(),
+          },
+        }
       : s
   );
   // Failed is terminal — whatever the run placed belongs to the user now.
@@ -596,7 +611,7 @@ function failed(projectId: string, orch: SceneOrchestrator): (e: unknown) => voi
       return;
     }
     if (orchestrators.get(projectId) === orch && !orch.isAborted) {
-      fail(projectId, e instanceof Error ? e.message : String(e));
+      fail(projectId, e);
     }
   };
 }
@@ -862,6 +877,8 @@ export const useGenScene = create<GenSceneState>((set, get) => ({
               ...s.run,
               status: plan.breakdownApproved ? ("generating" as const) : ("planning" as const),
               error: undefined,
+              errorCode: undefined,
+              errorParams: undefined,
               endedAt: undefined,
               renderStartedAt: Date.now(),
             },

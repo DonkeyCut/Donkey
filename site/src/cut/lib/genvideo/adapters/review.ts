@@ -17,6 +17,7 @@ import { hostedPost } from "../../hosted";
 import { captureVideoFrames } from "../../visualFrames";
 import { findRunAsset } from "../docWriter";
 import { imagePart } from "./refImages";
+import { UserError } from "../../userError";
 import type {
   FrameCheckInput,
   ReviewInput,
@@ -27,6 +28,7 @@ import type {
 } from "../capabilities";
 
 const MAX_FRAMES = 8;
+const reviewUnavailable = () => new UserError("review_model_unavailable", "The review model is unavailable.");
 /** Aim for one frame every ~1s of take. */
 const SECONDS_PER_FRAME = 1;
 
@@ -236,7 +238,9 @@ The benchmark sheet — the artist to match:`,
         response_format: { type: "json_object" },
         input: [{ role: "user", content }],
       });
-      if (!res.ok) throw new Error("The review model is unavailable.");
+      if (!res.ok) {
+        throw reviewUnavailable();
+      }
       const body = (await res.json()) as { output_text?: string };
       const parsed = JSON.parse(body.output_text ?? "{}") as Record<string, unknown>;
       const ok = parsed.ok !== false;
@@ -280,7 +284,9 @@ The look: ${input.style || "(none)"}`,
         response_format: { type: "json_object" },
         input: [{ role: "user", content }],
       });
-      if (!res.ok) throw new Error("The review model is unavailable.");
+      if (!res.ok) {
+        throw reviewUnavailable();
+      }
       const body = (await res.json()) as { output_text?: string };
       const parsed = JSON.parse(body.output_text ?? "{}") as Record<string, unknown>;
       const verdicts = Array.isArray(parsed.panels) ? parsed.panels : [];
@@ -303,10 +309,14 @@ The look: ${input.style || "(none)"}`,
       // The take resolves wherever the run's project lives — store when open,
       // persisted doc when the user switched away mid-render.
       const asset = await findRunAsset(projectId, input.videoMediaId);
-      if (!asset || asset.type !== "video") throw new Error("No take to review.");
+      if (!asset || asset.type !== "video") {
+        throw new UserError("review_take_missing", "No take to review.");
+      }
       const clipSec = Math.max(0.1, asset.duration);
       const frames = await captureVideoFrames(asset.url, frameTimes(clipSec));
-      if (frames.length === 0) throw new Error("Could not sample the take.");
+      if (frames.length === 0) {
+        throw new UserError("review_take_unsampled", "Could not sample the take.");
+      }
       // Each cast sheet rides both the main review and the identity check —
       // resolve and encode it once per take, not once per use.
       const sheetImages = new Map<string, Awaited<ReturnType<typeof imagePart>>>();
@@ -359,7 +369,9 @@ The timeline slot needs ${input.slotSec.toFixed(1)}s of this take.`,
         text: { format: { type: "json_schema", schema: REVIEW_SCHEMA } },
         input: [{ role: "user", content }],
       });
-      if (!res.ok) throw new Error("The review model is unavailable.");
+      if (!res.ok) {
+        throw reviewUnavailable();
+      }
       const body = (await res.json()) as { output_text?: string };
       // The reviewer CLASSIFIES what it sees, one field per rule — an easier
       // ask than remembering to fail — and code adds the fields up. A reply
@@ -398,7 +410,9 @@ The canonical design sheet for "${sheet.name}":`,
             text: { format: { type: "json_schema", schema: IDENTITY_SCHEMA } },
             input: [{ role: "user", content: idContent }],
           });
-          if (!idRes.ok) throw new Error("The review model is unavailable.");
+          if (!idRes.ok) {
+            throw reviewUnavailable();
+          }
           const idBody = (await idRes.json()) as { output_text?: string };
           let idParsed: Record<string, unknown> | null = null;
           try {

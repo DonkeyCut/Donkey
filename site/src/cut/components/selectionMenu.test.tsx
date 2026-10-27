@@ -1,27 +1,39 @@
 import { describe, expect, test } from "bun:test";
-import { foldersGoNote, phoneGoNote, pickLabel } from "./selectionMenu";
+import { renderToStaticMarkup } from "react-dom/server";
+import { WithIntl } from "@/i18n/testing";
+import { usePickWords } from "./selectionMenu";
+
+// The words come from a hook, so one render hands them over in English.
+type Words = ReturnType<typeof usePickWords>;
+function Probe({ take }: { take: (words: Words) => void }) {
+  take(usePickWords());
+  return null;
+}
+let words!: Words;
+renderToStaticMarkup(<WithIntl><Probe take={(w) => (words = w)} /></WithIntl>);
+const { foldersGoNote, phoneGoNote, pickLabel } = words;
 
 const folder = { name: "Shoot day" };
 const item = { name: "clip.mp4" };
 
 describe("what a confirm calls a pick", () => {
   test("one folder by name, with what it holds in the grid's own word", () => {
-    expect(pickLabel([folder], [], ["project", "projects"], 3)).toBe(
+    expect(pickLabel([folder], [], "project", 3)).toBe(
       "“Shoot day” and its 3 projects",
     );
-    expect(pickLabel([folder], [], ["file", "files"], 1)).toBe("“Shoot day” and its 1 file");
-    expect(pickLabel([folder], [], ["item", "items"], 0)).toBe("“Shoot day”");
+    expect(pickLabel([folder], [], "file", 1)).toBe("“Shoot day” and its 1 file");
+    expect(pickLabel([folder], [], "item", 0)).toBe("“Shoot day”");
   });
 
   test("one item by name", () => {
-    expect(pickLabel([], [item], ["file", "files"], 0)).toBe("“clip.mp4”");
+    expect(pickLabel([], [item], "file", 0)).toBe("“clip.mp4”");
   });
 
   test("counts otherwise, the held count in the same word", () => {
-    expect(pickLabel([folder, folder], [item, item, item], ["project", "projects"], 19)).toBe(
+    expect(pickLabel([folder, folder], [item, item, item], "project", 19)).toBe(
       "2 folders (19 projects) and 3 projects",
     );
-    expect(pickLabel([folder], [item], ["item", "items"], 0)).toBe("1 folder and 1 item");
+    expect(pickLabel([folder], [item], "item", 0)).toBe("1 folder and 1 item");
   });
 });
 

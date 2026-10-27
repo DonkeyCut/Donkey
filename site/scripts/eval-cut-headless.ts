@@ -16,6 +16,7 @@
 import type { UIMessage } from "ai";
 import { openCloudProject, pushCloudProject } from "../src/cut/lib/headless/docSession";
 import { dropPiSession, streamCutChat } from "../src/cut/lib/pi/cutAgent";
+import { DEFAULT_LOCALE } from "../src/i18n/locales";
 import { headlessDeps, type HeadlessSession } from "../src/cut/lib/pi/serverDeps";
 import { geminiModelRoles } from "../src/lib/inference/gemini-models";
 
@@ -81,6 +82,7 @@ try {
     threadId,
     model: geminiModelRoles.chat,
     messages,
+    locale: DEFAULT_LOCALE,
     deps,
   }).getReader();
   try {

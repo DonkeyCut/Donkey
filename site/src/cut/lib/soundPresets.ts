@@ -12,6 +12,7 @@ import { normalizeSound, type ClipSound } from "@donkeycut/effects-kit";
 import { deleteTemplate, fetchLibrary, saveTemplate } from "./library";
 import type { Residency } from "./residency";
 import type { LibraryTemplate } from "./types";
+import { UserError } from "./userError";
 
 export interface SoundPreset {
   id: string;
@@ -49,7 +50,9 @@ export async function saveSoundPreset(
   sound: ClipSound
 ): Promise<SoundPreset | null> {
   const normalized = normalizeSound(sound);
-  if (!normalized) throw new Error("A flat treatment is nothing to save.");
+  if (!normalized) {
+    throw new UserError("sound_preset_flat", "A flat treatment is nothing to save.");
+  }
   const saved = await saveTemplate(projectId, {
     name,
     duration: 0,

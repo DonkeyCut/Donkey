@@ -17,13 +17,16 @@ import { runTranscription, useEditor } from "../../store";
 import { trackLocale } from "../../subtitles";
 import type { TranscribeRole } from "../capabilities";
 import type { TranscriptWord } from "../types";
+import { UserError } from "../../userError";
 
 export function makeTranscribeRole(projectId: string): TranscribeRole {
   return {
     async transcribe(audioMediaId) {
       const state = useEditor.getState();
       const asset = state.assets.find((a) => a.id === audioMediaId);
-      if (!asset || asset.type !== "audio") throw new Error("No audio to transcribe.");
+      if (!asset || asset.type !== "audio") {
+        throw new UserError("transcribe_audio_missing", "No audio to transcribe.");
+      }
       const cues = await runTranscription(projectId, {
         duration: asset.duration,
         // The recognizer's language: a voiceover stamped what it speaks at
@@ -37,7 +40,9 @@ export function makeTranscribeRole(projectId: string): TranscribeRole {
       // The poller yields null when the project closed mid-run. That is a
       // pause, never a result — an empty transcript here would silently plan
       // shots with no relation to the narration's words.
-      if (cues === null) throw new Error("Transcription stopped — the project was closed.");
+      if (cues === null) {
+        throw new UserError("transcribe_project_closed", "Transcription stopped — the project was closed.");
+      }
       return cues.flatMap<TranscriptWord>((c) => c.words ?? []);
     },
   };

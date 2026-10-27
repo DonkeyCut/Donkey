@@ -29,6 +29,7 @@ import { useEditor } from "../store";
 import { nearestAspect, TRANSITION_STYLE_IDS, type TransitionStyle } from "../types";
 import { defaultVideoAspects } from "../videoModels";
 import { docPlaceGenAudio, docPlaceGenClip, projectWriteMode, withProjectDoc } from "./docWriter";
+import { UserError } from "../userError";
 import type { AudioClipInfo, EditorBridge, TimelineInfo } from "./editor";
 
 /** The rate the plan runs at. Fixed to the export frame rate so a shot's frame
@@ -107,14 +108,18 @@ export class StoreEditorBridge implements EditorBridge {
   ): Promise<string> {
     if ((await this.mode()) === "store" && this.open()) {
       const id = useEditor.getState().placeGenClip(mediaId, toSec(startFrame), toSec(endFrame), opts);
-      if (!id) throw new Error(`placeClip: no placeable asset ${mediaId}`);
+      if (!id) {
+        throw new UserError("scene_clip_unplaceable", `placeClip: no placeable asset ${mediaId}`, { id: mediaId });
+      }
       return id;
     }
     let placed: string | null = null;
     await withProjectDoc(this.projectId, (doc) => {
       placed = docPlaceGenClip(doc, mediaId, toSec(startFrame), toSec(endFrame), opts);
     });
-    if (!placed) throw new Error(`placeClip: no placeable asset ${mediaId}`);
+    if (!placed) {
+      throw new UserError("scene_clip_unplaceable", `placeClip: no placeable asset ${mediaId}`, { id: mediaId });
+    }
     return placed;
   }
 
@@ -184,14 +189,18 @@ export class StoreEditorBridge implements EditorBridge {
       const id = useEditor
         .getState()
         .placeGenAudio(mediaId, toSec(startFrame), toSec(durationFrames), audioOpts);
-      if (!id) throw new Error(`placeAudio: no audio asset ${mediaId}`);
+      if (!id) {
+        throw new UserError("scene_audio_unplaceable", `placeAudio: no audio asset ${mediaId}`, { id: mediaId });
+      }
       return id;
     }
     let placed: string | null = null;
     await withProjectDoc(this.projectId, (doc) => {
       placed = docPlaceGenAudio(doc, mediaId, toSec(startFrame), toSec(durationFrames), audioOpts);
     });
-    if (!placed) throw new Error(`placeAudio: no audio asset ${mediaId}`);
+    if (!placed) {
+      throw new UserError("scene_audio_unplaceable", `placeAudio: no audio asset ${mediaId}`, { id: mediaId });
+    }
     return placed;
   }
 
