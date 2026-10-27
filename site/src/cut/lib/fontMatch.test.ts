@@ -191,4 +191,15 @@ describe("faces off a reference frame", () => {
     expect(ranked[0].score).toBeGreaterThanOrEqual(good);
     expect(ranked.find((m) => m.font === "anton")!.score).toBeLessThan(ranked[0].score);
   });
+
+  test("a recap template's small display serif ranks Libre Caslon Display over Playfair", async () => {
+    // "photo 29" in warm grey over peach, 41 px tall in a 576 px frame: a
+    // thin Caslon-style display serif. Before Libre Caslon Display was
+    // bundled the closest serif was Playfair Display, far wider and with a
+    // taller x-height, at 0.29.
+    const ranked = await rankFaces(await frameInk("serif-photo-29.webp"), "photo 29", catalog, fontStack);
+    const caslon = ranked.find((m) => m.font === "libre-caslon-display")!;
+    const playfair = ranked.find((m) => m.font === "playfair")!;
+    expect(caslon.score).toBeGreaterThan(playfair.score + 0.1);
+  });
 });

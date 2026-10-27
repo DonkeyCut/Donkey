@@ -70,6 +70,13 @@
     "note": "Bold only: the tall condensed face of a lyric template's big words."
   },
   {
+    "id": "libre-caslon-display",
+    "kind": "serif",
+    "look": "thin high-contrast Caslon display serif",
+    "family": "Libre Caslon Display",
+    "weights": [400]
+  },
+  {
     "family": "Roboto",
     "weights": [400, 500, 600, 700],
     "aliases": [
