@@ -19,7 +19,7 @@ interface ErrorBody {
 const text = (v: unknown): string | undefined => (typeof v === "string" && v.trim() ? v.trim() : undefined);
 
 /** The account balance can't cover the generation — callers surface a link to
- * buy credits alongside the message. */
+ * the plans alongside the message. */
 export class NoCreditsError extends UserError {
   constructor() {
     super("credits_insufficient", NO_CREDITS_MESSAGE);

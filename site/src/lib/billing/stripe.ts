@@ -51,7 +51,7 @@ export function portalConfigurationId(): string | undefined {
 }
 
 // Reuse one Stripe customer per user, stored on User.stripeCustomerId so every
-// billing product (Pro, top-ups) shares it and a customer is never duplicated.
+// billing product shares it and a customer is never duplicated.
 export async function ensureStripeCustomer(input: {
   userId: string;
   email: string;

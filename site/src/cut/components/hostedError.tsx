@@ -8,7 +8,7 @@ import { openUpgrade } from "@/cut/lib/upgrade";
 import { useDescribeError } from "@/i18n/describeError";
 
 /** Opens the upgrade dialog on its credits wall. A surface without the dialog
- * (the ChatGPT card) opens the credits page. */
+ * (the ChatGPT card) opens the settings page, where plans are sold. */
 export function openCreditsWall(): void {
   if (openUpgrade("credits")) {
     return;
@@ -18,7 +18,7 @@ export function openCreditsWall(): void {
 
 /** A hosted-inference failure (chat reply or generation tile): an Error, a
  * string, or a record carrying `error` and `errorCode` (a job). A balance
- * failure reads "Insufficient credits, reload here" with the link to the
+ * failure reads "Insufficient credits, see plans" with the link to the
  * credits wall inline; any other failure reads through the shared describer, and
  * a missing one reads `fallback`.
  * Surfaces inside the chat panel pass `link={false}` and lean on the composer's

@@ -108,9 +108,9 @@ async function noteBalance(res: Response) {
 // One re-check in flight at a time; focus/visibility events can fire together.
 let rechecking: Promise<void> | null = null;
 
-/** While flagged out, ask the balance route directly: a top-up happens on the
- * settings page, so waiting for the next hosted call would leave the credits
- * tab up after the user already paid. Any failure leaves the flag as is. */
+/** While flagged out, ask the balance route directly: a subscription starts on
+ * the settings page, so waiting for the next hosted call would leave the
+ * credits tab up after the user already paid. Any failure leaves the flag as is. */
 export function recheckCredits(): Promise<void> {
   if (!useOutOfCredits.getState().out) return Promise.resolve();
   rechecking ??= hostedFetch("/api/credits/balance", { cache: "no-store" })

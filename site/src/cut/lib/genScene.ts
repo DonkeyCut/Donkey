@@ -673,7 +673,7 @@ interface GenSceneState {
    * render only the new ones. The rest of the scene stays as it is. */
   recutShots: (fromN: number, toN: number, instruction: string) => { ok: boolean; message: string };
   /** Redo every shot holding a still in one go — the card's single retry
-   * button after a credits top-up or a bad batch. */
+   * button after credits land or a bad batch. */
   retryFailedShots: () => { ok: boolean; message: string };
   /** Restyle the whole scene and redo every shot. */
   restyle: (style: string) => { ok: boolean; message: string };

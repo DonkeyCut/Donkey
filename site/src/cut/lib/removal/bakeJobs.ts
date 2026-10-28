@@ -248,7 +248,7 @@ export function cancelMatteBake(key: string): void {
 }
 
 /** Clear a failed bake and run the ladder again — the panel's Retry, and the
- * upgrade affordance after a credit top-up. */
+ * upgrade affordance once credits land. */
 export function retryMatteBake(clipId: string): void {
   failed.delete(clipId);
   setJob(clipId, null);

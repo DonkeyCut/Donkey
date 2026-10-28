@@ -153,7 +153,7 @@ interface GenerateState {
   ) => { jobId: string; settled: Promise<GenerateJob>; submitted: Promise<VideoSubmitOutcome> };
   /** Resubmit a failed video job as itself: same job id (so its chat card and
    * doc mirror follow along), same ladder. A render that failed on an empty
-   * balance retries after a top-up without retyping the prompt or losing its
+   * balance retries once credits land without retyping the prompt or losing its
    * references. */
   retry: (id: string) => void;
   dismiss: (id: string) => void;
@@ -239,8 +239,8 @@ export function signInUrl(): string {
   return `/sign-in?callbackURL=${encodeURIComponent(window.location.href)}`;
 }
 
-/** Cut's billing page, where credits are bought. Linked from any generation
- * error caused by an empty balance. */
+/** Cut's settings page, where the plans are sold. Linked from any
+ * generation error caused by an empty balance. */
 export function creditsUrl(): string {
   return `${CUT_APP_BASE}/settings`;
 }
