@@ -48,14 +48,6 @@
       "invoking": "プロジェクトを読み込み中",
       "invoked": "プロジェクトを読み込みました"
     },
-    "listCommands": {
-      "invoking": "コマンド一覧を取得中",
-      "invoked": "コマンド一覧を取得しました"
-    },
-    "describeCommands": {
-      "invoking": "コマンドの説明を取得中",
-      "invoked": "コマンドの説明を取得しました"
-    },
     "listSkills": {
       "invoking": "ガイド一覧を取得中",
       "invoked": "ガイド一覧を取得しました"

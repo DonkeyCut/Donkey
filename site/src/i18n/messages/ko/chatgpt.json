@@ -48,14 +48,6 @@
       "invoking": "프로젝트 읽는 중",
       "invoked": "프로젝트 읽기 완료"
     },
-    "listCommands": {
-      "invoking": "명령어 목록 조회 중",
-      "invoked": "명령어 목록 조회 완료"
-    },
-    "describeCommands": {
-      "invoking": "명령어 설명 중",
-      "invoked": "명령어 설명 완료"
-    },
     "listSkills": {
       "invoking": "가이드 목록 조회 중",
       "invoked": "가이드 목록 조회 완료"

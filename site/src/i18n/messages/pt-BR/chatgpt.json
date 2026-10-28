@@ -48,14 +48,6 @@
       "invoking": "Lendo o projeto",
       "invoked": "Projeto lido"
     },
-    "listCommands": {
-      "invoking": "Listando comandos",
-      "invoked": "Comandos listados"
-    },
-    "describeCommands": {
-      "invoking": "Descrevendo comandos",
-      "invoked": "Comandos descritos"
-    },
     "listSkills": {
       "invoking": "Listando guias",
       "invoked": "Guias listados"

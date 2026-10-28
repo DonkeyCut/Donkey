@@ -48,14 +48,6 @@
       "invoking": "正在读取项目",
       "invoked": "项目已读取"
     },
-    "listCommands": {
-      "invoking": "正在列出命令",
-      "invoked": "命令已列出"
-    },
-    "describeCommands": {
-      "invoking": "正在描述命令",
-      "invoked": "命令已描述"
-    },
     "listSkills": {
       "invoking": "正在列出指南",
       "invoked": "指南已列出"

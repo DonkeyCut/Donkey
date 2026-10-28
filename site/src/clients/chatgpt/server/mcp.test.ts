@@ -7,7 +7,7 @@ import {
 } from "@/clients/chatgpt/server/mcp";
 import { WIDGET_URI } from "@/clients/chatgpt/contracts";
 import type { projectTools, ProjectResult } from "@/clients/chatgpt/server/projects";
-import { unknownCommandNames } from "@/clients/chatgpt/server/catalog";
+import { COMMAND_NAMES, unknownCommandNames } from "@/clients/chatgpt/server/catalog";
 
 const config = SETTINGS.chatgptApp.schema.parse({
   ...SETTINGS.chatgptApp.default,
@@ -86,15 +86,12 @@ describe("ChatGPT MCP protocol", () => {
         [
           "account_status",
           "create_project",
-          "describe_commands",
-          "edit_project",
           "export_video",
           "get_export_status",
           "get_job_status",
           "get_preview_status",
           "import_media",
           "inspect_project",
-          "list_commands",
           "list_projects",
           "list_skills",
           "open_project",
@@ -102,8 +99,30 @@ describe("ChatGPT MCP protocol", () => {
           "redo",
           "render_preview",
           "undo",
-        ],
+          ...COMMAND_NAMES,
+        ].sort(),
       );
+
+      // OpenAI's review needs every hint set explicitly, a read never
+      // destructive, and each operation its own tool with its own schema.
+      for (const tool of tools) {
+        const hints = tool.annotations!;
+        for (const hint of ["readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint"] as const) {
+          expect(typeof hints[hint]).toBe("boolean");
+        }
+        if (hints.readOnlyHint) {
+          expect(hints.destructiveHint).toBe(false);
+        }
+        expect(tool.description!.length).toBeGreaterThan(0);
+        expect(JSON.stringify(tool.inputSchema)).not.toMatch(/"commands"/);
+      }
+      for (const name of ["delete_item", "delete_asset", "set_color_grade", "undo", "redo"]) {
+        expect(tools.find((tool) => tool.name === name)?.annotations?.destructiveHint).toBe(true);
+      }
+      expect(tools.find((tool) => tool.name === "check_facts")?.annotations).toMatchObject({ readOnlyHint: true, openWorldHint: true });
+      expect(tools.find((tool) => tool.name === "library_share")?.annotations).toMatchObject({ openWorldHint: true, destructiveHint: true });
+      expect(tools.find((tool) => tool.name === "add_title")?.annotations).toMatchObject({ readOnlyHint: false, destructiveHint: false });
+      expect(tools.find((tool) => tool.name === "trim_clip")?.inputSchema.required).toContain("projectId");
       expect(tools.find((tool) => tool.name === "import_media")?._meta).toMatchObject({
         "openai/fileParams": ["files"],
       });
@@ -111,11 +130,6 @@ describe("ChatGPT MCP protocol", () => {
         readOnlyHint: false,
         destructiveHint: false,
         openWorldHint: true,
-      });
-      expect(tools.find((tool) => tool.name === "edit_project")?.annotations).toMatchObject({
-        readOnlyHint: false,
-        destructiveHint: true,
-        openWorldHint: false,
       });
       expect(
         tools.find((tool) => tool.name === "render_preview")?.annotations,
@@ -205,8 +219,8 @@ test("render scope requests a reconnect through the MCP authentication challenge
     expect(result.isError).toBe(true);
     expect(JSON.stringify(result._meta)).toContain("insufficient_scope");
     const edit = await client.callTool({
-      name: "edit_project",
-      arguments: { projectId: "project", commands: [{ name: "set_aspect", input: { aspect: "9:16" } }] },
+      name: "set_aspect",
+      arguments: { projectId: "project", aspect: "9:16" },
     });
     expect(edit.isError).toBe(true);
     expect(JSON.stringify(edit._meta)).toContain("projects:write");
@@ -356,28 +370,30 @@ test("2025-era clients still initialize and read tools and widget resources stat
   }
 });
 
-test("edit results reach the model as text and structure, and captured frames become image blocks", async () => {
+test("each command is its own tool: writes edit, reads inspect, and captured frames become image blocks", async () => {
   const frame = "data:image/jpeg;base64,/9j/4AAQ";
   const edited: ProjectResult = {
     ...data,
-    view: {
-      ...data.view,
-      changed: true,
-      results: [
-        { name: "set_aspect", ok: true, output: { aspect: "9:16" } },
-        { name: "capture_frame", ok: true, output: { image: frame, at: 1.5 } },
-      ],
-    },
+    view: { ...data.view, changed: true, results: [{ name: "set_aspect", ok: true, output: { aspect: "9:16" } }] },
     playback: null,
   };
-  let received: unknown = null;
+  const captured: ProjectResult = {
+    ...data,
+    view: { ...data.view, results: [{ name: "capture_frame", ok: true, output: { image: frame, at: 1.5 } }] },
+    playback: null,
+  };
+  const received: unknown[] = [];
   const server = createChatgptServer(
     { userId: "owner", scopes: ["projects:read", "projects:write"], grantId: "grant" },
     config,
     fakeProjects({
-      edit: async (_projectId, commands, label) => {
-        received = { commands, label };
+      edit: async (projectId, commands) => {
+        received.push({ edit: projectId, commands });
         return edited;
+      },
+      inspect: async (projectId, commands) => {
+        received.push({ inspect: projectId, commands });
+        return captured;
       },
     }),
   );
@@ -386,38 +402,25 @@ test("edit results reach the model as text and structure, and captured frames be
   await server.connect(serverTransport);
   await client.connect(clientTransport);
   try {
-    const result = await client.callTool({
-      name: "edit_project",
-      arguments: {
-        projectId: "project",
-        label: "Vertical cut",
-        commands: [{ name: "set_aspect", input: { aspect: "9:16" } }, { name: "capture_frame" }],
-      },
-    });
-    expect(received).toEqual({
-      commands: [
-        { name: "set_aspect", input: { aspect: "9:16" } },
-        { name: "capture_frame", input: {} },
-      ],
-      label: "Vertical cut",
-    });
-    const content = result.content as { type: string; text?: string; data?: string; mimeType?: string }[];
-    expect(content[0].text).toContain("2 commands ran; the project was saved");
+    const write = await client.callTool({ name: "set_aspect", arguments: { projectId: "project", aspect: "9:16" } });
+    expect((write.content as { text: string }[])[0].text).toContain("1 command ran; the project was saved");
+
+    const read = await client.callTool({ name: "capture_frame", arguments: { projectId: "project", t: 1.5 } });
+    expect(received).toEqual([
+      { edit: "project", commands: [{ name: "set_aspect", input: { aspect: "9:16" } }] },
+      { inspect: "project", commands: [{ name: "capture_frame", input: { t: 1.5 } }] },
+    ]);
+    const content = read.content as { type: string; text?: string; data?: string; mimeType?: string }[];
     expect(content[0].text).not.toContain("base64");
     expect(content[1]).toMatchObject({ type: "image", mimeType: "image/jpeg", data: "/9j/4AAQ" });
-    expect(JSON.stringify(result.structuredContent)).not.toContain("base64");
+    expect(JSON.stringify(read.structuredContent)).not.toContain("base64");
 
-    const index = await client.callTool({ name: "list_commands", arguments: {} });
-    const commands = (index.structuredContent as { commands: { name: string; reads?: true }[] }).commands;
-    expect(commands.some((c) => c.name === "set_aspect")).toBe(true);
-    expect(commands.find((c) => c.name === "watch_video")?.reads).toBe(true);
-    expect(commands.some((c) => c.name === "get_state" || c.name === "undo" || c.name === "import_url")).toBe(false);
-    // inspect_project's default read passes the batch guard while staying out of the listing.
+    // A schema violation never reaches the project.
+    const invalid = await client.callTool({ name: "set_aspect", arguments: { projectId: "project", nope: 1 } });
+    expect(invalid.isError).toBe(true);
+    expect(received).toHaveLength(2);
+    // inspect_project's default read passes the batch guard.
     expect(unknownCommandNames(["get_state", "set_aspect", "nope"])).toEqual(["nope"]);
-
-    const described = await client.callTool({ name: "describe_commands", arguments: { names: ["trim_clip", "nope"] } });
-    expect(described.structuredContent).toMatchObject({ unknown: ["nope"] });
-    expect((described.structuredContent as { commands: { name: string; inputSchema: object }[] }).commands[0].name).toBe("trim_clip");
 
     const skill = await client.callTool({ name: "read_skill", arguments: { name: "timeline-editing" } });
     expect((skill.content as { text: string }[])[0].text).toContain("# Timeline editing");

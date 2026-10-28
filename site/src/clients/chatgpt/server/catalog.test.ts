@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { AI_TOOLS, PROJECT_TOOLS } from "@/cut/server/ai/catalog";
-import { COMMAND_NAMES, COMMANDS, READ_COMMANDS, SKILL_INDEX, readSkill, unknownCommandNames } from "./catalog";
+import { COMMAND_NAMES, COMMANDS, READ_COMMANDS, SKILL_INDEX, readSkill, unknownCommandNames, unmappedCommands } from "./catalog";
+import { SERVER_INSTRUCTIONS } from "./mcp";
 
 test("first-class history tools can queue their editor commands", () => {
   expect(COMMANDS.some((tool) => tool.name === "undo" || tool.name === "redo")).toBe(false);
@@ -27,7 +28,7 @@ test("ChatGPT exposes file metadata as a read command", () => {
 test("ChatGPT guides and command descriptions refer to available tools", () => {
   const available = new Set([
     ...COMMANDS.map((tool) => tool.name),
-    "undo", "redo", "render_preview", "list_skills", "read_skill",
+    "undo", "redo", "render_preview", "list_projects", "list_skills", "read_skill",
   ]);
   const unavailable = AI_TOOLS.filter((tool) => !available.has(tool.name));
   const guidance = [
@@ -57,7 +58,19 @@ test("ChatGPT preserves the shared inspection schemas and teaches their use", ()
     expect(guide).toContain(name);
   }
   expect(READ_COMMANDS.has("note_source")).toBe(false);
-  expect(guide).toContain("edit_project with note_source");
+  expect(guide).toContain("with note_source");
   expect(PROJECT_TOOLS.find((tool) => tool.name === "listen_audio")!.description).toContain("get_state");
   expect(COMMANDS.find((tool) => tool.name === "listen_audio")!.description).toContain("inspect_project");
+});
+
+test("every exposed command declares its effect, so its tool carries honest annotations", () => {
+  expect(unmappedCommands()).toEqual([]);
+  expect(COMMAND_NAMES).not.toContain("list_projects");
+});
+
+test("nothing teaches the retired generic executor", () => {
+  const text = [SERVER_INSTRUCTIONS, ...SKILL_INDEX.map((name) => readSkill(name)!), ...COMMANDS.map((tool) => tool.description)];
+  for (const retired of ["edit_project", "list_commands", "describe_commands"]) {
+    for (const t of text) expect(t).not.toContain(retired);
+  }
 });

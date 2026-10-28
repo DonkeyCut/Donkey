@@ -1,4 +1,4 @@
-import { createMcpHandler, McpServer } from "@modelcontextprotocol/server";
+import { createMcpHandler, fromJsonSchema, McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import {
   checkInMemoryRateLimit,
@@ -10,13 +10,11 @@ import {
   type ProjectView,
 } from "@/clients/chatgpt/contracts";
 import {
-  commandIndex,
-  COMMAND_NAMES,
-  describeCommands,
+  commandHints,
+  COMMANDS,
   readSkill,
   SKILL_INDEX,
 } from "@/clients/chatgpt/server/catalog";
-import { MAX_COMMANDS_PER_BATCH } from "@/cut/server/cloud/commands";
 import { DOC_EXPORT_PRESETS } from "@/cut/lib/exportPresets";
 import { CUT_LOUDNESS, LOUDNESS_CHOICES, LOUDNESS_IDS } from "@/cut/lib/loudnessSettings";
 import { formatCredits } from "@/lib/credits/format-credits";
@@ -54,6 +52,8 @@ const editAnnotations = {
   openWorldHint: false,
   idempotentHint: false,
 };
+// Undo and redo overwrite the document with another revision of it.
+const historyAnnotations = { ...editAnnotations, destructiveHint: true };
 
 export const REPOSITORY_URL = "https://github.com/DonkeyCut/Donkey";
 
@@ -62,19 +62,38 @@ export const REPOSITORY_URL = "https://github.com/DonkeyCut/Donkey";
 export const SERVER_INSTRUCTIONS = [
   `Donkey Cut is an open-source video editor (Apache 2.0, ${REPOSITORY_URL}). Edit the connected account's cloud projects: import footage, inspect it, cut it, caption it, preview, undo, export.`,
   "Editing, previews and exports are free. Hosted AI (voiceover, music, images, caption rewriting, transcription past the monthly allowance) spends the account's credits. Imports and exports use the account's cloud storage.",
-  "You plan the edit with the user and interpret the footage; Donkey Cut supplies media inspection, signal measurements and editing commands. Use the user's assets and references. Ask for missing files, links or creative decisions when they are needed to fulfill the request. Use list_commands and describe_commands as the capability and input contract, and read_skill for guidance tailored to this ChatGPT client.",
-  "Workflow: list_projects or create_project → open_project → import_media → inspect_project → list_commands once, describe_commands for the ones you need → edit_project (batches, one undo step each) → render_preview → undo/redo → export_video.",
+  "You plan the edit with the user and interpret the footage; Donkey Cut supplies media inspection, signal measurements and editing tools. Use the user's assets and references. Ask for missing files, links or creative decisions when they are needed to fulfill the request. Read read_skill for guidance tailored to this ChatGPT client.",
+  "Workflow: list_projects or create_project → open_project → import_media → inspect_project → editing tools (one undo step each) → render_preview → undo/redo → export_video.",
   "Keep the existing editor card for the whole editing session. Its undo history belongs to that card. Call open_project only to open a project initially, switch projects, or recover a missing card. After editing, the existing card shows the changes; use render_preview and get_preview_status to verify the saved preview. Reopening the project creates a fresh editor with empty history.",
-  "Every edit runs inside the Donkey Cut editor in the card, on the document the user is looking at: open_project puts that editor in the card, timeline and panels included, when the connection can edit, and edit_project, inspect_project, import_media, undo and redo answer that no card is open until it is. A read-only connection sees the current preview playing. Call render_preview only after an edit or when the card reports no current preview.",
+  "Every edit runs inside the Donkey Cut editor in the card, on the document the user is looking at: open_project puts that editor in the card, timeline and panels included, when the connection can edit, and the editing and inspection tools, import_media, undo and redo answer that no card is open until it is. A read-only connection sees the current preview playing. Call render_preview only after an edit or when the card reports no current preview.",
   "If the editor shows Reconnect, ask the user to click it to renew the embedded session and reload the editor in ChatGPT. If a tool reports no card open, ask the user to open the project card and keep it open, then resume when it is ready. When the catalog lacks an operation, explain the limit and ask for the required media or a user action in Donkey Cut.",
-  "Inspect before editing. Watch and listen to the relevant media before content-based cuts; use silence, beat, level and color measurements for timing and adjustments. Commands marked reads run through inspect_project; observations saved with note_source and other writes run through edit_project. Verify changes with the returned state, frames and audio, and give the user a preview to review. Claim only coverage and completed work confirmed by tool results.",
-  "Times are seconds; ids come from inspect_project. A batch stops at its first failed command. A tool that answers with a job still running is finished by get_job_status.",
+  "Inspect before editing. Watch and listen to the relevant media before content-based cuts; use silence, beat, level and color measurements for timing and adjustments. Save observations with note_source. Verify changes with the returned state, frames and audio, and give the user a preview to review. Claim only coverage and completed work confirmed by tool results.",
+  "Times are seconds; ids come from inspect_project. A tool that answers with a job still running is finished by get_job_status.",
 ].join("\n");
 
-const commandSchema = z.object({
-  name: z.string().min(1).max(64).describe(`A command from list_commands: one of ${COMMAND_NAMES.join(", ")}`),
-  input: z.record(z.string(), z.unknown()).optional().describe("The command's input, per describe_commands"),
-});
+/** An editor command as its own tool: the command's schema plus the project
+ * it runs on. Validators compile once per process, outside any request. */
+type CommandTool = { name: string; title: string; description: string; inputSchema: ReturnType<typeof fromJsonSchema<Record<string, unknown>>> };
+let commandTools: CommandTool[] | null = null;
+
+function listCommandTools(): CommandTool[] {
+  commandTools ??= COMMANDS.map((command) => {
+    const schema = command.inputSchema as { properties?: Record<string, unknown>; required?: string[] };
+    return {
+      name: command.name,
+      title: command.name.charAt(0).toUpperCase() + command.name.slice(1).replaceAll("_", " "),
+      description: command.description,
+      inputSchema: fromJsonSchema<Record<string, unknown>>({
+        ...schema,
+        type: "object",
+        properties: { projectId: { type: "string", minLength: 1, maxLength: 128, description: "The cloud project's id" }, ...schema.properties },
+        required: ["projectId", ...(schema.required ?? [])],
+      }),
+    };
+  });
+  return commandTools;
+}
+
 /** A file ChatGPT attaches to a call (openai/fileParams). */
 const fileSchema = z.object({
   download_url: z.url(),
@@ -131,7 +150,7 @@ export function createChatgptServer(
   t: ChatgptTranslator = ENGLISH,
 ) {
   const server = new McpServer(
-    { name: "donkey-cut", title: "Donkey Cut", version: "1.1.0" },
+    { name: "donkey-cut", title: "Donkey Cut", version: "1.2.0" },
     { instructions: SERVER_INSTRUCTIONS },
   );
   const readMetadata = {
@@ -277,7 +296,7 @@ export function createChatgptServer(
     {
       title: "Import footage into a project",
       description:
-        "Bring footage into a cloud project: files the user attached to the chat (files), or links (urls) — TikTok, YouTube, Instagram, an X post, a web page, or a direct video/audio/image link. Every file lands as a project asset with an assetId for edit_project's add_clip. Free; the bytes use the account's cloud storage. A long download can outlast this call — then the answer carries a job to finish with get_job_status. audio_only keeps just the soundtrack of a link.",
+        "Bring footage into a cloud project: files the user attached to the chat (files), or links (urls) — TikTok, YouTube, Instagram, an X post, a web page, or a direct video/audio/image link. Every file lands as a project asset with an assetId for add_clip. Free; the bytes use the account's cloud storage. A long download can outlast this call — then the answer carries a job to finish with get_job_status. audio_only keeps just the soundtrack of a link.",
       inputSchema: z.object({
         projectId: idSchema,
         files: z.array(fileSchema).max(10).optional().describe("Files attached in ChatGPT"),
@@ -306,66 +325,20 @@ export function createChatgptServer(
     {
       title: "Inspect a project",
       description:
-        "Read a project's full editor state — media assets with ids, durations, transcripts and notes; the video tracks with clip ids, trims and gaps; soundtrack, titles, captions, aspect. Call it before editing and after an edit_project you want to verify. Pass commands to run read-only inspection commands instead (watch_video for contact sheets of the footage, capture_frame for the composited picture at a time, detect_silence, listen_audio, detect_beats — list_commands marks them reads). Free.",
-      inputSchema: z.object({
-        projectId: idSchema,
-        commands: z.array(commandSchema).max(MAX_COMMANDS_PER_BATCH).optional(),
-      }),
+        "Read a project's full editor state — media assets with ids, durations, transcripts and notes; the video tracks with clip ids, trims and gaps; soundtrack, titles, captions, aspect. Call it before editing and after an edit you want to verify. Free.",
+      inputSchema: z.object({ projectId: idSchema }),
       outputSchema: viewSchema,
       annotations: readOnlyAnnotations,
       _meta: { ...readMetadata, ...status("inspectProject") },
     },
-    ({ projectId, commands }) => runTool(() => projects.inspect(projectId, commands?.map((c) => ({ name: c.name, input: c.input ?? {} })))),
-  );
-
-  server.registerTool(
-    "list_commands",
-    {
-      title: "List editing commands",
-      description:
-        "The catalog of editing commands edit_project runs, one line each. Call it once per conversation, then describe_commands for the input schemas of the ones you will use.",
-      inputSchema: z.object({}),
-      outputSchema: z.object({ commands: z.array(z.object({ name: z.string(), summary: z.string(), reads: z.literal(true).optional() })) }),
-      annotations: readOnlyAnnotations,
-      _meta: { ...readMetadata, ...status("listCommands") },
-    },
-    () => {
-      const commands = commandIndex();
-      return {
-        content: [{ type: "text" as const, text: commands.map((c) => `${c.name}${c.reads ? " (read)" : ""}: ${c.summary}`).join("\n") }],
-        structuredContent: { commands },
-      };
-    },
-  );
-
-  server.registerTool(
-    "describe_commands",
-    {
-      title: "Describe editing commands",
-      description: "Full descriptions and JSON input schemas for named commands from list_commands.",
-      inputSchema: z.object({ names: z.array(z.string().min(1).max(64)).min(1).max(20) }),
-      outputSchema: z.object({
-        commands: z.array(z.object({ name: z.string(), description: z.string(), inputSchema: z.record(z.string(), z.unknown()) })),
-        unknown: z.array(z.string()),
-      }),
-      annotations: readOnlyAnnotations,
-      _meta: { ...readMetadata, ...status("describeCommands") },
-    },
-    ({ names }) => {
-      const { found, unknown } = describeCommands(names);
-      const commands = found.map(({ name, description, inputSchema }) => ({ name, description, inputSchema }));
-      return {
-        content: [{ type: "text" as const, text: JSON.stringify({ commands, unknown }) }],
-        structuredContent: { commands, unknown },
-      };
-    },
+    ({ projectId }) => runTool(() => projects.inspect(projectId)),
   );
 
   server.registerTool(
     "list_skills",
     {
       title: "List editing guides",
-      description: "Guides for Donkey Cut in ChatGPT: the editor-card workflow, watching and listening, signal measurements, timeline editing, captions, transitions, graphics, audio and export. Read one with read_skill before working in an unfamiliar area. Available commands and inputs come from list_commands and describe_commands.",
+      description: "Guides for Donkey Cut in ChatGPT: the editor-card workflow, watching and listening, signal measurements, timeline editing, captions, transitions, graphics, audio and export. Read one with read_skill before working in an unfamiliar area.",
       inputSchema: z.object({}),
       outputSchema: z.object({ skills: z.array(z.string()) }),
       annotations: readOnlyAnnotations,
@@ -381,7 +354,7 @@ export function createChatgptServer(
     "read_skill",
     {
       title: "Read an editing guide",
-      description: "Read a ChatGPT editing guide from list_skills. Commands marked reads run through inspect_project; commands that write run through edit_project.",
+      description: "Read a ChatGPT editing guide from list_skills.",
       inputSchema: z.object({ name: z.string().min(1).max(64) }),
       outputSchema: z.object({ name: z.string(), guide: z.string() }),
       annotations: readOnlyAnnotations,
@@ -394,33 +367,40 @@ export function createChatgptServer(
     },
   );
 
-  server.registerTool(
-    "edit_project",
-    {
-      title: "Edit a project",
-      description:
-        "Run editing commands on a cloud project, in order, as one undo step in the editor open in the card. Commands come from list_commands with inputs per describe_commands; ids and times come from inspect_project. The batch stops at the first command that fails and reports every outcome. label names the step for undo. Editing is free; commands that generate media (voiceover_generate, generate_music, generate_image, captions_generate) spend the account's credits.",
-      inputSchema: z.object({
-        projectId: idSchema,
-        commands: z.array(commandSchema).min(1).max(MAX_COMMANDS_PER_BATCH),
-        label: z.string().max(80).optional().describe("What this step does, e.g. \"Cut to 30s and add captions\""),
-      }),
-      outputSchema: viewSchema,
-      annotations: { ...editAnnotations, destructiveHint: true },
-      _meta: { ...editMetadata, ...status("editProject") },
-    },
-    ({ projectId, commands, label }) =>
-      editing(() => runTool(() => projects.edit(projectId, commands.map((c) => ({ name: c.name, input: c.input ?? {} })), label))),
-  );
+  // Every editor command is its own tool, annotated by what it does. A read
+  // runs without saving; a write is one undo step in the card's editor. The
+  // project view they answer with goes undeclared: a copy of its schema per
+  // command would double the tool listing.
+  for (const command of listCommandTools()) {
+    const hints = commandHints(command.name);
+    const reads = hints.readOnlyHint;
+    server.registerTool(
+      command.name,
+      {
+        title: command.title,
+        description: command.description,
+        inputSchema: command.inputSchema,
+        annotations: hints,
+        _meta: reads ? { ...readMetadata, ...status("inspectProject") } : { ...editMetadata, ...status("editProject") },
+      },
+      ({ projectId, ...input }) => {
+        const call = [{ name: command.name, input }];
+        const id = String(projectId);
+        return reads
+          ? runTool(() => projects.inspect(id, call))
+          : editing(() => runTool(() => projects.edit(id, call)));
+      },
+    );
+  }
 
   server.registerTool(
     "undo",
     {
       title: "Undo the last edit",
-      description: "Undo the last step in the editor open in the card, the same as ⌘Z there: edit_project batches, imports and the user's own edits share one history.",
+      description: "Undo the last step in the editor open in the card, the same as ⌘Z there: ChatGPT's edits, imports and the user's own edits share one history.",
       inputSchema: z.object({ projectId: idSchema }),
       outputSchema: viewSchema,
-      annotations: editAnnotations,
+      annotations: historyAnnotations,
       _meta: { ...editMetadata, ...status("undo") },
     },
     ({ projectId }) => editing(() => runTool(() => projects.undo(projectId))),
@@ -433,7 +413,7 @@ export function createChatgptServer(
       description: "Re-apply the step the last undo reverted, in the editor open in the card.",
       inputSchema: z.object({ projectId: idSchema }),
       outputSchema: viewSchema,
-      annotations: editAnnotations,
+      annotations: historyAnnotations,
       _meta: { ...editMetadata, ...status("redo") },
     },
     ({ projectId }) => editing(() => runTool(() => projects.redo(projectId))),
@@ -476,7 +456,7 @@ export function createChatgptServer(
     "get_job_status",
     {
       title: "Check a job",
-      description: "Finish a call that answered with a running job (an import, an edit batch, an export): read its progress and, once done, its results.",
+      description: "Finish a call that answered with a running job (an import, an edit, an export): read its progress and, once done, its results.",
       inputSchema: z.object({ jobId: idSchema }),
       outputSchema: viewSchema,
       annotations: readOnlyAnnotations,

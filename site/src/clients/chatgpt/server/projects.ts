@@ -362,7 +362,7 @@ export function projectTools(
     await getOwnedProject(projectId);
     const unknown = unknownCommandNames(commands.map((c) => c.name));
     if (unknown.length)
-      throw new ProjectToolError(`Unknown command${unknown.length > 1 ? "s" : ""}: ${unknown.join(", ")}. Call list_commands for the catalog.`);
+      throw new ProjectToolError(`Unknown command${unknown.length > 1 ? "s" : ""}: ${unknown.join(", ")}.`);
     const queued = await queueCommands(identity.userId, projectId, { commands, ...opts });
     if (queued instanceof Response) return refusal(queued);
     const row = await waitForJob(identity.userId, queued.id, config.commandWaitMs, { editorClaimMs: config.editorClaimMs });
@@ -463,7 +463,7 @@ export function projectTools(
       const calls = commands?.length ? commands : [{ name: "get_state", input: {} }];
       const writes = calls.filter((c) => c.name !== "get_state" && !READ_COMMANDS.has(c.name)).map((c) => c.name);
       if (writes.length)
-        throw new ProjectToolError(`inspect_project runs reads only; ${writes.join(", ")} edit the project — send them through edit_project.`);
+        throw new ProjectToolError(`Inspection runs reads only; ${writes.join(", ")} edit the project.`);
       return runBatch(projectId, calls, { readOnly: true });
     },
 

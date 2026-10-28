@@ -48,14 +48,6 @@
       "invoking": "Lecture du projet",
       "invoked": "Projet lu"
     },
-    "listCommands": {
-      "invoking": "Création de la liste des commandes",
-      "invoked": "Commandes listées"
-    },
-    "describeCommands": {
-      "invoking": "Description des commandes",
-      "invoked": "Commandes décrites"
-    },
     "listSkills": {
       "invoking": "Création de la liste des guides",
       "invoked": "Guides listés"

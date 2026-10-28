@@ -121,20 +121,19 @@ let projectId: string | null = null;
 const card = new AbortController();
 let hosting: Promise<void> | undefined;
 try {
-  // Instructions and catalog: what ChatGPT reads first.
+  // Instructions and tools: what ChatGPT reads first.
   if (!SERVER_INSTRUCTIONS.includes("github.com/DonkeyCut/Donkey")) fail("server instructions do not link the repository");
-  const index = await call("list_commands");
-  const names = (index.view as unknown as { commands: { name: string }[] }).commands.map((c) => c.name);
+  const names = (await client.listTools()).tools.map((t) => t.name);
   for (const need of ["set_aspect", "add_clip", "trim_clip", "add_title", "subtitles_generate", "set_framing"])
-    if (!names.includes(need)) fail(`list_commands misses ${need}`);
-  console.log(`catalog: ${names.length} commands`);
+    if (!names.includes(need)) fail(`the tool list misses ${need}`);
+  console.log(`catalog: ${names.length} tools`);
 
   const created = await call("create_project", { name: `chatgpt-workflow-${Date.now()}`, aspect: "16:9" });
   projectId = created.view.project?.id ?? fail("create_project returned no project");
   console.log(`created ${projectId}`);
 
   // An edit before the card is open is refused, and says so.
-  const closed = await client.callTool({ name: "edit_project", arguments: { projectId, commands: [{ name: "set_aspect", input: { aspect: "9:16" } }] } });
+  const closed = await client.callTool({ name: "set_aspect", arguments: { projectId, aspect: "9:16" } });
   if (!closed.isError || !JSON.stringify(closed.content).includes("open_project")) fail(`an edit with no card open should ask for open_project: ${JSON.stringify(closed.content)}`);
   console.log("no card open: the edit asks for open_project");
   hosting = hostCard(projectId, card.signal).catch((e) => { if (!card.signal.aborted) console.error("card failed:", e); });
@@ -150,52 +149,29 @@ try {
   if (!state || !Array.isArray(state.media) || state.media.length !== 1) fail(`inspect_project state has no media list: ${inspected.text.slice(0, 200)}`);
   console.log("inspected: state carries the footage");
 
+  // Each command is its own tool and its own undo step.
+  const edit = async (name: string, input: Record<string, unknown>) => {
+    const result = await settle(await call(name, { projectId, ...input }), "get_job_status", name);
+    if (result.view.results.some((r) => !r.ok)) fail(`${name} failed: ${result.text}`);
+    return result;
+  };
   const before = await doc(projectId);
-  const placed = await settle(
-    await call("edit_project", {
-      projectId,
-      label: "Vertical frame with the footage",
-      commands: [
-        { name: "set_aspect", input: { aspect: "9:16" } },
-        { name: "add_clip", input: { asset_id: asset.assetId } },
-      ],
-    }),
-    "get_job_status",
-    "edit"
-  );
-  if (placed.view.results.some((r) => !r.ok)) fail(`the first batch failed: ${placed.text}`);
-  const clipId = (placed.view.results[1].output as { id?: string })?.id ?? fail("add_clip returned no clip id");
+  await edit("set_aspect", { aspect: "9:16" });
+  const placed = await edit("add_clip", { asset_id: asset.assetId });
+  const clipId = (placed.view.results[0].output as { id?: string })?.id ?? fail("add_clip returned no clip id");
   const after = await doc(projectId);
   if (after.aspect !== "9:16") fail(`aspect did not save: ${after.aspect}`);
   if (!(after.clips?.length === 1)) fail(`clip did not save: ${JSON.stringify(after.clips)}`);
   if (after.version <= before.version) fail("the edit did not bump the version");
 
-  // A batch stops at its first failure and reports how far it got.
-  const broken = await settle(
-    await call("edit_project", {
-      projectId,
-      commands: [{ name: "trim_clip", input: { clipId: "no-such-clip", out: 1 } }, { name: "set_background", input: { color: "#ff0000" } }],
-    }),
-    "get_job_status",
-    "broken edit"
-  );
-  if (broken.view.results.length !== 1 || broken.view.results[0].ok || broken.view.changed) fail(`a failed batch should stop and save nothing: ${broken.text}`);
+  // A failed command reports its error and saves nothing.
+  const broken = await settle(await call("trim_clip", { projectId, clipId: "no-such-clip", out: 1 }), "get_job_status", "broken edit");
+  if (broken.view.results[0]?.ok !== false || broken.view.changed) fail(`a failed command should save nothing: ${broken.text}`);
 
-  const finished = await settle(
-    await call("edit_project", {
-      projectId,
-      label: "Trim and title",
-      commands: [
-        { name: "trim_clip", input: { clipId, in: 0, out: Math.min(3, asset.duration) } },
-        { name: "add_title", input: { text: "MADE IN CHATGPT", start: 0, end: 2 } },
-        { name: "capture_frame", input: { t: 0.5 } },
-      ],
-    }),
-    "get_job_status",
-    "edit 2"
-  );
-  if (finished.view.results.some((r) => !r.ok)) fail(`second batch failed: ${finished.text}`);
-  if (finished.images < 1) fail("capture_frame returned no image block");
+  await edit("trim_clip", { clipId, in: 0, out: Math.min(3, asset.duration) });
+  await edit("add_title", { text: "MADE IN CHATGPT", start: 0, end: 2 });
+  const frame = await settle(await call("capture_frame", { projectId, t: 0.5 }), "get_job_status", "capture");
+  if (frame.images < 1) fail("capture_frame returned no image block");
   const titled = await doc(projectId);
   if (!(titled.overlays ?? []).some((o) => o.text === "MADE IN CHATGPT")) fail("the title did not save");
   if (!(titled.clips![0].out - titled.clips![0].in <= 3.001)) fail("the trim did not save");

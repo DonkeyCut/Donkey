@@ -48,14 +48,6 @@
       "invoking": "Projekt wird gelesen",
       "invoked": "Projekt gelesen"
     },
-    "listCommands": {
-      "invoking": "Befehle werden aufgelistet",
-      "invoked": "Befehle aufgelistet"
-    },
-    "describeCommands": {
-      "invoking": "Befehle werden beschrieben",
-      "invoked": "Befehle beschrieben"
-    },
     "listSkills": {
       "invoking": "Anleitungen werden aufgelistet",
       "invoked": "Anleitungen aufgelistet"

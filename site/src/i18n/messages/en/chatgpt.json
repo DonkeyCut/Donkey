@@ -39,8 +39,6 @@
     "createProject": { "invoking": "Creating the project", "invoked": "Project created" },
     "importMedia": { "invoking": "Importing footage", "invoked": "Footage imported" },
     "inspectProject": { "invoking": "Reading the project", "invoked": "Project read" },
-    "listCommands": { "invoking": "Listing commands", "invoked": "Commands listed" },
-    "describeCommands": { "invoking": "Describing commands", "invoked": "Commands described" },
     "listSkills": { "invoking": "Listing guides", "invoked": "Guides listed" },
     "readSkill": { "invoking": "Reading the guide", "invoked": "Guide read" },
     "editProject": { "invoking": "Editing the project", "invoked": "Project edited" },

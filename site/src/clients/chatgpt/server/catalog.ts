@@ -1,3 +1,4 @@
+import type { ToolAnnotations } from "@modelcontextprotocol/server";
 import type { AiToolDef } from "@/cut/lib/aiToolDef";
 import { ADOPT_COMMAND } from "@/cut/lib/commandBatch";
 import { PROJECT_TOOLS } from "@/cut/server/ai/catalog";
@@ -16,6 +17,7 @@ const HIDDEN = new Set([
   "redo",
   "render_preview",
   "import_url",
+  "list_projects",
   // Page-local: the editor's clipboard and playback.
   "copy_selection",
   "paste_selection",
@@ -54,51 +56,78 @@ export const COMMAND_NAMES = COMMANDS.map((tool) => tool.name);
 const KNOWN_COMMANDS = new Set([...COMMAND_NAMES, "get_state", "undo", "redo", ADOPT_COMMAND]);
 export const unknownCommandNames = (names: string[]): string[] => names.filter((name) => !KNOWN_COMMANDS.has(name));
 
-/** Commands whose output matters and whose effect is on the caller's eyes:
- * a read runs without saving the document. */
-export const READ_COMMANDS = new Set([
-  "get_asset_info",
-  "watch_video",
-  "capture_frame",
-  "compare_to_source",
-  "sample_color",
-  "track_element",
-  "track_camera",
-  "suggest_font",
-  "listen_audio",
-  "detect_silence",
-  "detect_beats",
-  "measure_level",
-  "read_color_stats",
-  "stock_search",
-  "list_voices",
-  "credit_prices",
-  "library_list",
-  "read_folder",
-  "notes_list",
-  "read_note",
-  "read_project",
-  "list_projects",
-  "check_facts",
-]);
+/** What a command does, in the terms of OpenAI's tool annotations. A read
+ * changes nothing; a search reaches the public web; session moves only the
+ * editor's view (playhead, selection, open timeline, guides); add writes new
+ * things alone; set overwrites a value, the same each time; change deletes,
+ * overwrites or moves by an amount; share opens a public link. Undo does not
+ * make a write additive. */
+type Effect = "read" | "search" | "session" | "add" | "set" | "change" | "share";
 
-/** The first sentence of a description, as the index shows it. */
-function summary(description: string): string {
-  const first = description.replace(/\s+/g, " ").match(/^(.*?[.!?])(\s|$)/)?.[1] ?? description;
-  return first.length > 180 ? `${first.slice(0, 177)}…` : first;
-}
+const HINTS: Record<Effect, Required<Pick<ToolAnnotations, "readOnlyHint" | "destructiveHint" | "idempotentHint" | "openWorldHint">>> = {
+  read: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  search: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  session: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  add: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  set: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+  change: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+  share: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+};
 
-export function commandIndex(): { name: string; summary: string; reads?: true }[] {
-  return COMMANDS.map((tool) => ({
-    name: tool.name,
-    summary: summary(tool.description),
-    ...(READ_COMMANDS.has(tool.name) ? { reads: true as const } : {}),
-  }));
-}
+// Every exposed command's effect; a test holds this map to COMMANDS.
+const EFFECTS: Record<string, Effect> = {
+  get_asset_info: "read", find_media: "read", watch_video: "read", detect_silence: "read",
+  find_filler: "read", measure_level: "read", detect_beats: "read", listen_audio: "read",
+  compare_to_source: "read", sample_color: "read", track_element: "read", track_camera: "read",
+  suggest_font: "read", find_highlights: "read", read_project: "read", capture_frame: "read",
+  read_color_stats: "read", list_voices: "read", credit_prices: "read", stock_search: "read",
+  read_note: "read", read_folder: "read", library_list: "read", notes_list: "read",
+  check_facts: "search",
+  seek: "session", select: "session", select_items: "session", switch_timeline: "session",
+  set_guides: "session", wait_for_uploads: "session",
+  note_source: "add", add_clip: "add", add_overlay_video: "add", add_title: "add",
+  add_text_sequence: "add", freeze_frame: "add", group_items: "add", copy_from_timeline: "add",
+  add_shape: "add", add_sticker: "add", create_sticker: "add", add_effect: "add",
+  subtitles_add_track: "add", subtitles_translate_track: "add", voiceover_generate: "add",
+  generate_music: "add", read_subtitles_aloud: "add", generate_image: "add", stock_add: "add",
+  library_add: "add", template_add: "add", save_template: "add", copy_project_media: "add",
+  replicate_project: "add",
+  find_picture: "set", detect_cuts: "set", trim_clip: "set", place_clip: "set",
+  set_clip_muted: "set", rename_item: "set", set_clip_hidden: "set", set_track_hidden: "set",
+  set_track_muted: "set", set_magnet: "set", update_overlay_video: "set", update_overlay: "set",
+  set_mask: "set", track_motion: "set", set_clip_keyframes: "set", update_audio: "set",
+  set_clip_volume: "set", sync_audio: "set", set_split_edit: "set", set_clip_sound: "set",
+  save_sound_preset: "set", set_framing: "set", set_clip_style: "set", set_clip_effects: "set",
+  set_speed: "set", set_speed_curve: "set", set_color_grade: "set", set_color_preset: "set",
+  set_color_curves: "set", set_color_wheels: "set", set_color_hsl: "set", set_color_lut: "set",
+  copy_color_grade: "set", set_source_color: "set", save_color_grade: "set",
+  apply_saved_grade: "set", match_color_grade: "set", set_camera_card: "set", set_removal: "set",
+  set_removal_stroke: "set", set_removal_background: "set", set_overlay_animation: "set",
+  set_overlay_keyframes: "set", set_group_camera: "set", set_transition: "set",
+  set_transition_hidden: "set", set_animation: "set", set_caption_look: "set",
+  set_caption_emphasis: "set", subtitles_set_view: "set", update_cue: "set", set_publish: "set",
+  set_project_notes: "set", set_background: "set", set_aspect: "set", set_project_name: "set",
+  set_project_color: "set", replace_item: "set", align_to_audio: "set", pack_lanes: "set",
+  file_asset: "set", convert_media: "set", sync_lyrics: "set", subtitles_generate: "set",
+  move_selection: "change", ungroup_items: "change", move_timeline_selection: "change",
+  insert_item_row: "change", split_at: "change", move_clip: "change", reorder_track: "change",
+  refine_speech_cuts: "change", delete_item: "change", remove_gap: "change", detach_audio: "change",
+  remove_transition: "change", subtitles_remove_track: "change", delete_cue: "change",
+  merge_cue: "change", captions_generate: "change", subtitles_from_visuals: "change",
+  note_save: "change", library_organize: "change", media_organize: "change", delete_asset: "change",
+  library_share: "share",
+};
 
-export function describeCommands(names: string[]): { found: AiToolDef[]; unknown: string[] } {
-  const wanted = new Set(names);
-  const found = COMMANDS.filter((tool) => wanted.has(tool.name));
-  const known = new Set(found.map((tool) => tool.name));
-  return { found, unknown: names.filter((name) => !known.has(name)) };
+/** A command's annotations, from its effect. */
+export const commandHints = (name: string) => HINTS[EFFECTS[name]];
+
+/** Commands that change nothing: a read runs without saving the document. */
+export const READ_COMMANDS = new Set(
+  Object.keys(EFFECTS).filter((name) => HINTS[EFFECTS[name]].readOnlyHint),
+);
+
+/** Names with no effect, or effects with no command: a test keeps both empty. */
+export function unmappedCommands(): string[] {
+  const names = new Set(COMMAND_NAMES);
+  return [...COMMAND_NAMES.filter((name) => !Object.hasOwn(EFFECTS, name)), ...Object.keys(EFFECTS).filter((name) => !names.has(name))];
 }
