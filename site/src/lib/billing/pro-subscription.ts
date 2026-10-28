@@ -7,7 +7,7 @@ import {
 } from "@/lib/billing/stripe";
 import { promotedAllowanceMicros } from "@/lib/billing/allowance-promotion";
 import { getGlobalSetting } from "@/lib/config/effective";
-import { PAID_PLANS, PLAN_TERMS, type PaidPlan } from "@/lib/billing/plans";
+import { isPaidPlan, PAID_PLANS, PLAN_TERMS, type PaidPlan } from "@/lib/billing/plans";
 import { creditStringToMicros, zeroCreditMicros } from "@/lib/credits/amounts";
 import { creditsPerDollar } from "@/lib/credits/format-credits";
 import { grantCredits } from "@/lib/credits/inference";
@@ -80,14 +80,21 @@ export async function getActiveSubscription(userId: string) {
   return subscription;
 }
 
+export type PlanLine = { plan: PaidPlan; item: Stripe.SubscriptionItem };
+
 // The subscription's plan line item and the plan its price sells, or null
 // for a subscription to no plan. Matches across ALL items (not just the
 // first), so a multi-item subscription is still recognized and its period is
 // read from the right item.
+//
+// A subscription Donkey already recorded keeps the plan its row holds when
+// its price is not listed, such as a Pro subscription on the price sold
+// before planPrices, so its renewals and its cancel still sync.
 export function subscriptionPlan(
   subscription: Stripe.Subscription,
   prices: PlanPrices,
-): { plan: PaidPlan; item: Stripe.SubscriptionItem } | null {
+  recorded: PaidPlan | null = null,
+): PlanLine | null {
   for (const plan of PAID_PLANS) {
     const id = prices[plan];
     const item = id ? subscription.items.data.find((i) => i.price?.id === id) : undefined;
@@ -95,7 +102,35 @@ export function subscriptionPlan(
       return { plan, item };
     }
   }
-  return null;
+
+  const item = subscription.items.data[0];
+  return recorded && item ? { plan: recorded, item } : null;
+}
+
+// The plan the account's row recorded for this subscription, or null for one
+// Donkey has never synced.
+async function recordedPlan(subscriptionId: string): Promise<PaidPlan | null> {
+  const row = await prisma.proSubscription.findUnique({
+    select: { planKey: true },
+    where: { stripeSubscriptionId: subscriptionId },
+  });
+  return row && isPaidPlan(row.planKey) ? row.planKey : null;
+}
+
+// The plan a live subscription sells, read from its price or its row.
+export async function livePlan(subscription: Stripe.Subscription): Promise<PlanLine | null> {
+  const [prices, recorded] = await Promise.all([readPlanPrices(), recordedPlan(subscription.id)]);
+  return subscriptionPlan(subscription, prices, recorded);
+}
+
+// Write a subscription to the account when it sells a plan; any other Stripe
+// subscription is left alone. Returns the plan line it synced.
+export async function syncPlanSubscription(subscription: Stripe.Subscription): Promise<PlanLine | null> {
+  const line = await livePlan(subscription);
+  if (line) {
+    await syncProSubscription(subscription, line);
+  }
+  return line;
 }
 
 // Source of truth for a Pro subscription's lifecycle. Maps the Stripe object
@@ -105,7 +140,7 @@ export function subscriptionPlan(
 // and the create/update/invoice events for one period grant the allowance once.
 export async function syncProSubscription(
   subscription: Stripe.Subscription,
-  { plan, item }: { plan: PaidPlan; item: Stripe.SubscriptionItem },
+  { plan, item }: PlanLine,
 ): Promise<void> {
   const userId = await resolveSubscriptionUserId(subscription);
   const customerId = stripeId(subscription.customer);

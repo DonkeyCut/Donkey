@@ -80,6 +80,15 @@ describe("subscriptionPlan", () => {
     expect(subscriptionPlan(withPrice("price_other"), prices)).toBeNull();
     expect(subscriptionPlan(withPrice("price_pro"), { ...prices, pro: null })).toBeNull();
   });
+
+  test("a recorded subscription on an unlisted price keeps its row's plan", () => {
+    expect(subscriptionPlan(withPrice("price_legacy_pro"), prices, "pro")?.plan).toBe("pro");
+    expect(subscriptionPlan(withPrice("price_pro"), { plus: null, pro: null, max: null }, "pro")?.plan).toBe("pro");
+  });
+
+  test("a listed price wins over the recorded plan", () => {
+    expect(subscriptionPlan(withPrice("price_max"), prices, "plus")?.plan).toBe("max");
+  });
 });
 
 describe("planAllowanceMicros", () => {

@@ -3,22 +3,9 @@ import type Stripe from "stripe";
 
 import { handleCreditPaymentSucceeded } from "@/lib/billing/credit-purchases";
 import { trackCheckoutPurchase } from "@/lib/billing/meta-checkout";
-import {
-  readPlanPrices,
-  subscriptionPlan,
-  syncProSubscription,
-} from "@/lib/billing/pro-subscription";
+import { syncPlanSubscription } from "@/lib/billing/pro-subscription";
 import { getStripe, stripeId } from "@/lib/billing/stripe";
 import { notFoundResponse } from "@/lib/donkey-api-auth";
-
-// Plus, Pro and Max are the subscription products; ignore any other Stripe
-// subscription that reaches these webhook events.
-async function syncSubscription(subscription: Stripe.Subscription) {
-  const line = subscriptionPlan(subscription, await readPlanPrices());
-  if (line) {
-    await syncProSubscription(subscription, line);
-  }
-}
 
 // Public, signature-verified Stripe webhook. This is an intentional exception to
 // the "wrap every route with withDonkeyAuth" rule (see docs/guides/backend-apis):
@@ -57,7 +44,7 @@ export async function POST(request: Request) {
       const subscriptionId = stripeId(checkoutSession.subscription);
       if (subscriptionId) {
         const subscription = await stripe.subscriptions.retrieve(subscriptionId);
-        await syncSubscription(subscription);
+        await syncPlanSubscription(subscription);
       }
       trackCheckoutPurchase(checkoutSession);
       break;
@@ -75,7 +62,7 @@ export async function POST(request: Request) {
     case "customer.subscription.created":
     case "customer.subscription.updated":
     case "customer.subscription.deleted": {
-      await syncSubscription(event.data.object);
+      await syncPlanSubscription(event.data.object);
       break;
     }
     case "invoice.paid":
@@ -86,7 +73,7 @@ export async function POST(request: Request) {
       const subscriptionId = stripeId(invoice.subscription);
       if (subscriptionId) {
         const subscription = await stripe.subscriptions.retrieve(subscriptionId);
-        await syncSubscription(subscription);
+        await syncPlanSubscription(subscription);
       }
       break;
     }
