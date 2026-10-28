@@ -555,10 +555,18 @@ export type PendingImport = {
   /** The URL the asset plays from until the stored file takes over — a local
    * object URL for a dropped file, the source URL for remote media. */
   localUrl: string;
+  /** Put the bytes where a reload finds them — the browser store under a
+   * claimed name, or the project's own storage — as soon as the import starts.
+   * The queue runs it ahead of its transfer window, so a long drop is held
+   * whole while its uploads wait their turn. Safe to call again. */
+  hold?: ImportStep;
   /** Send the bytes and mark the object complete; resolves to the stored
    * (deduped) file name the asset swaps to. */
-  send: (opts?: { onProgress?: (fraction: number) => void; signal?: AbortSignal }) => Promise<string>;
+  send: (opts?: ImportOpts) => Promise<string>;
 };
+
+type ImportOpts = { onProgress?: (fraction: number) => void; signal?: AbortSignal };
+type ImportStep = (opts?: ImportOpts) => Promise<void>;
 
 /** Prepare a dropped file so it is on the timeline at the release: probed
  * from its own header, playing from the bytes in hand, named after the file.
@@ -609,11 +617,30 @@ export async function prepareImport(
     url: localUrl,
     upload: { progress: 0 },
   };
-  const send: PendingImport["send"] =
+  const steps =
     backend.kind === "cloud"
       ? sendCloudImport(backend, projectId, file, id)
-      : (opts) => uploadProjectMediaTo(backend, projectId, file, file.name, opts);
-  return { asset, localUrl, send };
+      : sendDirectImport(backend, projectId, file);
+  return { asset, localUrl, ...steps };
+}
+
+/** A browser or engine project stores a dropped file by copying it in, on
+ * this machine: the copy is the hold, and the send hands back its name. A
+ * failed or cancelled copy is forgotten, so a retry copies again. */
+function sendDirectImport(
+  backend: CutBackend,
+  projectId: string,
+  file: File
+): Pick<PendingImport, "hold" | "send"> {
+  let copy: Promise<string> | null = null;
+  const send: PendingImport["send"] = (opts) => {
+    copy ??= uploadProjectMediaTo(backend, projectId, file, file.name, opts).catch((err: unknown) => {
+      copy = null;
+      throw err;
+    });
+    return copy;
+  };
+  return { hold: async (opts) => void (await send(opts)), send };
 }
 
 /** Claims run one at a time, each against the names already taken, so two
@@ -635,60 +662,65 @@ type CloudClaim = {
   stored: boolean;
 };
 
-/** The drain for a dropped file on a cloud project: claim the stored name,
- * land the bytes in the browser store under it — the asset joins the saved
- * document there, and a reload resumes the upload from the ledger — then PUT
- * them and complete. A browser that cannot hold the store keeps the import
- * tab-scoped and uploads it directly; a full account (413) stashes the bytes
- * under a local name, and the ledger drain claims a cloud name for them once
- * there is room. The claim is made once: a retry drains what it holds. */
+/** The drain for a dropped file on a cloud project. The hold claims the
+ * stored name and lands the bytes in the browser store under it — the asset
+ * joins the saved document there, and a reload resumes the upload from the
+ * ledger; the send PUTs them and completes. A browser that cannot hold the
+ * store keeps the import tab-scoped and uploads it directly; a full account
+ * (413) stashes the bytes under a local name, and the ledger drain claims a
+ * cloud name for them once there is room. The claim is made once: a retry
+ * drains what it holds. */
 function sendCloudImport(
   backend: CutBackend,
   projectId: string,
   file: File,
   assetId: string
-): PendingImport["send"] {
+): Pick<PendingImport, "hold" | "send"> {
   let claim: CloudClaim | null = null;
   const live = () => {
     const s = useEditor.getState();
     return s.projectId === projectId && s.assets.some((a) => a.id === assetId);
   };
-  return async (opts) => {
-    if (!claim) {
-      const made = await claimInTurn(async (): Promise<Omit<CloudClaim, "stored">> => {
-        const avoid = (await pendingUploadsFor(projectId)).map((p) => p.fileName);
-        try {
-          const signed = await presignUpload(
-            `/api/cut/projects/${projectId}/media/presign`,
-            file,
-            file.name,
-            backend,
-            avoid.length > 0 ? { avoid } : {}
-          );
-          return { signed, fileName: signed.fileName };
-        } catch (err) {
-          if ((err as { status?: number }).status !== 413) throw err;
-          return { signed: null, fileName: "" };
-        }
-      });
-      if (made.signed) {
-        const storedUrl = await stashCloudMedia(projectId, file, made.fileName);
-        claim = { ...made, stored: storedUrl !== null };
-      } else {
-        const stashed = await stashUnclaimedMedia(projectId, file);
-        if (!stashed) throw replyError(413, {}, new UserError("upload_failed", "Upload failed."));
-        claim = { signed: null, fileName: stashed.fileName, stored: true };
+  const cancelled = () => new DOMException("Cancelled.", "AbortError");
+  const hold: ImportStep = async (opts) => {
+    if (claim) return;
+    // The store write rides the claim's turn: the next claim's steer sees this
+    // pin, and one write at a time keeps each room check true to the disk.
+    const made = await claimInTurn(async (): Promise<CloudClaim> => {
+      if (opts?.signal?.aborted || !live()) throw cancelled();
+      const avoid = (await pendingUploadsFor(projectId)).map((p) => p.fileName);
+      let signed: CloudClaim["signed"] = null;
+      try {
+        signed = await presignUpload(
+          `/api/cut/projects/${projectId}/media/presign`,
+          file,
+          file.name,
+          backend,
+          avoid.length > 0 ? { avoid } : {}
+        );
+      } catch (err) {
+        if ((err as { status?: number }).status !== 413) throw err;
       }
-      // Deleted, or left behind, while the claim ran: the copy comes back out
-      // and nothing is completed, so nothing counts against the account.
-      if (opts?.signal?.aborted || !live()) {
-        const gone = claim;
-        claim = null;
-        if (gone.stored) await dropLocalMedia(projectId, gone.fileName);
-        throw new DOMException("Cancelled.", "AbortError");
+      if (signed) {
+        const storedUrl = await stashCloudMedia(projectId, file, signed.fileName);
+        return { signed, fileName: signed.fileName, stored: storedUrl !== null };
       }
-      if (claim.stored) markUploadStored(assetId, claim.fileName);
+      const stashed = await stashUnclaimedMedia(projectId, file);
+      if (!stashed) throw replyError(413, {}, new UserError("upload_failed", "Upload failed."));
+      return { signed: null, fileName: stashed.fileName, stored: true };
+    });
+    // Deleted, or left behind, while the claim ran: the copy comes back out
+    // and nothing is completed, so nothing counts against the account.
+    if (opts?.signal?.aborted || !live()) {
+      if (made.stored) await dropLocalMedia(projectId, made.fileName);
+      throw cancelled();
     }
+    claim = made;
+    if (claim.stored) markUploadStored(assetId, claim.fileName);
+  };
+  const send: PendingImport["send"] = async (opts) => {
+    await hold(opts);
+    if (!claim) throw cancelled();
     // Stored bytes drain from the store, own name excluded from the steer;
     // that path also re-signs, so a retry never reuses a signature that aged.
     if (claim.stored || !claim.signed) {
@@ -704,6 +736,7 @@ function sendCloudImport(
     if (!res.ok || !body.fileName) throw errorFromBody(body, new UserError("upload_failed", "Upload failed."));
     return body.fileName;
   };
+  return { hold, send };
 }
 
 /** The drain for a store-backed upload, built from the stored bytes alone so

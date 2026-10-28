@@ -34,3 +34,27 @@ test("an upload the connection dropped picks back up when the connection returns
   expect(sends).toBe(2);
   expect(useEditor.getState().assets[0]).toMatchObject({ fileName: "take.mov", url: "stored:take.mov", upload: undefined });
 });
+
+test("every file of a long drop is held at once while its uploads wait their turn", async () => {
+  const ids = ["a", "b", "c", "d", "e", "f"];
+  const assets: MediaAsset[] = ids.map((id) => ({ id, fileName: `pending:${id}:${id}.mov`, name: `${id}.mov`, type: "video", duration: 5, url: `blob:${id}`, upload: { progress: 0 } }));
+  useEditor.setState({ projectId: "p", assets });
+  const held: string[] = [];
+  let sending = 0;
+  for (const asset of assets) {
+    startUpload("p", {
+      asset,
+      localUrl: asset.url,
+      hold: async () => {
+        held.push(asset.id);
+      },
+      send: () => {
+        sending++;
+        return new Promise<string>(() => {});
+      },
+    });
+  }
+  await settle();
+  expect(held).toEqual(ids);
+  expect(sending).toBe(3);
+});

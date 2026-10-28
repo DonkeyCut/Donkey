@@ -235,14 +235,14 @@ function stopStored(job: Job) {
 }
 
 async function run(job: Job) {
-  const { asset, localUrl, send } = job.pending;
-  await acquire();
+  const { asset, localUrl, send, hold } = job.pending;
+  let slot = false;
   try {
     if (!wanted(job)) return storeBacked(job) ? stopStored(job) : cancelUpload(asset.id);
     let shown = -1;
-    const fileName = await send({
+    const opts = {
       signal: job.controller.signal,
-      onProgress: (fraction) => {
+      onProgress: (fraction: number) => {
         // The progress stream is the cheapest place to notice the asset is
         // gone, and the only one that fires during a long upload.
         if (!wanted(job)) return storeBacked(job) ? stopStored(job) : cancelUpload(asset.id);
@@ -251,7 +251,16 @@ async function run(job: Job) {
         shown = pct;
         useEditor.getState().updateAsset(asset.id, uploadPatch(job, fraction));
       },
-    });
+    };
+    // The hold runs at once, outside the window: every file of a long drop
+    // reaches storage a reload can find while the uploads queue behind it.
+    if (hold) {
+      await hold(opts);
+    }
+    await acquire();
+    slot = true;
+    if (!wanted(job)) return storeBacked(job) ? stopStored(job) : cancelUpload(asset.id);
+    const fileName = await send(opts);
     if (!wanted(job)) {
       if (storeBacked(job) && useEditor.getState().projectId !== job.projectId) {
         // The bytes landed exactly where the saved document points; the job
@@ -311,6 +320,8 @@ async function run(job: Job) {
       scheduleResume(job);
     }
   } finally {
-    release();
+    if (slot) {
+      release();
+    }
   }
 }
