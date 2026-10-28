@@ -120,6 +120,16 @@ describe("other read failures", () => {
     expect(reported).toEqual([]);
   });
 
+  test("a read the firewall throttled is not reported", async () => {
+    // The enrich retry reads again after the window passes.
+    failure = new CloudMediaError(429);
+    const asset = audio();
+
+    await ensurePeaks(asset);
+
+    expect(reported).toEqual([]);
+  });
+
   test("an undecodable file is reported against its stage", async () => {
     failure = new DOMException("Decoding error.", "EncodingError");
     const asset = audio();

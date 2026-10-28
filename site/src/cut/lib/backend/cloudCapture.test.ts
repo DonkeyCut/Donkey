@@ -37,3 +37,28 @@ test("each transport saves as its own writer, numbering its saves in order", asy
     expect(sent.map((h) => h.get(DOC_SEQ_HEADER))).toEqual(["1", "2", "1"]);
   } finally { fetcher.mockRestore(); }
 });
+
+test("a request the firewall throttled goes again once its window passes", async () => {
+  const answers = [
+    new Response("Too Many Requests", { status: 429, headers: { "Retry-After": "0", "Content-Type": "text/plain" } }),
+    Response.json({ key: "k", url: "https://media.invalid/k" }),
+  ];
+  const fetcher = spyOn(globalThis, "fetch").mockImplementation((async () => answers.shift()!) as typeof fetch);
+  try {
+    const res = await cloudBackend.fetch("/api/cut/media/presign", { method: "POST", body: "{}" });
+    expect(res.status).toBe(200);
+    expect(fetcher.mock.calls.length).toBe(2);
+  } finally { fetcher.mockRestore(); }
+});
+
+test("a throttle a route answers itself stands", async () => {
+  // "Too many turns are running": the route's own verdict, with its reason.
+  const fetcher = spyOn(globalThis, "fetch").mockImplementation(
+    (async () => Response.json({ error: "Too many turns are running on this account." }, { status: 429 })) as typeof fetch
+  );
+  try {
+    const res = await cloudBackend.fetch("/api/cut/turns", { method: "POST", body: "{}" });
+    expect(res.status).toBe(429);
+    expect(fetcher.mock.calls.length).toBe(1);
+  } finally { fetcher.mockRestore(); }
+});

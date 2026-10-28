@@ -2076,6 +2076,9 @@ function knownMissing(asset: MediaAsset): boolean {
 
 // A cloud route answers this when the request carries no session.
 const UNAUTHORIZED = 401;
+// The firewall answers this to a burst of requests from one address; the
+// enrich retry reads again after the window passes.
+const TOO_MANY_REQUESTS = 429;
 
 /**
  * Settle a failed read of an asset's file. A file that is not there marks the
@@ -2091,7 +2094,8 @@ function readFailed(asset: MediaAsset, what: string, err: unknown, subject = ass
     console.warn(`${what} for ${subject}`, err);
     return;
   }
-  if (cloudMediaStatus(err) === UNAUTHORIZED) {
+  const status = cloudMediaStatus(err);
+  if (status === UNAUTHORIZED || status === TOO_MANY_REQUESTS) {
     console.warn(`${what} for ${subject}`, err);
     return;
   }

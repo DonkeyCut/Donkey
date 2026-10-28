@@ -30,3 +30,26 @@ export function fetchDropped(err: unknown): boolean {
 export function connectionLost(err: unknown): boolean {
   return err instanceof ConnectionLostError || fetchDropped(err) || isOffline();
 }
+
+// The status a server answers a client asking too often.
+const TOO_MANY_REQUESTS = 429;
+
+/** How long to hold off a throttle that names no wait: the window the site
+ * firewall counts requests in (site/firewall/). */
+const THROTTLE_WAIT_MS = 10_000;
+
+/** How long `res` asks the caller to wait before asking again, or null when it
+ * is no throttle. Retry-After comes as seconds or as a date, e.g. "3". */
+export function throttleWait(res: Response, now = Date.now()): number | null {
+  if (res.status !== TOO_MANY_REQUESTS) {
+    return null;
+  }
+
+  const header = res.headers.get("retry-after");
+  if (!header) {
+    return THROTTLE_WAIT_MS;
+  }
+  const seconds = Number(header);
+  const wait = Number.isFinite(seconds) ? seconds * 1000 : Date.parse(header) - now;
+  return Number.isFinite(wait) ? Math.max(0, wait) : THROTTLE_WAIT_MS;
+}

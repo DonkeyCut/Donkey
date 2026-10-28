@@ -53,6 +53,7 @@ import {
 } from "./backend/browser/opfs";
 import { CUT_MEDIA_ORIGIN } from "./hosts";
 import { allowance, holdMemory } from "./memoryBudget";
+import { throttleWait } from "./network";
 import { observeOperationResponse } from "./operationFailure";
 
 export const CHUNK_SIZE = 2 * 1024 * 1024;
@@ -529,6 +530,7 @@ async function fetchRange(
   let delay = 400;
   for (let attempt = 1; ; attempt++) {
     if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+    let wait = delay;
     try {
       const res = await fetch(url, {
         headers: { Range: `bytes=${start}-${endInclusive}` },
@@ -536,11 +538,16 @@ async function fetchRange(
       });
       // 4xx is the URL's own verdict — an expired token re-mints upstream
       // (mediaLinks.ts), and retrying the same string here would stall that.
-      if (res.ok || attempt >= FETCH_ATTEMPTS || (res.status >= 400 && res.status < 500)) return res;
+      // A throttle is the exception: the same request answers once the
+      // firewall's window has passed.
+      const throttled = throttleWait(res);
+      if (res.ok || attempt >= FETCH_ATTEMPTS || (throttled === null && res.status >= 400 && res.status < 500)) return res;
+      void res.body?.cancel().catch(() => {});
+      wait = throttled ?? delay;
     } catch (err) {
       if (signal?.aborted || attempt >= FETCH_ATTEMPTS) throw err;
     }
-    await sleep(delay, signal ?? new AbortController().signal);
+    await sleep(wait, signal ?? new AbortController().signal);
     delay *= 3;
   }
 }

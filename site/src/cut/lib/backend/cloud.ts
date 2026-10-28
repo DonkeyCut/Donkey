@@ -3,6 +3,7 @@
 // the session). Routes mirror the engine's JSON shapes under /api/cut-cloud.
 // Media bytes ride presigned R2 URLs minted by those routes, not this
 // transport.
+import { throttleWait } from "../network";
 import { observeOperationResponse, operationFailure } from "../operationFailure";
 import { UserError } from "../userError";
 import { DOC_SEQ_HEADER, DOC_WRITER_HEADER, HTTP_CONFLICT, type CutBackend, type CutRequestInit } from "./types";
@@ -22,11 +23,33 @@ export function bindCloudSession(base: string, headers: Record<string, string>) 
  * page, the bound session's origin and headers in a headless process. */
 type CloudSession = { base: string; headers: Record<string, string> } | null;
 
-function requestWithSession(bound: CloudSession, path: string, init?: RequestInit): Promise<Response> {
+async function requestWithSession(bound: CloudSession, path: string, init?: RequestInit): Promise<Response> {
   const headers = new Headers(bound?.headers);
   new Headers(init?.headers).forEach((value, key) => headers.set(key, value));
-  return fetch((bound?.base ?? "") + path, { ...init, headers }).then(observeOperationResponse);
+
+  // The firewall refuses a burst from one address before any route runs
+  // (site/firewall/), so the same request goes again once the window passes.
+  // A route that throttles answers JSON with its reason, and that stands.
+  for (let attempt = 1; ; attempt++) {
+    const res = await fetch((bound?.base ?? "") + path, { ...init, headers });
+    const wait = throttleWait(res);
+    if (wait === null || attempt > FIREWALL_RETRIES || !firewallRefusal(res) || !resendable(init?.body) || init?.signal?.aborted) {
+      return observeOperationResponse(res);
+    }
+    await res.body?.cancel().catch(() => {});
+    await new Promise((r) => setTimeout(r, wait));
+  }
 }
+
+// How many times a request the firewall refused goes again.
+const FIREWALL_RETRIES = 2;
+
+/** Whether a throttle came from the firewall: its refusal is plain text. */
+const firewallRefusal = (res: Response) => !/json/i.test(res.headers.get("content-type") ?? "");
+
+/** Whether a request body can be sent a second time: a stream is spent once
+ * read, e.g. a piped upload. */
+const resendable = (body: RequestInit["body"]) => !(typeof ReadableStream !== "undefined" && body instanceof ReadableStream);
 
 export function cloudRequest(path: string, init?: RequestInit): Promise<Response> {
   return requestWithSession(session, path, init);
