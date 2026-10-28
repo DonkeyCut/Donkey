@@ -43,6 +43,7 @@
     "unsupported_image_type": "Type d'image non pris en charge.",
     "image_too_large": "Image trop volumineuse.",
     "plan_not_an_upgrade": "Ce compte bénéficie déjà de ce forfait ou d'un forfait supérieur.",
+    "upgrade_in_progress": "Cette mise à niveau est déjà en cours.",
     "upgrade_payment_failed": "Votre carte a été refusée, votre forfait n'a donc pas changé. Mettez à jour votre carte dans la facturation et réessayez."
   },
   "languageSaveFailed": "Impossible d'enregistrer votre langue. Réessayez.",

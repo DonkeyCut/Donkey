@@ -43,6 +43,7 @@
     "unsupported_image_type": "サポートされていない画像形式です。",
     "image_too_large": "画像が大きすぎます。",
     "plan_not_an_upgrade": "このアカウントはすでにこのプラン、または上位プランをご利用中です。",
+    "upgrade_in_progress": "このアップグレードはすでに進行中です。",
     "upgrade_payment_failed": "カードの支払いが拒否されたため、プランは変更されませんでした。請求設定でカード情報を更新し、もう一度お試しください。"
   },
   "languageSaveFailed": "言語を保存できませんでした。もう一度お試しください。",

@@ -337,6 +337,7 @@
     "apiErrors.unsupported_image_type": "73cf38d0e3e1",
     "apiErrors.image_too_large": "3fdb4028f18f",
     "apiErrors.plan_not_an_upgrade": "d968260313e6",
+    "apiErrors.upgrade_in_progress": "105dee90239b",
     "apiErrors.upgrade_payment_failed": "9f81fe318848",
     "languageSaveFailed": "8d8a247bafe6",
     "languageBlocked": "6cdf84383309"
@@ -3366,6 +3367,7 @@
     "apiErrors.unsupported_image_type": "73cf38d0e3e1",
     "apiErrors.image_too_large": "3fdb4028f18f",
     "apiErrors.plan_not_an_upgrade": "d968260313e6",
+    "apiErrors.upgrade_in_progress": "105dee90239b",
     "apiErrors.upgrade_payment_failed": "9f81fe318848",
     "languageSaveFailed": "8d8a247bafe6",
     "languageBlocked": "6cdf84383309"
@@ -6395,6 +6397,7 @@
     "apiErrors.unsupported_image_type": "73cf38d0e3e1",
     "apiErrors.image_too_large": "3fdb4028f18f",
     "apiErrors.plan_not_an_upgrade": "d968260313e6",
+    "apiErrors.upgrade_in_progress": "105dee90239b",
     "apiErrors.upgrade_payment_failed": "9f81fe318848",
     "languageSaveFailed": "8d8a247bafe6",
     "languageBlocked": "6cdf84383309"
@@ -9424,6 +9427,7 @@
     "apiErrors.unsupported_image_type": "73cf38d0e3e1",
     "apiErrors.image_too_large": "3fdb4028f18f",
     "apiErrors.plan_not_an_upgrade": "d968260313e6",
+    "apiErrors.upgrade_in_progress": "105dee90239b",
     "apiErrors.upgrade_payment_failed": "9f81fe318848",
     "languageSaveFailed": "8d8a247bafe6",
     "languageBlocked": "6cdf84383309"
@@ -12453,6 +12457,7 @@
     "apiErrors.unsupported_image_type": "73cf38d0e3e1",
     "apiErrors.image_too_large": "3fdb4028f18f",
     "apiErrors.plan_not_an_upgrade": "d968260313e6",
+    "apiErrors.upgrade_in_progress": "105dee90239b",
     "apiErrors.upgrade_payment_failed": "9f81fe318848",
     "languageSaveFailed": "8d8a247bafe6",
     "languageBlocked": "6cdf84383309"
@@ -15482,6 +15487,7 @@
     "apiErrors.unsupported_image_type": "73cf38d0e3e1",
     "apiErrors.image_too_large": "3fdb4028f18f",
     "apiErrors.plan_not_an_upgrade": "d968260313e6",
+    "apiErrors.upgrade_in_progress": "105dee90239b",
     "apiErrors.upgrade_payment_failed": "9f81fe318848",
     "languageSaveFailed": "8d8a247bafe6",
     "languageBlocked": "6cdf84383309"
@@ -18511,6 +18517,7 @@
     "apiErrors.unsupported_image_type": "73cf38d0e3e1",
     "apiErrors.image_too_large": "3fdb4028f18f",
     "apiErrors.plan_not_an_upgrade": "d968260313e6",
+    "apiErrors.upgrade_in_progress": "105dee90239b",
     "apiErrors.upgrade_payment_failed": "9f81fe318848",
     "languageSaveFailed": "8d8a247bafe6",
     "languageBlocked": "6cdf84383309"

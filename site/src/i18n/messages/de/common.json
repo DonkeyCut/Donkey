@@ -43,6 +43,7 @@
     "unsupported_image_type": "Nicht unterstütztes Bildformat.",
     "image_too_large": "Bild zu groß.",
     "plan_not_an_upgrade": "Dieses Konto nutzt bereits diesen oder einen höheren Plan.",
+    "upgrade_in_progress": "Dieses Upgrade läuft bereits.",
     "upgrade_payment_failed": "Deine Karte wurde abgelehnt, daher wurde dein Plan nicht geändert. Aktualisiere deine Karte unter Abrechnung und versuche es erneut."
   },
   "languageSaveFailed": "Deine Sprache konnte nicht gespeichert werden. Versuch es noch einmal.",

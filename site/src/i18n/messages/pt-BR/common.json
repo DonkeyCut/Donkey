@@ -43,6 +43,7 @@
     "unsupported_image_type": "Tipo de imagem não suportado.",
     "image_too_large": "Imagem grande demais.",
     "plan_not_an_upgrade": "Esta conta já está neste plano ou em um superior.",
+    "upgrade_in_progress": "Este upgrade já está em andamento.",
     "upgrade_payment_failed": "Seu cartão foi recusado, portanto seu plano não mudou. Atualize o cartão no faturamento e tente novamente."
   },
   "languageSaveFailed": "Não foi possível salvar seu idioma. Tente novamente.",

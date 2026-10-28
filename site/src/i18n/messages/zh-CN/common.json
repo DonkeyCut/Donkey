@@ -43,6 +43,7 @@
     "unsupported_image_type": "不支持的图片格式。",
     "image_too_large": "图片过大。",
     "plan_not_an_upgrade": "该账号已在使用此方案或更高级方案。",
+    "upgrade_in_progress": "此升级已在进行中。",
     "upgrade_payment_failed": "你的银行卡被拒，方案未作更改。请在账单中更新银行卡并重试。"
   },
   "languageSaveFailed": "无法保存语言设置。请重试。",
