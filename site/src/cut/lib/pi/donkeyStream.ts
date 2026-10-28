@@ -211,7 +211,7 @@ async function requestError(
     (v): v is string => typeof v === "string" && v.length > 0
   );
   if (res.status === 402)
-    return message ?? "You're out of Donkey credits — top up to keep generating.";
+    return message ?? "You're out of Donkey credits. Plus, Pro, and Max add credits every month.";
   return message ?? "Gemini request failed.";
 }
 

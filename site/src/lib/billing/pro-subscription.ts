@@ -7,16 +7,15 @@ import {
 } from "@/lib/billing/stripe";
 import { promotedAllowanceMicros } from "@/lib/billing/allowance-promotion";
 import { getGlobalSetting } from "@/lib/config/effective";
-import { creditMicrosPerCent, zeroCreditMicros } from "@/lib/credits/amounts";
+import { PAID_PLANS, PLAN_TERMS, type PaidPlan } from "@/lib/billing/plans";
+import { creditStringToMicros, zeroCreditMicros } from "@/lib/credits/amounts";
+import { creditsPerDollar } from "@/lib/credits/format-credits";
 import { grantCredits } from "@/lib/credits/inference";
 import { claimOfferBySubscribing, SUBSCRIBE_BONUS_METADATA_KEY } from "@/lib/credits/subscribe-bonus-claim";
 import { prisma } from "@/lib/prisma";
 
-// Donkey Pro: the Mac app subscription.
-export const proPlanKey = "pro";
-
-// Stripe subscription statuses that include the Pro allowance, as a list so a
-// database filter can reuse it.
+// Stripe subscription statuses that include a plan's allowance, as a list so
+// a database filter can reuse it.
 export const ACTIVE_PRO_STATUSES = ["active", "trialing"] as const;
 
 const activeStatuses = new Set<string>(ACTIVE_PRO_STATUSES);
@@ -53,24 +52,25 @@ export function scheduledProEnd(subscription: ProEndAnchor): Date | null {
   return subscription.cancelAtPeriodEnd ? subscription.currentPeriodEnd : null;
 }
 
-export function proPriceId(): string | undefined {
-  return process.env.STRIPE_PRO_PRICE_ID || undefined;
+// Each plan's recurring Stripe price, from the planPrices setting.
+export type PlanPrices = Record<PaidPlan, string | null>;
+
+export function readPlanPrices(): Promise<PlanPrices> {
+  return getGlobalSetting("planPrices");
 }
 
-// The included monthly inference allowance equals the Pro plan price: a $20/mo
-// plan includes $20 of app inference each period. Read straight from the
-// recurring price's unit_amount (cents) — no separate metadata to configure.
-export function allowanceMicrosFromPrice(
-  price: Stripe.Price | null | undefined,
-): bigint {
-  const cents = price?.unit_amount;
-  if (typeof cents === "number" && Number.isFinite(cents) && cents > 0) {
-    return BigInt(Math.round(cents)) * creditMicrosPerCent;
-  }
-  return zeroCreditMicros;
+export async function planPriceId(plan: PaidPlan): Promise<string | null> {
+  return (await readPlanPrices())[plan];
 }
 
-export async function getActiveProSubscription(userId: string) {
+// The credits a plan's billing period starts with, as ledger micros.
+export function planAllowanceMicros(plan: PaidPlan): bigint {
+  return creditStringToMicros(String(PLAN_TERMS[plan].monthlyCredits / creditsPerDollar));
+}
+
+// The account's running subscription, whichever plan it is on; null for a
+// free account.
+export async function getActiveSubscription(userId: string) {
   const subscription = await prisma.proSubscription.findUnique({
     where: { userId },
   });
@@ -80,22 +80,22 @@ export async function getActiveProSubscription(userId: string) {
   return subscription;
 }
 
-// The subscription's Pro line item, if any. Matches across ALL items (not just
-// the first), so a multi-item subscription is still recognized as Pro and its
-// price/period are read from the right item rather than items.data[0].
-function proItem(
+// The subscription's plan line item and the plan its price sells, or null
+// for a subscription to no plan. Matches across ALL items (not just the
+// first), so a multi-item subscription is still recognized and its period is
+// read from the right item.
+export function subscriptionPlan(
   subscription: Stripe.Subscription,
-): Stripe.SubscriptionItem | undefined {
-  const id = proPriceId();
-  return id
-    ? subscription.items.data.find((item) => item.price?.id === id)
-    : undefined;
-}
-
-// True when the subscription includes the Pro price. Used to route shared
-// subscription webhook events to the right product sync.
-export function subscriptionIsPro(subscription: Stripe.Subscription): boolean {
-  return proItem(subscription) !== undefined;
+  prices: PlanPrices,
+): { plan: PaidPlan; item: Stripe.SubscriptionItem } | null {
+  for (const plan of PAID_PLANS) {
+    const id = prices[plan];
+    const item = id ? subscription.items.data.find((i) => i.price?.id === id) : undefined;
+    if (item) {
+      return { plan, item };
+    }
+  }
+  return null;
 }
 
 // Source of truth for a Pro subscription's lifecycle. Maps the Stripe object
@@ -105,6 +105,7 @@ export function subscriptionIsPro(subscription: Stripe.Subscription): boolean {
 // and the create/update/invoice events for one period grant the allowance once.
 export async function syncProSubscription(
   subscription: Stripe.Subscription,
+  { plan, item }: { plan: PaidPlan; item: Stripe.SubscriptionItem },
 ): Promise<void> {
   const userId = await resolveSubscriptionUserId(subscription);
   const customerId = stripeId(subscription.customer);
@@ -116,19 +117,17 @@ export async function syncProSubscription(
     return;
   }
 
-  const item = proItem(subscription) ?? subscription.items.data[0];
-  const price = item?.price;
-  const periodStart = unixToDate(item?.current_period_start ?? null);
-  const periodEnd = unixToDate(item?.current_period_end ?? null);
+  const periodStart = unixToDate(item.current_period_start);
+  const periodEnd = unixToDate(item.current_period_end);
   const cancelAt = subscriptionCancelAt(subscription);
   const endedAt = unixToDate(subscription.ended_at);
   const allowanceMicros = periodStart
     ? promotedAllowanceMicros(
-        allowanceMicrosFromPrice(price),
+        planAllowanceMicros(plan),
         await getGlobalSetting("proAllowancePromotion"),
         periodStart,
       )
-    : allowanceMicrosFromPrice(price);
+    : planAllowanceMicros(plan);
 
   await prisma.proSubscription.upsert({
     create: {
@@ -138,7 +137,7 @@ export async function syncProSubscription(
       currentPeriodStart: periodStart,
       endedAt,
       monthlyAllowanceMicros: allowanceMicros,
-      planKey: proPlanKey,
+      planKey: plan,
       status: subscription.status,
       stripeCustomerId: customerId,
       stripeSubscriptionId: subscription.id,
@@ -151,6 +150,7 @@ export async function syncProSubscription(
       currentPeriodStart: periodStart,
       endedAt,
       monthlyAllowanceMicros: allowanceMicros,
+      planKey: plan,
       status: subscription.status,
       stripeCustomerId: customerId,
       stripeSubscriptionId: subscription.id,
@@ -176,13 +176,13 @@ export async function syncProSubscription(
   ) {
     await grantCredits({
       amountMicros: allowanceMicros,
-      description: "Donkey Pro monthly allowance",
+      description: `Donkey ${PLAN_TERMS[plan].name} monthly allowance`,
       expiresAt: periodEnd,
-      metadata: { plan: proPlanKey },
+      metadata: { plan },
       periodEnd,
       periodStart,
       source: "pro_subscription",
-      sourceId: `pro:${subscription.id}:${item?.current_period_start ?? 0}`,
+      sourceId: `pro:${subscription.id}:${item.current_period_start}`,
       userId,
     });
   }

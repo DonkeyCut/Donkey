@@ -1,7 +1,7 @@
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getCreditBalance } from "@/lib/credits/inference";
-import { getActiveProSubscription } from "@/lib/billing/pro-subscription";
+import { getActiveSubscription } from "@/lib/billing/pro-subscription";
 import { cloudProjectsFull } from "@/lib/billing/project-limit-server";
 import { isDonkeySuperUser } from "@/lib/super-user";
 import { normalizeAspect, type ProjectDoc } from "@/cut/lib/types";
@@ -549,14 +549,14 @@ export function projectTools(
         usageBytes(identity.userId),
         cutLimitsFor(identity.userId),
         isDonkeySuperUser(identity.userId),
-        getActiveProSubscription(identity.userId),
+        getActiveSubscription(identity.userId),
       ]);
       const view = emptyProjectView();
       view.account = {
         credits: credits.balance,
         storageBytes: bytes,
         storageQuotaBytes: limits.storageBytes,
-        plan: superUser ? "unlimited" : pro ? "pro" : "free",
+        plan: superUser ? "unlimited" : (pro?.planKey ?? "free"),
       };
       return { view, playback: null };
     },

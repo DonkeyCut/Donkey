@@ -27,20 +27,23 @@
   "dialog": {
     "close": "Cerrar"
   },
-  "proPlan": {
-    "body": "Genera contenido multimedia con IA.",
+  "plans": {
+    "body": "{plan, select, plus {Prueba la generación con IA con bajo presupuesto.} pro {Genera multimedia enriquecida con IA.} other {Para generación intensiva con IA, cada mes.}}",
     "price": "{price}/mes",
+    "perMonth": "/mes",
     "storage": "{gb, number} GB de almacenamiento en la nube",
     "credits": "{credits} créditos de IA cada mes",
-    "generation": "Generación de imagen, video, voz en off y música"
+    "generation": "Generación de imagen, video, locución y música",
+    "unlimitedProjects": "Proyectos ilimitados",
+    "renders": "{count, number} exportaciones e importaciones al día",
+    "everythingIn": "Todo lo incluido en {plan}"
   },
   "apiErrors": {
     "checkout_no_url": "Stripe no devolvió una URL.",
-    "credit_amount_out_of_range": "Elige entre {min} y {max}, en miles enteros.",
-    "auto_reload_invalid": "Proporciona enabled, thresholdDollars y amountDollars.",
-    "no_payment_method": "Compra créditos una vez para guardar una tarjeta y luego activa la recarga automática.",
     "unsupported_image_type": "Tipo de imagen no compatible.",
-    "image_too_large": "Imagen demasiado grande."
+    "image_too_large": "Imagen demasiado grande.",
+    "plan_not_an_upgrade": "Esta cuenta ya tiene este plan o uno superior.",
+    "upgrade_payment_failed": "Tu tarjeta fue rechazada, así que tu plan no cambió. Actualiza tu tarjeta en facturación e inténtalo de nuevo."
   },
   "languageSaveFailed": "No se pudo guardar tu idioma. Inténtalo de nuevo.",
   "languageBlocked": "Este navegador no guarda cookies, así que no se puede cambiar el idioma."

@@ -27,7 +27,7 @@
       "writeCaption": "Rédiger la légende et les tags"
     },
     "workingEllipsis": "Traitement…",
-    "insufficientCredits": "Crédits insuffisants — <link>recharger des crédits</link>",
+    "insufficientCredits": "Crédits insuffisants — <link>voir les forfaits</link>",
     "dropToAttach": "Déposer pour joindre",
     "composerPlaceholder": "Posez une question sur votre vidéo ou demandez une modification… @ référence les fichiers, dossiers et notes",
     "dictate": "Dicter",
@@ -140,7 +140,7 @@
   },
   "hostedError": {
     "insufficientCredits": "Crédits insuffisants",
-    "insufficientCreditsReload": "Crédits insuffisants, <link>rechargez ici</link>",
+    "insufficientCreditsReload": "Crédits insuffisants, <link>voir les forfaits</link>",
     "failed": "Échec."
   }
 }

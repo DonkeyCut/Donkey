@@ -33,7 +33,7 @@ export type AnalyticsEvents = {
   cut_credits_pill_clicked: { credits: number; dollars: number };
   cut_storage_upgrade_shown: { source: "quota-413" | "render" | "pill" };
   // The upgrade wall at a free limit; intro is the open discount's percent, 0 for none.
-  upgrade_dialog_shown: { reason: "projects" | "credits"; pro: boolean; intro: number };
+  upgrade_dialog_shown: { reason: "projects" | "credits" | "storage" | "plans"; pro: boolean; plan: string; intro: number };
   project_limit_hit: { limit: number };
   cut_grace_banner_shown: void;
   // First exposure to an experiment variant; the same value rides every
@@ -63,14 +63,8 @@ export type AnalyticsEvents = {
   subscribe_bonus_offered: { dollars: number };
   subscribe_bonus_checkout_started: { dollars: number; minutesLeft: number; source: "editor" | "settings" | "email" };
   // Billing (settings).
-  pro_checkout_started: void;
+  pro_checkout_started: { plan: string } | void;
   billing_portal_opened: void;
-  credits_checkout_started: { amountDollars: number };
-  credit_auto_reload_saved: {
-    enabled: boolean;
-    thresholdDollars: number;
-    amountDollars: number;
-  };
 };
 
 // Binds this browser's events to the signed-in account and records the app

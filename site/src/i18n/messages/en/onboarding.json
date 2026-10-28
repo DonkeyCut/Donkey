@@ -51,11 +51,10 @@
   "plans": {
     "title": "Simple pricing",
     "subtitle": "The editor is free. Pay only for AI generated media.",
-    "forIndividuals": "For individuals",
-    "getPro": "Get Pro",
+    "bestValue": "Best value",
+    "getPlan": "Get {plan}",
     "getProOff": "Get {percent}% off Pro",
     "continueFree": "Continue with free",
-    "endsIn": "{percent}% off ends in {hours}h {minutes}m {seconds}s",
     "covers": "{months, plural, one {For your first month, then {price}/month} other {Per month for your first # months, then {price}/month}}"
   }
 }

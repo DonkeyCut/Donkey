@@ -27,7 +27,7 @@
       "writeCaption": "投稿キャプションとタグを作成"
     },
     "workingEllipsis": "処理中…",
-    "insufficientCredits": "クレジット残高不足 — <link>クレジットをチャージ</link>",
+    "insufficientCredits": "クレジット不足 — <link>プランを見る</link>",
     "dropToAttach": "ドロップして添付",
     "composerPlaceholder": "動画について質問するか、変更内容を指示… @でファイル、フォルダ、ノートを参照",
     "dictate": "音声入力",
@@ -140,7 +140,7 @@
   },
   "hostedError": {
     "insufficientCredits": "クレジット残高不足",
-    "insufficientCreditsReload": "クレジット残高不足です。<link>こちらからチャージしてください</link>",
+    "insufficientCreditsReload": "クレジット不足、<link>プランを見る</link>",
     "failed": "失敗しました。"
   }
 }

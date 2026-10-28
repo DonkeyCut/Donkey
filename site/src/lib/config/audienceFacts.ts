@@ -36,7 +36,7 @@ export async function collectFactsFor(
   const [pro, paid, sessions, storage, credits] = await Promise.all([
     wantsPro
       ? prisma.proSubscription.findMany({
-          select: { userId: true },
+          select: { planKey: true, userId: true },
           where: { status: { in: [...ACTIVE_PRO_STATUSES] }, userId: { in: ids } },
         })
       : [],
@@ -63,6 +63,8 @@ export async function collectFactsFor(
         })
       : [],
   ]);
+  // Any running plan counts as subscribed; the plan itself sizes the quota.
+  const planBy = new Map(pro.map((row) => [row.userId, row.planKey]));
   for (const row of pro) facts.get(row.userId)!.pro = true;
   for (const row of paid) facts.get(row.userId)!.paid = true;
   for (const row of sessions) facts.get(row.userId)!.lastActiveAt = row._max.updatedAt;
@@ -71,7 +73,7 @@ export async function collectFactsFor(
     const bytesBy = new Map(usage.map((row) => [row.userId, Number(row.bytes)]));
     for (const tier of tiers) {
       const fact = facts.get(tier.id)!;
-      const quota = cutLimitsForTier({ superUser: tier.superUser, pro: fact.pro }).storageBytes;
+      const quota = cutLimitsForTier({ superUser: tier.superUser, plan: planBy.get(tier.id) ?? null }).storageBytes;
       fact.storageUsedPercent = quota === null ? null : clampPercent((100 * (bytesBy.get(tier.id) ?? 0)) / quota);
     }
   }

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { requestLocale } from "@/i18n/requestLocale";
-import { getActiveProSubscription } from "@/lib/billing/pro-subscription";
+import { getActiveSubscription } from "@/lib/billing/pro-subscription";
 import { creditMicrosToString } from "@/lib/credits/amounts";
 import { formatCredits } from "@/lib/credits/format-credits";
 import { getCreditBalance } from "@/lib/credits/inference";
@@ -48,7 +48,7 @@ export const GET = withDonkeyAuth(async (request) => {
   if (!offer || !claim) return notFoundResponse();
   if (offer.userId !== request.donkey.userId) return forbiddenResponse();
   if (!offer.claimedAt && !creditOfferOpen(offer, new Date())) return goneResponse();
-  if (!offer.claimedAt && claim === "subscribe" && (await getActiveProSubscription(offer.userId))) {
+  if (!offer.claimedAt && claim === "subscribe" && (await getActiveSubscription(offer.userId))) {
     return proHeldResponse();
   }
   return NextResponse.json({

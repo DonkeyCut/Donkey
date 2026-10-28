@@ -27,20 +27,23 @@
   "dialog": {
     "close": "关闭"
   },
-  "proPlan": {
-    "body": "利用 AI 生成富媒体内容。",
+  "plans": {
+    "body": "{plan, select, plus {低预算体验 AI 生成。} pro {用 AI 生成丰富媒体。} other {适合每月大量 AI 生成需求。}}",
     "price": "{price}/月",
+    "perMonth": "/月",
     "storage": "{gb, number} GB 云存储空间",
-    "credits": "每月 {credits} 点 AI 额度",
-    "generation": "图像、视频、配音与音乐生成"
+    "credits": "每月 {credits} 点 AI 积分",
+    "generation": "图像、视频、配音和音乐生成",
+    "unlimitedProjects": "不限项目数量",
+    "renders": "每天 {count, number} 次导出与导入",
+    "everythingIn": "包含 {plan} 的全部功能"
   },
   "apiErrors": {
     "checkout_no_url": "Stripe 未返回 URL。",
-    "credit_amount_out_of_range": "请选择 {min} 到 {max} 之间，且为整千数。",
-    "auto_reload_invalid": "请提供 enabled、thresholdDollars 和 amountDollars。",
-    "no_payment_method": "购买一次点数以保存银行卡，然后即可开启自动充值。",
     "unsupported_image_type": "不支持的图片格式。",
-    "image_too_large": "图片过大。"
+    "image_too_large": "图片过大。",
+    "plan_not_an_upgrade": "该账号已在使用此方案或更高级方案。",
+    "upgrade_payment_failed": "你的银行卡被拒，方案未作更改。请在账单中更新银行卡并重试。"
   },
   "languageSaveFailed": "无法保存语言设置。请重试。",
   "languageBlocked": "此浏览器未保存 Cookie，因此无法更改语言。"

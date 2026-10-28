@@ -17,8 +17,9 @@
     "billingDescription": "Tu suscripción y saldo de créditos."
   },
   "pro": {
-    "title": "Donkey Pro",
-    "description": "Un límite de uso mensual que se renueva cada mes; aún puedes comprar créditos en cualquier momento.",
+    "title": "Plan",
+    "titlePlan": "Donkey {plan}",
+    "description": "Una cuota de uso mensual que se restablece cada mes.",
     "status": "{status, select, active {activo} trialing {en prueba} past_due {vencido} canceled {cancelado} incomplete {incompleto} unpaid {sin pagar} other {{status}}}",
     "promotionUntil": "<b>Obtén Pro antes del {day}</b> y cada mes que comience para entonces incluirá {allowance}, {multiplier}× lo habitual ({usual}).",
     "promotionOpen": "Actualmente, cada mes incluye {allowance}, {multiplier}× lo habitual ({usual}).",
@@ -32,30 +33,14 @@
     "introDeadline": "{terms} Suscríbete antes del {deadline}.",
     "opening": "Abriendo…",
     "manage": "Administrar facturación",
-    "starting": "Iniciando…",
-    "subscribe": "Suscribirse a Pro",
-    "unavailable": "La facturación no está disponible en este momento."
+    "unavailable": "La facturación no está disponible en este momento.",
+    "seePlans": "Ver planes",
+    "upgrade": "Mejorar plan"
   },
   "credits": {
     "title": "Créditos",
-    "description": "Saldo prepagado para la app Donkey. Compra más en cualquier momento.",
-    "available": "Saldo disponible",
-    "buy": "Comprar créditos",
-    "preset": "{credits} · {price}",
-    "customLabel": "Créditos",
-    "starting": "Iniciando…",
-    "buyFor": "Comprar por {price}",
-    "buyPlain": "Comprar",
-    "checkoutFailed": "No se pudo iniciar el pago. Inténtalo de nuevo en un momento.",
-    "autoReload": "Recargar automáticamente cuando mi saldo esté bajo",
-    "fallsBelow": "Cuando el saldo baje de",
-    "unit": "créditos",
-    "thenBuy": "comprar automáticamente",
-    "saving": "Guardando…",
-    "save": "Guardar",
-    "saveFailed": "No se pudo guardar la recarga automática. Inténtalo de nuevo en un momento.",
-    "lastFailed": "Falló la última recarga automática: {error}",
-    "needsCard": "La recarga automática requiere una tarjeta guardada. <buy>Compra créditos una vez</buy> para guardar una y luego activa esta opción."
+    "description": "Tu saldo para funciones de IA. Plus, Pro y Max agregan créditos cada mes.",
+    "available": "Saldo disponible"
   },
   "profile": {
     "loadFailed": "No se pudo cargar tu perfil.",

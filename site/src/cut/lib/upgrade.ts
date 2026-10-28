@@ -1,6 +1,7 @@
-// The upgrade wall's signal: what a free account just ran into. The dialog
-// listens; anything that hits a paid limit raises it.
-export type UpgradeReason = "projects" | "credits";
+// The upgrade wall's signal: what an account just ran into, or "plans" when
+// it asked to see them. The dialog listens; anything that hits a paid limit
+// raises it.
+export type UpgradeReason = "projects" | "credits" | "plans";
 
 const listeners = new Set<(reason: UpgradeReason) => void>();
 

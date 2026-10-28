@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type Stripe from "stripe";
 
-import { scheduledProEnd, subscriptionCancelAt } from "@/lib/billing/pro-subscription";
+import { planAllowanceMicros, scheduledProEnd, subscriptionCancelAt, subscriptionPlan } from "@/lib/billing/pro-subscription";
 
 const PERIOD_START = 1_767_225_600; // 2026-01-01T00:00:00Z
 const PERIOD_END = 1_769_904_000; // 2026-02-01T00:00:00Z
@@ -60,5 +60,33 @@ describe("scheduledProEnd", () => {
 
   test("a renewing plan has no end", () => {
     expect(scheduledProEnd({ cancelAt: null, cancelAtPeriodEnd: false, currentPeriodEnd })).toBeNull();
+  });
+});
+
+describe("subscriptionPlan", () => {
+  const prices = { plus: "price_plus", pro: "price_pro", max: "price_max" };
+  const withPrice = (id: string) =>
+    subscription({
+      items: { data: [{ current_period_end: PERIOD_END, current_period_start: PERIOD_START, price: { id } }] },
+    } as unknown as Partial<Stripe.Subscription>);
+
+  test("names the plan its price sells", () => {
+    expect(subscriptionPlan(withPrice("price_plus"), prices)?.plan).toBe("plus");
+    expect(subscriptionPlan(withPrice("price_pro"), prices)?.plan).toBe("pro");
+    expect(subscriptionPlan(withPrice("price_max"), prices)?.plan).toBe("max");
+  });
+
+  test("a price no plan sells is no plan", () => {
+    expect(subscriptionPlan(withPrice("price_other"), prices)).toBeNull();
+    expect(subscriptionPlan(withPrice("price_pro"), { ...prices, pro: null })).toBeNull();
+  });
+});
+
+describe("planAllowanceMicros", () => {
+  // 1,000 credits a dollar; a dollar is a million micros.
+  test("grants each plan's credits", () => {
+    expect(planAllowanceMicros("plus")).toBe(BigInt(5_000_000));
+    expect(planAllowanceMicros("pro")).toBe(BigInt(20_000_000));
+    expect(planAllowanceMicros("max")).toBe(BigInt(60_000_000));
   });
 });

@@ -1,9 +1,7 @@
 {
   "notNow": "Pas maintenant",
   "ok": "OK",
-  "upgradeToPro": "Passer à Pro",
   "subscribeToPro": "S'abonner à Pro",
-  "buyCredits": "Acheter des crédits",
   "billingUnavailable": "La facturation est indisponible pour le moment.",
   "offer": {
     "validThrough": "Les crédits supplémentaires sont valables jusqu'au {date}.",
@@ -18,14 +16,8 @@
     "terms": "{months, plural, one {-{percent} % : {price} le premier mois, puis {full}/mois.} other {-{percent} % : {price}/mois les # premiers mois, puis {full}/mois.}}"
   },
   "upgrade": {
-    "outOfCredits": "Vous n'avez plus de crédits",
-    "proOutBody": "Les crédits Pro de ce mois sont épuisés. Achetez-en pour continuer à générer.",
-    "projectsTitle": "Passez à Pro pour créer plus de projets",
-    "creditsBody": "Passez à Pro pour obtenir {credits} chaque mois et 100 GB de stockage cloud pour {price}.",
-    "creditsBodyOffer": "Passez à Pro pour obtenir {credits} chaque mois et 100 GB de stockage cloud.",
-    "proPrice": "Pro est à {price}.",
-    "projectsBodyStarter": "Le forfait gratuit conserve votre projet de départ. Pro en crée autant que nécessaire.",
-    "projectsBody": "Le forfait gratuit conserve {count, plural, one {# projet} other {# projets}} en plus de votre projet de départ. Pro en crée autant que nécessaire."
+    "projectsTitle": "Obtenez des projets illimités",
+    "projectsBody": "Pro et Max n'ont aucune limite de projets."
   },
   "claim": {
     "expiredTitle": "Cette offre a expiré",
@@ -51,9 +43,7 @@
     "graceToday": "Votre forfait Pro a pris fin. Vos projets cloud les plus anciens seront supprimés aujourd'hui, sauf si vous passez à l'offre supérieure ou libérez {bytes}.",
     "graceDays": "Votre forfait Pro a pris fin. Vos projets cloud les plus anciens seront supprimés dans {days, plural, one {# jour} other {# jours}}, sauf si vous passez à l'offre supérieure ou libérez {bytes}.",
     "proBody": "Libérez de l'espace en supprimant les projets ou médias dont vous n'avez plus besoin.",
-    "body": "Pro inclut 100 GB de stockage cloud.",
-    "bodyUsed": "Vous avez utilisé {used} sur {quota}. Pro inclut 100 GB de stockage cloud.",
-    "freeUpTerms": "Ou libérez de l'espace en supprimant les projets et médias dont vous n'avez plus besoin."
+    "moreTitle": "Obtenez plus d'espace de stockage cloud"
   },
   "subscribeBonus": {
     "daysLeft": "{count} j restants",
@@ -75,5 +65,22 @@
     "graceTooltip": "Votre forfait Pro a pris fin et vous dépassez la limite gratuite. Passez à l'offre supérieure ou libérez de l'espace avant la suppression de vos plus anciens projets.",
     "fullTooltip": "Vous n'avez plus d'espace de stockage cloud. Passez à l'offre supérieure ou libérez de l'espace pour continuer à importer.",
     "usedTooltip": "{used} sur {quota} de stockage cloud utilisé."
+  },
+  "plans": {
+    "chooseTitle": "Choisissez votre forfait",
+    "chooseBody": "Chaque forfait ajoute des crédits IA par mois et plus de stockage cloud.",
+    "freeOutTitle": "Choisissez un forfait pour continuer à générer",
+    "paidOutTitle": "Passez au niveau supérieur pour plus de crédits dès aujourd'hui",
+    "paidOutBody": "Vos crédits {plan} seront renouvelés le {date}.",
+    "topOutTitle": "Vos crédits {plan} seront renouvelés le {date}",
+    "bestValue": "Meilleure offre",
+    "billedMonthly": "Facturé mensuellement",
+    "introThen": "{months, plural, one {Premier mois, puis {price}/mois} other {# premiers mois, puis {price}/mois}}",
+    "stickerPercent": "{percent} %",
+    "stickerOff": "de réduction",
+    "get": "Obtenir {plan}",
+    "upgrade": "Passer à {plan}",
+    "current": "Forfait actuel",
+    "footer": "Prix en USD. Renouvellement mensuel automatique jusqu'à résiliation. Passer à un forfait supérieur facture la différence aujourd'hui."
   }
 }

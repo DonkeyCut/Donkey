@@ -4,8 +4,8 @@ import { CreditsCard } from "@/app/[locale]/cut/app/(home)/settings/_components/
 import { ProCard } from "@/app/[locale]/cut/app/(home)/settings/_components/ProCard";
 import { SettingsGuard } from "@/cut/components/SettingsGuard";
 
-// Cut's billing page: the Pro subscription that carries the monthly AI
-// credits, plus the credit balance and top-ups.
+// Cut's billing page: the subscription that carries the monthly AI credits,
+// plus the credit balance.
 export default function CutBillingPage() {
   return (
     <SettingsGuard>

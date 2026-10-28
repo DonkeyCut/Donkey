@@ -27,7 +27,7 @@
       "writeCaption": "Post-Beschreibung + Tags verfassen"
     },
     "workingEllipsis": "Wird bearbeitet…",
-    "insufficientCredits": "Nicht genügend Guthaben – <link>Guthaben aufladen</link>",
+    "insufficientCredits": "Nicht genügend Guthaben – <link>Pläne ansehen</link>",
     "dropToAttach": "Zum Anhängen ablegen",
     "composerPlaceholder": "Frag etwas zu deinem Video oder sag mir, was geändert werden soll… @ verweist auf Dateien, Ordner und Notizen",
     "dictate": "Diktieren",
@@ -140,7 +140,7 @@
   },
   "hostedError": {
     "insufficientCredits": "Nicht genügend Guthaben",
-    "insufficientCreditsReload": "Nicht genügend Guthaben, <link>hier aufladen</link>",
+    "insufficientCreditsReload": "Nicht genügend Guthaben, <link>Pläne ansehen</link>",
     "failed": "Fehlgeschlagen."
   }
 }

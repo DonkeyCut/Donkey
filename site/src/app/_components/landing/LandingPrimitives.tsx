@@ -115,6 +115,9 @@ type PillButtonProps = {
   onClick?: () => void | Promise<void>;
   size?: ButtonSize;
   variant?: ButtonVariant;
+  // "full" stretches the pill across its container, so a row of cards shares
+  // one button size whatever each label says.
+  width?: "fit" | "full";
 };
 
 export function PillButton({
@@ -125,6 +128,7 @@ export function PillButton({
   onClick,
   size = "md",
   variant = "primary",
+  width = "fit",
 }: PillButtonProps) {
   const sizes: Record<ButtonSize, CSSProperties> = {
     sm: { padding: "8px 16px", fontSize: 14 },
@@ -159,6 +163,7 @@ export function PillButton({
     transition: "transform 0.15s ease, opacity 0.15s ease",
     ...sizes[size],
     ...variants[variant],
+    ...(width === "full" ? { boxSizing: "border-box", width: "100%" } : {}),
   };
 
   if (href && !disabled) {

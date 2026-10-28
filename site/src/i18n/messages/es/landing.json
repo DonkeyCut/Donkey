@@ -20,8 +20,7 @@
   },
   "pricing": {
     "title": "Precios <italic>simples</italic>",
-    "body": "El editor es gratis. Paga solo por la multimedia generada con IA.",
-    "footnote": "* Compra créditos para contenido generado con IA en cualquier momento."
+    "body": "El editor es gratis. Paga solo por la multimedia generada con IA."
   },
   "plans": {
     "free": {
@@ -34,10 +33,10 @@
       "tools": "Importación, exportación y transcripción local",
       "subscriptions": "Conecta tu suscripción a Claude o Codex"
     },
-    "pro": {
-      "detail": "Para creadores individuales",
-      "cta": "Obtén Pro",
-      "everythingInFree": "Todo lo incluido en Gratis"
+    "paid": {
+      "detail": "{plan, select, plus {Para empezar} pro {La mejor opción} other {Para generación intensiva}}",
+      "cta": "Obtén {plan}",
+      "everythingInFree": "Todo lo incluido en Free"
     }
   },
   "local": {

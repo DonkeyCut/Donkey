@@ -27,20 +27,23 @@
   "dialog": {
     "close": "Fermer"
   },
-  "proPlan": {
-    "body": "Générez des médias enrichis avec l'IA.",
+  "plans": {
+    "body": "{plan, select, plus {Testez la génération par IA avec un petit budget.} pro {Générez des médias riches grâce à l'IA.} other {Pour une utilisation intensive de l'IA, chaque mois.}}",
     "price": "{price}/mois",
+    "perMonth": "/mois",
     "storage": "{gb, number} GB de stockage cloud",
-    "credits": "{credits} crédits IA chaque mois",
-    "generation": "Génération d'images, de vidéos, de voix off et de musique"
+    "credits": "{credits} crédits IA par mois",
+    "generation": "Génération d'images, de vidéos, de voix off et de musique",
+    "unlimitedProjects": "Projets illimités",
+    "renders": "{count, number} exportations et importations par jour",
+    "everythingIn": "Tout ce qui est inclus dans {plan}"
   },
   "apiErrors": {
     "checkout_no_url": "Stripe n'a pas renvoyé d'URL.",
-    "credit_amount_out_of_range": "Choisissez entre {min} et {max}, par milliers entiers.",
-    "auto_reload_invalid": "Indiquez enabled, thresholdDollars et amountDollars.",
-    "no_payment_method": "Achetez des crédits une fois pour enregistrer une carte, puis activez le rechargement automatique.",
     "unsupported_image_type": "Type d'image non pris en charge.",
-    "image_too_large": "Image trop volumineuse."
+    "image_too_large": "Image trop volumineuse.",
+    "plan_not_an_upgrade": "Ce compte bénéficie déjà de ce forfait ou d'un forfait supérieur.",
+    "upgrade_payment_failed": "Votre carte a été refusée, votre forfait n'a donc pas changé. Mettez à jour votre carte dans la facturation et réessayez."
   },
   "languageSaveFailed": "Impossible d'enregistrer votre langue. Réessayez.",
   "languageBlocked": "Ce navigateur n'enregistre pas les cookies, la langue ne peut donc pas être modifiée."

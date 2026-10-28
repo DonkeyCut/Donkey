@@ -16,7 +16,9 @@ export type PricingPlan = {
   detail: string;
   features: string[];
   name: string;
+  // The figure, large ("$20"), and what it is per, small beside it ("/month").
   price: string;
+  cadence?: string;
   tapeColor: CardColor;
   tapePosition?: "left" | "right" | "center";
 };

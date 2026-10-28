@@ -17,8 +17,9 @@
     "billingDescription": "サブスクリプションとクレジット残高。"
   },
   "pro": {
-    "title": "Donkey Pro",
-    "description": "毎月リセットされる月間使用枠です。クレジットはいつでも追加購入できます。",
+    "title": "プラン",
+    "titlePlan": "Donkey {plan}",
+    "description": "毎月リセットされる月間利用枠です。",
     "status": "{status, select, active {アクティブ} trialing {トライアル中} past_due {支払い遅延} canceled {キャンセル済み} incomplete {未完了} unpaid {未払い} other {{status}}}",
     "promotionUntil": "<b>{day}までにProに登録</b>すると、それまでに開始するすべての月で通常の{usual}の{multiplier}倍となる{allowance}が付与されます。",
     "promotionOpen": "現在、毎月通常の{usual}の{multiplier}倍となる{allowance}が付与されます。",
@@ -32,30 +33,14 @@
     "introDeadline": "{terms} {deadline}までにご登録ください。",
     "opening": "開いています…",
     "manage": "請求の管理",
-    "starting": "開始中…",
-    "subscribe": "Proに登録",
-    "unavailable": "現在、請求機能を利用できません。"
+    "unavailable": "現在、請求機能を利用できません。",
+    "seePlans": "プランを見る",
+    "upgrade": "アップグレード"
   },
   "credits": {
     "title": "クレジット",
-    "description": "Donkeyアプリの都度払い残高です。いつでも追加購入できます。",
-    "available": "利用可能残高",
-    "buy": "クレジットを購入",
-    "preset": "{credits} · {price}",
-    "customLabel": "クレジット",
-    "starting": "処理中…",
-    "buyFor": "{price}で購入",
-    "buyPlain": "購入",
-    "checkoutFailed": "チェックアウトを開始できませんでした。しばらくしてからもう一度お試しください。",
-    "autoReload": "残高不足時に自動リチャージ",
-    "fallsBelow": "残高が以下を下回った場合",
-    "unit": "クレジット",
-    "thenBuy": "自動購入する額",
-    "saving": "保存中…",
-    "save": "保存",
-    "saveFailed": "自動リチャージを保存できませんでした。しばらくしてからもう一度お試しください。",
-    "lastFailed": "前回の自動リチャージに失敗しました: {error}",
-    "needsCard": "自動リチャージには保存済みのカードが必要です。<buy>クレジットを一度購入</buy>してカードを登録してから有効にしてください。"
+    "description": "AI機能用の残高です。Plus、Pro、Maxプランでは毎月クレジットが付与されます。",
+    "available": "利用可能残高"
   },
   "profile": {
     "loadFailed": "プロフィールを読み込めませんでした。",

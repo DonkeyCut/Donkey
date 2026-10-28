@@ -2,6 +2,7 @@
 
 import { useMutation, useQuery } from "@tanstack/react-query";
 
+import type { PaidPlan } from "@/lib/billing/plans";
 import { apiFetch } from "@/queries/apiClient";
 
 export const proSubscriptionQueryKey = ["billing", "pro"] as const;
@@ -9,6 +10,8 @@ export const introOfferQueryKey = ["billing", "intro-offer"] as const;
 
 export type ProSubscription = {
   isActive: boolean;
+  // The running plan; null on a free account.
+  plan: PaidPlan | null;
   status: string | null;
   // End of the current billing period: the allowance resets and the plan
   // renews here.
@@ -40,11 +43,13 @@ export type IntroOffer = {
 };
 
 // The discount an account inside its intro window gets on Pro. Checkout
-// applies it on its own; this read is for the surfaces that show it.
+// applies it on its own; this read is for the surfaces that show it, and the
+// first one starts the window.
 export function useIntroOffer({ enabled = true }: { enabled?: boolean } = {}) {
   return useQuery({
     enabled,
-    queryFn: async () => (await apiFetch<{ offer: IntroOffer | null }>("/api/billing/intro-offer")).offer,
+    queryFn: async () =>
+      (await apiFetch<{ offer: IntroOffer | null }>("/api/billing/intro-offer", { method: "POST" })).offer,
     queryKey: introOfferQueryKey,
     staleTime: 5 * 60_000,
   });
@@ -52,11 +57,13 @@ export function useIntroOffer({ enabled = true }: { enabled?: boolean } = {}) {
 
 // Mutations return the Stripe URL; the caller redirects the browser. We don't
 // invalidate here because the user leaves the page for Stripe.
-// A checkout opened from an offer's claim link passes the offer's token, so
-// the credit that lands is the one the dialog described.
+// A checkout names its plan (Pro when unnamed). One opened from an offer's
+// claim link passes the offer's token, so the credit that lands is the one the
+// dialog described. An account already on a plan moves up in place and comes
+// back with the settings URL.
 export function useStartCheckout() {
   return useMutation({
-    mutationFn: (input?: { offerToken: string } | void) =>
+    mutationFn: (input?: { plan?: PaidPlan; offerToken?: string } | void) =>
       apiFetch<{ url: string }>("/api/billing/checkout", {
         method: "POST",
         ...(input ? { body: JSON.stringify(input) } : {}),

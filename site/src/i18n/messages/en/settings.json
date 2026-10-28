@@ -17,8 +17,9 @@
     "billingDescription": "Your subscription and credit balance."
   },
   "pro": {
-    "title": "Donkey Pro",
-    "description": "A monthly usage allowance that resets each month — you can still buy credits any time.",
+    "title": "Plan",
+    "titlePlan": "Donkey {plan}",
+    "description": "A monthly usage allowance that resets each month.",
     "status": "{status, select, active {active} trialing {trialing} past_due {past_due} canceled {canceled} incomplete {incomplete} unpaid {unpaid} other {{status}}}",
     "promotionUntil": "<b>Get Pro by {day}</b> and every month that starts by then includes {allowance}, {multiplier}× the usual {usual}.",
     "promotionOpen": "Every month currently includes {allowance}, {multiplier}× the usual {usual}.",
@@ -32,30 +33,14 @@
     "introDeadline": "{terms} Subscribe by {deadline}.",
     "opening": "Opening…",
     "manage": "Manage billing",
-    "starting": "Starting…",
-    "subscribe": "Subscribe to Pro",
-    "unavailable": "Billing is unavailable right now."
+    "unavailable": "Billing is unavailable right now.",
+    "seePlans": "See plans",
+    "upgrade": "Upgrade"
   },
   "credits": {
     "title": "Credits",
-    "description": "Pay-as-you-go balance for the Donkey app. Buy more any time.",
-    "available": "Available balance",
-    "buy": "Buy credits",
-    "preset": "{credits} · {price}",
-    "customLabel": "Credits",
-    "starting": "Starting…",
-    "buyFor": "Buy for {price}",
-    "buyPlain": "Buy",
-    "checkoutFailed": "Couldn't start checkout. Try again in a moment.",
-    "autoReload": "Auto-reload when my balance runs low",
-    "fallsBelow": "When balance falls below",
-    "unit": "credits",
-    "thenBuy": "automatically buy",
-    "saving": "Saving…",
-    "save": "Save",
-    "saveFailed": "Couldn't save auto-reload. Try again in a moment.",
-    "lastFailed": "Last auto-reload failed: {error}",
-    "needsCard": "Auto-reload needs a saved card. <buy>Buy credits once</buy> to save one, then turn this on."
+    "description": "Your balance for AI features. Plus, Pro, and Max add credits every month.",
+    "available": "Available balance"
   },
   "profile": {
     "loadFailed": "Couldn't load your profile.",

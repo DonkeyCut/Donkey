@@ -1,9 +1,7 @@
 {
   "notNow": "나중에",
   "ok": "확인",
-  "upgradeToPro": "Pro로 업그레이드",
   "subscribeToPro": "Pro 구독",
-  "buyCredits": "크레딧 구매",
   "billingUnavailable": "지금은 결제 기능을 이용할 수 없어요.",
   "offer": {
     "validThrough": "추가 크레딧은 {date}까지 유효해요.",
@@ -18,14 +16,8 @@
     "terms": "{months, plural, other {{percent}% 할인: 첫 #개월간 {price}/월, 이후 {full}/월.}}"
   },
   "upgrade": {
-    "outOfCredits": "크레딧이 모두 소진되었어요",
-    "proOutBody": "이번 달 Pro 크레딧을 모두 사용했어요. 계속 생성하려면 크레딧을 더 구매하세요.",
-    "projectsTitle": "프로젝트를 더 만들려면 업그레이드하세요",
-    "creditsBody": "Pro로 업그레이드하면 {price}에 매월 {credits}과 100 GB의 클라우드 스토리지를 이용할 수 있어요.",
-    "creditsBodyOffer": "Pro로 업그레이드하고 매월 {credits}과 100 GB의 클라우드 스토리지를 받으세요.",
-    "proPrice": "Pro는 {price}예요.",
-    "projectsBodyStarter": "무료 플랜에서는 스타터 프로젝트만 유지할 수 있어요. Pro에서는 원하는 만큼 만들 수 있어요.",
-    "projectsBody": "{count, plural, other {무료 플랜에서는 스타터 프로젝트 외에 프로젝트를 #개 유지할 수 있어요. Pro에서는 원하는 만큼 만들 수 있어요.}}"
+    "projectsTitle": "무제한 프로젝트 이용하기",
+    "projectsBody": "Pro 및 Max 요금제는 프로젝트 제한이 없어요."
   },
   "claim": {
     "expiredTitle": "만료된 혜택이에요",
@@ -51,9 +43,7 @@
     "graceToday": "Pro 요금제가 종료되었어요. 업그레이드하거나 {bytes}를 확보하지 않으면 가장 오래된 클라우드 프로젝트가 오늘 삭제돼요.",
     "graceDays": "Pro 요금제가 종료되었어요. 업그레이드하거나 {bytes}를 확보하지 않으면 가장 오래된 클라우드 프로젝트가 {days, plural, other {#일 후에}} 삭제돼요.",
     "proBody": "더 이상 필요 없는 프로젝트나 미디어를 삭제해 공간을 확보하세요.",
-    "body": "Pro에는 100 GB의 클라우드 스토리지가 포함되어 있어요.",
-    "bodyUsed": "{quota} 중 {used}를 사용했어요. Pro에는 100 GB의 클라우드 스토리지가 포함되어 있어요.",
-    "freeUpTerms": "또는 더 이상 필요 없는 프로젝트와 미디어를 삭제해 공간을 확보하세요."
+    "moreTitle": "클라우드 저장 공간 추가하기"
   },
   "subscribeBonus": {
     "daysLeft": "{count}일 남음",
@@ -75,5 +65,22 @@
     "graceTooltip": "Pro 요금제가 종료되어 무료 용량을 초과했어요. 가장 오래된 프로젝트가 삭제되기 전에 업그레이드하거나 공간을 확보하세요.",
     "fullTooltip": "클라우드 저장 공간이 부족해요. 계속 업로드하려면 업그레이드하거나 공간을 확보하세요.",
     "usedTooltip": "클라우드 스토리지 {quota} 중 {used}를 사용 중이에요."
+  },
+  "plans": {
+    "chooseTitle": "요금제 선택",
+    "chooseBody": "모든 요금제에서 매달 AI 크레딧과 추가 클라우드 저장 공간을 제공해요.",
+    "freeOutTitle": "계속 생성하려면 요금제를 선택하세요",
+    "paidOutTitle": "업그레이드하고 오늘 크레딧을 더 받으세요",
+    "paidOutBody": "{plan} 크레딧은 {date}에 다시 충전돼요.",
+    "topOutTitle": "{plan} 크레딧 충전일: {date}",
+    "bestValue": "최고 혜택",
+    "billedMonthly": "매월 청구",
+    "introThen": "{months, plural, other {첫 #개월 이용 후 월 {price}}}",
+    "stickerPercent": "{percent}%",
+    "stickerOff": "할인",
+    "get": "{plan} 선택",
+    "upgrade": "{plan}(으)로 업그레이드",
+    "current": "현재 요금제",
+    "footer": "가격은 USD 기준이에요. 직접 취소하기 전까지 요금제가 매달 자동 갱신돼요. 더 높은 요금제로 변경하면 오늘 차액이 결제돼요."
   }
 }

@@ -20,8 +20,7 @@
   },
   "pricing": {
     "title": "Simple <italic>pricing</italic>",
-    "body": "The editor is free. Pay only for AI generated media.",
-    "footnote": "* Buy credits for AI generated content at any time."
+    "body": "The editor is free. Pay only for AI generated media."
   },
   "plans": {
     "free": {
@@ -34,9 +33,9 @@
       "tools": "Import, export, and local transcription",
       "subscriptions": "Connect your Claude or Codex subscription"
     },
-    "pro": {
-      "detail": "For individuals",
-      "cta": "Get Pro",
+    "paid": {
+      "detail": "{plan, select, plus {To get started} pro {Best value} other {For heavy generation}}",
+      "cta": "Get {plan}",
       "everythingInFree": "Everything in Free"
     }
   },

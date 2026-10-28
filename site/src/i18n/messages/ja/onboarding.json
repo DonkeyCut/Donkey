@@ -51,11 +51,10 @@
   "plans": {
     "title": "シンプルな料金プラン",
     "subtitle": "エディターは無料。AI生成メディアにのみお支払いいただけます。",
-    "forIndividuals": "個人向け",
-    "getPro": "Proを利用",
+    "bestValue": "最もお得",
+    "getPlan": "{plan}を入手",
     "getProOff": "Proを{percent}%オフで利用",
     "continueFree": "無料で続ける",
-    "endsIn": "{percent}%オフの終了まであと{hours}時間{minutes}分{seconds}秒",
     "covers": "{months, plural, other {最初の#か月間の月額、以降は{price}/月}}"
   }
 }

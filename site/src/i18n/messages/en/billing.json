@@ -1,9 +1,7 @@
 {
   "notNow": "Not now",
   "ok": "OK",
-  "upgradeToPro": "Upgrade to Pro",
   "subscribeToPro": "Subscribe to Pro",
-  "buyCredits": "Buy credits",
   "billingUnavailable": "Billing is unavailable right now.",
   "offer": {
     "validThrough": "Extra credits are valid through {date}.",
@@ -18,14 +16,8 @@
     "terms": "{months, plural, one {{percent}% off: {price} for your first month, then {full}/month.} other {{percent}% off: {price}/month for your first # months, then {full}/month.}}"
   },
   "upgrade": {
-    "outOfCredits": "You're out of credits",
-    "proOutBody": "This month's Pro credits are spent. Buy more to keep generating.",
-    "projectsTitle": "Upgrade to make more projects",
-    "creditsBody": "Upgrade to Pro and get {credits} every month and 100 GB of cloud storage for {price}.",
-    "creditsBodyOffer": "Upgrade to Pro and get {credits} every month and 100 GB of cloud storage.",
-    "proPrice": "Pro is {price}.",
-    "projectsBodyStarter": "The free plan keeps your starter project. Pro makes as many as you need.",
-    "projectsBody": "The free plan keeps {count, plural, one {# project} other {# projects}} besides your starter. Pro makes as many as you need."
+    "projectsTitle": "Get unlimited projects",
+    "projectsBody": "Pro and Max have no project limit."
   },
   "claim": {
     "expiredTitle": "This offer has expired",
@@ -51,9 +43,7 @@
     "graceToday": "Your Pro plan ended. Your oldest cloud projects will be deleted today unless you upgrade or free {bytes}.",
     "graceDays": "Your Pro plan ended. Your oldest cloud projects will be deleted in {days, plural, one {# day} other {# days}} unless you upgrade or free {bytes}.",
     "proBody": "Free up space by deleting projects or media you no longer need.",
-    "body": "Pro includes 100 GB of cloud storage.",
-    "bodyUsed": "You've used {used} of {quota}. Pro includes 100 GB of cloud storage.",
-    "freeUpTerms": "Or free up space by deleting projects and media you no longer need."
+    "moreTitle": "Get more cloud storage"
   },
   "subscribeBonus": {
     "daysLeft": "{count}d left",
@@ -75,5 +65,22 @@
     "graceTooltip": "Your Pro plan ended and you're over the free limit. Upgrade or free up space before your oldest projects are deleted.",
     "fullTooltip": "You've run out of cloud storage. Upgrade or free up space to keep uploading.",
     "usedTooltip": "{used} of {quota} of cloud storage used."
+  },
+  "plans": {
+    "chooseTitle": "Choose your plan",
+    "chooseBody": "Every plan adds AI credits each month and more cloud storage.",
+    "freeOutTitle": "Pick a plan to keep generating",
+    "paidOutTitle": "Upgrade for more credits today",
+    "paidOutBody": "Your {plan} credits refill on {date}.",
+    "topOutTitle": "Your {plan} credits refill on {date}",
+    "bestValue": "Best value",
+    "billedMonthly": "Billed monthly",
+    "introThen": "{months, plural, one {First month, then {price}/month} other {First # months, then {price}/month}}",
+    "stickerPercent": "{percent}%",
+    "stickerOff": "off",
+    "get": "Get {plan}",
+    "upgrade": "Upgrade to {plan}",
+    "current": "Current plan",
+    "footer": "Prices in USD. Plans renew monthly until you cancel. Moving up a plan charges the difference today."
   }
 }

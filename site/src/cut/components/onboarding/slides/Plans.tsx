@@ -1,32 +1,40 @@
 "use client";
 
-import { Check } from "lucide-react";
+import { ArrowLeft, Check, Loader2, Sparkles } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 
 import { TapedCard } from "@/app/_components/landing/LandingPrimitives";
-import { useCutPro } from "@/app/[locale]/cut/_components/landing/cutPricingPlans";
+import type { CardColor } from "@/app/_components/landing/theme";
+import { useCutPlans, type PlanCopy, type PlanFeature } from "@/app/[locale]/cut/_components/landing/cutPricingPlans";
 import { Button } from "@/components/ui/button";
 import { priceLabel } from "@/cut/components/IntroOffer";
-import { countdownParts, useNow } from "@/cut/components/OfferDialog";
-import { useUpgradeToPro } from "@/cut/lib/proUpgrade";
+import { OfferSticker } from "@/cut/components/OfferSticker";
+import { usePlanCheckout } from "@/cut/lib/proUpgrade";
+import { RECOMMENDED_PLAN, type PaidPlan } from "@/lib/billing/plans";
 import { useIntroOffer, type IntroOffer } from "@/queries/billing";
 
 import "../onboarding.css";
 
-// The sequence's last word: Pro is the offer, free is the default, and the
-// benefits sit in the card so nobody has to take the price on faith. It's the
-// landing's own Pro card — same taped coral frame, same ringed check bullets —
-// so the offer looks the same wherever it's met. Checkout is the one the
-// storage wall and the billing page start. While the intro offer is open the
-// card prices the discount and counts down to its end.
+// The landing's own card colors, so a plan looks the same wherever it's met.
+const PLAN_CARD: Record<PaidPlan, { color: CardColor; tapeColor: CardColor }> = {
+  plus: { color: "cream", tapeColor: "mint" },
+  pro: { color: "coral", tapeColor: "yellow" },
+  max: { color: "cream", tapeColor: "pink" },
+};
+
+// The sequence's last word: the paid plans side by side, Pro marked the best
+// value, and free the default under them. The benefits sit in each card so
+// nobody has to take a price on faith. Checkout is the one the upgrade modal
+// starts. While the intro offer is open the Pro card prices the discount and
+// counts down to its end.
 export function PlansSlide({ onSkipPro }: { onSkipPro: () => void }) {
   const t = useTranslations("onboarding.plans");
-  const plan = useCutPro();
-  const pro = useUpgradeToPro();
+  const plans = useCutPlans();
+  const checkout = usePlanCheckout();
   const offer = useIntroOffer().data ?? null;
 
   return (
-    <div className="mx-auto w-full max-w-[520px]">
+    <div className="mx-auto w-full max-w-[1040px]">
       <h2 className="text-center text-[clamp(24px,3vw,32px)] leading-[1.1] font-semibold tracking-[-0.02em]">
         {t("title")}
       </h2>
@@ -34,54 +42,17 @@ export function PlansSlide({ onSkipPro }: { onSkipPro: () => void }) {
         {t("subtitle")}
       </p>
 
-      <div className="mt-8">
-        <TapedCard
-          color="coral"
-          tapeColor="yellow"
-          tapePosition="right"
-          tapeClassName="onboarding-tape-shake"
-        >
-          <div className="p-7 md:p-9">
-            <div className="text-[22px] font-semibold">Pro</div>
-            {offer ? (
-              <IntroPrice offer={offer} />
-            ) : (
-              <>
-                <div className="mt-4 text-[clamp(34px,4.4vw,48px)] leading-[0.95] font-semibold">
-                  {plan.price}
-                </div>
-                <div className="mt-2.5 text-[13px] font-semibold text-[#201715]">
-                  {t("forIndividuals")}
-                </div>
-              </>
-            )}
-            <p className="mt-5 text-[15px] leading-[1.55] text-[#1a1a1a]">
-              {plan.body}
-            </p>
-
-            <div className="mt-6 grid gap-2.5">
-              {plan.features.map((feature) => (
-                <div
-                  key={feature}
-                  className="flex items-center gap-2.5 text-[14px] font-semibold"
-                >
-                  <span className="inline-flex size-6 shrink-0 items-center justify-center rounded-full border-2 border-ink bg-white">
-                    <Check size={14} />
-                  </span>
-                  {feature}
-                </div>
-              ))}
-            </div>
-
-            <Button
-              onClick={pro.start}
-              disabled={pro.isPending}
-              className="mt-7 h-11 rounded-full bg-ink px-6 text-[15px] text-white hover:bg-ink/90"
-            >
-              {offer ? t("getProOff", { percent: offer.percentOff }) : t("getPro")}
-            </Button>
-          </div>
-        </TapedCard>
+      <div className="mt-8 grid items-stretch gap-5 md:grid-cols-3">
+        {plans.map((copy) => (
+          <PlanCard
+            key={copy.plan}
+            copy={copy}
+            offer={copy.plan === "pro" ? offer : null}
+            pending={checkout.pendingPlan === copy.plan}
+            busy={checkout.pendingPlan !== null}
+            onPick={() => checkout.start(copy.plan)}
+          />
+        ))}
       </div>
 
       <div className="mt-5 text-right">
@@ -97,28 +68,107 @@ export function PlansSlide({ onSkipPro }: { onSkipPro: () => void }) {
   );
 }
 
-// The discounted price beside the struck-through one, what it covers, and
-// the time left to take it.
+function PlanCard({
+  copy,
+  offer,
+  pending,
+  busy,
+  onPick,
+}: {
+  copy: PlanCopy;
+  offer: IntroOffer | null;
+  pending: boolean;
+  busy: boolean;
+  onPick: () => void;
+}) {
+  const t = useTranslations("onboarding.plans");
+  const recommended = copy.plan === RECOMMENDED_PLAN;
+
+  return (
+    <TapedCard
+      color={PLAN_CARD[copy.plan].color}
+      // An open offer's sticker takes the tape's corner.
+      tapeColor={offer ? undefined : PLAN_CARD[copy.plan].tapeColor}
+      fill
+      tapePosition="right"
+      tapeClassName={recommended ? "onboarding-tape-shake" : undefined}
+    >
+      {offer ? (
+        <OfferSticker offer={offer} tone="yellow" className="onboarding-sticker-shake absolute -top-4 -right-4 z-10" />
+      ) : null}
+      <div className="flex h-full flex-col p-6 md:p-7">
+        <div className="flex items-center gap-2">
+          <div className="text-[22px] font-semibold">{copy.name}</div>
+          {recommended ? (
+            <span className="rounded-full bg-ink px-2.5 py-0.5 text-[12px] font-semibold text-white">
+              {t("bestValue")}
+            </span>
+          ) : null}
+        </div>
+        {offer ? (
+          <IntroPrice offer={offer} />
+        ) : (
+          <div className="mt-4 flex items-baseline gap-1.5">
+            <span className="text-[clamp(34px,4vw,44px)] leading-[0.95] font-semibold">{copy.amount}</span>
+            <span className="text-[14px] font-semibold text-[#201715]/70">{copy.cadence}</span>
+          </div>
+        )}
+        <p className="mt-4 text-[15px] leading-[1.5] text-[#1a1a1a]">{copy.body}</p>
+
+        <div className="mt-5 grid gap-2.5">
+          {copy.features.map((feature) => (
+            <div key={feature.text} className="flex items-center gap-2.5 text-[14px] font-semibold text-[#1a1a1a]">
+              <span className="inline-flex size-6 shrink-0 items-center justify-center rounded-full border-2 border-ink bg-white">
+                <FeatureIcon kind={feature.kind} />
+              </span>
+              {feature.text}
+            </div>
+          ))}
+        </div>
+
+        {/* The buttons line up across the row whatever each card holds. */}
+        <div className="mt-auto pt-7">
+          <Button
+            onClick={onPick}
+            disabled={busy}
+            className="h-11 w-full rounded-full px-6 text-[15px] bg-ink text-white hover:bg-ink/90"
+          >
+            {pending ? <Loader2 className="animate-spin" data-icon="inline-start" /> : null}
+            {offer ? t("getProOff", { percent: offer.percentOff }) : t("getPlan", { plan: copy.name })}
+          </Button>
+        </div>
+      </div>
+    </TapedCard>
+  );
+}
+
+function FeatureIcon({ kind }: { kind: PlanFeature["kind"] }) {
+  if (kind === "credits") {
+    return <Sparkles size={13} />;
+  }
+  if (kind === "inherits") {
+    return <ArrowLeft size={13} />;
+  }
+  return <Check size={14} />;
+}
+
+// The discounted price beside the struck-through one, and what it covers.
 function IntroPrice({ offer }: { offer: IntroOffer }) {
   const t = useTranslations("onboarding.plans");
   const locale = useLocale();
-  const now = useNow();
 
   return (
     <>
       <div className="mt-4 flex items-baseline gap-3">
-        <span className="text-[clamp(34px,4.4vw,48px)] leading-[0.95] font-semibold">
+        <span className="text-[clamp(34px,4vw,44px)] leading-[0.95] font-semibold">
           {priceLabel(offer.introCents, locale)}
         </span>
-        <span className="text-[22px] font-semibold text-[#201715]/40 line-through decoration-2">
+        <span className="text-[20px] font-semibold text-[#201715]/40 line-through decoration-2">
           {priceLabel(offer.priceCents, locale)}
         </span>
       </div>
       <div className="mt-2.5 text-[13px] font-semibold text-[#201715]">
         {t("covers", { months: offer.months, price: priceLabel(offer.priceCents, locale) })}
-      </div>
-      <div className="mt-4 inline-flex rounded-full bg-ink px-3 py-1 text-[12px] font-semibold text-white tabular-nums">
-        {t("endsIn", { percent: offer.percentOff, ...countdownParts(offer.endsAt, now) })}
       </div>
     </>
   );

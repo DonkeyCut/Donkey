@@ -1,4 +1,5 @@
-import { getActiveProSubscription } from "@/lib/billing/pro-subscription";
+import { PLAN_TERMS, isPaidPlan, type PaidPlan } from "@/lib/billing/plans";
+import { getActiveSubscription } from "@/lib/billing/pro-subscription";
 import { isDonkeySuperUser } from "@/lib/super-user";
 import { prisma } from "@/lib/prisma";
 
@@ -52,13 +53,28 @@ const FREE: CutLimits = {
   liveTurns: 4,
   titlesPerDay: 300,
 };
+const GB = 1024 ** 3;
+// Plus buys credits and storage; its other caps are the free ones.
+const PLUS: CutLimits = {
+  ...FREE,
+  storageBytes: PLAN_TERMS.plus.storageGb * GB,
+  renderJobsPerDay: PLAN_TERMS.plus.rendersPerDay,
+};
 const PRO: CutLimits = {
-  storageBytes: 100 * 1024 ** 3,
-  renderJobsPerDay: 200,
+  storageBytes: PLAN_TERMS.pro.storageGb * GB,
+  renderJobsPerDay: PLAN_TERMS.pro.rendersPerDay,
   liveJobs: 32,
   liveTurns: 8,
   titlesPerDay: 2000,
 };
+const MAX: CutLimits = {
+  storageBytes: PLAN_TERMS.max.storageGb * GB,
+  renderJobsPerDay: PLAN_TERMS.max.rendersPerDay,
+  liveJobs: 48,
+  liveTurns: 12,
+  titlesPerDay: 5000,
+};
+const PLAN_LIMITS: Record<PaidPlan, CutLimits> = { plus: PLUS, pro: PRO, max: MAX };
 const UNLIMITED: CutLimits = {
   storageBytes: null,
   renderJobsPerDay: null,
@@ -67,15 +83,19 @@ const UNLIMITED: CutLimits = {
   titlesPerDay: null,
 };
 
-/** The limits an account's tier earns. Super users are unlimited. */
-export function cutLimitsForTier(tier: { superUser: boolean; pro: boolean }): CutLimits {
+/** The limits an account's tier earns: its plan's, or free's without one.
+ * Super users are unlimited. A row with a plan key this build doesn't know
+ * reads as Pro, the plan every row was before the ladder. */
+export function cutLimitsForTier(tier: { superUser: boolean; plan: string | null }): CutLimits {
   if (tier.superUser) return UNLIMITED;
-  return tier.pro ? PRO : FREE;
+  if (tier.plan === null) return FREE;
+  return isPaidPlan(tier.plan) ? PLAN_LIMITS[tier.plan] : PRO;
 }
 
 export async function cutLimitsFor(userId: string): Promise<CutLimits> {
   if (await isDonkeySuperUser(userId)) return UNLIMITED;
-  return cutLimitsForTier({ superUser: false, pro: !!(await getActiveProSubscription(userId)) });
+  const subscription = await getActiveSubscription(userId);
+  return cutLimitsForTier({ superUser: false, plan: subscription?.planKey ?? null });
 }
 
 /** 429 when the account already has as many asked-for jobs in flight as its

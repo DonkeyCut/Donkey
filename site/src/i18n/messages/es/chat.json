@@ -27,7 +27,7 @@
       "writeCaption": "Escribir pie de publicación + etiquetas"
     },
     "workingEllipsis": "Trabajando…",
-    "insufficientCredits": "Créditos insuficientes — <link>recargar créditos</link>",
+    "insufficientCredits": "Créditos insuficientes — <link>ver planes</link>",
     "dropToAttach": "Suelta para adjuntar",
     "composerPlaceholder": "Pregunta sobre tu video o dime qué cambiar… @ hace referencia a archivos, carpetas y notas",
     "dictate": "Dictar",
@@ -140,7 +140,7 @@
   },
   "hostedError": {
     "insufficientCredits": "Créditos insuficientes",
-    "insufficientCreditsReload": "Créditos insuficientes, <link>recarga aquí</link>",
+    "insufficientCreditsReload": "Créditos insuficientes, <link>ver planes</link>",
     "failed": "Error."
   }
 }

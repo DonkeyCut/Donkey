@@ -27,20 +27,23 @@
   "dialog": {
     "close": "Close"
   },
-  "proPlan": {
-    "body": "Generate rich media with AI.",
+  "plans": {
+    "body": "{plan, select, plus {Try AI generation on a small budget.} pro {Generate rich media with AI.} other {For heavy AI generation, every month.}}",
     "price": "{price}/month",
+    "perMonth": "/month",
     "storage": "{gb, number} GB of cloud storage",
     "credits": "{credits} AI credits every month",
-    "generation": "Image, video, voiceover, and music generation"
+    "generation": "Image, video, voiceover, and music generation",
+    "unlimitedProjects": "Unlimited projects",
+    "renders": "{count, number} exports and imports a day",
+    "everythingIn": "Everything in {plan}"
   },
   "apiErrors": {
     "checkout_no_url": "Stripe did not return a URL.",
-    "credit_amount_out_of_range": "Choose between {min} and {max}, in whole thousands.",
-    "auto_reload_invalid": "Provide enabled, thresholdDollars, and amountDollars.",
-    "no_payment_method": "Buy credits once to save a card, then turn on auto-reload.",
     "unsupported_image_type": "Unsupported image type.",
-    "image_too_large": "Image too large."
+    "image_too_large": "Image too large.",
+    "plan_not_an_upgrade": "This account is already on this plan or a higher one.",
+    "upgrade_payment_failed": "Your card was declined, so your plan didn't change. Update your card in billing and try again."
   },
   "languageSaveFailed": "Couldn't save your language. Try again.",
   "languageBlocked": "This browser isn't saving cookies, so the language can't change."

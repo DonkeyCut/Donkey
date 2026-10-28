@@ -1,10 +1,9 @@
 "use client";
 
 // The storage-quota wall's face: opens when an upload is rejected for space
-// anywhere in the app, or when the top bar's pill is clicked, and sells the
-// Pro storage tier — or just explains, when the account already has it.
+// anywhere in the app, or when the top bar's pill is clicked, and lays out the
+// plans with more room — or just explains, on the plan with the most.
 import { useEffect, useState } from "react";
-import { HardDrive, Loader2 } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import {
@@ -14,9 +13,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { useIntroTerms, wallBanner } from "./IntroOffer";
-import { OfferButton, OfferDialog, OfferDismiss } from "./OfferDialog";
-import { useUpgradeToPro } from "@/cut/lib/proUpgrade";
+import { PlansDialog } from "./PlansDialog";
 import {
   clearStorageQuotaWall,
   emitStorageQuota,
@@ -25,7 +22,8 @@ import {
 } from "@/cut/lib/storageQuota";
 import { daysUntil } from "@/cut/lib/time";
 import { track } from "@/lib/analytics";
-import { useIntroOffer, useProSubscription } from "@/queries/billing";
+import { PAID_PLANS } from "@/lib/billing/plans";
+import { useProSubscription } from "@/queries/billing";
 import { useCloudUsage } from "@/cut/lib/backend/hooks";
 import { onOperationFailure } from "@/cut/lib/operationFailure";
 import { formatBytes } from "@/lib/bytes";
@@ -60,11 +58,8 @@ export function StorageUpgradeDialog() {
 function OpenDialog({ detail, onClose }: { detail: StorageQuotaDetail; onClose: () => void }) {
   const t = useTranslations("billing");
   const locale = useLocale();
-  const introTerms = useIntroTerms();
-  const pro = useProSubscription();
-  const upgrade = useUpgradeToPro();
-  const isPro = pro.data?.isActive === true;
-  const intro = useIntroOffer({ enabled: pro.data?.isActive === false });
+  const subscription = useProSubscription();
+  const onTopPlan = subscription.data?.plan === PAID_PLANS[PAID_PLANS.length - 1];
   // A wall raised by a queued render carries no numbers — it failed in the
   // worker, hours from the request. The account's own meter fills them in, so
   // every wall says how full the account is.
@@ -86,10 +81,10 @@ function OpenDialog({ detail, onClose }: { detail: StorageQuotaDetail; onClose: 
         : t("storage.graceDays", { bytes: formatBytes(detail.grace.overBytes, locale), days: graceDays })
       : null;
 
-  // An account that already has Pro is being told something, not sold
-  // something: the offer card's picture and its full-width buy button belong
-  // to the upgrade, so the plain dialog carries this one.
-  if (isPro) {
+  // An account on the plan with the most room is being told something, not
+  // sold something, so the plain dialog carries this one.
+  if (!subscription.data) return null;
+  if (onTopPlan) {
     return (
       <Dialog open onOpenChange={(open) => !open && onClose()}>
         <DialogContent className="sm:max-w-sm">
@@ -111,22 +106,12 @@ function OpenDialog({ detail, onClose }: { detail: StorageQuotaDetail; onClose: 
   }
 
   return (
-    <OfferDialog
-      open
-      onOpenChange={(open) => !open && onClose()}
-      banner={wallBanner(HardDrive, intro.data)}
-      closesAt={intro.data?.endsAt}
-      title={title}
-      body={meter ? t("storage.bodyUsed", meter) : t("storage.body")}
-      terms={intro.data ? introTerms(intro.data) : t("storage.freeUpTerms")}
-      error={grace}
-      cta={
-        <OfferButton disabled={upgrade.isPending} onClick={upgrade.start}>
-          {upgrade.isPending && <Loader2 className="animate-spin" data-icon="inline-start" />}
-          {t("upgradeToPro")}
-        </OfferButton>
-      }
-      secondary={<OfferDismiss onClick={onClose}>{t("notNow")}</OfferDismiss>}
+    <PlansDialog
+      source="storage"
+      title={detail.source === "pill" ? t("storage.moreTitle") : t("storage.fullTitle")}
+      body={used}
+      notice={grace}
+      onClose={onClose}
     />
   );
 }

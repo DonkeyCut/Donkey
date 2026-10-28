@@ -51,11 +51,10 @@
   "plans": {
     "title": "简单明了的定价",
     "subtitle": "编辑器完全免费，仅为 AI 生成的媒体内容付费。",
-    "forIndividuals": "个人版",
-    "getPro": "获取 Pro",
+    "bestValue": "最超值",
+    "getPlan": "获取 {plan}",
     "getProOff": "立享 {percent}% 优惠升级 Pro",
     "continueFree": "继续使用免费版",
-    "endsIn": "{percent}% 优惠剩余时间：{hours}小时 {minutes}分 {seconds}秒",
     "covers": "{months, plural, other {前 # 个月每月此价格，之后 {price}/月}}"
   }
 }

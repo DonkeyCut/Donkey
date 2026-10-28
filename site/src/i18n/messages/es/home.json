@@ -260,9 +260,9 @@
     "logOut": "Cerrar sesión"
   },
   "navStorage": {
-    "get100": "Obtén 100 GB",
-    "upgradeTip": "Mejora tu plan para 100 GB + créditos de IA",
-    "grace": "Tu plan Pro terminó. Mejora tu plan o libera {size} antes de que se eliminen tus proyectos más antiguos."
+    "upgrade": "Mejorar",
+    "upgradeTip": "Mira los planes con más almacenamiento y créditos de IA",
+    "grace": "Tu plan terminó. Mejora tu plan o libera {size} antes de que se eliminen tus proyectos más antiguos."
   },
   "justNow": "ahora mismo"
 }

@@ -1,9 +1,7 @@
 {
   "notNow": "今はしない",
   "ok": "OK",
-  "upgradeToPro": "Proにアップグレード",
   "subscribeToPro": "Proに登録",
-  "buyCredits": "クレジットを購入",
   "billingUnavailable": "現在、お支払いはご利用いただけません。",
   "offer": {
     "validThrough": "追加クレジットの有効期限は{date}までです。",
@@ -18,14 +16,8 @@
     "terms": "{months, plural, other {{percent}%オフ：最初の#か月は{price}/月、その後は{full}/月。}}"
   },
   "upgrade": {
-    "outOfCredits": "クレジットがなくなりました",
-    "proOutBody": "今月のProクレジットを使い切りました。生成を続けるにはクレジットを購入してください。",
-    "projectsTitle": "アップグレードしてさらにプロジェクトを作成",
-    "creditsBody": "Proにアップグレードすると、{price}で毎月{credits}と100 GBのクラウドストレージをご利用いただけます。",
-    "creditsBodyOffer": "Proにアップグレードすると、毎月{credits}と100 GBのクラウドストレージをご利用いただけます。",
-    "proPrice": "Proは{price}です。",
-    "projectsBodyStarter": "無料プランで保持できるのはスタータープロジェクトのみです。Proなら必要なだけ作成できます。",
-    "projectsBody": "無料プランではスタータープロジェクトのほかに{count, plural, other {#個のプロジェクト}}を保持できます。Proなら必要なだけ作成できます。"
+    "projectsTitle": "プロジェクトを無制限に作成",
+    "projectsBody": "ProとMaxにはプロジェクト数の上限がありません。"
   },
   "claim": {
     "expiredTitle": "このオファーは期限切れです",
@@ -51,9 +43,7 @@
     "graceToday": "Proプランが終了しました。アップグレードするか{bytes}の空き容量を確保しない限り、最も古いクラウドプロジェクトは本日削除されます。",
     "graceDays": "Proプランが終了しました。アップグレードするか{bytes}の空き容量を確保しない限り、最も古いクラウドプロジェクトは{days, plural, other {#日後}}に削除されます。",
     "proBody": "不要になったプロジェクトやメディアを削除して空き容量を増やしてください。",
-    "body": "Proには100 GBのクラウドストレージが含まれます。",
-    "bodyUsed": "{quota}中{used}を使用しています。Proには100 GBのクラウドストレージが含まれます。",
-    "freeUpTerms": "または、不要になったプロジェクトやメディアを削除して空き容量を増やしてください。"
+    "moreTitle": "クラウドストレージを増量"
   },
   "subscribeBonus": {
     "daysLeft": "残り{count}日",
@@ -75,5 +65,22 @@
     "graceTooltip": "Proプランが終了し、無料の上限を超えています。最も古いプロジェクトが削除される前に、アップグレードするか空き容量を確保してください。",
     "fullTooltip": "クラウドストレージの空き容量がなくなりました。アップロードを続けるには、アップグレードするか空き容量を確保してください。",
     "usedTooltip": "クラウドストレージ{quota}のうち{used}を使用しています。"
+  },
+  "plans": {
+    "chooseTitle": "プランの選択",
+    "chooseBody": "すべてのプランに毎月のAIクレジットと追加のクラウドストレージが含まれます。",
+    "freeOutTitle": "生成を続けるにはプランを選択",
+    "paidOutTitle": "アップグレードして今すぐクレジットを追加",
+    "paidOutBody": "{plan}のクレジットは{date}に補充されます。",
+    "topOutTitle": "{plan}のクレジットは{date}に補充されます",
+    "bestValue": "最もお得",
+    "billedMonthly": "月額請求",
+    "introThen": "{months, plural, other {最初の#か月、その後は{price}/月}}",
+    "stickerPercent": "{percent}%",
+    "stickerOff": "OFF",
+    "get": "{plan}を入手",
+    "upgrade": "{plan}にアップグレード",
+    "current": "現在のプラン",
+    "footer": "価格は米ドル表記です。プランは解約するまで毎月更新されます。上位プランに変更する場合、本日差額が請求されます。"
   }
 }

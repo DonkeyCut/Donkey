@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
 
-import { getActiveProSubscription, scheduledProEnd } from "@/lib/billing/pro-subscription";
+import { isPaidPlan } from "@/lib/billing/plans";
+import { getActiveSubscription, scheduledProEnd } from "@/lib/billing/pro-subscription";
 import { creditMicrosToString, zeroCreditMicros } from "@/lib/credits/amounts";
 import { withDonkeyAuth } from "@/lib/donkey-api-auth";
 import { prisma } from "@/lib/prisma";
 
-// Pro subscription status for the settings UI, plus how much of this period's
+// The account's plan and subscription status for the settings UI, plus how much of this period's
 // included allowance is left — the remaining balance on the active
 // "pro_subscription" grant(s).
 export const GET = withDonkeyAuth(async (request) => {
@@ -13,7 +14,7 @@ export const GET = withDonkeyAuth(async (request) => {
   const now = new Date();
 
   const [subscription, grants] = await Promise.all([
-    getActiveProSubscription(userId),
+    getActiveSubscription(userId),
     prisma.userCreditGrant.findMany({
       select: { originalAmountMicros: true, remainingAmountMicros: true },
       where: {
@@ -47,6 +48,8 @@ export const GET = withDonkeyAuth(async (request) => {
     // When a scheduled cancel ends Pro; null while the plan renews.
     endsAt: subscription ? (scheduledProEnd(subscription)?.toISOString() ?? null) : null,
     isActive: Boolean(subscription),
+    // A row from before the ladder carries "pro".
+    plan: subscription ? (isPaidPlan(subscription.planKey) ? subscription.planKey : "pro") : null,
     monthlyAllowance: subscription
       ? creditMicrosToString(monthlyAllowanceMicros)
       : null,

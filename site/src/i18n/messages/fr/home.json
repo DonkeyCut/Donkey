@@ -260,9 +260,9 @@
     "logOut": "Se déconnecter"
   },
   "navStorage": {
-    "get100": "Obtenir 100 GB",
-    "upgradeTip": "Mettez à niveau pour 100 GB + crédits IA",
-    "grace": "Votre forfait Pro a expiré. Mettez à niveau ou libérez {size} avant la suppression de vos plus anciens projets."
+    "upgrade": "Mettre à niveau",
+    "upgradeTip": "Voir les forfaits avec plus de stockage et de crédits IA",
+    "grace": "Votre forfait a pris fin. Mettez à niveau ou libérez {size} avant que vos plus anciens projets ne soient supprimés."
   },
   "justNow": "à l'instant"
 }

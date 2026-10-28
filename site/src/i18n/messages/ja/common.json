@@ -27,20 +27,23 @@
   "dialog": {
     "close": "閉じる"
   },
-  "proPlan": {
-    "body": "AIでリッチメディアを生成。",
+  "plans": {
+    "body": "{plan, select, plus {予算を抑えてAI生成をお試し。} pro {AIでリッチなメディアを生成。} other {毎月本格的にAI生成を利用する方に。}}",
     "price": "{price}/月",
-    "storage": "クラウドストレージ {gb, number} GB",
-    "credits": "毎月 {credits} AIクレジット",
-    "generation": "画像、動画、ナレーション、音楽の生成"
+    "perMonth": "/月",
+    "storage": "{gb, number} GBのクラウドストレージ",
+    "credits": "毎月{credits} AIクレジット",
+    "generation": "画像、動画、ボイスオーバー、音楽の生成",
+    "unlimitedProjects": "プロジェクト無制限",
+    "renders": "1日あたり{count, number}回の書き出しと読み込み",
+    "everythingIn": "{plan}のすべての機能"
   },
   "apiErrors": {
     "checkout_no_url": "Stripe から URL が返されませんでした。",
-    "credit_amount_out_of_range": "{min} から {max} の間で、1,000単位で指定してください。",
-    "auto_reload_invalid": "enabled、thresholdDollars、amountDollars を指定してください。",
-    "no_payment_method": "カードを保存するためにクレジットを1度購入してから、自動チャージを有効にしてください。",
     "unsupported_image_type": "サポートされていない画像形式です。",
-    "image_too_large": "画像が大きすぎます。"
+    "image_too_large": "画像が大きすぎます。",
+    "plan_not_an_upgrade": "このアカウントはすでにこのプラン、または上位プランをご利用中です。",
+    "upgrade_payment_failed": "カードの支払いが拒否されたため、プランは変更されませんでした。請求設定でカード情報を更新し、もう一度お試しください。"
   },
   "languageSaveFailed": "言語を保存できませんでした。もう一度お試しください。",
   "languageBlocked": "このブラウザではCookieが保存されないため、言語を変更できません。"

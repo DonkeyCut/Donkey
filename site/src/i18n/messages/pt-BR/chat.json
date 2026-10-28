@@ -27,7 +27,7 @@
       "writeCaption": "Escrever legenda do post + tags"
     },
     "workingEllipsis": "Processando…",
-    "insufficientCredits": "Créditos insuficientes — <link>recarregar créditos</link>",
+    "insufficientCredits": "Créditos insuficientes — <link>ver planos</link>",
     "dropToAttach": "Solte para anexar",
     "composerPlaceholder": "Pergunte sobre seu vídeo ou diga o que mudar… @ referencia arquivos, pastas e notas",
     "dictate": "Ditar",
@@ -140,7 +140,7 @@
   },
   "hostedError": {
     "insufficientCredits": "Créditos insuficientes",
-    "insufficientCreditsReload": "Créditos insuficientes, <link>recarregue aqui</link>",
+    "insufficientCreditsReload": "Créditos insuficientes, <link>ver planos</link>",
     "failed": "Falhou."
   }
 }

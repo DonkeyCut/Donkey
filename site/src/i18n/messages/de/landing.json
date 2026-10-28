@@ -20,8 +20,7 @@
   },
   "pricing": {
     "title": "Einfache <italic>Preise</italic>",
-    "body": "Der Editor ist kostenlos. Zahle nur für KI-generierte Medien.",
-    "footnote": "* Guthaben für KI-generierte Inhalte kannst du jederzeit nachkaufen."
+    "body": "Der Editor ist kostenlos. Zahle nur für KI-generierte Medien."
   },
   "plans": {
     "free": {
@@ -34,9 +33,9 @@
       "tools": "Import, Export und lokale Transkription",
       "subscriptions": "Verbinde dein Claude- oder Codex-Abo"
     },
-    "pro": {
-      "detail": "Für Einzelpersonen",
-      "cta": "Pro holen",
+    "paid": {
+      "detail": "{plan, select, plus {Zum Einstieg} pro {Bester Wert} other {Für intensives Generieren}}",
+      "cta": "{plan} holen",
       "everythingInFree": "Alles aus Free"
     }
   },

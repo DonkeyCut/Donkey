@@ -196,7 +196,7 @@ export const SETTINGS = defineSettings({
         percentOff: z.number().int().min(0).max(90),
         // Billing months the discount covers.
         months: z.number().int().min(1).max(12),
-        // Hours after signup the offer stays open.
+        // Hours the offer stays open after the account first sees it.
         windowHours: z.number().int().min(1).max(24 * 30),
       })
       .strict(),
@@ -204,7 +204,7 @@ export const SETTINGS = defineSettings({
     public: true,
     title: "Intro offer",
     description:
-      "A discount on the first months of Pro for an account that subscribes within this many hours of signing up and has never held Pro. Checkout applies it on its own.",
+      "A discount on the first months of Pro for an account that has never held a plan. It opens the first time the account sees it and closes this many hours later, for good. Checkout applies it on its own.",
   },
   freeProjectLimit: {
     schema: z
@@ -219,18 +219,21 @@ export const SETTINGS = defineSettings({
     description:
       "How many projects a free account may hold besides its starter project. Creating one more opens the upgrade dialog.",
   },
-  outOfCreditsUpsell: {
+  planPrices: {
     schema: z
       .object({
-        // "dialog" opens the upgrade dialog when a request runs out of credits.
-        mode: z.enum(["off", "dialog"]),
+        // Each paid plan's recurring monthly Stripe price; null leaves the
+        // plan unsold.
+        plus: z.string().regex(/^price_/, "price_…").nullable(),
+        pro: z.string().regex(/^price_/, "price_…").nullable(),
+        max: z.string().regex(/^price_/, "price_…").nullable(),
       })
       .strict(),
-    default: { mode: "off" },
-    public: true,
-    title: "Out of credits upsell",
+    default: { plus: null, pro: null, max: null },
+    public: false,
+    title: "Plan prices",
     description:
-      "What happens when the server refuses a request for credits. Off leaves the inline notice; dialog also opens the upgrade dialog, which sells Pro to a free account and credits to a Pro one. A Generate button the balance can't cover opens the dialog either way.",
+      "The Stripe price each paid plan checks out with. A plan without one can't be bought, and a subscription to a price not listed here is no plan.",
   },
 });
 

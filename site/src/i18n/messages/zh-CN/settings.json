@@ -17,8 +17,9 @@
     "billingDescription": "你的订阅和点数余额。"
   },
   "pro": {
-    "title": "Donkey Pro",
-    "description": "每月重置的使用额度——你仍可随时购买点数。",
+    "title": "方案",
+    "titlePlan": "Donkey {plan}",
+    "description": "每月重置的使用额度。",
     "status": "{status, select, active {有效} trialing {试用中} past_due {已逾期} canceled {已取消} incomplete {未完成} unpaid {未支付} other {{status}}}",
     "promotionUntil": "<b>在 {day} 前开通 Pro</b>，在此之前开始的每个月均包含 {allowance}，是平时 {usual} 的 {multiplier} 倍。",
     "promotionOpen": "目前每个月均包含 {allowance}，是平时 {usual} 的 {multiplier} 倍。",
@@ -32,30 +33,14 @@
     "introDeadline": "{terms} 请在 {deadline} 前订阅。",
     "opening": "正在打开…",
     "manage": "管理账单",
-    "starting": "正在启动…",
-    "subscribe": "订阅 Pro",
-    "unavailable": "账单服务目前不可用。"
+    "unavailable": "账单服务目前不可用。",
+    "seePlans": "查看方案",
+    "upgrade": "升级"
   },
   "credits": {
     "title": "点数",
-    "description": "Donkey 应用程序的按需付费余额。可随时购买更多。",
-    "available": "可用余额",
-    "buy": "购买点数",
-    "preset": "{credits} · {price}",
-    "customLabel": "点数",
-    "starting": "正在启动…",
-    "buyFor": "以 {price} 购买",
-    "buyPlain": "购买",
-    "checkoutFailed": "无法发起结账。请稍后重试。",
-    "autoReload": "余额不足时自动充值",
-    "fallsBelow": "当余额低于",
-    "unit": "点数",
-    "thenBuy": "自动购买",
-    "saving": "正在保存…",
-    "save": "保存",
-    "saveFailed": "无法保存自动充值设置。请稍后重试。",
-    "lastFailed": "上次自动充值失败：{error}",
-    "needsCard": "自动充值需要保存的银行卡。<buy>先购买一次点数</buy>以保存卡片，然后即可开启此功能。"
+    "description": "用于 AI 功能的额度余额。Plus、Pro 和 Max 每月都会增加额度。",
+    "available": "可用余额"
   },
   "profile": {
     "loadFailed": "无法加载个人资料。",

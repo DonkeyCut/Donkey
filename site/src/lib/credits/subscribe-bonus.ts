@@ -1,5 +1,5 @@
 import type { CreditOffer } from "@/generated/prisma/client";
-import { getActiveProSubscription } from "@/lib/billing/pro-subscription";
+import { getActiveSubscription } from "@/lib/billing/pro-subscription";
 import { getSetting, type ConfigContext } from "@/lib/config/effective";
 import { creditMicrosToString, creditStringToMicros, zeroCreditMicros } from "@/lib/credits/amounts";
 import { creditOfferOpen } from "@/lib/credits/offers";
@@ -101,7 +101,7 @@ export async function readSubscribeBonusOffer(ctx: ConfigContext, now = new Date
   // most accounts out before the configuration is resolved.
   const [offers, pro, grant] = await Promise.all([
     findOffersForSubscribing(ctx.userId),
-    getActiveProSubscription(ctx.userId),
+    getActiveSubscription(ctx.userId),
     prisma.userCreditGrant.findFirst({
       where: { userId: ctx.userId, source: SIGNUP_GRANT_SOURCE },
       select: { id: true, originalAmountMicros: true, remainingAmountMicros: true },

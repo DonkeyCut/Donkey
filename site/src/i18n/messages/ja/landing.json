@@ -20,8 +20,7 @@
   },
   "pricing": {
     "title": "シンプルな<italic>料金プラン</italic>",
-    "body": "エディターは無料です。料金が発生するのはAI生成メディアの利用時のみです。",
-    "footnote": "※ AI生成コンテンツ用のクレジットはいつでも購入できます。"
+    "body": "エディターは無料です。料金が発生するのはAI生成メディアの利用時のみです。"
   },
   "plans": {
     "free": {
@@ -34,10 +33,10 @@
       "tools": "インポート、書き出し、ローカル文字起こし",
       "subscriptions": "ClaudeやCodexのサブスクリプションと連携"
     },
-    "pro": {
-      "detail": "個人向け",
-      "cta": "Proを始める",
-      "everythingInFree": "Freeの全機能"
+    "paid": {
+      "detail": "{plan, select, plus {まずはここから} pro {最もお得} other {大量の生成向け}}",
+      "cta": "{plan}を入手",
+      "everythingInFree": "Freeプランの全機能"
     }
   },
   "local": {

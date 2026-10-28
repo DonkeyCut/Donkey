@@ -8,7 +8,7 @@
 import Image from "next/image";
 import { useFormatter, useTranslations } from "next-intl";
 import { useEffect, useState } from "react";
-import { useCutPro } from "@/app/[locale]/cut/_components/landing/cutPricingPlans";
+import { useCutPlan } from "@/app/[locale]/cut/_components/landing/cutPricingPlans";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
@@ -69,7 +69,7 @@ export type OfferCopy = { body: string; terms: string | null };
 export function useOfferCopy() {
   const t = useTranslations("billing");
   const format = useFormatter();
-  const pro = useCutPro();
+  const pro = useCutPlan("pro");
 
   // How long the credit lasts once it lands; null when it keeps forever.
   const creditValidity = (offer: { expiresAt: string | null; lifetimeDays: number | null }): string | null => {

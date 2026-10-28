@@ -260,9 +260,9 @@
     "logOut": "Sair"
   },
   "navStorage": {
-    "get100": "Obter 100 GB",
-    "upgradeTip": "Faça upgrade para 100 GB + créditos de IA",
-    "grace": "Seu plano Pro terminou. Faça upgrade ou libere {size} antes que seus projetos mais antigos sejam excluídos."
+    "upgrade": "Fazer upgrade",
+    "upgradeTip": "Veja planos com mais armazenamento e créditos de IA",
+    "grace": "Seu plano expirou. Faça upgrade ou libere {size} antes que seus projetos mais antigos sejam excluídos."
   },
   "justNow": "agora mesmo"
 }

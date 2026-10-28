@@ -51,11 +51,10 @@
   "plans": {
     "title": "Preços simples",
     "subtitle": "O editor é grátis. Pague apenas por mídias geradas por IA.",
-    "forIndividuals": "Para uso individual",
-    "getPro": "Assinar o Pro",
+    "bestValue": "Melhor custo-benefício",
+    "getPlan": "Obter {plan}",
     "getProOff": "Garanta {percent}% de desconto no Pro",
     "continueFree": "Continuar grátis",
-    "endsIn": "{percent}% de desconto acaba em {hours}h {minutes}m {seconds}s",
     "covers": "{months, plural, one {No seu primeiro mês, depois {price}/mês} other {Por mês nos seus primeiros # meses, depois {price}/mês}}"
   }
 }

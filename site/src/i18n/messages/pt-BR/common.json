@@ -27,20 +27,23 @@
   "dialog": {
     "close": "Fechar"
   },
-  "proPlan": {
-    "body": "Gere mídias avançadas com IA.",
+  "plans": {
+    "body": "{plan, select, plus {Experimente a geração por IA gastando pouco.} pro {Gere mídias avançadas com IA.} other {Para geração pesada por IA todo mês.}}",
     "price": "{price}/mês",
-    "storage": "{gb, number} GB de armazenamento na nuvem",
+    "perMonth": "/mês",
+    "storage": "{gb, number} GB de armazenamento em nuvem",
     "credits": "{credits} créditos de IA todo mês",
-    "generation": "Geração de imagem, vídeo, narração e música"
+    "generation": "Geração de imagem, vídeo, locução e música",
+    "unlimitedProjects": "Projetos ilimitados",
+    "renders": "{count, number} exportações e importações por dia",
+    "everythingIn": "Tudo do plano {plan}"
   },
   "apiErrors": {
     "checkout_no_url": "A Stripe não retornou uma URL.",
-    "credit_amount_out_of_range": "Escolha entre {min} e {max}, em milhares inteiros.",
-    "auto_reload_invalid": "Informe enabled, thresholdDollars e amountDollars.",
-    "no_payment_method": "Compre créditos uma vez para salvar um cartão e, depois, ative a recarga automática.",
     "unsupported_image_type": "Tipo de imagem não suportado.",
-    "image_too_large": "Imagem grande demais."
+    "image_too_large": "Imagem grande demais.",
+    "plan_not_an_upgrade": "Esta conta já está neste plano ou em um superior.",
+    "upgrade_payment_failed": "Seu cartão foi recusado, portanto seu plano não mudou. Atualize o cartão no faturamento e tente novamente."
   },
   "languageSaveFailed": "Não foi possível salvar seu idioma. Tente novamente.",
   "languageBlocked": "Este navegador não está salvando cookies, então o idioma não pode ser alterado."

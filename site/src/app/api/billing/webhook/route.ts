@@ -1,25 +1,22 @@
 import { NextResponse } from "next/server";
 import type Stripe from "stripe";
 
-import {
-  handleAutoReloadPaymentFailed,
-  handleAutoReloadPaymentSucceeded,
-  handleCreditTopUpCheckout,
-  handleCreditTopUpPaymentSucceeded,
-} from "@/lib/billing/credit-purchases";
+import { handleCreditPaymentSucceeded } from "@/lib/billing/credit-purchases";
 import { trackCheckoutPurchase } from "@/lib/billing/meta-checkout";
 import {
-  subscriptionIsPro,
+  readPlanPrices,
+  subscriptionPlan,
   syncProSubscription,
 } from "@/lib/billing/pro-subscription";
 import { getStripe, stripeId } from "@/lib/billing/stripe";
 import { notFoundResponse } from "@/lib/donkey-api-auth";
 
-// Pro is the only subscription product; ignore any other Stripe subscription
-// that reaches these webhook events.
+// Plus, Pro and Max are the subscription products; ignore any other Stripe
+// subscription that reaches these webhook events.
 async function syncSubscription(subscription: Stripe.Subscription) {
-  if (subscriptionIsPro(subscription)) {
-    await syncProSubscription(subscription);
+  const line = subscriptionPlan(subscription, await readPlanPrices());
+  if (line) {
+    await syncProSubscription(subscription, line);
   }
 }
 
@@ -61,27 +58,18 @@ export async function POST(request: Request) {
       if (subscriptionId) {
         const subscription = await stripe.subscriptions.retrieve(subscriptionId);
         await syncSubscription(subscription);
-      } else {
-        // A one-time credit top-up (mode=payment) has no subscription.
-        await handleCreditTopUpCheckout(stripe, checkoutSession);
       }
       trackCheckoutPurchase(checkoutSession);
       break;
     }
     case "checkout.session.async_payment_succeeded": {
-      // A delayed payment method settled; the credits land through
-      // payment_intent.succeeded, and the purchase is reported here.
+      // A delayed payment method settled; the purchase is reported here.
       trackCheckoutPurchase(event.data.object);
       break;
     }
     case "payment_intent.succeeded": {
-      // Each handler no-ops unless the PaymentIntent's kind matches, so both run.
-      await handleAutoReloadPaymentSucceeded(event.data.object);
-      await handleCreditTopUpPaymentSucceeded(event.data.object);
-      break;
-    }
-    case "payment_intent.payment_failed": {
-      await handleAutoReloadPaymentFailed(event.data.object);
+      // A credit purchase charged before purchases were retired.
+      await handleCreditPaymentSucceeded(event.data.object);
       break;
     }
     case "customer.subscription.created":

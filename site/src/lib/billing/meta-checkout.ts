@@ -1,6 +1,7 @@
 import type Stripe from "stripe";
 
 import { DONKEYCUT_CANONICAL } from "@/cut/lib/hosts";
+import type { PlanTerms } from "@/lib/billing/plans";
 import { metaBrowser, type MetaBrowser, trackMetaEvent } from "@/lib/meta/conversions";
 
 // A purchase completes in Stripe's webhook, far from the browser that paid.
@@ -28,7 +29,8 @@ const CENTS_PER_DOLLAR = 100;
 // checkout.session.async_payment_succeeded.
 const CONVERTED: ReadonlySet<Stripe.Checkout.Session["payment_status"]> = new Set(["paid", "no_payment_required"]);
 
-export type CheckoutProduct = "Pro" | "Credits";
+// The plan a checkout sells, by its display name.
+export type CheckoutProduct = PlanTerms["name"];
 
 /** The browser behind a checkout request, as checkout session metadata. */
 export function metaCheckoutMetadata(headers: Headers): Record<string, string> {
@@ -74,7 +76,9 @@ export function trackCheckoutPurchase(session: Stripe.Checkout.Session): void {
       ip: metadata[METADATA_KEYS.ip],
       userAgent: metadata[METADATA_KEYS.userAgent],
     },
-    content: session.mode === "subscription" ? "Pro" : "Credits",
+    // The plan the checkout named; a credit purchase begun before they were
+    // retired settles as "Credits".
+    content: session.metadata?.plan ?? (session.mode === "subscription" ? "Pro" : "Credits"),
     id: `checkout-${session.id}`,
     name: "Purchase",
     url: CHECKOUT_PAGE,

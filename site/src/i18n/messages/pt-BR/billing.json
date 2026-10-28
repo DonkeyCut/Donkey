@@ -1,9 +1,7 @@
 {
   "notNow": "Agora não",
   "ok": "OK",
-  "upgradeToPro": "Fazer upgrade para o Pro",
   "subscribeToPro": "Assinar o Pro",
-  "buyCredits": "Comprar créditos",
   "billingUnavailable": "O faturamento não está disponível no momento.",
   "offer": {
     "validThrough": "Os créditos extras são válidos até {date}.",
@@ -18,14 +16,8 @@
     "terms": "{months, plural, one {{percent}% de desconto: {price} no primeiro mês, depois {full}/mês.} other {{percent}% de desconto: {price}/mês nos primeiros # meses, depois {full}/mês.}}"
   },
   "upgrade": {
-    "outOfCredits": "Seus créditos acabaram",
-    "proOutBody": "Os créditos do Pro deste mês acabaram. Compre mais para continuar gerando.",
-    "projectsTitle": "Faça upgrade para criar mais projetos",
-    "creditsBody": "Faça upgrade para o Pro e receba {credits} todo mês e 100 GB de armazenamento em nuvem por {price}.",
-    "creditsBodyOffer": "Faça upgrade para o Pro e receba {credits} todo mês e 100 GB de armazenamento em nuvem.",
-    "proPrice": "O Pro custa {price}.",
-    "projectsBodyStarter": "O plano gratuito mantém seu projeto inicial. O Pro permite criar quantos você precisar.",
-    "projectsBody": "O plano gratuito mantém {count, plural, one {# projeto} other {# projetos}} além do seu inicial. O Pro permite criar quantos você precisar."
+    "projectsTitle": "Tenha projetos ilimitados",
+    "projectsBody": "O Pro e o Max não têm limite de projetos."
   },
   "claim": {
     "expiredTitle": "Esta oferta expirou",
@@ -51,9 +43,7 @@
     "graceToday": "Seu plano Pro expirou. Seus projetos mais antigos na nuvem serão excluídos hoje, a menos que faça upgrade ou libere {bytes}.",
     "graceDays": "Seu plano Pro expirou. Seus projetos mais antigos na nuvem serão excluídos em {days, plural, one {# dia} other {# dias}}, a menos que faça upgrade ou libere {bytes}.",
     "proBody": "Libere espaço excluindo projetos ou mídias que não usa mais.",
-    "body": "O Pro inclui 100 GB de armazenamento na nuvem.",
-    "bodyUsed": "Você usou {used} de {quota}. O Pro inclui 100 GB de armazenamento na nuvem.",
-    "freeUpTerms": "Ou libere espaço excluindo projetos e mídias que não usa mais."
+    "moreTitle": "Obtenha mais armazenamento em nuvem"
   },
   "subscribeBonus": {
     "daysLeft": "{count}d restantes",
@@ -75,5 +65,22 @@
     "graceTooltip": "Seu plano Pro expirou e você ultrapassou o limite gratuito. Faça upgrade ou libere espaço antes que seus projetos mais antigos sejam excluídos.",
     "fullTooltip": "Seu armazenamento na nuvem acabou. Faça upgrade ou libere espaço para continuar fazendo upload.",
     "usedTooltip": "{used} de {quota} de armazenamento em nuvem usado."
+  },
+  "plans": {
+    "chooseTitle": "Escolha seu plano",
+    "chooseBody": "Cada plano adiciona créditos de IA todo mês e mais armazenamento na nuvem.",
+    "freeOutTitle": "Escolha um plano para continuar gerando",
+    "paidOutTitle": "Faça upgrade para ter mais créditos hoje",
+    "paidOutBody": "Seus créditos do {plan} serão renovados em {date}.",
+    "topOutTitle": "Seus créditos do {plan} serão renovados em {date}",
+    "bestValue": "Melhor custo-benefício",
+    "billedMonthly": "Cobrado mensalmente",
+    "introThen": "{months, plural, one {Primeiro mês, depois {price}/mês} other {Primeiros # meses, depois {price}/mês}}",
+    "stickerPercent": "{percent}%",
+    "stickerOff": "OFF",
+    "get": "Obter {plan}",
+    "upgrade": "Fazer upgrade para o {plan}",
+    "current": "Plano atual",
+    "footer": "Preços em USD. Os planos se renovam mensalmente até você cancelar. Mudar para um plano superior cobra a diferença hoje."
   }
 }

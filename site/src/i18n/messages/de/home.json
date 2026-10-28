@@ -260,9 +260,9 @@
     "logOut": "Abmelden"
   },
   "navStorage": {
-    "get100": "100 GB holen",
-    "upgradeTip": "Upgrade für 100 GB + KI-Credits",
-    "grace": "Dein Pro-Abo ist abgelaufen. Mach ein Upgrade oder gib {size} frei, bevor deine ältesten Projekte gelöscht werden."
+    "upgrade": "Upgrade",
+    "upgradeTip": "Sieh dir Pläne mit mehr Speicherplatz und KI-Credits an",
+    "grace": "Dein Abo ist abgelaufen. Mach ein Upgrade oder gib {size} frei, bevor deine ältesten Projekte gelöscht werden."
   },
   "justNow": "gerade eben"
 }

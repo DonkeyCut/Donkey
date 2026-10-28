@@ -27,7 +27,7 @@
       "writeCaption": "生成帖子文案和标签"
     },
     "workingEllipsis": "处理中…",
-    "insufficientCredits": "积分不足——<link>充值积分</link>",
+    "insufficientCredits": "额度不足 —— <link>查看方案</link>",
     "dropToAttach": "拖放即可添加",
     "composerPlaceholder": "询问关于视频的问题，或告诉我需要修改什么… 输入 @ 引用文件、文件夹和笔记",
     "dictate": "听写",
@@ -140,7 +140,7 @@
   },
   "hostedError": {
     "insufficientCredits": "积分不足",
-    "insufficientCreditsReload": "积分不足，<link>在此充值</link>",
+    "insufficientCreditsReload": "额度不足，<link>查看方案</link>",
     "failed": "失败。"
   }
 }

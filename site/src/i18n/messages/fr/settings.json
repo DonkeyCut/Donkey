@@ -17,8 +17,9 @@
     "billingDescription": "Votre abonnement et votre solde de crédits."
   },
   "pro": {
-    "title": "Donkey Pro",
-    "description": "Un quota d'utilisation mensuel réinitialisé chaque mois — vous pouvez acheter des crédits à tout moment.",
+    "title": "Forfait",
+    "titlePlan": "Donkey {plan}",
+    "description": "Un quota d'utilisation mensuel réinitialisé chaque mois.",
     "status": "{status, select, active {actif} trialing {en essai} past_due {en retard} canceled {annulé} incomplete {incomplet} unpaid {impayé} other {{status}}}",
     "promotionUntil": "<b>Passez à Pro avant le {day}</b> et chaque mois commençant d'ici là inclura {allowance}, soit {multiplier}× le volume habituel ({usual}).",
     "promotionOpen": "Chaque mois inclut actuellement {allowance}, soit {multiplier}× le volume habituel ({usual}).",
@@ -32,30 +33,14 @@
     "introDeadline": "{terms} Abonnez-vous avant le {deadline}.",
     "opening": "Ouverture…",
     "manage": "Gérer la facturation",
-    "starting": "Démarrage…",
-    "subscribe": "S'abonner à Pro",
-    "unavailable": "La facturation est indisponible pour le moment."
+    "unavailable": "La facturation est indisponible pour le moment.",
+    "seePlans": "Voir les forfaits",
+    "upgrade": "Mettre à niveau"
   },
   "credits": {
     "title": "Crédits",
-    "description": "Solde prépayé pour l'application Donkey. Achetez-en à tout moment.",
-    "available": "Solde disponible",
-    "buy": "Acheter des crédits",
-    "preset": "{credits} · {price}",
-    "customLabel": "Crédits",
-    "starting": "Démarrage…",
-    "buyFor": "Acheter pour {price}",
-    "buyPlain": "Acheter",
-    "checkoutFailed": "Impossible de lancer le paiement. Réessayez dans un instant.",
-    "autoReload": "Recharger automatiquement quand mon solde est bas",
-    "fallsBelow": "Quand le solde passe sous",
-    "unit": "crédits",
-    "thenBuy": "acheter automatiquement",
-    "saving": "Enregistrement…",
-    "save": "Enregistrer",
-    "saveFailed": "Impossible d'enregistrer le rechargement automatique. Réessayez dans un instant.",
-    "lastFailed": "Échec du dernier rechargement automatique : {error}",
-    "needsCard": "Le rechargement automatique requiert une carte enregistrée. <buy>Achetez des crédits une fois</buy> pour en enregistrer une, puis activez cette option."
+    "description": "Votre solde pour les fonctionnalités IA. Plus, Pro et Max ajoutent des crédits chaque mois.",
+    "available": "Solde disponible"
   },
   "profile": {
     "loadFailed": "Impossible de charger votre profil.",

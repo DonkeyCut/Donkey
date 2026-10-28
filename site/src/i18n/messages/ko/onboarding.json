@@ -51,11 +51,10 @@
   "plans": {
     "title": "단순한 요금제",
     "subtitle": "편집기는 무료예요. AI로 생성하는 미디어에 대해서만 결제하세요.",
-    "forIndividuals": "개인용",
-    "getPro": "Pro 시작하기",
+    "bestValue": "최고 혜택",
+    "getPlan": "{plan} 시작하기",
     "getProOff": "Pro {percent}% 할인받기",
     "continueFree": "무료로 계속하기",
-    "endsIn": "{percent}% 할인 종료까지 {hours}시간 {minutes}분 {seconds}초",
     "covers": "{months, plural, other {첫 #개월 동안 적용되며, 이후 월 {price}}}"
   }
 }

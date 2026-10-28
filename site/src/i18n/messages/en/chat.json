@@ -27,7 +27,7 @@
       "writeCaption": "Write my post caption + tags"
     },
     "workingEllipsis": "Working…",
-    "insufficientCredits": "Insufficient credits — <link>reload credits</link>",
+    "insufficientCredits": "Insufficient credits — <link>see plans</link>",
     "dropToAttach": "Drop to attach",
     "composerPlaceholder": "Ask about your video, or tell me what to change… @ references files, folders, and notes",
     "dictate": "Dictate",
@@ -140,7 +140,7 @@
   },
   "hostedError": {
     "insufficientCredits": "Insufficient credits",
-    "insufficientCreditsReload": "Insufficient credits, <link>reload here</link>",
+    "insufficientCreditsReload": "Insufficient credits, <link>see plans</link>",
     "failed": "Failed."
   }
 }

@@ -17,8 +17,9 @@
     "billingDescription": "Dein Abo und dein Credit-Guthaben."
   },
   "pro": {
-    "title": "Donkey Pro",
-    "description": "Ein monatliches Nutzungskontingent, das sich jeden Monat erneuert – du kannst jederzeit zusätzliche Credits kaufen.",
+    "title": "Tarif",
+    "titlePlan": "Donkey {plan}",
+    "description": "Ein monatliches Nutzungskontingent, das jeden Monat zurückgesetzt wird.",
     "status": "{status, select, active {aktiv} trialing {Testphase} past_due {überfällig} canceled {gekündigt} incomplete {unvollständig} unpaid {unbezahlt} other {{status}}}",
     "promotionUntil": "<b>Hol dir Pro bis zum {day}</b> und jeder Monat, der bis dahin beginnt, enthält {allowance}, {multiplier}× so viel wie die üblichen {usual}.",
     "promotionOpen": "Jeder Monat enthält aktuell {allowance}, {multiplier}× so viel wie die üblichen {usual}.",
@@ -32,30 +33,14 @@
     "introDeadline": "{terms} Abonniere bis zum {deadline}.",
     "opening": "Wird geöffnet…",
     "manage": "Abrechnung verwalten",
-    "starting": "Wird gestartet…",
-    "subscribe": "Pro abonnieren",
-    "unavailable": "Abrechnung ist momentan nicht verfügbar."
+    "unavailable": "Abrechnung ist momentan nicht verfügbar.",
+    "seePlans": "Tarife ansehen",
+    "upgrade": "Upgraden"
   },
   "credits": {
     "title": "Credits",
-    "description": "Nutzungsbasiertes Guthaben für die Donkey-App. Jederzeit nachkaufbar.",
-    "available": "Verfügbares Guthaben",
-    "buy": "Credits kaufen",
-    "preset": "{credits} · {price}",
-    "customLabel": "Credits",
-    "starting": "Wird gestartet…",
-    "buyFor": "Für {price} kaufen",
-    "buyPlain": "Kaufen",
-    "checkoutFailed": "Checkout konnte nicht gestartet werden. Versuch es gleich noch einmal.",
-    "autoReload": "Automatisch aufladen, wenn das Guthaben zur Neige geht",
-    "fallsBelow": "Wenn das Guthaben fällt unter",
-    "unit": "Credits",
-    "thenBuy": "automatisch kaufen",
-    "saving": "Wird gespeichert…",
-    "save": "Speichern",
-    "saveFailed": "Automatisches Aufladen konnte nicht gespeichert werden. Versuch es gleich noch einmal.",
-    "lastFailed": "Letztes automatisches Aufladen fehlgeschlagen: {error}",
-    "needsCard": "Automatisches Aufladen erfordert eine gespeicherte Karte. <buy>Kaufe einmalig Credits</buy>, um eine zu hinterlegen, und aktiviere dies dann."
+    "description": "Dein Guthaben für KI-Funktionen. Plus, Pro und Max laden jeden Monat Credits auf.",
+    "available": "Verfügbares Guthaben"
   },
   "profile": {
     "loadFailed": "Dein Profil konnte nicht geladen werden.",

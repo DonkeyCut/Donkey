@@ -18,7 +18,7 @@ export function PricingPlanCard({ plan }: Props) {
   const action = plan.action;
 
   const button = (
-    <PillButton href={action.href} variant="dark">
+    <PillButton href={action.href} variant="dark" width="full">
       {action.label}
     </PillButton>
   );
@@ -52,6 +52,11 @@ export function PricingPlanCard({ plan }: Props) {
           >
             {plan.price}
           </span>
+          {plan.cadence ? (
+            <span style={{ fontWeight: 600, fontSize: 16, opacity: 0.7 }}>
+              {plan.cadence}
+            </span>
+          ) : null}
         </div>
         <div
           style={{

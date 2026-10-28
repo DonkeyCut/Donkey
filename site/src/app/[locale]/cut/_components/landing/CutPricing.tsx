@@ -13,7 +13,7 @@ export function CutPricing() {
   const appHref = useAppEntryHref();
   const t = useTranslations("landing.pricing");
 
-  // Both plan CTAs enter the app, so gate them the same way as the hero: a
+  // Every plan CTA enters the app, so gate them the same way as the hero: a
   // signed-out click lands on sign-in first, then returns to the app target.
   const plans = useCutPricingPlans().map((plan) => ({
     ...plan,
@@ -41,7 +41,7 @@ export function CutPricing() {
         style={{
           marginTop: 48,
           display: "grid",
-          gridTemplateColumns: isDesktop ? "1fr 1fr" : "1fr",
+          gridTemplateColumns: isDesktop ? "repeat(auto-fit, minmax(260px, 1fr))" : "1fr",
           alignItems: "stretch",
           gap: 24,
         }}
@@ -50,9 +50,6 @@ export function CutPricing() {
           <PricingPlanCard key={plan.name} plan={plan} />
         ))}
       </div>
-      <p className="mt-6 text-[15px] leading-[1.55] text-foreground/70">
-        {t("footnote")}
-      </p>
     </section>
   );
 }

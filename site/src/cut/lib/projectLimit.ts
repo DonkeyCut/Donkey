@@ -1,10 +1,11 @@
-// The free plan's project limit, checked before any new project is made: the
+// The free project limit, checked before any new project is made: the
 // projects home, the sidebar, a file dropped on the home, a duplicate, and
 // the ChatGPT card all ask here first. A move keeps the count, so it never
 // asks.
 import type { QueryClient } from "@tanstack/react-query";
 
 import { track } from "@/lib/analytics";
+import { PLAN_TERMS } from "@/lib/billing/plans";
 import { countedProjects, projectLimitFull } from "@/lib/billing/project-limit";
 import { accountConfigQueryKey, fetchAccountConfig } from "@/queries/accountConfig";
 import { fetchProSubscription, proSubscriptionQueryKey } from "@/queries/billing";
@@ -28,8 +29,9 @@ export async function newProjectAllowed(client: QueryClient): Promise<boolean> {
     return true;
   }
 
-  const pro = await client.ensureQueryData({ queryKey: proSubscriptionQueryKey, queryFn: fetchProSubscription });
-  if (pro.isActive) {
+  // Plus keeps the free limit; Pro and Max lift it.
+  const subscription = await client.ensureQueryData({ queryKey: proSubscriptionQueryKey, queryFn: fetchProSubscription });
+  if (subscription.plan && PLAN_TERMS[subscription.plan].unlimitedProjects) {
     return true;
   }
 

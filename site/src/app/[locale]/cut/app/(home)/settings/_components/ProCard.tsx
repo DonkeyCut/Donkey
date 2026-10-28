@@ -6,7 +6,6 @@ import {
   useIntroOffer,
   useOpenBillingPortal,
   useProSubscription,
-  useStartCheckout,
 } from "@/queries/billing";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -19,11 +18,13 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { activeProPromotion, CUT_PRO, useCutPro } from "@/app/[locale]/cut/_components/landing/cutPricingPlans";
+import { activeProPromotion, useCutPlan } from "@/app/[locale]/cut/_components/landing/cutPricingPlans";
 import { useApiErrorText } from "@/app/[locale]/cut/app/(home)/settings/_components/useApiErrorText";
 import { useIntroTerms } from "@/cut/components/IntroOffer";
-import { minutesLeft, useCreditLifeClause, useFormatDeadline } from "@/cut/components/SubscribeBonusPill";
+import { useCreditLifeClause, useFormatDeadline } from "@/cut/components/SubscribeBonusPill";
+import { openUpgrade } from "@/cut/lib/upgrade";
 import { track } from "@/lib/analytics";
+import { PAID_PLANS, PLAN_TERMS } from "@/lib/billing/plans";
 import { creditCountLabel, creditsFromDollars, creditsPerDollar, formatCreditCount, formatCredits } from "@/lib/credits/format-credits";
 import type { Locale } from "@/i18n/locales";
 import { useSubscribeBonus } from "@/queries/credits";
@@ -39,7 +40,7 @@ export function ProCard() {
   const t = useTranslations("settings.pro");
   const locale = useLocale();
   const format = useFormatter();
-  const proPlan = useCutPro();
+  const proPlan = useCutPlan("pro");
   const apiErrorText = useApiErrorText();
 
   // The promotion's last day, the way the card names it.
@@ -50,7 +51,6 @@ export function ProCard() {
   const formatDeadline = useFormatDeadline();
   const creditLifeClause = useCreditLifeClause();
   const pro = useProSubscription();
-  const checkout = useStartCheckout();
   const portal = useOpenBillingPortal();
   const bonus = useSubscribeBonus();
   const config = useAccountConfig({ enabled: true });
@@ -72,6 +72,7 @@ export function ProCard() {
 
   const data = pro.data;
   const isActive = data?.isActive ?? false;
+  const plan = data?.plan ?? null;
   const offer = bonus.data;
   const offerOpen = offer?.status === "open";
 
@@ -79,7 +80,7 @@ export function ProCard() {
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-3">
-          {t("title")}
+          {plan ? t("titlePlan", { plan: PLAN_TERMS[plan].name }) : t("title")}
           {isActive && data ? (
             <Badge variant="default">{t("status", { status: data.status ?? "" })}</Badge>
           ) : null}
@@ -94,12 +95,12 @@ export function ProCard() {
                 day: lastDayLabel(promotion.lastDay),
                 allowance: allowanceCredits(promotion.allowanceDollars, locale),
                 multiplier: format.number(promotion.multiplier),
-                usual: allowanceCredits(CUT_PRO.monthlyDollars, locale),
+                usual: allowanceCredits(PLAN_TERMS.pro.monthlyDollars, locale),
               })
             : t("promotionOpen", {
                 allowance: allowanceCredits(promotion.allowanceDollars, locale),
                 multiplier: format.number(promotion.multiplier),
-                usual: allowanceCredits(CUT_PRO.monthlyDollars, locale),
+                usual: allowanceCredits(PLAN_TERMS.pro.monthlyDollars, locale),
               })}
         </CardContent>
       ) : null}
@@ -156,6 +157,9 @@ export function ProCard() {
         </CardContent>
       ) : null}
       <CardFooter className="gap-3">
+        {plan !== PAID_PLANS[PAID_PLANS.length - 1] ? (
+          <Button onClick={() => openUpgrade("plans")}>{isActive ? t("upgrade") : t("seePlans")}</Button>
+        ) : null}
         {isActive ? (
           <Button
             disabled={portal.isPending}
@@ -169,30 +173,9 @@ export function ProCard() {
           >
             {portal.isPending ? t("opening") : t("manage")}
           </Button>
-        ) : (
-          <Button
-            disabled={checkout.isPending}
-            onClick={() => {
-              track("pro_checkout_started");
-              if (offer && offerOpen) {
-                track("subscribe_bonus_checkout_started", {
-                  dollars: Number(offer.dollars),
-                  minutesLeft: minutesLeft(offer.closesAt, Date.now()),
-                  source: "settings",
-                });
-              }
-              checkout.mutate(undefined, {
-                onSuccess: (result) => window.location.assign(result.url),
-              });
-            }}
-          >
-            {checkout.isPending ? t("starting") : t("subscribe")}
-          </Button>
-        )}
-        {checkout.isError || portal.isError ? (
-          <span className="text-sm text-destructive">
-            {apiErrorText(checkout.error ?? portal.error, t("unavailable"))}
-          </span>
+        ) : null}
+        {portal.isError ? (
+          <span className="text-sm text-destructive">{apiErrorText(portal.error, t("unavailable"))}</span>
         ) : null}
       </CardFooter>
     </Card>

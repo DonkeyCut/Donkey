@@ -20,8 +20,7 @@
   },
   "pricing": {
     "title": "단순한 <italic>요금제</italic>",
-    "body": "편집기는 무료예요. AI로 생성하는 미디어에 대해서만 결제하세요.",
-    "footnote": "* AI 생성 콘텐츠용 크레딧은 언제든지 구매할 수 있어요."
+    "body": "편집기는 무료예요. AI로 생성하는 미디어에 대해서만 결제하세요."
   },
   "plans": {
     "free": {
@@ -34,10 +33,10 @@
       "tools": "가져오기, 내보내기 및 온디바이스 텍스트 변환",
       "subscriptions": "보유한 Claude 또는 Codex 구독 연동"
     },
-    "pro": {
-      "detail": "개인용 플랜",
-      "cta": "Pro 시작하기",
-      "everythingInFree": "Free 플랜의 모든 기능 포함"
+    "paid": {
+      "detail": "{plan, select, plus {시작하기에 적합} pro {최고의 가성비} other {대량 생성용}}",
+      "cta": "{plan} 시작하기",
+      "everythingInFree": "Free 플랜의 모든 기능"
     }
   },
   "local": {

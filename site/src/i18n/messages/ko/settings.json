@@ -17,8 +17,9 @@
     "billingDescription": "구독 및 크레딧 잔액이에요."
   },
   "pro": {
-    "title": "Donkey Pro",
-    "description": "매월 초기화되는 월간 사용 한도예요. 언제든 크레딧을 추가 구매할 수 있어요.",
+    "title": "요금제",
+    "titlePlan": "Donkey {plan}",
+    "description": "매월 초기화되는 월간 사용 한도예요.",
     "status": "{status, select, active {활성} trialing {체험 중} past_due {결제 연체} canceled {취소됨} incomplete {미완료} unpaid {미납} other {{status}}}",
     "promotionUntil": "<b>{day}까지 Pro를 구독하면</b> 그때까지 시작되는 모든 달에 평소 {usual}의 {multiplier}배인 {allowance}이 제공돼요.",
     "promotionOpen": "현재 매월 평소 {usual}의 {multiplier}배인 {allowance}이 제공돼요.",
@@ -32,30 +33,14 @@
     "introDeadline": "{terms} {deadline}까지 구독하세요.",
     "opening": "여는 중…",
     "manage": "결제 관리",
-    "starting": "시작하는 중…",
-    "subscribe": "Pro 구독",
-    "unavailable": "지금은 결제 기능을 이용할 수 없어요."
+    "unavailable": "지금은 결제 기능을 이용할 수 없어요.",
+    "seePlans": "요금제 보기",
+    "upgrade": "업그레이드"
   },
   "credits": {
     "title": "크레딧",
-    "description": "Donkey 앱에서 사용하는 종량제 잔액이에요. 언제든 추가 구매할 수 있어요.",
-    "available": "사용 가능한 잔액",
-    "buy": "크레딧 구매",
-    "preset": "{credits} · {price}",
-    "customLabel": "크레딧",
-    "starting": "시작하는 중…",
-    "buyFor": "{price}에 구매",
-    "buyPlain": "구매",
-    "checkoutFailed": "결제를 시작하지 못했어요. 잠시 후 다시 시도해 주세요.",
-    "autoReload": "잔액 부족 시 자동 충전",
-    "fallsBelow": "잔액이 다음 미만일 때",
-    "unit": "크레딧",
-    "thenBuy": "자동 구매",
-    "saving": "저장 중…",
-    "save": "저장",
-    "saveFailed": "자동 충전 설정을 저장하지 못했어요. 잠시 후 다시 시도해 주세요.",
-    "lastFailed": "최근 자동 충전 실패: {error}",
-    "needsCard": "자동 충전을 사용하려면 저장된 카드가 필요해요. <buy>크레딧을 한 번 구매</buy>하여 카드를 저장한 후 이 기능을 켜주세요."
+    "description": "AI 기능 이용을 위한 잔여 크레딧이에요. Plus, Pro, Max 요금제에서는 매달 크레딧이 충전돼요.",
+    "available": "사용 가능한 잔액"
   },
   "profile": {
     "loadFailed": "프로필을 불러오지 못했어요.",

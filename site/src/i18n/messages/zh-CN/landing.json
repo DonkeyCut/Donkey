@@ -20,8 +20,7 @@
   },
   "pricing": {
     "title": "价格<italic>简单透明</italic>",
-    "body": "编辑器完全免费，仅对 AI 生成的媒体内容按需付费。",
-    "footnote": "* 可随时购买积分用于生成 AI 内容。"
+    "body": "编辑器完全免费，仅对 AI 生成的媒体内容按需付费。"
   },
   "plans": {
     "free": {
@@ -34,10 +33,10 @@
       "tools": "导入、导出及本地转录",
       "subscriptions": "关联你的 Claude 或 Codex 订阅"
     },
-    "pro": {
-      "detail": "面向个人创作者",
-      "cta": "获取 Pro",
-      "everythingInFree": "包含免费版的全部功能"
+    "paid": {
+      "detail": "{plan, select, plus {新手入门} pro {超值首选} other {适合高频生成}}",
+      "cta": "获取 {plan}",
+      "everythingInFree": "包含免费版的所有功能"
     }
   },
   "local": {

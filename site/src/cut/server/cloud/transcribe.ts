@@ -12,7 +12,7 @@ import {
   recordInferenceUsage,
   requireInferenceCredits,
 } from "@/lib/credits/inference";
-import { getActiveProSubscription } from "@/lib/billing/pro-subscription";
+import { getActiveSubscription } from "@/lib/billing/pro-subscription";
 import { prisma } from "@/lib/prisma";
 import {
   defaultGeminiClientFactory,
@@ -66,7 +66,7 @@ export const freeTranscriptionExhausted = "free_transcription_exhausted";
  * records, so the allowance can overshoot by the posts-in-flight few —
  * bounded and cheap, like the credit preflight's own concurrency window. */
 async function withinFreeAllowance(userId: string, sweep: boolean): Promise<boolean> {
-  const pro = await getActiveProSubscription(userId);
+  const pro = await getActiveSubscription(userId);
   const now = new Date();
   const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
   const windowStart = pro?.currentPeriodStart ?? monthStart;
@@ -82,7 +82,8 @@ async function withinFreeAllowance(userId: string, sweep: boolean): Promise<bool
     },
   });
   const total = used.reduce((n, u) => n + u._count._all, 0);
-  const cap = pro ? PRO_FREE_CHUNKS : FREE_CHUNKS;
+  // Pro and Max carry the two hours; Plus and free accounts the half hour.
+  const cap = pro && pro.planKey !== "plus" ? PRO_FREE_CHUNKS : FREE_CHUNKS;
   if (total >= cap) return false;
   if (!sweep) return true;
   const sweepUsed = used.find((u) => u.requestKind === SWEEP_KIND)?._count._all ?? 0;

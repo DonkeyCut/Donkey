@@ -260,9 +260,9 @@
     "logOut": "退出登录"
   },
   "navStorage": {
-    "get100": "获取 100 GB",
-    "upgradeTip": "升级获取 100 GB + AI 积分",
-    "grace": "你的 Pro 计划已到期。请在最早的项目被删除前升级或释放 {size} 空间。"
+    "upgrade": "升级",
+    "upgradeTip": "查看包含更多存储空间和 AI 积分的方案",
+    "grace": "你的方案已到期。请在最早的项目被删除前升级或释放 {size} 空间。"
   },
   "justNow": "刚刚"
 }

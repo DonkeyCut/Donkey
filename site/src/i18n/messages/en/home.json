@@ -260,9 +260,9 @@
     "logOut": "Log out"
   },
   "navStorage": {
-    "get100": "Get 100 GB",
-    "upgradeTip": "Upgrade for 100 GB + AI credits",
-    "grace": "Your Pro plan ended. Upgrade or free {size} before your oldest projects are deleted."
+    "upgrade": "Upgrade",
+    "upgradeTip": "See plans with more storage and AI credits",
+    "grace": "Your plan ended. Upgrade or free {size} before your oldest projects are deleted."
   },
   "justNow": "just now"
 }

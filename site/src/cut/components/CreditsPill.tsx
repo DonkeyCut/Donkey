@@ -3,19 +3,18 @@
 // The top bar's balance: what the account can still spend on hosted work —
 // chat, generation, voice — so a session can be planned around it. Reads as a
 // number; clicking it opens the plan card with the exact balance and the way
-// into Pro.
+// to a bigger plan.
 import { useEffect } from "react";
-import Link from "next/link";
 import { useQueryClient } from "@tanstack/react-query";
-import { Loader2, Zap } from "lucide-react";
+import { Zap } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useEngineUser } from "@/cut/lib/backend/hooks";
 import { useHostedBalance, useInvalidateOnSettle } from "@/cut/lib/hosted";
-import { useCutBase } from "@/cut/lib/nav";
-import { useUpgradeToPro } from "@/cut/lib/proUpgrade";
+import { openUpgrade } from "@/cut/lib/upgrade";
 import { track } from "@/lib/analytics";
+import { PAID_PLANS, PLAN_TERMS } from "@/lib/billing/plans";
 import { compactCredits, creditsFromDollars, formatCreditCount, formatCredits } from "@/lib/credits/format-credits";
 import { CREDITS_PILL_FLAG } from "@/lib/feature-flags";
 import { useProSubscription } from "@/queries/billing";
@@ -62,8 +61,9 @@ function BalancePill() {
   const balance = useCreditBalance();
   useLiveCreditBalance();
   // Background work — renders, cloud jobs — charges without a call from this
-  // tab, and a top-up happens on another page; a slow poll keeps the number
-  // honest between them, and a focus refetch catches the trip back from billing.
+  // tab, and a plan's credits land from another page; a slow poll keeps the
+  // number honest between them, and a focus refetch catches the trip back from
+  // billing.
   useEffect(() => {
     const id = setInterval(() => {
       if (document.visibilityState !== "visible") return;
@@ -98,31 +98,22 @@ function BalancePill() {
   );
 }
 
-// Mounted only while the card is open, so the plan query runs on demand. A
-// free account is sold Pro; a Pro account already pays, so its button goes to
-// billing, where credits are bought.
+// Mounted only while the card is open, so the plan query runs on demand. Any
+// account below the top plan gets the way up: the plans side by side.
 function PlanCard({ balance }: { balance: string }) {
   const t = useTranslations("billing");
   const locale = useLocale();
-  const base = useCutBase();
-  const pro = useProSubscription();
-  const upgrade = useUpgradeToPro();
-  const isPro = pro.data?.isActive === true;
+  const subscription = useProSubscription();
+  const plan = subscription.data?.plan ?? null;
   return (
     <div className="text-sm">
       <div className="flex items-center justify-between gap-3 px-4 py-3">
-        <span className="font-semibold">{isPro ? "Pro" : t("creditsPill.free")}</span>
-        {pro.data &&
-          (isPro ? (
-            <Button size="sm" render={<Link href={`${base}/settings`} />}>
-              {t("buyCredits")}
-            </Button>
-          ) : (
-            <Button size="sm" disabled={upgrade.isPending} onClick={upgrade.start}>
-              {upgrade.isPending && <Loader2 className="animate-spin" data-icon="inline-start" />}
-              {t("creditsPill.upgrade")}
-            </Button>
-          ))}
+        <span className="font-semibold">{plan ? PLAN_TERMS[plan].name : t("creditsPill.free")}</span>
+        {subscription.data && plan !== PAID_PLANS[PAID_PLANS.length - 1] ? (
+          <Button size="sm" onClick={() => openUpgrade("plans")}>
+            {t("creditsPill.upgrade")}
+          </Button>
+        ) : null}
       </div>
       <div className="flex items-center gap-2.5 border-t border-border px-4 py-3">
         <Zap className="size-4 text-muted-foreground" />

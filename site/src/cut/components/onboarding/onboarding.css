@@ -35,8 +35,33 @@
   animation: onboarding-tape-shake 700ms ease-in-out 250ms both;
 }
 
+/* The offer sticker lands with the same wobble and comes to rest tilted. */
+@keyframes onboarding-sticker-shake {
+  0% {
+    rotate: 6deg;
+  }
+  20% {
+    rotate: -6deg;
+  }
+  45% {
+    rotate: 12deg;
+  }
+  70% {
+    rotate: 2deg;
+  }
+  100% {
+    rotate: 6deg;
+  }
+}
+
+.onboarding-sticker-shake {
+  rotate: 6deg;
+  animation: onboarding-sticker-shake 700ms ease-in-out 250ms both;
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .onboarding-tape-shake {
+  .onboarding-tape-shake,
+  .onboarding-sticker-shake {
     animation: none;
   }
 }

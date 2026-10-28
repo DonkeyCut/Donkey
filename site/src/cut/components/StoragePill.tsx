@@ -49,22 +49,23 @@ function CloudStoragePill() {
   const t = useTranslations("billing.storagePill");
   const locale = useLocale();
   const pro = useProSubscription();
+  // Free and Plus have quotas small enough to fill, so they carry the meter.
+  const metered = pro.data !== undefined && (pro.data.plan === null || pro.data.plan === "plus");
   // The meter has to move as media lands, so this reader is the polling one.
-  const usage = useCloudUsage(pro.data?.isActive === false, { poll: true });
+  const usage = useCloudUsage(metered, { poll: true });
   const portal = useOpenBillingPortal();
   const config = useAccountConfig({ enabled: true });
 
   if (!pro.data) return null;
 
-  if (pro.data.isActive) {
-    const end = pro.data.endsAt;
-    if (!end) return null;
-    const days = daysUntil(end);
-    // The config read can fail without taking the pill with it: the registry
-    // default stands in until an override arrives.
-    const daysBefore =
-      config.data?.settings.proEndingNotice.daysBefore ?? SETTINGS.proEndingNotice.default.daysBefore;
-    if (days >= daysBefore) return null;
+  // A plan set to cancel counts down its last days in place of the meter.
+  const end = pro.data.isActive ? pro.data.endsAt : null;
+  const days = end ? daysUntil(end) : null;
+  // The config read can fail without taking the pill with it: the registry
+  // default stands in until an override arrives.
+  const daysBefore =
+    config.data?.settings.proEndingNotice.daysBefore ?? SETTINGS.proEndingNotice.default.daysBefore;
+  if (days !== null && days < daysBefore) {
     return (
       <PillTooltip message={t("cancelTooltip")}>
         <TooltipTrigger
@@ -87,6 +88,7 @@ function CloudStoragePill() {
     );
   }
 
+  if (!metered) return null;
   const u = usage.data;
   if (!u || u.quotaBytes === null) return null;
   const frac = u.bytes / u.quotaBytes;
