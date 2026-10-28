@@ -41,6 +41,7 @@ import {
   REFERENCE_ASSET,
   REFERENCE_STATE,
 } from "./fixtures";
+import { overlayCases } from "./overlayCases";
 
 export type Bucket = "instant" | "chat" | "single-tool" | "multi-tool";
 
@@ -1273,5 +1274,6 @@ export function cases(audio: { dataBase64: string; mimeType: string }): EvalCase
         capture_frame: { image: "data:image/jpeg;base64,", at: 1 },
       },
     },
+    ...overlayCases(),
   ];
 }
