@@ -3163,6 +3163,12 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       const track = isNum(input.track) ? Math.max(1, Math.round(input.track)) : 1;
       if (isNum(input.track) && Math.round(input.track) === 0)
         throw new ToolError("Track 0 holds the timeline clips — use place_clip for it.");
+      // A stack grounds on its lowest row, so an overlay over an empty track 0
+      // would become the base clip itself.
+      if (track0Clips(s.clips).length === 0)
+        throw new ToolError(
+          "Track 0 is empty, and an overlay over nothing becomes the base clip itself. Put the clip it sits over on track 0 first (add_clip), then add this."
+        );
 
       // Its length goes in with the add, so the landing makes room for the
       // clip it will be: `end` when given, else an image stops where track 0

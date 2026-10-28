@@ -20,8 +20,8 @@ beforeEach(async () => {
     subtitles: emptySubtitles(),
     assets: [{ id: "a1", fileName: "rec.mov", name: "Rec", type: "video", duration: 10, url: "" }],
   });
-  // The first lands on the empty main track, the second above it.
-  await runAiTool("add_overlay_video", { asset_id: "a1", start: 0 });
+  // A clip on the main track, the overlay above it.
+  await runAiTool("add_clip", { asset_id: "a1" });
   await runAiTool("add_overlay_video", { asset_id: "a1", start: 0 });
 });
 

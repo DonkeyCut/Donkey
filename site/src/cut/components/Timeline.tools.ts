@@ -290,7 +290,7 @@ export const TIMELINE_TOOLS = [
         description: "Frame region preset; leave out when passing region",
       },
       region: obj({
-        x: num("Centre of the box, frame fractions (0.5 = the middle), as add_title and add_shape take x; the box may run past the frame, and the frame crops the overhang"),
+        x: num("Centre of the box, frame fractions (0.5 = the middle), as add_title and add_shape take x; the box may run past the frame, and the frame crops the overhang. A box known by its left and top edges centres at left + w/2, top + h/2"),
         y: num("Centre of the box, frame fractions (0.5 = the middle)"),
         w: num(`Width in frame fractions, 0.05..${REGION_MAX_SCALE}; past 1 the box runs off the frame`),
         h: num(`Height in frame fractions, 0.05..${REGION_MAX_SCALE}`),
