@@ -7,6 +7,9 @@ type Event = { event: string; properties: { $exception_list: unknown[] } };
 type BeforeSend = (event: Event) => Event | null;
 
 let beforeSend: BeforeSend;
+// What the client listens for on the window, so a case can fire an event.
+const listeners = new Map<string, (e: unknown) => void>();
+const session = new Map<string, string>();
 const saved = {
   env: { ...process.env },
   window: (globalThis as { window?: unknown }).window,
@@ -20,7 +23,13 @@ beforeAll(async () => {
     default: { init: (_key: string, config: { before_send: BeforeSend }) => (beforeSend = config.before_send) },
   } as never);
   Object.assign(process.env, { NEXT_PUBLIC_POSTHOG_KEY: "test", NODE_ENV: "production" });
-  Object.assign(globalThis, { window: { location: { pathname: "/" }, addEventListener: () => {} } });
+  Object.assign(globalThis, {
+    window: {
+      location: { pathname: "/", reload: () => {} },
+      addEventListener: (type: string, fn: (e: unknown) => void) => listeners.set(type, fn),
+      sessionStorage: { getItem: (k: string) => session.get(k) ?? null, setItem: (k: string, v: string) => session.set(k, v) },
+    },
+  });
   await import("./instrumentation-client");
 });
 
@@ -59,6 +68,35 @@ describe("before_send", () => {
     };
 
     expect(beforeSend(exception(wallet))).toBeNull();
+  });
+
+  test("drops an in-app browser's bridge failing", () => {
+    // Instagram's web view on Android runs its bridge from its own scheme.
+    const bridge = {
+      type: "Error",
+      value: "Error invoking postMessage: Java object is gone",
+      stacktrace: {
+        frames: [
+          { filename: "iabjs://navigation_performance_logger_android", function: "sendDataToNative" },
+          { filename: "iabjs://navigation_performance_logger_android", function: "sendBeforeUnloadMessage" },
+        ],
+      },
+    };
+
+    expect(beforeSend(exception(bridge))).toBeNull();
+  });
+
+  test("drops a failed chunk load once a reload recovers it", () => {
+    const chunk = {
+      type: "ChunkLoadError",
+      value: "Failed to load chunk /_next/static/chunks/a.js from module 1",
+      stacktrace: { frames: [{ filename: "https://donkeycut.com/_next/static/chunks/turbopack-a.js" }] },
+    };
+    expect(beforeSend(exception(chunk))).not.toBeNull();
+
+    listeners.get("unhandledrejection")?.({ reason: Object.assign(new Error(chunk.value), { name: "ChunkLoadError" }) });
+
+    expect(beforeSend(exception(chunk))).toBeNull();
   });
 
   test("drops a hydration error on a page the browser translated", () => {

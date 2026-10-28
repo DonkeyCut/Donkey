@@ -20,9 +20,11 @@ interface ReloadWindow {
  * A tab open across a deploy still asks for the old build's chunks, and once
  * those are gone the import rejects and the tree it was loading dies. A
  * reload fetches the current build, at most once per window; a tab whose
- * storage throws keeps the failure.
+ * storage throws keeps the failure. Returns whether a reload is on its way,
+ * so error tracking can leave out the failures it recovers.
  */
-export function reloadOnChunkError(win: ReloadWindow, now: () => number = Date.now): void {
+export function reloadOnChunkError(win: ReloadWindow, now: () => number = Date.now): () => boolean {
+  let reloading = false;
   const recover = (error: unknown) => {
     if ((error as { name?: string } | null)?.name !== CHUNK_LOAD_ERROR) {
       return;
@@ -40,9 +42,11 @@ export function reloadOnChunkError(win: ReloadWindow, now: () => number = Date.n
       return;
     }
 
+    reloading = true;
     win.location.reload();
   };
 
   win.addEventListener("error", (e) => recover(e.error));
   win.addEventListener("unhandledrejection", (e) => recover(e.reason));
+  return () => reloading;
 }

@@ -57,6 +57,16 @@ describe("reloadOnChunkError", () => {
     expect(win.reloads).toBe(1);
   });
 
+  test("says when a reload is on its way", () => {
+    const win = fakeWindow();
+    const reloading = reloadOnChunkError(win, () => win.now);
+    expect(reloading()).toBe(false);
+
+    win.fire("unhandledrejection", { reason: chunkError() });
+
+    expect(reloading()).toBe(true);
+  });
+
   test("leaves every other error alone", () => {
     const win = fakeWindow();
     reloadOnChunkError(win, () => win.now);

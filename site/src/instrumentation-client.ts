@@ -18,6 +18,10 @@ const replayFree = () => REPLAY_FREE.test(window.location.pathname);
 // embed one get it masked before the event leaves the browser.
 const scrubUrls = (s: string) => s.replace(/https?:\/\/\S+/g, "<url>");
 
+// Where a script this page runs can come from: its own origin, posthog-js's
+// asset host, or a blob it made.
+const WEB_ADDRESS = /^(https?:|blob:|\/)/;
+
 /**
  * Whether this exception was thrown by script the page never served.
  *
@@ -25,13 +29,14 @@ const scrubUrls = (s: string) => s.replace(/https?:\/\/\S+/g, "<url>");
  * its own bridge into every page it opens, and that bridge throws when its
  * host tears the native side down mid-page ("Java object is gone"). The frames
  * come from no file, because there is no file: the code was evaluated into the
- * document. Anything this page shipped, minified or not, has a filename on
- * every frame, and an exception carrying no stack at all (a DOMException, say)
- * is ours to keep — so the test is a stack that exists and names nothing.
+ * document, or from the web view's own scheme ("iabjs://…"). Anything this
+ * page shipped, minified or not, names a web address on every frame, and an
+ * exception carrying no stack at all (a DOMException, say) is ours to keep —
+ * so the test is a stack that exists and names no web address.
  */
 const fromInjectedScript = (item: { stacktrace?: { frames?: { filename?: string }[] } }) => {
   const frames = item?.stacktrace?.frames;
-  return Array.isArray(frames) && frames.length > 0 && frames.every((f) => !f?.filename);
+  return Array.isArray(frames) && frames.length > 0 && frames.every((f) => !WEB_ADDRESS.test(f?.filename ?? ""));
 };
 
 /**
@@ -146,9 +151,14 @@ const evaluatedSyntaxError = (item: { type?: string; value?: string; stacktrace?
   item?.type === "SyntaxError" && !item.stacktrace?.frames?.length && !/JSON/.test(item.value ?? "");
 
 // A tab left open across a deploy recovers from the old build's missing chunks.
-if (process.env.NODE_ENV === "production") {
-  reloadOnChunkError(window);
-}
+const chunkReloading = process.env.NODE_ENV === "production" ? reloadOnChunkError(window) : () => false;
+
+// The error name the bundler's runtime gives a lazy chunk that failed to load.
+const CHUNK_LOAD_ERROR = "ChunkLoadError";
+
+/** Whether this exception is a failed chunk load the page is reloading for.
+ * A chunk that fails again after that reload is reported. */
+const recoveredChunk = (item: { type?: string }) => item?.type === CHUNK_LOAD_ERROR && chunkReloading();
 
 // Production builds only: a dev server on localhost sends HMR build overlays
 // and half-saved-file errors straight into production error tracking.
@@ -184,6 +194,7 @@ if (process.env.NEXT_PUBLIC_POSTHOG_KEY && process.env.NODE_ENV === "production"
             translatorArtifact(list[0]) ||
             droppedFetch(list[0]) ||
             cancellation(list[0]) ||
+            recoveredChunk(list[0]) ||
             evaluatedSyntaxError(list[0])
           ) {
             return null;
