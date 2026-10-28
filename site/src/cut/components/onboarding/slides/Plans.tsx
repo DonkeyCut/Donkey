@@ -14,6 +14,7 @@ import { usePlanCheckout } from "@/cut/lib/proUpgrade";
 import { track } from "@/lib/analytics";
 import { RECOMMENDED_PLAN, type PaidPlan } from "@/lib/billing/plans";
 import type { OnboardingRun } from "@/lib/onboarding/sequence";
+import { cn } from "@/lib/utils";
 import { useIntroOffer, type IntroOffer } from "@/queries/billing";
 
 import "../onboarding.css";
@@ -57,16 +58,28 @@ export function PlansSlide({ run, onSkipPro }: { run: OnboardingRun; onSkipPro: 
         {t("subtitle")}
       </p>
 
-      <div className="mt-8 grid items-stretch gap-5 md:grid-cols-3">
+      {/* A narrow window scrolls the cards sideways. The row bleeds past the
+          slide's gutter to the screen edge so the next card peeks in on the
+          right, and the top padding keeps the tape and offer sticker. The
+          recommended plan comes first so it is the one on screen when the
+          slide opens. */}
+      <div className="-mx-6 mt-3 flex scroll-px-6 snap-x snap-mandatory gap-4 overflow-x-auto px-6 pt-5 pb-3 [scrollbar-width:none] md:mx-0 md:mt-8 md:grid md:grid-cols-3 md:items-stretch md:gap-5 md:overflow-visible md:p-0 [&::-webkit-scrollbar]:hidden">
         {plans.map((copy) => (
-          <PlanCard
+          <div
             key={copy.plan}
-            copy={copy}
-            offer={copy.plan === "pro" ? offer : null}
-            pending={checkout.pendingPlan === copy.plan}
-            busy={checkout.pendingPlan !== null}
-            onPick={() => checkout.start(copy.plan)}
-          />
+            className={cn(
+              "w-[80%] min-w-0 shrink-0 snap-start md:w-auto",
+              copy.plan === RECOMMENDED_PLAN && "order-first md:order-none",
+            )}
+          >
+            <PlanCard
+              copy={copy}
+              offer={copy.plan === "pro" ? offer : null}
+              pending={checkout.pendingPlan === copy.plan}
+              busy={checkout.pendingPlan !== null}
+              onPick={() => checkout.start(copy.plan)}
+            />
+          </div>
         ))}
       </div>
 
