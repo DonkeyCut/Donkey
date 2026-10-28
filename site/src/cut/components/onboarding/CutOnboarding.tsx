@@ -13,7 +13,7 @@ import { PlansSlide, type PlansExit } from "@/cut/components/onboarding/slides/P
 import { ReferralSlide } from "@/cut/components/onboarding/slides/Referral";
 import { WelcomeSlide } from "@/cut/components/onboarding/slides/Welcome";
 import { useEngineUser } from "@/cut/lib/backend/hooks";
-import { useFormFactor } from "@/cut/lib/environment";
+import { useEnvironment, useFormFactor } from "@/cut/lib/environment";
 import { useCutBase } from "@/cut/lib/nav";
 import { onOpenOnboarding, setOnboardingCover } from "@/cut/lib/onboarding";
 import { track } from "@/lib/analytics";
@@ -37,6 +37,10 @@ const SLIDES = ["welcome", "referral", "modes", "credits", "ai-chat", "plans"] a
 // answer, the last write, and the current picks compare cheaply.
 const referralSignature = (sources: ReferralSource[], other: string) =>
   `${[...sources].sort().join(",")}|${other}`;
+
+// How often the phone paywall rereads the plan. A checkout comes back before
+// its webhook lands, and the paywall has to clear once the plan does.
+const PAYWALL_POLL_MS = 5_000;
 
 // The sequence version this browser last saw this account finish. It exists so
 // a returning load paints the app immediately instead of covering it while the
@@ -70,11 +74,12 @@ export function CutOnboarding() {
   // no account at all.
   const userId = useEngineUser() ?? "";
   const { data: state, isPending } = useOnboardingState();
-  const { data: pro } = useProSubscription();
   const save = useSaveOnboarding();
   // A phone ends on the plans with no free way out: the editor needs a
-  // computer, so the phone's job is the account and the plan.
-  const exit: PlansExit = useFormFactor() === "phone" ? "paywall" : "free";
+  // computer, so the phone's job is the account and the plan. The ChatGPT card
+  // keeps the editor on a phone and sells no plans, so it keeps the free exit.
+  const { chatgpt } = useEnvironment();
+  const exit: PlansExit = useFormFactor() === "phone" && !chatgpt ? "paywall" : "free";
   const [rawStep, setStep] = useState(0);
   const saved = useMemo(() => (state?.referralSources ?? []).filter(isKnownReferralSource), [state]);
   const savedOther = saved.includes("other") ? (state?.referralOther ?? "") : "";
@@ -113,6 +118,7 @@ export function CutOnboarding() {
             ? "first_run"
             : "replay"
           : null;
+  const { data: pro } = useProSubscription({ pollMs: run && exit === "paywall" ? PAYWALL_POLL_MS : undefined });
 
   // Navigation and progress use the slides this account can see.
   const isPro = pro?.isActive ?? false;

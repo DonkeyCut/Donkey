@@ -25,10 +25,13 @@ export type ProSubscription = {
 
 export const fetchProSubscription = () => apiFetch<ProSubscription>("/api/billing/pro");
 
-export function useProSubscription() {
+// A surface waiting on a plan to land, such as the phone paywall after a
+// checkout, rereads it every pollMs.
+export function useProSubscription({ pollMs }: { pollMs?: number } = {}) {
   return useQuery({
     queryFn: fetchProSubscription,
     queryKey: proSubscriptionQueryKey,
+    refetchInterval: (query) => (pollMs && !query.state.data?.isActive ? pollMs : false),
   });
 }
 
