@@ -558,10 +558,10 @@ export type PendingImport = {
   /** The URL the asset plays from until the stored file takes over — a local
    * object URL for a dropped file, the source URL for remote media. */
   localUrl: string;
-  /** Put the bytes where a reload finds them — the browser store under a
-   * claimed name, or the project's own storage — as soon as the import starts.
-   * The queue runs it ahead of its transfer window, so a long drop is held
-   * whole while its uploads wait their turn. Safe to call again. */
+  /** Put the bytes in the browser store under a claimed name, where a reload
+   * finds them, as soon as a cloud import starts. The queue runs it ahead of
+   * its transfer window, so a long drop is held whole while its uploads wait
+   * their turn. Safe to call again. */
   hold?: ImportStep;
   /** Send the bytes and mark the object complete; resolves to the stored
    * (deduped) file name the asset swaps to. */
@@ -628,13 +628,15 @@ export async function prepareImport(
 }
 
 /** A browser or engine project stores a dropped file by copying it in, on
- * this machine: the copy is the hold, and the send hands back its name. A
- * failed or cancelled copy is forgotten, so a retry copies again. */
+ * this machine, and the send hands back its name. The copy is the whole
+ * transfer, so it waits for the queue's window like any upload: a long drop
+ * copied at once would swamp the engine socket or the browser store. A failed
+ * or cancelled copy is forgotten, so a retry copies again. */
 function sendDirectImport(
   backend: CutBackend,
   projectId: string,
   file: File
-): Pick<PendingImport, "hold" | "send"> {
+): Pick<PendingImport, "send"> {
   let copy: Promise<string> | null = null;
   const send: PendingImport["send"] = (opts) => {
     copy ??= uploadProjectMediaTo(backend, projectId, file, file.name, opts).catch((err: unknown) => {
@@ -643,7 +645,7 @@ function sendDirectImport(
     });
     return copy;
   };
-  return { hold: async (opts) => void (await send(opts)), send };
+  return { send };
 }
 
 /** Claims run one at a time, each against the names already taken, so two
