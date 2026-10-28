@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import postcss from "postcss";
 import { createElement } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderToStaticMarkup } from "react-dom/server";
 import { EmailAuthForm } from "./_components/landing/EmailAuthForm";
 import { MentionTextarea } from "@/cut/components/AssetRefs";
@@ -27,9 +28,11 @@ describe("dark theme", () => {
   });
 
   test("generation prompt hints use the theme's readable text color", () => {
-    const html = renderToStaticMarkup(createElement(WithIntl, null, createElement(MentionTextarea, {
+    const textarea = createElement(MentionTextarea, {
       value: "", candidates: [], onChange: () => {}, placeholder: "Describe a shot",
-    })));
+    });
+    const html = renderToStaticMarkup(createElement(WithIntl, null,
+      createElement(QueryClientProvider, { client: new QueryClient() }, textarea)));
     expect(html.match(/<textarea[^>]+class="([^"]+)"/)?.[1]).toContain("placeholder:text-muted-foreground");
   });
 
