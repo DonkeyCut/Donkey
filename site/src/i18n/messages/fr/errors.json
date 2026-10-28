@@ -122,7 +122,7 @@
   "free_transcription_exhausted": "Le quota de transcription gratuite est épuisé.",
   "image_add_failed": "Impossible d'ajouter l'image.",
   "image_add_to_project_failed": "Impossible d'ajouter l'image au projet.",
-  "image_download_failed": "Impossible de télécharger cette image.",
+  "image_download_failed": "Impossible de télécharger cette image ({status}).",
   "image_generation_failed": "Échec de la génération de l'image.",
   "image_import_failed": "Impossible d'importer l'image.",
   "image_output_missing": "Le fournisseur n'a renvoyé aucune image.",

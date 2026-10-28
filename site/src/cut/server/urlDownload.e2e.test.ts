@@ -6,6 +6,7 @@ import { createServer } from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { download, playableMedia } from "./urlDownload";
+import { videoDimensions } from "./util";
 
 // What a link import lands has to play on every surface it reaches: the
 // phone's viewer and the Mac's player go through AVFoundation, which decodes
@@ -137,6 +138,75 @@ suite("playableMedia", () => {
       ff(["-f", "lavfi", "-i", "sine=frequency=440:duration=1", "-c:a", "aac", file]);
       expect(await playableMedia(file)).toBe(file);
     } finally {
+      await rm(dir, { force: true, recursive: true });
+    }
+  });
+});
+
+// Serve fixed bodies by path on a local port, so a page and its pictures
+// import the way a real site's would.
+async function serve(routes: Record<string, { type: string; body: Buffer | string; status?: number }>) {
+  const server = createServer((request, response) => {
+    const route = routes[new URL(request.url!, "http://localhost").pathname];
+    if (!route) {
+      response.writeHead(404).end();
+      return;
+    }
+    response.writeHead(route.status ?? 200, { "Content-Type": route.type }).end(route.body);
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("Missing test server address.");
+  return {
+    base: `http://127.0.0.1:${address.port}`,
+    close: () => new Promise<void>((resolve) => server.close(() => resolve())),
+  };
+}
+
+suite("page pictures", () => {
+  // A file page links one picture as its preview, a smaller rendition and a
+  // srcset entry; the import keeps it once, at its sharpest size.
+  test("one picture shown at several sizes imports once, at its largest", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "cut-page-"));
+    const big = path.join(dir, "big.png");
+    const small = path.join(dir, "small.png");
+    const bars = path.join(dir, "bars.png");
+    ff(["-f", "lavfi", "-i", "testsrc=size=1280x1280", "-frames:v", "1", big]);
+    ff(["-i", big, "-vf", "scale=960:960", small]);
+    ff(["-f", "lavfi", "-i", "mandelbrot=size=960x540", "-frames:v", "1", bars]);
+    const prose = "A page about one logo, with enough words for a reader to keep. ".repeat(4);
+    const site = await serve({
+      "/page": {
+        type: "text/html",
+        body: `<html><head><title>Logo</title><meta property="og:image" content="/big.png?from=og"></head>
+          <body><article><h1>Logo</h1><p>${prose}</p>
+          <img src="/small.png" alt="Logo"><img srcset="/big.png?from=srcset 1280w"><img src="/bars.png" alt="Bars">
+          </article></body></html>`,
+      },
+      "/big.png": { type: "image/png", body: await readFile(big) },
+      "/small.png": { type: "image/png", body: await readFile(small) },
+      "/bars.png": { type: "image/png", body: await readFile(bars) },
+    });
+    try {
+      const result = await download(`${site.base}/page`, dir);
+      expect(result.files).toHaveLength(2);
+      expect((await videoDimensions(result.files[0].file))?.width).toBe(1280);
+      expect(result.files[1].title).toBe("Bars");
+    } finally {
+      await site.close();
+      await rm(dir, { force: true, recursive: true });
+    }
+  }, 60_000);
+
+  // The chat retries a refused image link only when it can see why it failed.
+  test("a refused image link says what the server answered", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "cut-image-"));
+    const site = await serve({ "/logo.png": { type: "text/html", body: "Bad thumbnail width", status: 400 } });
+    try {
+      await expect(download(`${site.base}/logo.png`, dir)).rejects.toThrow("400");
+    } finally {
+      await site.close();
       await rm(dir, { force: true, recursive: true });
     }
   });

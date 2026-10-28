@@ -7,6 +7,7 @@ import { Defuddle } from "defuddle/node";
 import { parseHTML } from "linkedom";
 import { convertToMp4, fitsAlready, streamCodecs } from "./convert";
 import type { LibrarySource } from "./library";
+import { videoDimensions } from "./util";
 import { pexelsFileUrl, pexelsVideo } from "./pexels";
 import { UserError } from "../lib/userError";
 
@@ -274,7 +275,7 @@ async function savePoster(
 
 async function downloadDirectImage(url: string, dir: string): Promise<Downloaded> {
   const res = await fetch(url);
-  if (!res.ok) throw new UserError("image_download_failed", "Could not download that image.");
+  if (!res.ok) throw new UserError("image_download_failed", `Could not download that image (${res.status}).`, { status: res.status });
   const name = path.basename(new URL(url).pathname) || "image.jpg";
   const file = path.join(dir, name);
   await writeFile(file, Buffer.from(await res.arrayBuffer()));
@@ -543,7 +544,7 @@ async function pageImages(
   const saved = await Promise.all(
     refs.map((ref, i) => savePageImage(ref, pageUrl, i, dir).catch(() => null))
   );
-  const kept = saved.filter((f): f is SavedImage => !!f).slice(0, MAX_PAGE_IMAGES);
+  const kept = (await distinctPictures(saved.filter((f): f is SavedImage => !!f))).slice(0, MAX_PAGE_IMAGES);
   // A picture the page captioned keeps that caption; the rest are named after
   // the page and counted, the way a multi-photo post's are.
   return kept.map((img, i) => ({
@@ -644,6 +645,101 @@ async function savePageImage(
   const file = path.join(dir, `page-${index + 1}.${ext}`);
   await writeFile(file, bytes);
   return { file, alt: ref.alt };
+}
+
+// Two files are one picture when their shapes agree and their 16×16
+// thumbnails differ by at most this much per pixel on average, out of 255.
+// A file page shows one logo as its preview, a thumbnail and a srcset entry.
+const PRINT_SIDE = 16;
+const SAME_PICTURE_DIFF = 6;
+const SAME_SHAPE_TOLERANCE = 0.02;
+
+interface PicturePrint {
+  pixels: number;
+  aspect: number;
+  thumb: Buffer;
+}
+
+interface PrintedImage {
+  image: SavedImage;
+  print: PicturePrint;
+}
+
+/** Keep each picture a page shows once, at its largest size, in the place it
+ * first appeared. A file that can't be read stays, since nothing says it
+ * repeats another. */
+async function distinctPictures(images: SavedImage[]): Promise<SavedImage[]> {
+  const prints = await Promise.all(images.map((img) => picturePrint(img.file)));
+  const kept: { image: SavedImage; print: PicturePrint | null }[] = [];
+  for (const [i, image] of images.entries()) {
+    const print = prints[i];
+    const twin = print && kept.find((k): k is PrintedImage => !!k.print && samePicture(k.print, print));
+    if (!print || !twin) {
+      kept.push({ image, print });
+      continue;
+    }
+
+    // The sharper copy takes the first one's place; a caption from either stays.
+    const alt = twin.image.alt ?? image.alt;
+    if (print.pixels > twin.print.pixels) {
+      twin.image = { file: image.file, alt };
+      twin.print = print;
+      continue;
+    }
+    twin.image = { ...twin.image, alt };
+  }
+  return kept.map((k) => k.image);
+}
+
+function samePicture(a: PicturePrint, b: PicturePrint): boolean {
+  if (Math.abs(a.aspect - b.aspect) > SAME_SHAPE_TOLERANCE * a.aspect) {
+    return false;
+  }
+  let diff = 0;
+  for (let i = 0; i < a.thumb.length; i++) {
+    diff += Math.abs(a.thumb[i] - b.thumb[i]);
+  }
+  return diff / a.thumb.length <= SAME_PICTURE_DIFF;
+}
+
+async function picturePrint(file: string): Promise<PicturePrint | null> {
+  const [dims, thumb] = await Promise.all([videoDimensions(file), pictureThumb(file)]);
+  if (!dims || !thumb) {
+    return null;
+  }
+  return { pixels: dims.width * dims.height, aspect: dims.width / dims.height, thumb };
+}
+
+/** The picture shrunk to a gray PRINT_SIDE square, transparency laid on
+ * white so a logo's empty corners read the same in every rendition. */
+function pictureThumb(file: string): Promise<Buffer | null> {
+  const side = `${PRINT_SIDE}x${PRINT_SIDE}`;
+  return new Promise((resolve) => {
+    const p = spawn("ffmpeg", [
+      "-v", "error",
+      "-i", file,
+      "-filter_complex",
+      `[0:v]scale=${side}:flags=area,format=rgba[pic];color=white:size=${side}[bg];[bg][pic]overlay=shortest=1,format=gray`,
+      "-frames:v", "1",
+      "-f", "rawvideo", "-",
+    ]);
+    const chunks: Buffer[] = [];
+    const timer = setTimeout(() => {
+      p.kill("SIGKILL");
+      resolve(null);
+    }, 30_000);
+    timer.unref();
+    p.stdout.on("data", (d: Buffer) => chunks.push(d));
+    p.on("close", (code) => {
+      clearTimeout(timer);
+      const thumb = Buffer.concat(chunks);
+      resolve(code === 0 && thumb.length === PRINT_SIDE * PRINT_SIDE ? thumb : null);
+    });
+    p.on("error", () => {
+      clearTimeout(timer);
+      resolve(null);
+    });
+  });
 }
 
 /** An absolute http(s) address for a page's link, or nothing for the inline

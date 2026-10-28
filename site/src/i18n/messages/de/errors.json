@@ -122,7 +122,7 @@
   "free_transcription_exhausted": "Das Guthaben für kostenlose Transkriptionen ist aufgebraucht.",
   "image_add_failed": "Bild konnte nicht hinzugefügt werden.",
   "image_add_to_project_failed": "Bild konnte nicht zum Projekt hinzugefügt werden.",
-  "image_download_failed": "Bild konnte nicht heruntergeladen werden.",
+  "image_download_failed": "Dieses Bild konnte nicht heruntergeladen werden ({status}).",
   "image_generation_failed": "Bilderstellung fehlgeschlagen.",
   "image_import_failed": "Bild konnte nicht importiert werden.",
   "image_output_missing": "Der Anbieter hat kein Bild zurückgegeben.",

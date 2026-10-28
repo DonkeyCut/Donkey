@@ -122,7 +122,7 @@
   "free_transcription_exhausted": "免费转录额度已用尽。",
   "image_add_failed": "无法添加图像。",
   "image_add_to_project_failed": "无法将图像添加到项目中。",
-  "image_download_failed": "无法下载该图像。",
+  "image_download_failed": "无法下载该图片（{status}）。",
   "image_generation_failed": "图像生成失败。",
   "image_import_failed": "无法导入图像。",
   "image_output_missing": "服务提供方未返回任何图像。",

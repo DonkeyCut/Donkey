@@ -122,7 +122,7 @@
   "free_transcription_exhausted": "The free transcription allowance is used up.",
   "image_add_failed": "Could not add the image.",
   "image_add_to_project_failed": "Could not add the image to the project.",
-  "image_download_failed": "Could not download that image.",
+  "image_download_failed": "Could not download that image ({status}).",
   "image_generation_failed": "Image generation failed.",
   "image_import_failed": "Could not import the image.",
   "image_output_missing": "The provider returned no image.",

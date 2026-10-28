@@ -122,7 +122,7 @@
   "free_transcription_exhausted": "Se agotó el límite de transcripción gratuita.",
   "image_add_failed": "No se pudo agregar la imagen.",
   "image_add_to_project_failed": "No se pudo agregar la imagen al proyecto.",
-  "image_download_failed": "No se pudo descargar esa imagen.",
+  "image_download_failed": "No se pudo descargar esa imagen ({status}).",
   "image_generation_failed": "Falló la generación de la imagen.",
   "image_import_failed": "No se pudo importar la imagen.",
   "image_output_missing": "El proveedor no devolvió ninguna imagen.",

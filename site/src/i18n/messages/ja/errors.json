@@ -122,7 +122,7 @@
   "free_transcription_exhausted": "無料の文字起こし枠を使い切りました。",
   "image_add_failed": "画像を追加できませんでした。",
   "image_add_to_project_failed": "プロジェクトに画像を追加できませんでした。",
-  "image_download_failed": "その画像をダウンロードできませんでした。",
+  "image_download_failed": "その画像をダウンロードできませんでした ({status})。",
   "image_generation_failed": "画像の生成に失敗しました。",
   "image_import_failed": "画像をインポートできませんでした。",
   "image_output_missing": "プロバイダーから画像が返されませんでした。",
