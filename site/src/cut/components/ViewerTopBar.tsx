@@ -13,7 +13,7 @@ import { projectHref, useCutBase } from "@/cut/lib/nav";
 import { OperationError, operationFailure } from "@/cut/lib/operationFailure";
 import { useEditor } from "@/cut/lib/store";
 import { errorFromBody } from "@/cut/lib/userError";
-import { authClient } from "@/lib/auth-client";
+import { useSession } from "@/lib/auth-client";
 
 // Chrome for the read-only share view: logo, project name, a "View only"
 // chip, and the viewer's two actions — open the shared chat (when the share
@@ -27,7 +27,7 @@ export function ViewerTopBar({ chatStatus }: { chatStatus: ChatStatus }) {
   const base = useCutBase();
   const projectName = useEditor((s) => s.projectName);
   const chatShared = useEditor((s) => s.sharedFeatures?.chat === true);
-  const { data: session } = authClient.useSession();
+  const { data: session } = useSession();
   const [copying, setCopying] = useState(false);
   const [copyError, setCopyError] = useState<string | null>(null);
 

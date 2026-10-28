@@ -14,7 +14,7 @@ import { bindSharedBackend } from "@/cut/lib/backend/shared";
 import { holdThreadsInMemory } from "@/cut/lib/chatThreads";
 import { useEditor } from "@/cut/lib/store";
 import type { ShareFeatures } from "@/cut/lib/types";
-import { authClient } from "@/lib/auth-client";
+import { useSession } from "@/lib/auth-client";
 
 // The read-only share view. This route sits beside the app subtree on purpose:
 // /cut/app is session-gated (RequireSession) and engine-gated (ConnectGate),
@@ -35,7 +35,7 @@ export function SharedProject() {
   const t = useTranslations("share.view");
   const untitled = t("untitled");
   const [gate, setGate] = useState<Gate>({ state: "loading" });
-  const { data: session } = authClient.useSession();
+  const { data: session } = useSession();
   const narrow = useIsNarrowAtOpen();
 
   useEffect(() => {

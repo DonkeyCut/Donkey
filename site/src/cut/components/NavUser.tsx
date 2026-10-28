@@ -26,7 +26,7 @@ import { connectToEngine } from "@/cut/lib/connect";
 import { cutInstallHref } from "@/cut/lib/install";
 import { openOnboarding } from "@/cut/lib/onboarding";
 import { useCutBase } from "@/cut/lib/nav";
-import { authClient } from "@/lib/auth-client";
+import { authClient, useSession } from "@/lib/auth-client";
 import { useAccountProfile, visibleName } from "@/queries/accountProfile";
 
 // Signed-in user row pinned to the sidebar bottom; the whole row opens the
@@ -44,7 +44,7 @@ export function NavUser() {
   const router = useRouter();
   const base = useCutBase();
   const user = useEngineUser();
-  const { data: session } = authClient.useSession();
+  const { data: session } = useSession();
   // Mounted above the account check so the hook order is stable; it stays idle
   // until there's an account to read a profile for.
   const { data: profile, isPending } = useAccountProfile({ enabled: Boolean(user) });

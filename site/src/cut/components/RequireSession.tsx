@@ -13,7 +13,7 @@ import {
   setEngineUser,
 } from "@/cut/lib/api";
 import { reportExposures, useAppLoaded } from "@/lib/analytics";
-import { authClient } from "@/lib/auth-client";
+import { useSession } from "@/lib/auth-client";
 import { useAccountConfig } from "@/queries/accountConfig";
 import { useNoteOutboxSync } from "@/cut/hooks/useNoteOutboxSync";
 
@@ -25,7 +25,7 @@ import { useNoteOutboxSync } from "@/cut/hooks/useNoteOutboxSync";
 // It binds the account id; SessionGate, one level in, is what holds the app
 // until the id lands, because every engine URL carries it.
 export function RequireSession({ children }: { children: ReactNode }) {
-  const { data: session, isPending, refetch } = authClient.useSession();
+  const { data: session, isPending, refetch } = useSession();
   useNoteOutboxSync();
 
   const signedOut = !isPending && !session;

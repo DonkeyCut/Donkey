@@ -8,7 +8,7 @@ import { SessionGate } from "@/cut/components/SessionGate";
 import { cloudBackend } from "@/cut/lib/backend/cloud";
 import { CUT_APP_BASE } from "@/cut/lib/nav";
 import { starterProjectId } from "@/cut/lib/starter";
-import { authClient } from "@/lib/auth-client";
+import { useSession } from "@/lib/auth-client";
 
 // The welcome sequence's own address. The sequence is a full-window overlay
 // mounted in the app shell that reads this address itself and opens from its
@@ -20,7 +20,7 @@ import { authClient } from "@/lib/auth-client";
 // home, the same thing that's behind the sequence everywhere else.
 export default function OnboardingPage() {
   const router = useRouter();
-  const { data: session } = authClient.useSession();
+  const { data: session } = useSession();
   const userId = session?.user.id;
   const sent = useRef(false);
 

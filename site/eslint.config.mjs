@@ -51,6 +51,18 @@ const eslintConfig = defineConfig([
     },
   },
   {
+    // The session a component renders comes through the hook that keeps the
+    // first client render equal to the server's HTML (lib/auth-client.ts).
+    files: ["src/**/*.ts", "src/**/*.tsx"],
+    ignores: ["src/lib/auth-client.ts"],
+    rules: {
+      "no-restricted-properties": [
+        "error",
+        { object: "authClient", property: "useSession", message: "Use useSession from @/lib/auth-client; it renders the server's state until hydration." },
+      ],
+    },
+  },
+  {
     // The packages are standalone: each must build for any host, so none
     // reaches into the app's source or aliases.
     files: ["packages/*/**/*.ts", "packages/*/**/*.tsx"],
