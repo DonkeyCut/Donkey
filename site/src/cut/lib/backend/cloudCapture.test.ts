@@ -62,3 +62,24 @@ test("a throttle a route answers itself stands", async () => {
     expect(fetcher.mock.calls.length).toBe(1);
   } finally { fetcher.mockRestore(); }
 });
+
+test("a firewall refusal holds every request until its window passes", async () => {
+  const WINDOW_MS = 100;
+  const sentAt: number[] = [];
+  const fetcher = spyOn(globalThis, "fetch").mockImplementation((async () => {
+    sentAt.push(Date.now());
+    return sentAt.length === 1
+      ? new Response("Too Many Requests", { status: 429, headers: { "Retry-After": String(WINDOW_MS / 1000), "Content-Type": "text/plain" } })
+      : Response.json({ ok: true });
+  }) as typeof fetch);
+  try {
+    // The second request starts after the first was refused: it waits the
+    // window out with it, so the burst does not refill the next window.
+    const first = cloudBackend.fetch("/api/cut/projects", { method: "GET" });
+    await new Promise((r) => setTimeout(r, 10));
+    const second = cloudBackend.fetch("/api/cut/projects/p1", { method: "GET" });
+    await Promise.all([first, second]);
+    expect(sentAt.length).toBe(3);
+    expect(Math.min(...sentAt.slice(1)) - sentAt[0]).toBeGreaterThanOrEqual(WINDOW_MS - 5);
+  } finally { fetcher.mockRestore(); }
+});

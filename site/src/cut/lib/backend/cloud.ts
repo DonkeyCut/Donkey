@@ -31,18 +31,48 @@ async function requestWithSession(bound: CloudSession, path: string, init?: Requ
   // (site/firewall/), so the same request goes again once the window passes.
   // A route that throttles answers JSON with its reason, and that stands.
   for (let attempt = 1; ; attempt++) {
+    await firewallGate();
     const res = await fetch((bound?.base ?? "") + path, { ...init, headers });
     const wait = throttleWait(res);
-    if (wait === null || attempt > FIREWALL_RETRIES || !firewallRefusal(res) || !resendable(init?.body) || init?.signal?.aborted) {
+    if (wait === null || !firewallRefusal(res)) {
+      return observeOperationResponse(res);
+    }
+    holdFirewall(wait);
+    if (attempt > FIREWALL_RETRIES || !resendable(init?.body) || init?.signal?.aborted) {
       return observeOperationResponse(res);
     }
     await res.body?.cancel().catch(() => {});
-    await new Promise((r) => setTimeout(r, wait));
   }
 }
 
 // How many times a request the firewall refused goes again.
 const FIREWALL_RETRIES = 2;
+
+// The firewall counts one address, so one refusal holds every cloud request
+// this process sends until its window passes. Each then goes at a random
+// point in a spread after it, half the window wide, so the burst that tripped
+// the window does not land in the next one all at once: a 10 s window
+// reopens over 10–15 s.
+const FIREWALL_SPREAD = 0.5;
+let firewallOpensAt = 0;
+let firewallWindowMs = 0;
+
+function holdFirewall(waitMs: number) {
+  const opensAt = Date.now() + waitMs;
+  if (opensAt <= firewallOpensAt) {
+    return;
+  }
+  firewallOpensAt = opensAt;
+  firewallWindowMs = waitMs;
+}
+
+async function firewallGate() {
+  const wait = firewallOpensAt - Date.now();
+  if (wait <= 0) {
+    return;
+  }
+  await new Promise((r) => setTimeout(r, wait + Math.random() * firewallWindowMs * FIREWALL_SPREAD));
+}
 
 /** Whether a throttle came from the firewall: its refusal is plain text. */
 const firewallRefusal = (res: Response) => !/json/i.test(res.headers.get("content-type") ?? "");
