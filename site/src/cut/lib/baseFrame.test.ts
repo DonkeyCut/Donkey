@@ -6,9 +6,9 @@ import { baseFramesAt } from "./baseFrame";
 import { registerBlobFile } from "./backend/browser/registry";
 import { setFrameSinkFactory, type FrameSinkOptions } from "./mediaRead";
 
-// A plain H.264 + AAC clip: the starter project's own footage, the file the
+// A plain H.264 clip from the starter project's own footage, the kind of file the
 // reported decoder failures came from.
-const CLIP = join(dirname(fileURLToPath(import.meta.url)), "../../../public/cut-starter/media/ai-watercolor-and-loose-black-ink-sketch-il-1.mp4");
+const CLIP = join(dirname(fileURLToPath(import.meta.url)), "../../../public/cut-starter/media/recap-01-6a6c904b.mp4");
 const url = registerBlobFile("test/base-frames.mp4", new File([readFileSync(CLIP)], "clip.mp4", { type: "video/mp4" }));
 
 const frameAt = (t: number) => ({ canvas: {}, timestamp: t, duration: 1 / 24 });

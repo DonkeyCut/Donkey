@@ -36,7 +36,7 @@ const base = arg("base") ?? "http://localhost:3000";
 const keep = process.argv.includes("--keep");
 // The user the dev bypass header resolves to (src/lib/donkey-api-auth.ts).
 const USER_ID = "donkey-dev-auth-bypass";
-const FOOTAGE = `${base}/cut-starter/media/ai-watercolor-and-loose-black-ink-sketch-il.mp4`;
+const FOOTAGE = `${base}/cut-starter/media/recap-01-6a6c904b.mp4`;
 
 const fail = (msg: string): never => {
   process.exitCode = 1;

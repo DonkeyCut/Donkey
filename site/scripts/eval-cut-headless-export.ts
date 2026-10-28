@@ -55,7 +55,7 @@ try {
   // A real clip: one of the starter videos, imported the same way generated
   // media lands (upload, probe from the bytes in hand, store row).
   const mp4 = readFileSync(
-    join(import.meta.dir, "../public/cut-starter/media/ai-watercolor-and-loose-black-ink-sketch-il.mp4")
+    join(import.meta.dir, "../public/cut-starter/media/recap-01-6a6c904b.mp4")
   );
   const file = new File([new Uint8Array(mp4)], "clip.mp4", { type: "video/mp4" });
   const asset = await importFileToProject(projectId, file);

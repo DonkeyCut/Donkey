@@ -1,5 +1,5 @@
 // The starter project a new account is seeded with at signup: a finished
-// example cut (doc + media + its AI chat thread) sourced from public/cut-starter.
+// example cut (doc + media + any AI chat threads) sourced from public/cut-starter.
 // Each account gets its own copy — the doc and thread rows are theirs, and the
 // media bytes are copied under their R2 prefix — so deleting the project (or
 // single files from it) removes only that account's copy through the normal
