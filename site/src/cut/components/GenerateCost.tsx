@@ -42,5 +42,5 @@ export function useGenerateCost(price: (sheet: CreditPriceSheet) => bigint | nul
 /** The Generate button's press: the upgrade wall when the balance falls
  * short, the generation otherwise. */
 export function generateButton(cost: GenerateCost, go: () => void): { onClick: () => void } {
-  return { onClick: cost.short ? () => void openUpgrade("credits") : go };
+  return { onClick: cost.short ? () => void openUpgrade("credits", "generate_button") : go };
 }

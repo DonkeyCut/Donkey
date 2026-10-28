@@ -15,6 +15,7 @@ import { Dialog, DialogBody, DialogContent, DialogDescription, DialogHeader, Dia
 import { priceLabel } from "@/cut/components/IntroOffer";
 import { OfferSticker } from "@/cut/components/OfferSticker";
 import { usePlanCheckout } from "@/cut/lib/proUpgrade";
+import type { UpgradeEntry } from "@/cut/lib/upgrade";
 import { track } from "@/lib/analytics";
 import { planRank, RECOMMENDED_PLAN, type PaidPlan } from "@/lib/billing/plans";
 import { cn } from "@/lib/utils";
@@ -29,13 +30,15 @@ export type PlansSource = "credits" | "projects" | "storage" | "plans";
 
 export function PlansDialog({
   source,
+  entry,
   title,
   body,
   notice,
   onClose,
 }: {
-  // What raised it, for analytics.
+  // What raised it, and the button or limit that did, for analytics.
   source: PlansSource;
+  entry: UpgradeEntry;
   // The headline: one short line.
   title: React.ReactNode;
   // A small line under it, for the detail.
@@ -51,29 +54,43 @@ export function PlansDialog({
   const subscription = useProSubscription();
   const current = subscription.data?.plan ?? null;
   const intro = useIntroOffer({ enabled: subscription.data?.isActive === false });
-  const checkout = usePlanCheckout();
+  const checkout = usePlanCheckout({ surface: "plans_dialog", reason: source, entry });
   // Held until the plan is known, so no column opens buyable and then locks.
   const ready = subscription.isSuccess && (current !== null || !intro.isPending);
 
   // Opening focuses the card itself, so no plan's button starts out looking
   // picked; Tab moves into the plans.
   const popup = useRef<HTMLDivElement>(null);
-  const tracked = useRef(false);
+  const shownAt = useRef<number | null>(null);
   useEffect(() => {
-    if (!ready || tracked.current) {
+    if (!ready || shownAt.current !== null) {
       return;
     }
-    tracked.current = true;
+    shownAt.current = Date.now();
     track("upgrade_dialog_shown", {
       reason: source,
+      entry,
       pro: current !== null,
       plan: current ?? "free",
       intro: intro.data?.percentOff ?? 0,
     });
-  }, [ready, source, current, intro.data]);
+  }, [ready, source, entry, current, intro.data]);
+
+  // A close is a dismissal: a picked plan leaves the page for checkout.
+  const close = () => {
+    const seconds = shownAt.current === null ? 0 : Math.round((Date.now() - shownAt.current) / 1000);
+    track("upgrade_dialog_closed", {
+      reason: source,
+      entry,
+      plan: current ?? "free",
+      intro: intro.data?.percentOff ?? 0,
+      seconds,
+    });
+    onClose();
+  };
 
   return (
-    <Dialog open={ready} onOpenChange={(open) => !open && onClose()}>
+    <Dialog open={ready} onOpenChange={(open) => !open && close()}>
       <DialogContent ref={popup} initialFocus={popup} className="gap-0 overflow-hidden p-0 sm:max-w-[60rem]">
         {/* A wash of the accent behind the heading. */}
         <div className="bg-gradient-to-b from-[#0071e3]/12 to-transparent px-6 pt-9 pb-7 text-center dark:from-[#0a84ff]/18 sm:px-10">

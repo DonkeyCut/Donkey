@@ -41,6 +41,6 @@ export async function newProjectAllowed(client: QueryClient): Promise<boolean> {
   }
 
   track("project_limit_hit", { limit });
-  openUpgrade("projects");
+  openUpgrade("projects", "project_limit");
   return false;
 }

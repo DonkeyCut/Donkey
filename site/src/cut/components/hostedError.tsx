@@ -10,7 +10,7 @@ import { useDescribeError } from "@/i18n/describeError";
 /** Opens the upgrade dialog on its credits wall. A surface without the dialog
  * (the ChatGPT card) opens the settings page, where plans are sold. */
 export function openCreditsWall(): void {
-  if (openUpgrade("credits")) {
+  if (openUpgrade("credits", "credits_link")) {
     return;
   }
   window.open(creditsUrl(), "_blank", "noreferrer");

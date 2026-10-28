@@ -8,34 +8,35 @@ import { useEffect, useState } from "react";
 
 import { PlansDialog } from "@/cut/components/PlansDialog";
 import { onOperationFailure } from "@/cut/lib/operationFailure";
-import { onUpgrade, openUpgrade, type UpgradeReason } from "@/cut/lib/upgrade";
+import { onUpgrade, openUpgrade, type UpgradeRequest } from "@/cut/lib/upgrade";
 import { PAID_PLANS, PLAN_TERMS } from "@/lib/billing/plans";
 import { useProSubscription } from "@/queries/billing";
 
 export function UpgradeDialog() {
-  const [reason, setReason] = useState<UpgradeReason | null>(null);
+  const [request, setRequest] = useState<UpgradeRequest | null>(null);
 
-  useEffect(() => onUpgrade(setReason), []);
+  useEffect(() => onUpgrade(setRequest), []);
 
   // A request refused for credits always raises the plans.
   useEffect(
     () =>
       onOperationFailure((failure) => {
         if (failure.code === "insufficient_credits" || failure.code === "insufficient_credits_for_generation") {
-          openUpgrade("credits");
+          openUpgrade("credits", "credits_refused");
         }
       }),
     [],
   );
 
-  if (!reason) {
+  if (!request) {
     return null;
   }
-  return <OpenDialog reason={reason} onClose={() => setReason(null)} />;
+  return <OpenDialog request={request} onClose={() => setRequest(null)} />;
 }
 
 // Split so the billing read only runs while the dialog is up.
-function OpenDialog({ reason, onClose }: { reason: UpgradeReason; onClose: () => void }) {
+function OpenDialog({ request, onClose }: { request: UpgradeRequest; onClose: () => void }) {
+  const { reason, entry } = request;
   const t = useTranslations("billing");
   const format = useFormatter();
   const subscription = useProSubscription();
@@ -61,5 +62,5 @@ function OpenDialog({ reason, onClose }: { reason: UpgradeReason; onClose: () =>
         ? { title: t("upgrade.projectsTitle"), body: t("upgrade.projectsBody") }
         : { title: t("plans.chooseTitle"), body: t("plans.chooseBody") };
 
-  return <PlansDialog source={reason} {...wall} onClose={onClose} />;
+  return <PlansDialog source={reason} entry={entry} {...wall} onClose={onClose} />;
 }

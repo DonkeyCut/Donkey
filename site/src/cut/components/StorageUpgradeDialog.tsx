@@ -21,12 +21,20 @@ import {
   type StorageQuotaDetail,
 } from "@/cut/lib/storageQuota";
 import { daysUntil } from "@/cut/lib/time";
+import type { UpgradeEntry } from "@/cut/lib/upgrade";
 import { track } from "@/lib/analytics";
 import { PAID_PLANS } from "@/lib/billing/plans";
 import { useProSubscription } from "@/queries/billing";
 import { useCloudUsage } from "@/cut/lib/backend/hooks";
 import { onOperationFailure } from "@/cut/lib/operationFailure";
 import { formatBytes } from "@/lib/bytes";
+
+// What raised the storage wall, as the plans name where they were met.
+const STORAGE_ENTRY: Record<StorageQuotaDetail["source"], UpgradeEntry> = {
+  "quota-413": "storage_refused",
+  render: "render_refused",
+  pill: "storage_pill",
+};
 
 export function StorageUpgradeDialog() {
   const [detail, setDetail] = useState<StorageQuotaDetail | null>(null);
@@ -108,6 +116,7 @@ function OpenDialog({ detail, onClose }: { detail: StorageQuotaDetail; onClose: 
   return (
     <PlansDialog
       source="storage"
+      entry={STORAGE_ENTRY[detail.source]}
       title={detail.source === "pill" ? t("storage.moreTitle") : t("storage.fullTitle")}
       body={used}
       notice={grace}

@@ -158,7 +158,7 @@ export function ProCard() {
       ) : null}
       <CardFooter className="gap-3">
         {plan !== PAID_PLANS[PAID_PLANS.length - 1] ? (
-          <Button onClick={() => openUpgrade("plans")}>{isActive ? t("upgrade") : t("seePlans")}</Button>
+          <Button onClick={() => openUpgrade("plans", "settings")}>{isActive ? t("upgrade") : t("seePlans")}</Button>
         ) : null}
         {isActive ? (
           <Button

@@ -45,7 +45,7 @@ export function NavStorage() {
               <button
                 type="button"
                 className="group flex cursor-pointer items-center justify-between gap-2 rounded-lg px-2 py-2 text-xs transition-colors hover:bg-muted disabled:opacity-50"
-                onClick={() => openUpgrade("plans")}
+                onClick={() => openUpgrade("plans", "storage_meter")}
               />
             }
           >

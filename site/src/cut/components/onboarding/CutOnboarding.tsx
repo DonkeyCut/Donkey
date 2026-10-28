@@ -336,7 +336,7 @@ export function CutOnboarding() {
             />
           )}
           {slide === "ai-chat" && <AiChatSlide />}
-          {slide === "plans" && <PlansSlide onSkipPro={() => finish(false)} />}
+          {slide === "plans" && <PlansSlide run={run} onSkipPro={() => finish(false)} />}
         </div>
         <div aria-hidden className="flex-[3]" />
       </div>

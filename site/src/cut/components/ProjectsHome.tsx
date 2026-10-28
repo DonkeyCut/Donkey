@@ -78,6 +78,7 @@ import { creatorLocale, creatorNames } from "@/cut/lib/defaultNames";
 import { dropLocalProjectCopy, localMediaUrl } from "@/cut/lib/mediaSync";
 import { copyProjectAcross } from "@/cut/lib/projectCopy";
 import { newProjectAllowed } from "@/cut/lib/projectLimit";
+import { checkoutErrorCode } from "@/cut/lib/proUpgrade";
 import { homeHref, projectHref, useCutBase } from "@/cut/lib/nav";
 import { daysUntil, formatDate, formatTime } from "@/cut/lib/time";
 import {
@@ -225,11 +226,12 @@ function GraceBanner({ enabled }: { enabled: boolean }) {
         className="h-auto p-0"
         disabled={checkout.isPending}
         onClick={async () => {
-          track("pro_checkout_started");
+          track("pro_checkout_started", { plan: "pro", surface: "grace_banner" });
           try {
             const { url } = await checkout.mutateAsync();
             window.location.assign(url);
-          } catch {
+          } catch (error) {
+            track("pro_checkout_failed", { plan: "pro", error: checkoutErrorCode(error), surface: "grace_banner" });
             window.location.assign(`${base}/settings`);
           }
         }}

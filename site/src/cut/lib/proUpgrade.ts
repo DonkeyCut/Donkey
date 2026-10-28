@@ -6,21 +6,34 @@
 import { useState } from "react";
 
 import type { PaidPlan } from "@/lib/billing/plans";
-import { track } from "@/lib/analytics";
+import { track, type CheckoutOrigin } from "@/lib/analytics";
+import { ApiError } from "@/queries/apiClient";
 import { useStartCheckout } from "@/queries/billing";
 
-export function usePlanCheckout() {
+/** A checkout's failure as analytics names it: the API's error code, the
+ * HTTP status when the route sent none, or "network". */
+export function checkoutErrorCode(error: unknown): string {
+  if (!(error instanceof ApiError)) {
+    return "network";
+  }
+  return error.code ?? `http_${error.status}`;
+}
+
+export function usePlanCheckout(origin: CheckoutOrigin) {
   const checkout = useStartCheckout();
   const [pendingPlan, setPendingPlan] = useState<PaidPlan | null>(null);
 
   const start = (plan: PaidPlan) => {
-    track("pro_checkout_started", { plan });
+    track("pro_checkout_started", { plan, ...origin });
     setPendingPlan(plan);
     checkout.mutate(
       { plan },
       {
         onSuccess: ({ url }) => window.location.assign(url),
-        onError: () => setPendingPlan(null),
+        onError: (error) => {
+          setPendingPlan(null);
+          track("pro_checkout_failed", { plan, error: checkoutErrorCode(error), ...origin });
+        },
       },
     );
   };

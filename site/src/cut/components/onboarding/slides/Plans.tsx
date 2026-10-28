@@ -2,6 +2,7 @@
 
 import { ArrowLeft, Check, Loader2, Sparkles } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
+import { useEffect, useRef } from "react";
 
 import { TapedCard } from "@/app/_components/landing/LandingPrimitives";
 import type { CardColor } from "@/app/_components/landing/theme";
@@ -10,7 +11,9 @@ import { Button } from "@/components/ui/button";
 import { priceLabel } from "@/cut/components/IntroOffer";
 import { OfferSticker } from "@/cut/components/OfferSticker";
 import { usePlanCheckout } from "@/cut/lib/proUpgrade";
+import { track } from "@/lib/analytics";
 import { RECOMMENDED_PLAN, type PaidPlan } from "@/lib/billing/plans";
+import type { OnboardingRun } from "@/lib/onboarding/sequence";
 import { useIntroOffer, type IntroOffer } from "@/queries/billing";
 
 import "../onboarding.css";
@@ -27,11 +30,23 @@ const PLAN_CARD: Record<PaidPlan, { color: CardColor; tapeColor: CardColor }> = 
 // nobody has to take a price on faith. Checkout is the one the upgrade modal
 // starts. While the intro offer is open the Pro card prices the discount and
 // counts down to its end.
-export function PlansSlide({ onSkipPro }: { onSkipPro: () => void }) {
+export function PlansSlide({ run, onSkipPro }: { run: OnboardingRun; onSkipPro: () => void }) {
   const t = useTranslations("onboarding.plans");
   const plans = useCutPlans();
-  const checkout = usePlanCheckout();
-  const offer = useIntroOffer().data ?? null;
+  const checkout = usePlanCheckout({ surface: "onboarding" });
+  const intro = useIntroOffer();
+  const offer = intro.data ?? null;
+
+  // Reported once the offer read settles, so the event says whether the
+  // discount was on the card.
+  const tracked = useRef(false);
+  useEffect(() => {
+    if (intro.isPending || tracked.current) {
+      return;
+    }
+    tracked.current = true;
+    track("onboarding_plans_shown", { source: run, intro: intro.data?.percentOff ?? 0 });
+  }, [intro.isPending, intro.data, run]);
 
   return (
     <div className="mx-auto w-full max-w-[1040px]">

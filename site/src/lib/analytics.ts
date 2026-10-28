@@ -4,10 +4,22 @@ import { useEffect } from "react";
 import type { PerfLogBatch } from "@/cut/lib/perfLog";
 import type { MainThreadSample, PerfSample } from "@/cut/lib/perfTrace";
 import type { ShortcutDecline } from "@/cut/lib/shortcutGate";
+import type { UpgradeEntry } from "@/cut/lib/upgrade";
 import type {
   OnboardingRun,
   ReferralSource,
 } from "@/lib/onboarding/sequence";
+
+// What the plans modal opened for: a limit hit, or the plans asked for.
+type PlansReason = "projects" | "credits" | "storage" | "plans";
+
+// Where a plan's checkout started: the plans modal, with what raised it and
+// the button or limit that did; the onboarding's plans slide; or the storage
+// grace banner on the projects home.
+export type CheckoutOrigin =
+  | { surface: "plans_dialog"; reason: PlansReason; entry: UpgradeEntry }
+  | { surface: "onboarding" }
+  | { surface: "grace_banner" };
 
 // Every product analytics event, in one place. `track` checks the name and
 // its properties against this map at compile time, so call sites can't drift
@@ -24,6 +36,8 @@ export type AnalyticsEvents = {
     referralOther?: string;
   };
   onboarding_completed: { source: OnboardingRun; skipped: boolean; step: number };
+  // The sequence's plans slide came up; intro as on the plans modal.
+  onboarding_plans_shown: { source: OnboardingRun; intro: number };
   // Cut projects home.
   project_created: { source: "projects_home" | "sidebar" | "file_import" | "chatgpt_card" };
   folder_created: void;
@@ -32,8 +46,11 @@ export type AnalyticsEvents = {
   // The top bar's credits pill.
   cut_credits_pill_clicked: { credits: number; dollars: number };
   cut_storage_upgrade_shown: { source: "quota-413" | "render" | "pill" };
-  // The upgrade wall at a free limit; intro is the open discount's percent, 0 for none.
-  upgrade_dialog_shown: { reason: "projects" | "credits" | "storage" | "plans"; pro: boolean; plan: string; intro: number };
+  // The plans modal: shown, and closed without a checkout after `seconds` up.
+  // entry is the button or limit that raised it; intro is the open discount's
+  // percent, 0 for none.
+  upgrade_dialog_shown: { reason: PlansReason; entry: UpgradeEntry; pro: boolean; plan: string; intro: number };
+  upgrade_dialog_closed: { reason: PlansReason; entry: UpgradeEntry; plan: string; intro: number; seconds: number };
   project_limit_hit: { limit: number };
   cut_grace_banner_shown: void;
   // First exposure to an experiment variant; the same value rides every
@@ -63,7 +80,11 @@ export type AnalyticsEvents = {
   subscribe_bonus_offered: { dollars: number };
   subscribe_bonus_checkout_started: { dollars: number; minutesLeft: number; source: "editor" | "settings" | "email" };
   // Billing (settings).
-  pro_checkout_started: { plan: string } | void;
+  // A plan picked, the checkout that failed to start (error is the API's
+  // code), and the trip back from Stripe or an in-place upgrade.
+  pro_checkout_started: { plan: string } & CheckoutOrigin;
+  pro_checkout_failed: { plan: string; error: string } & CheckoutOrigin;
+  checkout_returned: { result: "success" | "cancelled" };
   billing_portal_opened: void;
 };
 

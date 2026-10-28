@@ -110,7 +110,7 @@ function PlanCard({ balance }: { balance: string }) {
       <div className="flex items-center justify-between gap-3 px-4 py-3">
         <span className="font-semibold">{plan ? PLAN_TERMS[plan].name : t("creditsPill.free")}</span>
         {subscription.data && plan !== PAID_PLANS[PAID_PLANS.length - 1] ? (
-          <Button size="sm" onClick={() => openUpgrade("plans")}>
+          <Button size="sm" onClick={() => openUpgrade("plans", "credits_pill")}>
             {t("creditsPill.upgrade")}
           </Button>
         ) : null}
