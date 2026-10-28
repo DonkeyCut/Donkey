@@ -73,6 +73,50 @@ export const routingCases: RoutingCase[] = [
   { request: "put a rounded rectangle behind the title", skill: "graphics", areas: ["elements"] },
   { request: "build a 2x2 grid of my four clips like this reference", skill: "graphics", areas: ["timeline", "inspector"], intent: "complex" },
   { request: "add a sticker of a smiling sun in the corner", skill: "graphics", areas: ["elements"] },
+  // Laying several pictures over a talking head, each on the line that
+  // speaks of it, is a composed job however short the ask — the follow-ups
+  // a real edit sent to the light model, which dropped every chart on the
+  // wrong line.
+  {
+    request: "put the diagrams in the video",
+    recent: [
+      { role: "user", text: "Here's the script. Get diagrams from the report at this link and edit it for TikTok." },
+      { role: "assistant", text: "I cut the 15 takes in script order and imported the report's six diagrams into the project." },
+    ],
+    skill: ["talking-head-videos", "graphics"],
+    areas: ["timeline"],
+    intent: "complex",
+  },
+  {
+    request: "highlight or zoom into important pieces",
+    recent: [
+      { role: "user", text: "put the diagrams in the video" },
+      { role: "assistant", text: "I placed the five report diagrams as picture-in-picture overlays across the timeline." },
+    ],
+    skill: ["talking-head-videos", "graphics", "editing-taste"],
+    areas: ["timeline"],
+    intent: "complex",
+  },
+  {
+    request: "remember the safe zones",
+    recent: [
+      { role: "user", text: "highlight or zoom into important pieces" },
+      { role: "assistant", text: "I scaled the seven diagram overlays to fill the centre of the frame." },
+    ],
+    skill: ["graphics", "talking-head-videos"],
+    areas: ["timeline"],
+    intent: "complex",
+  },
+  {
+    request: "the images are not fully in the video",
+    recent: [
+      { role: "user", text: "remember the safe zones" },
+      { role: "assistant", text: "I moved all seven diagram overlays inside the safe zones." },
+    ],
+    skill: ["graphics", "talking-head-videos", null],
+    areas: ["timeline"],
+    intent: "complex",
+  },
   // ── text-videos ───────────────────────────────────────────────────────
   { request: "build a lyric video from this song", skill: "text-videos", areas: ["subtitles", "timeline"], intent: "complex" },
   { request: "make a quote card video with the three quotes I pasted", skill: "text-videos", areas: ["timeline"], intent: "complex" },

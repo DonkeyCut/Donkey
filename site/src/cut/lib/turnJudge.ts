@@ -44,7 +44,7 @@ export const TURN_JUDGE_QUESTIONS = {
       simple:
         "One self-contained ask: a single edit, a single generation, or a question to answer. A terse follow-up (\"yes\", \"do it\", \"the second one\") that confirms one pending action is simple.",
       complex:
-        "A composed job: several edits across the timeline, cutting or reorganizing many clips, assembling media into a cut, building a whole video from a script, a song, or pasted text (a lyric video, quote cards, kinetic type), or anything needing a plan across steps. A sweep phrased as one ask still fans out into many cuts (removing filler words, tightening silences, cutting every pause). An edit aimed at \"this clip / that one / it\" with no named target, or whose targets are picked by description (\"the grey ones\", \"the short clips\"), takes the full model.",
+        "A composed job: several edits across the timeline, cutting or reorganizing many clips, assembling media into a cut, building a whole video from a script, a song, or pasted text (a lyric video, quote cards, kinetic type), or anything needing a plan across steps. A sweep phrased as one ask still fans out into many cuts (removing filler words, tightening silences, cutting every pause). Laying several pictures, charts or clips over the cut, each where the speech names it, is composed however short the ask (\"put the diagrams in\"), and so is a fix every placed item takes (\"keep them in the safe zones\", \"they're cut off\", \"zoom in on the key parts\"). An edit aimed at \"this clip / that one / it\" with no named target, or whose targets are picked by description (\"the grey ones\", \"the short clips\"), takes the full model.",
     },
   ),
   skill: choice(
