@@ -22,7 +22,7 @@ Captured document → worker renderer → signed media
 
 ## Editing from ChatGPT
 
-ChatGPT reads the editor's tool catalog and sends a batch through `edit_project`; the editor open in the card claims it, runs it on the document the user is looking at as one undo step, saves, and reports the result. Nothing else runs a batch: with no card open the tool answers that the project has to be opened first, and undo and redo step the card's own history, which the user's edits share. Editing, previews and exports
+Each editor command is its own tool, annotated by its effect; the editor in the card runs it on the document the user sees as one undo step, saves, and reports. With no card open the tool asks for the project to be opened, and undo and redo step the card's own history, which the user's edits share. Editing, previews and exports
 spend no credits; commands that generate media spend the account's credits, and
 imports and exports use its storage allowance; the server instructions and
 tool descriptions say so.
@@ -36,9 +36,8 @@ and production builds. Rebuild it after editing widget code. ChatGPT caches the
 widget HTML it reads over MCP, so the entry script and stylesheet keep stable
 names that revalidate on every load; only the chunks they import are hashed.
 
-The MCP adapter exposes project listing, creation and opening, the command
-catalog and guides, editing, importing, undo and redo, previews, exports and job
-polling. Its schemas and widget data types share one contract. Signed media and
+The MCP adapter exposes projects, editor commands, guides, imports,
+history, previews, exports and job polling. Its schemas and widget data types share one contract. Signed media and
 download URLs travel in tool-result metadata, which reaches the widget. The
 model gets project metadata, command outcomes, render state, and an Open in
 Donkey Cut link. ChatGPT's sandbox drops null-valued keys from a tool result
