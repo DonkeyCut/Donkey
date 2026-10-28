@@ -49,6 +49,24 @@ export const subscribePlayhead = subscribe;
 /** The playhead, in timeline seconds. */
 export const playheadAt = () => at;
 
+/** The frame rate the paused playhead steps at. */
+const STEP_FPS = 30;
+
+/** How far off a frame, in frames, still counts as on it. */
+const ON_FRAME = 1e-6;
+
+/**
+ * The frame one step from `t`, forward for `dir` 1 and back for -1, as
+ * exactly k / 30. Adding 1/30 drifts a hair under the frame (283 steps make
+ * 9.4333…32), and a title cut in on that frame would not show yet while the
+ * block under it had. A playhead between frames steps to the next one its way.
+ */
+export function stepFrame(t: number, dir: 1 | -1): number {
+  const f = t * STEP_FPS;
+  const k = dir > 0 ? Math.floor(f + ON_FRAME) + 1 : Math.ceil(f - ON_FRAME) - 1;
+  return k / STEP_FPS;
+}
+
 /** The skimmer, or null when the pointer is off the timeline. */
 export const skimAt = () => skim;
 

@@ -74,7 +74,7 @@ import {
 import { docFieldsEdited, projectDuration, serializeDoc, storedAssets, timelineHMax, useEditor, clipLen, type VideoTrackPlacement } from "@/cut/lib/store";
 import { fileLandingAt } from "@/cut/lib/timelineDrop";
 import { landOnRow } from "@/cut/lib/laneTracks";
-import { playheadAt, previewAt, skimAt } from "@/cut/lib/playhead";
+import { playheadAt, previewAt, skimAt, stepFrame } from "@/cut/lib/playhead";
 import type { MediaAsset } from "@/cut/lib/types";
 import { AiPanel } from "./AiPanel";
 import type { ChatStatus } from "./ChatStatusBadge";
@@ -1182,8 +1182,8 @@ export function Editor({
         // While playing, arrows skip in 1s jumps and playback rolls on (seek
         // never pauses); paused, they step a frame — 1s with Shift — for
         // precise editing.
-        const step = s.playing ? 1 : e.shiftKey ? 1 : 1 / 30;
-        s.seek(playheadAt() + (e.key === "ArrowLeft" ? -step : step));
+        const dir = e.key === "ArrowLeft" ? -1 : 1;
+        s.seek(s.playing || e.shiftKey ? playheadAt() + dir : stepFrame(playheadAt(), dir));
       } else if (e.key === "Escape") {
         s.select(null);
       }
