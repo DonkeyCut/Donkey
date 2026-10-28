@@ -16,13 +16,14 @@ import {
 // mediabunny's decode pump, as patched (patches/mediabunny+1.61.0.patch):
 // what happens to a decoder that fails while the reader has stopped pulling.
 
-const CLIP = join(dirname(fileURLToPath(import.meta.url)), "../../../public/cut-starter/media/ai-watercolor-and-loose-black-ink-sketch-il-1.mp4");
+const CLIP = join(dirname(fileURLToPath(import.meta.url)), "../../../public/cut-starter/media/recap-01-6a6c904b.mp4");
 const bytes = readFileSync(CLIP);
 
-// Registered decoders are process-wide and permanent, so this one answers
-// only while a case here runs.
+// Registered decoders are process-wide and permanent, so each answers only
+// while a case of its own runs.
 let active = false;
 let closed = 0;
+let steady = false;
 
 /** A decoder that hands back a frame per packet and fails out of band a
  * moment after its fourth: by then the pump has filled the queue and is
@@ -59,9 +60,42 @@ class FailingDecoder extends CustomVideoDecoder {
 }
 registerDecoder(FailingDecoder);
 
+/** Every frame a SteadyDecoder made, to check each was closed. */
+const made: VideoSample[] = [];
+
+/** A decoder that hands back a frame per packet and never fails. */
+class SteadyDecoder extends CustomVideoDecoder {
+  static override supports() {
+    return steady;
+  }
+
+  init() {}
+
+  decode(packet: EncodedPacket) {
+    const sample = new VideoSample(new Uint8Array(16), {
+      format: "RGBX",
+      codedWidth: 2,
+      codedHeight: 2,
+      timestamp: packet.timestamp,
+      duration: packet.duration,
+    });
+    made.push(sample);
+    this.onSample(sample);
+  }
+
+  flush() {}
+
+  close() {}
+}
+registerDecoder(SteadyDecoder);
+
 afterAll(() => {
   active = false;
+  steady = false;
 });
+
+/** Whether mediabunny has let a sample's frame go. */
+const isClosed = (sample: VideoSample) => (sample as unknown as { _closed: boolean })._closed;
 
 const settle = () => new Promise((r) => setTimeout(r, 60));
 
@@ -91,6 +125,31 @@ describe("decode pump", () => {
       } finally {
         active = false;
         input.dispose();
+      }
+    });
+  }
+
+  for (const [name, read] of Object.entries(reads)) {
+    test(`an input disposed under an idle reader closes what the pump queued: ${name}`, async () => {
+      steady = true;
+      made.length = 0;
+      const input = new Input({ source: new BlobSource(new Blob([bytes])), formats: [MP4] });
+      try {
+        const track = await input.getPrimaryVideoTrack();
+        const samples = read(new VideoSampleSink(track!));
+
+        // One frame read, then the reader goes idle and never asks again
+        // while the pump fills the queue and parks.
+        (await samples.next()).value?.close();
+        await settle();
+        expect(made.length).toBeGreaterThan(1);
+
+        input.dispose();
+        await settle();
+
+        expect(made.filter((sample) => !isClosed(sample))).toEqual([]);
+      } finally {
+        steady = false;
       }
     });
   }

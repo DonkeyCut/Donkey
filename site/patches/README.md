@@ -14,9 +14,9 @@ about 40 decoded frames, around a gigabyte per stream at 4K.
 
 The patch gives `VideoDecoderWrapper` an `inFlight` count (packets submitted
 minus frames output, reset on flush), reports it as the decoder's queue size,
-and lowers the head start to 16. A read that ends in an error wakes the parked
-pump, so the failed decoder closes and frees its frames. The edits land in the
-ES module and all three bundles.
+and lowers the head start to 16. A read that fails, or whose input is disposed,
+wakes the parked pump, which closes its decoder and queued frames. The edits
+land in the ES module and all three bundles.
 
 Delete this patch when upstream's pump counts frames in flight itself: check
 `computeMaxQueueSize` and the pump loops around `getDecodeQueueSize()` in
