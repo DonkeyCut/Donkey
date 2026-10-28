@@ -1,7 +1,7 @@
 import { renderProjectFrames } from "./exportRender";
 import { FULL_FRAME, isFullFrame } from "./measure/picture";
 import type { FrameBox } from "./measure/sourceMeasure";
-import { bestShift, diffPixels, edgeBand, inkColor, inkOff, meanDiff, runShift, SCORE_LONG_SIDE, SWEEP_TARGET, sweepStats, worstStretches, type Edge } from "./frameDiff";
+import { bestShift, diffPixels, edgeBand, inkColor, inkOff, meanDiff, type Ink, runShift, SCORE_LONG_SIDE, SWEEP_TARGET, sweepStats, worstStretches, type Edge } from "./frameDiff";
 import { hexOf } from "./measure/color";
 import { composeComparison, makeStillFrame } from "./media";
 import type { WrappedCanvas } from "mediabunny";
@@ -54,9 +54,19 @@ const READ_LOST_RUN = 3;
 const READ_RETRY_MS = 100;
 
 /** How far a title's ink may sit from the source's (inkOff) before the sweep
- * names it: a white label where the source's is black reads near 230, the
- * same label a shade off or a little thinner under 30. */
-const INK_TOLERANCE = 64;
+ * counts the frame: a white label where the source's is black reads near 230,
+ * pale cyan letters washed to white near 65, the same label a shade off or a
+ * little thinner under 30. */
+const INK_TOLERANCE = 48;
+
+/** Frames a title has to be off on before the sweep names it, so a single
+ * frame of a move caught mid-way does not. */
+const MIN_TITLE_FRAMES = 2;
+
+/** The shortest box a title is read in, px at the sweep's size: type smaller
+ * than this is a few pixels of strokes on either side, and their colour comes
+ * and goes with the decode. */
+const MIN_TITLE_PX = 8;
 
 /** The most titles one sweep names. */
 const MAX_TITLES = 8;
@@ -421,10 +431,16 @@ type Stretch = {
 export type TitleInk = {
   id: string;
   text: string;
+  /** The span the title's letters were off over, and on how many frames. */
+  from: number;
+  to: number;
+  frames: number;
+  /** Its worst frame, and the letters' colour there on each side: null
+   * where that side shows none. */
   at: number;
   source: number;
-  ink: string;
-  sourceInk: string;
+  ink: string | null;
+  sourceInk: string | null;
 };
 
 export type SweepResult = {
@@ -496,11 +512,18 @@ export async function sweepSource(
 
   const size = sizeOf(doc, SWEEP_LONG_SIDE);
   const scorer = makeScorer(doc, area, fit);
-  // Titles read at the render's own size, where letters still have cores.
+  // Titles read at the render's own size, where letters still have cores,
+  // on every sample they are up for: the source's letters as it is decoded,
+  // the cut's as it renders.
   const reads = titleReads(doc, samples);
   const fine = reads.size > 0 ? makeScorer(doc, area, fit, SWEEP_LONG_SIDE) : null;
-  const fineSources = new Map<number, Uint8ClampedArray>();
-  const titles: (TitleInk & { off: number })[] = [];
+  const sourceInks = new Map<number, (Ink | null)[]>();
+  const readInks = (j: number, px: Uint8ClampedArray, f: NonNullable<typeof fine>) =>
+    (reads.get(j) ?? []).map((o) => {
+      const box = titleBox(doc, o, samples[j].at, f.size);
+      return box.h < MIN_TITLE_PX ? null : inkColor(px, f.size.width, f.size.height, box);
+    });
+  const offs = new Map<string, { o: TextOverlay; hits: { j: number; off: number; ink: Ink; sourceInk: Ink }[] }>();
   const width = SHIFT_REACH * 2 + 1;
   const started = performance.now();
   const outOfTime = (j: number) => j > 0 && performance.now() - started > SWEEP_BUDGET_MS;
@@ -517,7 +540,7 @@ export async function sweepSource(
     sources.push(...samples.map(() => still));
     if (fine) {
       const px = (await stillPixels(asset, fine, area)).pixels;
-      for (const j of reads.keys()) fineSources.set(j, px);
+      for (const j of reads.keys()) sourceInks.set(j, readInks(j, px, fine));
     }
   } else {
     try {
@@ -526,7 +549,7 @@ export async function sweepSource(
           break;
         }
         if (c && fine && reads.has(sources.length)) {
-          fineSources.set(sources.length, fine.pixels(c.canvas, c.canvas.width, c.canvas.height));
+          sourceInks.set(sources.length, readInks(sources.length, fine.pixels(c.canvas, c.canvas.width, c.canvas.height), fine));
         }
         sources.push(c ? scorer.pixels(c.canvas, c.canvas.width, c.canvas.height) : null);
       }
@@ -572,18 +595,19 @@ export async function sweepSource(
       cuts.set(j, cut);
       cuts.delete(j - SHIFT_REACH);
 
-      const fineSrc = fineSources.get(j);
-      if (fine && fineSrc) {
-        const fineCut = fine.cut(canvas, canvas.width, canvas.height);
-        for (const o of reads.get(j) ?? []) {
-          const box = titleBox(doc, o, samples[j].at, fine.size);
-          const ink = inkColor(fineCut, fine.size.width, fine.size.height, box);
-          const sourceInk = inkColor(fineSrc, fine.size.width, fine.size.height, box);
+      const theirs = sourceInks.get(j);
+      if (fine && theirs) {
+        const ours = readInks(j, fine.cut(canvas, canvas.width, canvas.height), fine);
+        (reads.get(j) ?? []).forEach((o, k) => {
+          const ink = ours[k];
+          const sourceInk = theirs[k];
           const off = ink && sourceInk ? inkOff(ink, sourceInk) : null;
           if (off !== null && off > INK_TOLERANCE) {
-            titles.push({ id: o.id, text: o.text, at: samples[j].at, source: samples[j].source, ink: hexOf(...ink!.ink), sourceInk: hexOf(...sourceInk!.ink), off });
+            const rec = offs.get(o.id) ?? { o, hits: [] };
+            rec.hits.push({ j, off, ink: ink!, sourceInk: sourceInk! });
+            offs.set(o.id, rec);
           }
-        }
+        });
       }
     });
   } catch (e) {
@@ -637,6 +661,25 @@ export async function sweepSource(
     };
   });
   const timing = still ? undefined : runShift(near, SHIFT_REACH, 0, diffs.length - 1, step);
+  const hex = (c: Ink["ink"]) => (c ? hexOf(...c) : null);
+  const titles: TitleInk[] = [...offs.values()]
+    .filter((r) => r.hits.length >= MIN_TITLE_FRAMES)
+    .sort((a, b) => b.hits.length - a.hits.length)
+    .slice(0, MAX_TITLES)
+    .map(({ o, hits }) => {
+      const worst = hits.reduce((a, b) => (b.off > a.off ? b : a));
+      return {
+        id: o.id,
+        text: o.text,
+        from: samples[hits[0].j].at,
+        to: round3(Math.min(samples[hits[hits.length - 1].j].at + step, to)),
+        frames: hits.length,
+        at: samples[worst.j].at,
+        source: samples[worst.j].source,
+        ink: hex(worst.ink.ink),
+        sourceInk: hex(worst.sourceInk.ink),
+      };
+    });
   const onBlocks = scored.filter((s) => blockAt(doc, s.at)).length / scored.length;
   const frame = frameNote(doc, scorer.reshaped, area, fit);
   const reached = diffs.length < samples.length ? samples[diffs.length].at : undefined;
@@ -652,9 +695,7 @@ export async function sweepSource(
     target: SWEEP_TARGET,
     worst,
     ...(edges.length > 0 ? { edges } : {}),
-    ...(titles.length > 0
-      ? { titles: titles.sort((a, b) => b.off - a.off).slice(0, MAX_TITLES).map(({ off: _off, ...t }) => t) }
-      : {}),
+    ...(titles.length > 0 ? { titles } : {}),
     ...(timing ? { timing } : {}),
     ...(onBlocks > 0 ? { onBlocks: Math.round(onBlocks * 100) / 100 } : {}),
     ...(frame ? { frame } : {}),
@@ -663,26 +704,15 @@ export async function sweepSource(
   };
 }
 
-/** The titles a sweep reads the ink of, by the sample each is read at: the
- * one nearest the title's middle, so it is read settled, past its way in. */
+/** The titles up at each sample, by the sample's index: a title faded under
+ * half is left out there. */
 function titleReads(doc: ExportDoc, samples: { at: number }[]): Map<number, TextOverlay[]> {
+  const titles = doc.overlays.filter((o): o is TextOverlay => isTextOverlay(o) && !o.hidden && !!o.text.trim());
   const reads = new Map<number, TextOverlay[]>();
-  const first = samples[0].at;
-  const last = samples[samples.length - 1].at;
-  for (const o of doc.overlays) {
-    if (!isTextOverlay(o) || o.hidden || !o.text.trim() || o.end <= first || o.start > last) {
-      continue;
-    }
-    const mid = clamp((o.start + o.end) / 2, Math.max(first, o.start), Math.min(last, o.end));
-    let j = 0;
-    for (let i = 1; i < samples.length; i++) {
-      if (Math.abs(samples[i].at - mid) < Math.abs(samples[j].at - mid)) j = i;
-    }
-    if (samples[j].at < o.start || samples[j].at >= o.end || poseAt(o, samples[j].at - o.start).opacity < 0.5) {
-      continue;
-    }
-    reads.set(j, [...(reads.get(j) ?? []), o]);
-  }
+  samples.forEach(({ at }, j) => {
+    const up = titles.filter((o) => at >= o.start && at < o.end && poseAt(o, at - o.start).opacity >= 0.5);
+    if (up.length > 0) reads.set(j, up);
+  });
   return reads;
 }
 

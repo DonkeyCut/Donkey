@@ -260,6 +260,11 @@ const INK_SHARE = 0.08;
  * thinner or smaller letters read part way, never past the colour itself. */
 const INK_BLEND = [0.3, 1.1] as const;
 
+/** The ring around a title's box its ground is read from, as a share of the
+ * box's height, and never under 2 px: a small label fills most of its own
+ * box, so the box alone would read its letters as the ground. */
+const GROUND_RING = 0.25;
+
 /** How far apart the grounds under a title may be for its letters to be
  * compared: past it the title sits on something else in one frame — a card's
  * edge, another shape — which is the frame score's to find, not the ink's. */
@@ -267,8 +272,9 @@ const GROUND_SLACK = 48;
 
 type Rgb3 = [number, number, number];
 
-/** A title's letters as a frame shows them: their colour and the ground's. */
-export type Ink = { ink: Rgb3; ground: Rgb3 };
+/** A title's letters as a frame shows them: their colour, null where none
+ * stand off the ground, and the ground's. */
+export type Ink = { ink: Rgb3 | null; ground: Rgb3 };
 
 /** How far apart two colours are: the largest of their channel differences. */
 export function inkDiff(a: Rgb3, b: Rgb3): number {
@@ -280,12 +286,17 @@ export function inkDiff(a: Rgb3, b: Rgb3): number {
  * thinner, smaller or softer than ours read as our colour part way into their
  * ground, so the source's ink is held against the nearest blend of ours into
  * the source's ground: white letters read pale over purple are the same
- * white, black ones where ours are white are not. Null when the two sit on
- * different grounds.
+ * white, black ones where ours are white are not. Letters only one side
+ * shows are off by how far they stand off its ground. Null when the two sit
+ * on different grounds.
  */
 export function inkOff(cut: Ink, source: Ink): number | null {
   if (inkDiff(cut.ground, source.ground) > GROUND_SLACK) {
     return null;
+  }
+  if (!cut.ink || !source.ink) {
+    const shown = cut.ink ? cut : source;
+    return shown.ink ? inkDiff(shown.ink, shown.ground) : 0;
   }
   const dir = cut.ink.map((v, c) => v - cut.ground[c]);
   const seen = source.ink.map((v, c) => v - source.ground[c]);
@@ -295,12 +306,12 @@ export function inkOff(cut: Ink, source: Ink): number | null {
 }
 
 /**
- * The colour a title's letters are drawn in, read off a frame: inside the
- * box, the ground is the median colour and the ink is the mean of the pixels
- * furthest from it. A title's box is mostly ground, so this holds on a flat
+ * The colour a title's letters are drawn in, read off a frame: the ground is
+ * the median colour of a ring around the box, and the ink the mean of the
+ * pixels inside it furthest from that. A title's box is mostly ground, so this holds on a flat
  * card and on footage alike, and it reads the letters' colour where a frame
- * score at a sweep's size barely moves for it. Null when nothing in the box
- * stands off the ground.
+ * score at a sweep's size barely moves for it. Null when the box is outside
+ * the frame.
  */
 export function inkColor(
   px: Uint8ClampedArray,
@@ -316,22 +327,32 @@ export function inkColor(
     return null;
   }
   const at: number[] = [];
-  const ch: number[][] = [[], [], []];
+  const inside: number[][] = [[], [], []];
   for (let y = y0; y < y1; y++) {
     for (let x = x0; x < x1; x++) {
       const i = (y * w + x) * 4;
       at.push(i);
-      for (let c = 0; c < 3; c++) ch[c].push(px[i + c]);
+      for (let c = 0; c < 3; c++) inside[c].push(px[i + c]);
     }
   }
-  const ground = ch.map((v) => v.sort((a, b) => a - b)[v.length >> 1]) as Rgb3;
+  const pad = Math.max(2, Math.round(box.h * GROUND_RING));
+  const ring: number[][] = [[], [], []];
+  for (let y = Math.max(0, y0 - pad); y < Math.min(h, y1 + pad); y++) {
+    for (let x = Math.max(0, x0 - pad); x < Math.min(w, x1 + pad); x++) {
+      if (x >= x0 && x < x1 && y >= y0 && y < y1) continue;
+      const i = (y * w + x) * 4;
+      for (let c = 0; c < 3; c++) ring[c].push(px[i + c]);
+    }
+  }
+  const median = (v: number[]) => v.sort((a, b) => a - b)[v.length >> 1];
+  const ground = (ring[0].length > 0 ? ring : inside).map(median) as Rgb3;
   const off = at
     .map((i) => ({ i, d: inkDiff([px[i], px[i + 1], px[i + 2]], ground) }))
     .filter((p) => p.d > INK_MIN)
     .sort((a, b) => b.d - a.d)
     .slice(0, Math.max(1, Math.ceil(at.length * INK_SHARE)));
   if (off.length === 0) {
-    return null;
+    return { ink: null, ground };
   }
   const sum = [0, 0, 0];
   for (const { i } of off) for (let c = 0; c < 3; c++) sum[c] += px[i + c];

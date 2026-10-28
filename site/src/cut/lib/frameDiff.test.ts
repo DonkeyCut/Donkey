@@ -152,8 +152,8 @@ test("a title's ink is the colour its letters stand off the ground in", () => {
   const box = { x: 2, y: 2, w: 10, h: 5 };
   expect(inkColor(lettered(16, 9, [237, 105, 87], [0, 0, 0]), 16, 9, box)).toEqual({ ink: [0, 0, 0], ground: [237, 105, 87] });
   expect(inkColor(lettered(16, 9, [237, 105, 87], [255, 255, 255]), 16, 9, box)?.ink).toEqual([255, 255, 255]);
-  // Nothing stands off a flat ground: no letters to read.
-  expect(inkColor(solid(16, 9, [237, 105, 87]), 16, 9, box)).toBeNull();
+  // Nothing stands off a flat ground: no letters, only the ground.
+  expect(inkColor(solid(16, 9, [237, 105, 87]), 16, 9, box)).toEqual({ ink: null, ground: [237, 105, 87] });
 });
 
 test("white letters where the source has black ones are off; the same letters a shade apart aren't", () => {
@@ -163,7 +163,7 @@ test("white letters where the source has black ones are off; the same letters a 
   const softer = inkColor(lettered(16, 9, [237, 105, 87], [20, 14, 12]), 16, 9, box)!;
   expect(inkOff(white, black)).toBeGreaterThan(150);
   expect(inkOff(softer, black)).toBeLessThan(30);
-  expect(inkDiff(white.ink, black.ink)).toBe(255);
+  expect(inkDiff(white.ink!, black.ink!)).toBe(255);
 });
 
 test("thinner letters of the same colour, blended into their ground, are not off", () => {
@@ -191,4 +191,22 @@ test("a box past the frame's edge reads only what is inside it", () => {
   const px = lettered(16, 9, [0, 0, 0], [255, 255, 255]);
   expect(inkColor(px, 16, 9, { x: 6, y: -4, w: 20, h: 20 })?.ink).toEqual([255, 255, 255]);
   expect(inkColor(px, 16, 9, { x: 20, y: 20, w: 4, h: 4 })).toBeNull();
+});
+
+test("a small label that fills its own box reads its ground off what's around it", () => {
+  const px = solid(16, 9, [44, 75, 241]);
+  for (let y = 3; y <= 5; y++) for (let x = 6; x <= 9; x++) px.set([235, 238, 254, 255], (y * 16 + x) * 4);
+  expect(inkColor(px, 16, 9, { x: 6, y: 3, w: 4, h: 3 })).toEqual({ ink: [235, 238, 254], ground: [44, 75, 241] });
+});
+
+test("letters the source shows where yours don't are off by how far they stand out", () => {
+  // A strobe's white frame: the source's letters read pale cyan on white,
+  // ours wash out into the white.
+  const white = [249, 245, 244] as [number, number, number];
+  const gone = { ink: null, ground: white };
+  const cyan = { ink: [184, 232, 253] as [number, number, number], ground: white };
+  expect(inkOff(gone, cyan)).toBe(65);
+  expect(inkOff(cyan, gone)).toBe(65);
+  // Neither shows letters: nothing to tell apart.
+  expect(inkOff(gone, gone)).toBe(0);
 });
