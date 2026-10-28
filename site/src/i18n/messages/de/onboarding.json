@@ -49,6 +49,10 @@
     "body": "Bereits auf deinem Konto – du musst nichts aktivieren. Nutze sie für generierte Videos, Audio und Bilder.",
     "expires": "Gültig bis {date}."
   },
+  "phoneGate": {
+    "title": "Donkey Cut läuft auf einem Computer",
+    "body": "Öffne donkeycut.com auf deinem Mac oder PC."
+  },
   "plans": {
     "title": "Einfache Preise",
     "subtitle": "Der Editor ist kostenlos. Zahle nur für KI-generierte Medien.",
@@ -56,6 +60,7 @@
     "getPlan": "Hol dir {plan}",
     "getProOff": "{percent} % Rabatt auf Pro sichern",
     "continueFree": "Kostenlos weitermachen",
+    "paywallSubtitle": "Wähle einen Plan, um loszulegen. Du bearbeitest auf einem Computer: Melde dich dort mit diesem Account an.",
     "covers": "{months, plural, one {Für deinen ersten Monat, danach {price}/Monat} other {Pro Monat für deine ersten # Monate, danach {price}/Monat}}"
   }
 }

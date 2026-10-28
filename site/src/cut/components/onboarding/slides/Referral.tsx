@@ -54,11 +54,13 @@ export function ReferralSlide({
       <p className="mt-3 text-center text-[16px] text-foreground/70">
         {t("body")}
       </p>
-      <div className="mt-8 flex flex-col gap-2">
+      {/* Two columns on a phone, so the question and every answer fit on one
+          screen; Other spans both for the field under it. */}
+      <div className="mt-6 grid grid-cols-2 gap-2 md:mt-8 md:flex md:flex-col">
         {REFERRAL_SOURCES.map((source) => {
           const active = selected.includes(source.id);
           return (
-            <div key={source.id} className="relative">
+            <div key={source.id} className={cn("relative", source.id === "other" && "col-span-2")}>
               <button
                 type="button"
                 onClick={() => onToggle(source.id)}
@@ -66,7 +68,7 @@ export function ReferralSlide({
                 className={cn(
                   // Selection is a border and a check, not a filled row: the
                   // brand marks keep their own colors and stay legible.
-                  "relative z-[1] flex w-full items-center gap-3 rounded-xl border bg-card px-4 py-3.5 text-left text-[15px] font-medium transition-colors",
+                  "relative z-[1] flex h-full w-full items-center gap-2.5 rounded-xl border bg-card px-3 py-3 text-left text-[15px] font-medium transition-colors md:gap-3 md:px-4 md:py-3.5",
                   active
                     ? "border-foreground ring-1 ring-foreground"
                     : "border-foreground/15 hover:border-foreground/40",

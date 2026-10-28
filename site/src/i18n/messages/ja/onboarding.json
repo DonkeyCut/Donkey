@@ -49,6 +49,10 @@
     "body": "すでにアカウントに付与されています（受け取り手続きは不要です）。動画、音声、画像の生成にご利用いただけます。",
     "expires": "有効期限: {date}"
   },
+  "phoneGate": {
+    "title": "Donkey Cutはコンピューターで動作します",
+    "body": "MacまたはPCでdonkeycut.comを開いてください。"
+  },
   "plans": {
     "title": "シンプルな料金プラン",
     "subtitle": "エディターは無料。AI生成メディアにのみお支払いいただけます。",
@@ -56,6 +60,7 @@
     "getPlan": "{plan}を入手",
     "getProOff": "Proを{percent}%オフで利用",
     "continueFree": "無料で続ける",
+    "paywallSubtitle": "プランを選んで始めましょう。編集はコンピューターで行います。そちらでこのアカウントでサインインしてください。",
     "covers": "{months, plural, other {最初の#か月間の月額、以降は{price}/月}}"
   }
 }

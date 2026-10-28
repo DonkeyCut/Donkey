@@ -60,7 +60,10 @@ export type AnalyticsEvents = {
   };
   onboarding_completed: { source: OnboardingRun; skipped: boolean; step: number };
   // The sequence's plans slide came up; intro as on the plans modal.
-  onboarding_plans_shown: { source: OnboardingRun; intro: number };
+  // exit is "paywall" on a phone, where the slide has no free way on.
+  onboarding_plans_shown: { source: OnboardingRun; intro: number; exit: "free" | "paywall" };
+  // A phone reached the app past the sequence and was asked for a computer.
+  phone_gate_shown: void;
   // The first things a new account does in the editor. An import reports
   // once per run of files the person brought in: how many landed, how many
   // didn't, and whether they went on the timeline or only into Media.

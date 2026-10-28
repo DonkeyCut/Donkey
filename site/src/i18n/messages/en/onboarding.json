@@ -49,6 +49,10 @@
     "body": "Already in your account — nothing to claim. Spend them on generated video, audio and images.",
     "expires": "Expires {date}."
   },
+  "phoneGate": {
+    "title": "Donkey Cut runs on a computer",
+    "body": "Open donkeycut.com on your Mac or PC."
+  },
   "plans": {
     "title": "Simple pricing",
     "subtitle": "The editor is free. Pay only for AI generated media.",
@@ -56,6 +60,7 @@
     "getPlan": "Get {plan}",
     "getProOff": "Get {percent}% off Pro",
     "continueFree": "Continue with free",
+    "paywallSubtitle": "Pick a plan to start. You edit on a computer: sign in there with this account.",
     "covers": "{months, plural, one {For your first month, then {price}/month} other {Per month for your first # months, then {price}/month}}"
   }
 }

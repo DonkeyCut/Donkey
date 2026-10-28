@@ -49,6 +49,10 @@
     "body": "Ya están en tu cuenta; no tienes que reclamar nada. Úsalos en video, audio e imágenes generadas.",
     "expires": "Vence el {date}."
   },
+  "phoneGate": {
+    "title": "Donkey Cut funciona en una computadora",
+    "body": "Abre donkeycut.com en tu Mac o PC."
+  },
   "plans": {
     "title": "Precios simples",
     "subtitle": "El editor es gratis. Paga solo por multimedia generada por IA.",
@@ -56,6 +60,7 @@
     "getPlan": "Obtén {plan}",
     "getProOff": "Obtén {percent}% de descuento en Pro",
     "continueFree": "Continuar gratis",
+    "paywallSubtitle": "Elige un plan para comenzar. Editas en una computadora: inicia sesión ahí con esta cuenta.",
     "covers": "{months, plural, one {Durante tu primer mes, luego {price}/mes} other {Al mes durante tus primeros # meses, luego {price}/mes}}"
   }
 }

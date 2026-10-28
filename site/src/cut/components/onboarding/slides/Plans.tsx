@@ -31,7 +31,10 @@ const PLAN_CARD: Record<PaidPlan, { color: CardColor; tapeColor: CardColor }> = 
 // nobody has to take a price on faith. Checkout is the one the upgrade modal
 // starts. While the intro offer is open the Pro card prices the discount and
 // counts down to its end.
-export function PlansSlide({ run, onSkipPro }: { run: OnboardingRun; onSkipPro: () => void }) {
+/** How the slide lets a free account go: on with free, or nowhere but a plan. */
+export type PlansExit = "free" | "paywall";
+
+export function PlansSlide({ run, exit, onSkipPro }: { run: OnboardingRun; exit: PlansExit; onSkipPro: () => void }) {
   const t = useTranslations("onboarding.plans");
   const plans = useCutPlans();
   const checkout = usePlanCheckout({ surface: "onboarding" });
@@ -46,8 +49,8 @@ export function PlansSlide({ run, onSkipPro }: { run: OnboardingRun; onSkipPro: 
       return;
     }
     tracked.current = true;
-    track("onboarding_plans_shown", { source: run, intro: intro.data?.percentOff ?? 0 });
-  }, [intro.isPending, intro.data, run]);
+    track("onboarding_plans_shown", { source: run, intro: intro.data?.percentOff ?? 0, exit });
+  }, [intro.isPending, intro.data, run, exit]);
 
   return (
     <div className="mx-auto w-full max-w-[1040px]">
@@ -55,7 +58,7 @@ export function PlansSlide({ run, onSkipPro }: { run: OnboardingRun; onSkipPro: 
         {t("title")}
       </h2>
       <p className="mt-3 text-center text-[16px] text-foreground/70">
-        {t("subtitle")}
+        {exit === "paywall" ? t("paywallSubtitle") : t("subtitle")}
       </p>
 
       {/* A narrow window scrolls the cards sideways. The row bleeds past the
@@ -83,15 +86,18 @@ export function PlansSlide({ run, onSkipPro }: { run: OnboardingRun; onSkipPro: 
         ))}
       </div>
 
-      <div className="mt-5 text-right">
-        <button
-          type="button"
-          onClick={onSkipPro}
-          className="text-[15px] text-foreground/70 underline-offset-4 transition-colors hover:text-foreground hover:underline"
-        >
-          {t("continueFree")}
-        </button>
-      </div>
+      {/* Behind the paywall the plans are the only way on. */}
+      {exit === "free" && (
+        <div className="mt-5 text-right">
+          <button
+            type="button"
+            onClick={onSkipPro}
+            className="text-[15px] text-foreground/70 underline-offset-4 transition-colors hover:text-foreground hover:underline"
+          >
+            {t("continueFree")}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

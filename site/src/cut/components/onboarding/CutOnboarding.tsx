@@ -9,10 +9,11 @@ import { Button } from "@/components/ui/button";
 import { AiChatSlide } from "@/cut/components/onboarding/slides/AiChat";
 import { CreditsSlide } from "@/cut/components/onboarding/slides/Credits";
 import { ModesSlide } from "@/cut/components/onboarding/slides/Modes";
-import { PlansSlide } from "@/cut/components/onboarding/slides/Plans";
+import { PlansSlide, type PlansExit } from "@/cut/components/onboarding/slides/Plans";
 import { ReferralSlide } from "@/cut/components/onboarding/slides/Referral";
 import { WelcomeSlide } from "@/cut/components/onboarding/slides/Welcome";
 import { useEngineUser } from "@/cut/lib/backend/hooks";
+import { useFormFactor } from "@/cut/lib/environment";
 import { useCutBase } from "@/cut/lib/nav";
 import { onOpenOnboarding, setOnboardingCover } from "@/cut/lib/onboarding";
 import { track } from "@/lib/analytics";
@@ -71,6 +72,9 @@ export function CutOnboarding() {
   const { data: state, isPending } = useOnboardingState();
   const { data: pro } = useProSubscription();
   const save = useSaveOnboarding();
+  // A phone ends on the plans with no free way out: the editor needs a
+  // computer, so the phone's job is the account and the plan.
+  const exit: PlansExit = useFormFactor() === "phone" ? "paywall" : "free";
   const [rawStep, setStep] = useState(0);
   const saved = useMemo(() => (state?.referralSources ?? []).filter(isKnownReferralSource), [state]);
   const savedOther = saved.includes("other") ? (state?.referralOther ?? "") : "";
@@ -135,6 +139,21 @@ export function CutOnboarding() {
     started.current = true;
     track("onboarding_started", { source: run });
   }, [run]);
+
+  // Each slide starts at its top. The scroll area outlives the slides, so a
+  // tall one scrolled down would hand its offset to the next.
+  const scroller = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    scroller.current?.scrollTo({ top: 0 });
+  }, [slide]);
+
+  // Each slide once per showing, so a run that stops short says where.
+  useEffect(() => {
+    if (!run || !slide) {
+      return;
+    }
+    track("onboarding_slide_viewed", { source: run, slide, step });
+  }, [run, slide, step]);
 
   // The editor underneath reads this to hold the starter project's first
   // playback until the slides hand over.
@@ -225,7 +244,11 @@ export function CutOnboarding() {
   useEffect(() => {
     if (!run) return;
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") return finish(true);
+      if (event.key === "Escape") {
+        // Behind the paywall Escape is no way out; a subscriber has no paywall.
+        if (exit === "paywall" && !isPro) return;
+        return finish(true);
+      }
       if (event.key === "ArrowLeft") return back();
       if (event.key === "ArrowRight") return advance();
       if (event.key !== "Enter") return;
@@ -240,7 +263,7 @@ export function CutOnboarding() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [run, back, advance, finish]);
+  }, [run, back, advance, finish, exit, isPro]);
 
   // The landing nav's lockup, same icon box and wordmark size. Shared by the
   // hold below and the open sequence, so one becoming the other repaints
@@ -316,7 +339,7 @@ export function CutOnboarding() {
       {/* Slides sit high rather than centered: the spacers split the free space
           one part above to three below. They collapse first, so a slide taller
           than the window scrolls from its top instead of being clipped. */}
-      <div className="flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto px-6 py-4 md:px-10">
+      <div ref={scroller} className="flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto px-6 py-4 md:px-10">
         <div aria-hidden className="min-h-4 flex-[1]" />
         <div className="mx-auto w-full max-w-[1100px]">
           {slide === "welcome" && <WelcomeSlide />}
@@ -336,7 +359,7 @@ export function CutOnboarding() {
             />
           )}
           {slide === "ai-chat" && <AiChatSlide />}
-          {slide === "plans" && <PlansSlide run={run} onSkipPro={() => finish(false)} />}
+          {slide === "plans" && <PlansSlide run={run} exit={exit} onSkipPro={() => finish(false)} />}
         </div>
         <div aria-hidden className="flex-[3]" />
       </div>

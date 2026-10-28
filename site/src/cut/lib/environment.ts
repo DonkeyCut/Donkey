@@ -25,3 +25,24 @@ export function useEnvironment() {
   const host = useSyncExternalStore(subscribe, editorHost, serverHost);
   return { host, chatgpt: host === "chatgpt" };
 }
+
+/** The kind of device the page is on. A phone gets the welcome sequence and
+ * the plans, and the editor itself asks for a computer. */
+export type FormFactor = "phone" | "computer";
+
+// The browser's own answer where it gives one (Chromium's client hints), the
+// user agent's mobile token everywhere else. Tablets count as computers.
+function formFactor(): FormFactor {
+  if (typeof navigator === "undefined") return "computer";
+  const hinted = (navigator as Navigator & { userAgentData?: { mobile?: boolean } }).userAgentData?.mobile;
+  if (hinted !== undefined) return hinted ? "phone" : "computer";
+  return /iPhone|iPod|Android.+Mobile|Mobile.+Firefox/.test(navigator.userAgent) ? "phone" : "computer";
+}
+
+const serverFormFactor = (): FormFactor => "computer";
+
+/** The form factor as React state: the server and the first client render
+ * agree on a computer, and a phone settles right after hydration. */
+export function useFormFactor(): FormFactor {
+  return useSyncExternalStore(subscribe, formFactor, serverFormFactor);
+}

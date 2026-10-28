@@ -5,6 +5,7 @@ import { NoTranslate } from "@/app/_components/NoTranslate";
 import { ConnectGate } from "@/cut/components/ConnectGate";
 import { ExportsDock } from "@/cut/components/ExportsDock";
 import { CutOnboarding } from "@/cut/components/onboarding/CutOnboarding";
+import { PhoneGate } from "@/cut/components/PhoneGate";
 import { RequireSession } from "@/cut/components/RequireSession";
 import { AppLoading, AppLoadingOverlay, SessionGate } from "@/cut/components/SessionGate";
 import { LocaleSync } from "@/cut/components/LocaleSync";
@@ -50,15 +51,18 @@ export default function CutAppLayout({ children }: { children: ReactNode }) {
         <Suspense fallback={<AppLoading />}>
           <RequireSession>
             <LocaleSync />
-            <ConnectGate>
-              {children}
-              {/* App-wide: exports keep showing as you move between projects. Both
-                overlays read the account, so they wait for it; neither has a
-                shape worth drawing before then. */}
-              <SessionGate>
-                <ExportsDock placement="window" />
-              </SessionGate>
-            </ConnectGate>
+            {/* A phone gets the page that asks for a computer in the app's place. */}
+            <PhoneGate>
+              <ConnectGate>
+                {children}
+                {/* App-wide: exports keep showing as you move between projects. Both
+                  overlays read the account, so they wait for it; neither has a
+                  shape worth drawing before then. */}
+                <SessionGate>
+                  <ExportsDock placement="window" />
+                </SessionGate>
+              </ConnectGate>
+            </PhoneGate>
             {/* Outside the gate so a first run covers the whole window, gate and
               all, and hands over to it when the last slide closes. */}
             <SessionGate>

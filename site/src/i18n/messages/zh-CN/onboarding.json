@@ -49,6 +49,10 @@
     "body": "已存入你的账户，无需手动领取。可用于生成视频、音频和图像。",
     "expires": "有效期至 {date}。"
   },
+  "phoneGate": {
+    "title": "Donkey Cut 需在电脑上运行",
+    "body": "在 Mac 或 PC 上打开 donkeycut.com。"
+  },
   "plans": {
     "title": "简单明了的定价",
     "subtitle": "编辑器完全免费，仅为 AI 生成的媒体内容付费。",
@@ -56,6 +60,7 @@
     "getPlan": "获取 {plan}",
     "getProOff": "立享 {percent}% 优惠升级 Pro",
     "continueFree": "继续使用免费版",
+    "paywallSubtitle": "选择方案以开始。剪辑需在电脑上进行：使用此账号在电脑端登录即可。",
     "covers": "{months, plural, other {前 # 个月每月此价格，之后 {price}/月}}"
   }
 }
