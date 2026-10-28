@@ -2,7 +2,7 @@
 
 import { useTranslations } from "next-intl";
 import { useEffect, useRef, type ReactNode } from "react";
-import { Check, PenLine, Search, Users } from "lucide-react";
+import { Check, PenLine, Search, Sparkles, Users } from "lucide-react";
 
 import {
   REFERRAL_OTHER_MAX_LENGTH,
@@ -20,6 +20,7 @@ const MARKS: Record<ReferralSource, ReactNode> = {
   youtube: <BrandMark src="/cut/onboarding/youtube.svg" />,
   reddit: <BrandMark src="/cut/onboarding/reddit.svg" />,
   search: <Search className="size-[18px]" />,
+  ai: <Sparkles className="size-[18px]" />,
   friend: <Users className="size-[18px]" />,
   other: <PenLine className="size-[18px]" />,
 };

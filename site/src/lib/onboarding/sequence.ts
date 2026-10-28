@@ -14,6 +14,7 @@ export const REFERRAL_SOURCES = [
   { id: "youtube", label: "YouTube" },
   { id: "reddit", label: "Reddit" },
   { id: "search", label: "Search" },
+  { id: "ai", label: "AI assistant" },
   { id: "friend", label: "A friend" },
   { id: "other", label: "Other" },
 ] as const;
