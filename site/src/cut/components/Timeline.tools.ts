@@ -274,7 +274,7 @@ export const TIMELINE_TOOLS = [
   {
     name: "update_overlay_video",
     description:
-      "Update an overlay video clip: move it (start, track), trim (in/out), mute, hide, change its frame region (layout preset, or a custom region rect in frame fractions that may run past the frame's edges, e.g. to cover a screen in the shot that spills off the frame), fit, zoom, mirror (flipH/flipV), rotation, opacity, or speed.",
+      "Update an overlay video clip: move it (start, track), trim (in/out), mute, hide, change its frame region (layout preset, or a custom region rect in frame fractions that may run past the frame's edges, e.g. to cover a screen in the shot that spills off the frame), fit, zoom, mirror (flipH/flipV), rotation, opacity, or speed. replace_item swaps the asset it plays.",
     inputSchema: obj({
       id: str("Overlay video clip id"),
       start: num("Timeline start s"),
