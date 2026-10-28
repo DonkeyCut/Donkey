@@ -2,6 +2,7 @@
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import Link from "next/link";
+import { useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { CUT_APP_BASE, homeHref, projectHref } from "@/cut/lib/nav";
 import { Check, Clock, Copy, FileText, X } from "lucide-react";
@@ -18,6 +19,7 @@ import {
 } from "@/cut/lib/assetRef";
 import { MEDIA_CORS } from "@/cut/lib/mediaCors";
 import { isCollectionRef, useRefFor, useRefCandidates } from "@/cut/lib/assetRef";
+import { refreshMentionSources } from "@/cut/lib/queries";
 import { useInView } from "@/cut/hooks/useInView";
 import { revealRef } from "@/cut/lib/refReveal";
 import { formatTime } from "@/cut/lib/time";
@@ -1418,6 +1420,17 @@ export function MentionTextarea({
   }, [mirrorSegs, value, onChange]);
 
   const mention = useMemo(() => mentionAtCaret(value, caret), [value, caret]);
+
+  // Each new mention re-reads the notes, projects and Library, so whatever
+  // the phone or another tab added is in the menu it opens.
+  const client = useQueryClient();
+  const mentionStart = mention?.start ?? null;
+  useEffect(() => {
+    if (mentionStart === null) {
+      return;
+    }
+    refreshMentionSources(client);
+  }, [client, mentionStart]);
   // A caret strictly inside an intact, resolved token is a click on the pill —
   // the mention is complete, and offering lookalike suggestions for its
   // half-read query would misdirect it.

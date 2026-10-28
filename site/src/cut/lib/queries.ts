@@ -380,6 +380,15 @@ export function useNotes(enabled = true) {
   });
 }
 
+/** Re-read the listings a mention reaches outside this tab. Notes, projects
+ * and the Library are also written from the phone and other tabs, and this
+ * tab's reads of them only run on mount. */
+export function refreshMentionSources(client: QueryClient) {
+  void client.invalidateQueries({ queryKey: notesKey });
+  void client.invalidateQueries({ queryKey: ["cut", "projects"] });
+  void client.invalidateQueries({ queryKey: ["cut", "library"] });
+}
+
 /** Optimistic edit of the cached notes, snapshot moving with it. */
 export function patchNotes(client: QueryClient, fn: (prev: NotesData) => NotesData) {
   const next = client.setQueryData<NotesData>(notesKey, (prev) => (prev ? fn(prev) : prev));
