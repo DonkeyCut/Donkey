@@ -3,10 +3,11 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
-import { useCallback, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 
 import { TopNav } from "@/app/_components/landing/TopNav";
 import { EmailAuthForm } from "@/app/_components/landing/EmailAuthForm";
+import { track } from "@/lib/analytics";
 import { authClient } from "@/lib/auth-client";
 import { cn } from "@/lib/utils";
 
@@ -68,10 +69,19 @@ export function AuthScreen({ mode, method = "google", callbackURL, authError, fo
   if (callbackURL) alternateParams.set("callbackURL", callbackURL);
   const alternateHref = `${screenCopy.alternateHref}${alternateParams.size ? `?${alternateParams}` : ""}`;
 
+  // A provider callback that came back refused lands here carrying its code.
+  useEffect(() => {
+    if (!authError) {
+      return;
+    }
+    track("auth_failed", { mode, method: "google", error: authError });
+  }, [authError, mode]);
+
   const googleFailed = t("googleFailed");
   const handleGoogleAuth = useCallback(async () => {
     setIsPending(true);
     setStatusMessage(null);
+    track("auth_started", { mode, method: "google" });
 
     try {
       await authClient.signIn.social({
@@ -83,11 +93,12 @@ export function AuthScreen({ mode, method = "google", callbackURL, authError, fo
         provider: "google",
       });
     } catch {
+      track("auth_failed", { mode, method: "google", error: "request_failed" });
       setStatusMessage(googleFailed);
     } finally {
       setIsPending(false);
     }
-  }, [callbackURL, googleFailed]);
+  }, [callbackURL, googleFailed, mode]);
 
   const googleButtonWidth = Math.round(
     (screenCopy.googleWidth * GOOGLE_BUTTON_HEIGHT) / 40,

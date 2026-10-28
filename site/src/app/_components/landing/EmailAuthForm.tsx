@@ -2,6 +2,7 @@
 
 import { useTranslations } from "next-intl";
 import { useState, type FormEvent } from "react";
+import { track } from "@/lib/analytics";
 import { authClient } from "@/lib/auth-client";
 
 type Props = { mode: "sign-in" | "sign-up"; callbackURL?: string };
@@ -35,6 +36,7 @@ export function EmailAuthForm({ mode, callbackURL }: Props) {
     const data = new FormData(event.currentTarget);
     setPending(true);
     setError(null);
+    track("auth_started", { mode, method: "email" });
     try {
       const credentials = {
         email: String(data.get("email")),
@@ -45,12 +47,14 @@ export function EmailAuthForm({ mode, callbackURL }: Props) {
         ? await authClient.signUp.email({ ...credentials, name: String(data.get("name")) })
         : await authClient.signIn.email(credentials);
       if (result.error) {
+        track("auth_failed", { mode, method: "email", error: result.error.code ?? String(result.error.status ?? "unknown") });
         setError(describe(result.error));
       } else if (signingUp) {
         // OAuth callbacks can be non-React endpoints, so complete signup with a full navigation.
         window.location.href = credentials.callbackURL;
       }
     } catch {
+      track("auth_failed", { mode, method: "email", error: "request_failed" });
       setError(t("form.requestFailed"));
     } finally {
       setPending(false);

@@ -778,6 +778,9 @@ export function Editor({
       // Typing is never interrupted: a focused text field keeps the keyboard.
       focusShell();
       setImporting((n) => n + list.length);
+      // What landed, by kind, for the one import report after the run.
+      const kinds = new Set<MediaAsset["type"]>();
+      let landed = 0;
       // Files are probed one at a time, so a run lands in drop order. Their
       // bytes go out in parallel, from the upload queue.
       for (const file of list) {
@@ -853,6 +856,8 @@ export function Editor({
           // drawn from those rather than downloaded back from storage.
           void enrichAsset(asset, pending?.localUrl);
           if (pending) startUpload(projectId, pending);
+          kinds.add(asset.type);
+          landed += 1;
           opts?.onOutcome?.({ file, assetId: asset.id });
         } catch (err) {
           reportSwallowed("[cut] import failed", err, file.name);
@@ -861,6 +866,18 @@ export function Editor({
           setImporting((n) => n - 1);
         }
       }
+
+      // The person's own files only: a recording or a copied frame carries
+      // an origin and is media the editor made.
+      if (opts?.origin || !list.length) {
+        return;
+      }
+      track("media_imported", {
+        count: landed,
+        failed: list.length - landed,
+        kinds: [...kinds],
+        target: opts?.mediaOnly ? "media" : "timeline",
+      });
     },
     [projectId, focusShell]
   );

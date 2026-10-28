@@ -63,6 +63,7 @@ import { useLocalPref } from "@/cut/lib/uiState";
 import { DUCK_DEFAULT } from "@/cut/lib/voiceover";
 import { useSpeakerVoice, useSpeechLanguage, VoicePicker } from "@/cut/components/VoicePicker";
 import { GeneratedAssetMenu } from "@/cut/components/GeneratedAssetMenu";
+import { track } from "@/lib/analytics";
 import { cn } from "@/lib/utils";
 import { scrimIconButton } from "@/cut/components/iconButton";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -203,6 +204,7 @@ function MusicGenerator({ projectId }: { projectId: string }) {
     if (!text) return;
     setError(null);
     const n = takes;
+    track("generation_started", { kind: "music", refs: 0 });
     await Promise.all(
       Array.from({ length: n }, async () => {
         // Spins the Audio rail tile for the take's whole flight.
@@ -385,6 +387,7 @@ function VoiceGenerator({ projectId }: { projectId: string }) {
     // before the voice lands.
     const settle = useGenNotify.getState().begin("audio", "voice");
     setError(null);
+    track("generation_started", { kind: "voiceover", refs: 0 });
     try {
       const playhead = playheadAt();
       // Label with the spoken line, not just its first words, so the preview

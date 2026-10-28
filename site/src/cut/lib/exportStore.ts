@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef } from "react";
 import { create } from "zustand";
+import { track } from "@/lib/analytics";
 import { engineOrigin, servedFromEngine } from "./api";
 import { getBackend, type CutBackend, type CutMode } from "./backend";
 import { browserBackend } from "./backend/browser";
@@ -138,6 +139,11 @@ export const useExports = create<ExportsState>((set, get) => ({
     const inBrowser = await canRenderInBrowser(doc, settings, doc.colorSpace ?? "sdr");
     const tabOwned = backend.kind !== "local" || inBrowser;
     const abort = tabOwned ? new AbortController() : undefined;
+    // Who ends up rendering, for the start and finish reports: the tab, or the
+    // machine behind the project when the tab can't or gives up.
+    let renderer: "tab" | "machine" = inBrowser ? "tab" : "machine";
+    const shape = { residency: backend.kind, width: settings.width, height: settings.height, fps: settings.fps, codec: settings.codec };
+    track("export_started", { ...shape, renderer });
     set((s) => ({
       local: [
         ...s.local,
@@ -190,8 +196,12 @@ export const useExports = create<ExportsState>((set, get) => ({
     // The machine behind the project renders what the tab could not: the
     // engine has a Mac project's media, the worker a cloud project's, and a
     // browser project's goes up with the job.
+    // A job handed to the engine or the worker returns once queued; its file
+    // lands later, in the feed.
+    let queued = false;
     const renderOnWorker = async () => {
       release();
+      renderer = "machine";
       if (backend.kind === "browser") {
         await runBrowserExportInCloud(projectId, doc, settings, tabOpts);
         return;
@@ -202,6 +212,7 @@ export const useExports = create<ExportsState>((set, get) => ({
         ),
       }));
       tabOpts.onClaimed(await createExportJob(projectId, doc, settings));
+      queued = true;
     };
     try {
       if (inBrowser) {
@@ -224,6 +235,7 @@ export const useExports = create<ExportsState>((set, get) => ({
       } else {
         await renderOnWorker();
       }
+      track("export_finished", { ...shape, renderer, result: queued ? "queued" : "done" });
       // Pull the finished (or queued) job into the feed *before* retiring the
       // placeholder — dropping the local row first left a round-trip with
       // neither row on screen — and while the job row is still hidden, since
@@ -247,8 +259,10 @@ export const useExports = create<ExportsState>((set, get) => ({
       // failure.
       if (err instanceof DOMException && err.name === "AbortError") {
         set((s) => ({ local: s.local.filter((r) => r.id !== localId) }));
+        track("export_finished", { ...shape, renderer, result: "cancelled" });
         return;
       }
+      track("export_finished", { ...shape, renderer, result: "failed", error: errorFields(err, String(err)).errorCode ?? "unknown" });
       fail(err);
     }
   },

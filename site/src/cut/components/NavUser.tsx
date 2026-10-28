@@ -26,6 +26,7 @@ import { connectToEngine } from "@/cut/lib/connect";
 import { cutInstallHref } from "@/cut/lib/install";
 import { openOnboarding } from "@/cut/lib/onboarding";
 import { useCutBase } from "@/cut/lib/nav";
+import { resetAnalytics } from "@/lib/analytics";
 import { authClient, useSession } from "@/lib/auth-client";
 import { useAccountProfile, visibleName } from "@/queries/accountProfile";
 
@@ -89,6 +90,7 @@ export function NavUser() {
         await authClient.revokeSessions();
       } finally {
         forgetRememberedEngineUser();
+        resetAnalytics();
         await authClient.signOut();
         router.push("/");
       }

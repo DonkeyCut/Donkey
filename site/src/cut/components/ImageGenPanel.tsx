@@ -25,6 +25,7 @@ import { refsFromDroppedFiles } from "@/cut/lib/refMedia";
 import { useEditor } from "@/cut/lib/store";
 import { nearestAspect, type MediaAsset } from "@/cut/lib/types";
 import { imageMicros } from "@/lib/credits/price-sheet";
+import { track } from "@/lib/analytics";
 import { cn } from "@/lib/utils";
 import { CopyHandlePill, MentionTextarea, RefChips } from "./AssetRefs";
 import { DictationControl } from "./MicDictation";
@@ -106,6 +107,7 @@ export function ImageGenPanel({ projectId }: { projectId: string }) {
   const go = () => {
     const { text, refs: all } = collectRefs(prompt.trim(), refs, candidates);
     if (!text) return;
+    track("generation_started", { kind: "image", refs: all.length });
     void useGenerate.getState().generateImage(projectId, text, { refs: all, aspect, resolution });
   };
 

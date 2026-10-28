@@ -50,6 +50,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { apiJson, engineReady } from "@/cut/lib/api";
+import { track } from "@/lib/analytics";
 import { useCutCaps, useLocalCompute } from "@/cut/lib/backend/hooks";
 import { localBackend } from "@/cut/lib/backend/local";
 import { setAssetDragData } from "@/cut/lib/assetDrag";
@@ -1957,7 +1958,9 @@ function ChatSession({
       setSendError(unavailableMessage());
       return;
     }
-    if (busy || requests.snapshot()) {
+    const queued = busy || requests.snapshot();
+    track("chat_message_sent", { provider: provider(currentModel()), attachments: all.length, queued });
+    if (queued) {
       // A paused queue stays paused: parked rows fire only from the tray's
       // resume button, never as a side effect of submitting something new.
       // With the queue live, the triage places the row right away.

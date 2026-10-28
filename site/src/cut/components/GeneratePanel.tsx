@@ -36,6 +36,7 @@ import {
 } from "@/cut/lib/videoModels";
 import { videoRenderMicros } from "@/lib/credits/price-sheet";
 import { useLabels } from "@/i18n/labels";
+import { track } from "@/lib/analytics";
 import { cn } from "@/lib/utils";
 import { CopyHandlePill, MentionTextarea, RefChips } from "./AssetRefs";
 import { DictationControl } from "./MicDictation";
@@ -127,6 +128,7 @@ export function GenerateVideoPanel({ projectId }: { projectId: string }) {
     // same person delivers it.
     const composed = character?.persona ? characterPrompt(character.persona, text) : text;
     const seedRefs = character ? [refFromStockVideo(character)] : all;
+    track("generation_started", { kind: "video", refs: seedRefs.length });
     void useGenerate.getState().generateVideo(projectId, composed, {
       aspect: effAspect,
       resolution: effResolution,

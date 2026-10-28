@@ -1,6 +1,8 @@
 import posthog from "posthog-js";
 import { useEffect } from "react";
 
+import type { CutMode } from "@/cut/lib/backend/types";
+import type { ExportCodec } from "@/cut/lib/exportClient";
 import type { PerfLogBatch } from "@/cut/lib/perfLog";
 import type { MainThreadSample, PerfSample } from "@/cut/lib/perfTrace";
 import type { ShortcutDecline } from "@/cut/lib/shortcutGate";
@@ -12,6 +14,20 @@ import type {
 
 // What the plans modal opened for: a limit hit, or the plans asked for.
 type PlansReason = "projects" | "credits" | "storage" | "plans";
+
+type AuthMode = "sign-in" | "sign-up";
+type AuthMethod = "google" | "email";
+
+// What an export was asked for, and who renders it: the tab, or the machine
+// behind the project (the engine on this Mac, or the cloud worker).
+type ExportShape = {
+  residency: CutMode;
+  renderer: "tab" | "machine";
+  width: number;
+  height: number;
+  fps: number;
+  codec: ExportCodec;
+};
 
 // Where a plan's checkout started: the plans modal, with what raised it and
 // the button or limit that did; the onboarding's plans slide; or the storage
@@ -29,8 +45,15 @@ export type AnalyticsEvents = {
   app_loaded: { app: "cut" | "settings" };
   // Install prompts on the Cut app home's connect gate.
   app_install_clicked: { source: "connect_gate_button" | "connect_gate_link" };
+  // A Google or email sign-in/sign-up began on the auth page, and one that
+  // came back refused (error is the provider's or the API's code).
+  auth_started: { mode: AuthMode; method: AuthMethod };
+  auth_failed: { mode: AuthMode; method: AuthMethod; error: string };
   // The welcome sequence a new account sees, and its replay from settings.
   onboarding_started: { source: OnboardingRun };
+  // Each slide as it comes up, so the drop between start and finish has a
+  // place. step is the slide's index among the ones this account sees.
+  onboarding_slide_viewed: { source: OnboardingRun; slide: string; step: number };
   onboarding_referral_selected: {
     referralSources: ReferralSource[];
     referralOther?: string;
@@ -38,6 +61,18 @@ export type AnalyticsEvents = {
   onboarding_completed: { source: OnboardingRun; skipped: boolean; step: number };
   // The sequence's plans slide came up; intro as on the plans modal.
   onboarding_plans_shown: { source: OnboardingRun; intro: number };
+  // The first things a new account does in the editor. An import reports
+  // once per run of files the person brought in: how many landed, how many
+  // didn't, and whether they went on the timeline or only into Media.
+  media_imported: { count: number; failed: number; kinds: string[]; target: "timeline" | "media" };
+  // A message sent from the chat composer; queued when a turn was running.
+  chat_message_sent: { provider: string; attachments: number; queued: boolean };
+  // A render started from a generate panel. Chat-started ones ride the chat.
+  generation_started: { kind: "video" | "image" | "music" | "voiceover"; refs: number };
+  // An export, and how it ended: done when its file is written, queued when
+  // the engine or the worker took it on, failed with the error code.
+  export_started: ExportShape;
+  export_finished: ExportShape & { result: "done" | "queued" | "cancelled" | "failed"; error?: string };
   // Cut projects home.
   project_created: { source: "projects_home" | "sidebar" | "file_import" | "chatgpt_card" };
   folder_created: void;
@@ -101,6 +136,12 @@ export function useAppLoaded(
     posthog.identify(id, email ? { email } : undefined);
     track("app_loaded", { app });
   }, [app, id, email]);
+}
+
+// Forgets the signed-out account on this browser, so whatever happens here
+// next counts as an anonymous visitor until the next sign-in binds one.
+export function resetAnalytics(): void {
+  posthog.reset();
 }
 
 // Runs once per page load, after `identify`: every assignment becomes a super
