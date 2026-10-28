@@ -873,7 +873,9 @@ export interface EditorState {
   moveClip: (id: string, toIndex: number) => void;
   /** Add a video asset to the timeline at a placement: an existing track or a
    * freshly inserted one. Used by media / library drops. */
-  addVideoFromAsset: (assetId: string, place: VideoTrackPlacement, start: number) => void;
+  /** `len` sets the clip's timeline length (default: an image's
+   * IMAGE_CLIP_SECONDS, a video's whole source). */
+  addVideoFromAsset: (assetId: string, place: VideoTrackPlacement, start: number, len?: number) => void;
   /** "Detach Audio": lift the selected clip's sound onto the
    * soundtrack track (and mute the clip) so it can be cut independently. */
   detachAudio: () => void;
@@ -4079,14 +4081,17 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       set({ ...next, clips: [...next.clips].sort((a, b) => a.start - b.start), subtitles: { ...s.subtitles, cues: next.subtitles.cues } });
     },
 
-    addVideoFromAsset: (assetId, aimed, start) => {
+    addVideoFromAsset: (assetId, aimed, start, len) => {
       const asset = get().assets.find((a) => a.id === assetId);
       if (!asset || (asset.type !== "video" && asset.type !== "image")) return;
       // With the magnet on, nothing opens a row below track 0: a drop aimed
       // under the stack inserts into track 0 at the pointer.
       const place: VideoTrackPlacement =
         get().magnet && aimed.kind === "insert" && aimed.level === 0 ? { kind: "track", track: 0 } : aimed;
-      const out = asset.type === "image" ? IMAGE_CLIP_SECONDS : asset.duration;
+      // A given length lands as it is placed, so the collision-safe landing
+      // measures the clip it will be; a video never runs past its source.
+      const natural = asset.type === "image" ? IMAGE_CLIP_SECONDS : asset.duration;
+      const out = len === undefined ? natural : asset.type === "image" ? len : Math.min(natural, len);
       push();
       const { track, start: at, shifts } = landOnPlacement(
         get().clips,

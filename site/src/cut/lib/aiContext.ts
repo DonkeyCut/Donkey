@@ -49,6 +49,14 @@ export const roundT = (n: number) => Math.round(n * 1000) / 1000;
  * two decimals blur by up to five pixels. */
 const rF = (n: number) => Math.round(n * 10000) / 10000;
 
+/** A box as the chat reads and writes every box: x/y its centre and w/h its
+ * size, in frame fractions. The store keeps a top-left corner; the chat never
+ * sees one, so a measured box, a safe area and a layer's region all mean the
+ * same numbers. */
+export function centreBox(b: { x: number; y: number; w: number; h: number }) {
+  return { x: rF(b.x + b.w / 2), y: rF(b.y + b.h / 2), w: rF(b.w), h: rF(b.h) };
+}
+
 /** The transition this clip applies into the next one, clamped to the live
  * overlap the same way the preview and export are. Null when there's no
  * transition or no next clip. */
@@ -529,19 +537,13 @@ function describeState(
       magnet: s.magnet,
       // Every guide preset's safe area for this frame, whether or not it
       // shows, so placement can respect a platform's UI without a guide on:
-      // safeArea and keepOut are frame fractions (x, y, w, h).
+      // safeArea and keepOut are boxes as the chat reads them (centreBox).
       safeZones: Object.fromEntries(
         GUIDE_PRESETS.filter((p) => p.id !== "custom" && guideFits(p.id, s.aspect)).flatMap((p) => {
           const safeArea = safeAreaOf([p.id], s.aspect);
           if (!safeArea) return [];
-          const keepOut = guideGeometry([p.id], s.aspect).boxes.map((b) => ({
-            label: b.label,
-            x: rF(b.x),
-            y: rF(b.y),
-            w: rF(b.w),
-            h: rF(b.h),
-          }));
-          return [[p.id, { safeArea, ...(keepOut.length ? { keepOut } : {}) }]];
+          const keepOut = guideGeometry([p.id], s.aspect).boxes.map((b) => ({ label: b.label, ...centreBox(b) }));
+          return [[p.id, { safeArea: centreBox(safeArea), ...(keepOut.length ? { keepOut } : {}) }]];
         })
       ),
       // The guides showing on the preview and the user's own lines.
@@ -892,7 +894,7 @@ function describeOverlayClip(c: VideoClip, assets: Map<string, { name: string }>
     // The frame region this layer occupies: Full covers the frame; Top/Bottom/
     // Left/Right split it; PiP floats inside it.
     layout: regionLabel(rect),
-    region: { x: rF(rect.x), y: rF(rect.y), w: rF(rect.w), h: rF(rect.h) },
+    region: centreBox(rect),
     fit: c.fit ?? "fit",
     ...(clipZoom(c) > 1
       ? { zoom: r(clipZoom(c)), panX: r(c.panX ?? 0), panY: r(c.panY ?? 0) }

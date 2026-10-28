@@ -264,7 +264,7 @@ import { zoomAnchor } from "./measure/camera";
 import { DETECT_CHANGES_MAX, DETECT_CUTS_MAX, DETECT_CUTS_SPAN_MAX, SAMPLE_COLOR_MAX, SAMPLE_COLORS_K_MAX, TRACK_FRAMES_MAX, CAMERA_FRAMES_MAX, TRACK_MATCHES, TRACK_PATH_MAX, TRACK_TOLERANCE_DEFAULT } from "./measure/limits";
 import { renderStageFrame, storeStageStill } from "./stageFrame";
 import { createRasterCanvas, decodeRasterImageUrl, rasterCanvasToDataUrl } from "./raster";
-import { buildAiContext, describeCameraCard, describeDoc, describeParkedTimeline, hiddenFromChat, OTHER_CHATS_MEDIA_NOTE, roundT } from "./aiContext";
+import { buildAiContext, centreBox, describeCameraCard, describeDoc, describeParkedTimeline, hiddenFromChat, OTHER_CHATS_MEDIA_NOTE, roundT } from "./aiContext";
 import { CARD_SIDES, newCard, normalizeCard, type CardSide } from "./cameraCard";
 import { CAPTION_STYLES, captionEmphasis, cueSpot, EMPHASIS_SCALE_MAX, EMPHASIS_SCALE_MIN, laneCues, subtitleLaneCount, trackLocale } from "./subtitles";
 import { cueEmphasis, emphasisIndicesOf, emphasizedWords } from "./captionEmphasis";
@@ -1696,9 +1696,32 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       throw new ToolError("Upper-track clips animate with fade or zoom only.");
     const seconds = isNum(input.seconds) ? input.seconds : ANIM_DEFAULT_SECONDS;
     s.setClipAnim(clip.id, which, { style, seconds });
-    const next = useEditor.getState().clips.find((c) => c.id === clip.id)!;
+    const after = useEditor.getState();
+    const next = after.clips.find((c) => c.id === clip.id)!;
     const anim = which === "in" ? next.animIn : next.animOut;
-    return { id: next.id, which, style: anim?.style ?? "none", seconds: anim?.seconds ?? 0 };
+    if (anim) return { id: next.id, which, style: anim.style, seconds: anim.seconds };
+
+    // The bar did not take this edge. A clip butting against this one on
+    // its track turns the bar into the cut between the two, so the clip has
+    // no entrance or exit of its own there; say so, so the reply never
+    // claims an animation the clip lacks.
+    const edge = which === "in" ? next.start : next.start + clipLen(next);
+    const neighbour = after.clips.find(
+      (c) =>
+        c.track === next.track &&
+        c.id !== next.id &&
+        Math.abs((which === "in" ? c.start + clipLen(c) : c.start) - edge) <= ANIM_TOUCH_SECONDS
+    );
+    const name = (c: VideoClip) => after.assets.find((a) => a.id === c.assetId)?.name ?? c.id;
+    return {
+      id: next.id,
+      which,
+      style: "none",
+      seconds: 0,
+      note: neighbour
+        ? `Not set: "${name(neighbour)}" (${neighbour.id}) ${which === "in" ? "ends" : "starts"} at ${roundT(edge)}s on track ${next.track}, so the bar plays as the cut between the two and this clip has no ${which === "in" ? "entrance" : "exit"}. Leave a gap between them (update_overlay_video start or out) or move one to another track, then set it again.`
+        : `Not set: the bar did not land on this clip's ${which} edge at ${roundT(edge)}s.`,
+    };
   },
 
   get_state: (s, input) => {
@@ -2389,9 +2412,10 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
             }
           : {}),
         ...(timelineText ? { timeline: timelineText } : {}),
-        // Frame fractions, quietest first: where a title or caption can go
-        // over this stretch without covering the picture or the platform's UI.
-        ...(spots.length > 0 ? { textFits: spots } : {}),
+        // Boxes (centre and size), quietest first: where a title or caption
+        // can go over this stretch without covering the picture or the
+        // platform's UI.
+        ...(spots.length > 0 ? { textFits: spots.map((sp) => ({ ...sp, ...centreBox(sp) })) } : {}),
         // The picture box found or set on this source, so what the sheets
         // show and what the measuring tools read are told apart.
         ...(asset.picture && !isFullFrame(asset.picture)
@@ -3139,7 +3163,20 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       const track = isNum(input.track) ? Math.max(1, Math.round(input.track)) : 1;
       if (isNum(input.track) && Math.round(input.track) === 0)
         throw new ToolError("Track 0 holds the timeline clips — use place_clip for it.");
-      s.addVideoFromAsset(asset.id, { kind: "track", track }, start);
+
+      // Its length goes in with the add, so the landing makes room for the
+      // clip it will be: `end` when given, else an image stops where track 0
+      // does, e.g. a still at 50.9 over a cut ending at 52.8 runs 1.9s, not
+      // 8s past the close over black.
+      if (isNum(input.end) && input.end < start + CLIP_MIN_SECONDS - 1e-9)
+        throw new ToolError(`end must come after the clip's start (${roundT(start)}s).`);
+      const cutEnd = totalDuration(s.clips);
+      const len = isNum(input.end)
+        ? input.end - start
+        : asset.type === "image" && cutEnd > start + CLIP_MIN_SECONDS
+          ? Math.min(IMAGE_CLIP_SECONDS, cutEnd - start)
+          : undefined;
+      s.addVideoFromAsset(asset.id, { kind: "track", track }, start, len);
       const cur = useEditor.getState();
       const sel = cur.selection;
       const id = sel?.kind === "clip" ? sel.id : null;
@@ -3152,6 +3189,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         id: c.id,
         track: c.track,
         start: roundT(c.start),
+        end: roundT(c.start + clipLen(c)),
         len: roundT(clipLen(c)),
         layout: regionLabel(rectOf(c)),
       };
@@ -3177,19 +3215,30 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       }
       if (typeof input.muted === "boolean") patch.muted = input.muted;
       if (typeof input.hidden === "boolean") patch.hidden = input.hidden || undefined;
+      // A preset and a box both name the region; taking one silently left
+      // the other unapplied and the model setting it again round after round.
+      if (typeof input.layout === "string" && input.region)
+        throw new ToolError("Pass layout or region, not both: layout is a preset box, region a box of your own.");
       if (typeof input.layout === "string") {
         Object.assign(patch, layoutPatch(input.layout));
       } else if (input.region && typeof input.region === "object") {
         const rg = input.region as Record<string, unknown>;
         if (!isNum(rg.x) || !isNum(rg.y) || !isNum(rg.w) || !isNum(rg.h))
           throw new ToolError("region needs numeric x, y, w, h (frame fractions).");
-        // The box may hang past the frame's edges, as the preview's handles
-        // let it (a screen in the shot that runs off the frame); the frame
-        // crops it. A sliver always stays on the frame so it can't vanish.
+        // x/y name the box's centre, as every box the chat reads or writes
+        // does; the store keeps its top-left corner. The box may hang past
+        // the frame's edges, as the preview's handles let it (a screen in the
+        // shot that runs off the frame); the frame crops it. A sliver always
+        // stays on the frame so it can't vanish.
         const w = clamp(rg.w, 0.05, REGION_MAX_SCALE);
         const h = clamp(rg.h, 0.05, REGION_MAX_SCALE);
         const keep = 0.05;
-        patch.frame = { x: clamp(rg.x, keep - w, 1 - keep), y: clamp(rg.y, keep - h, 1 - keep), w, h };
+        patch.frame = {
+          x: clamp(rg.x - w / 2, keep - w, 1 - keep),
+          y: clamp(rg.y - h / 2, keep - h, 1 - keep),
+          w,
+          h,
+        };
       }
       refuseCardFraming(c, input, ["fit", "zoom"]);
       if (input.fit === "fit" || input.fit === "fill") patch.fit = input.fit;
@@ -3211,11 +3260,14 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       if (Object.keys(patch).length === 0) throw new ToolError("Nothing to change.");
       s.updateClip(c.id, patch);
       const next = useEditor.getState().clips.find((x) => x.id === c.id)!;
+      const overhang = frameOverhang(rectOf(next));
       return {
         id: next.id,
         track: next.track,
         start: roundT(next.start),
         layout: regionLabel(rectOf(next)),
+        region: centreBox(rectOf(next)),
+        ...(overhang ? { offFrame: overhang } : {}),
         fit: next.fit ?? "fit",
         ...(clipZoom(next) > 1 ? { zoom: clipZoom(next) } : {}),
         ...(next.flipH ? { flipH: true } : {}),
@@ -8108,6 +8160,29 @@ function layoutPatch(layout: string): Partial<VideoClip> {
   const L = LAYOUTS[key];
   return { frame: key === "full" ? undefined : { ...L.rect }, fit: L.fit };
 }
+
+/** How far a layer's box runs past each side of the frame, in frame
+ * fractions — the part the frame crops. Null when the box sits inside. A box
+ * set past the frame on purpose (a screen that spills off) reads the same;
+ * the chat checks the sides against what it meant.
+ * e.g. centre 0.875 at width 0.75 → { right: 0.25 } */
+function frameOverhang(r: { x: number; y: number; w: number; h: number }): Record<string, number> | null {
+  const sides = {
+    left: -r.x,
+    right: r.x + r.w - 1,
+    top: -r.y,
+    bottom: r.y + r.h - 1,
+  };
+  const past = Object.entries(sides).filter(([, v]) => v > OVERHANG_EPS);
+  return past.length > 0 ? Object.fromEntries(past.map(([k, v]) => [k, Math.round(v * 1000) / 1000])) : null;
+}
+
+// Under a pixel of a 1080 frame: a box flush with an edge is not past it.
+const OVERHANG_EPS = 0.001;
+
+// How close another clip's edge sits for set_animation to name it as the
+// clip that took the bar: a frame at 50 fps.
+const ANIM_TOUCH_SECONDS = 0.02;
 
 /** The model asked for timeline placement — explicitly, or implicitly by
  * giving a position. Otherwise generated media stays on its chat card. */

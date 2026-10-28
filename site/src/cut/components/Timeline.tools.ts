@@ -17,7 +17,7 @@ import {
 } from "@/cut/lib/textCompose";
 import { TEXT_MOVE_IDS, TEXT_MOVE_NOTES } from "@/cut/lib/textMotion";
 import { LETTER_SPACING_MAX, LETTER_SPACING_MIN, OVERLAY_ANIM_STYLE_IDS, TEXT_TEXTURES, TEXT_WEIGHTS } from "@donkeycut/effects-kit";
-import { REGION_MAX_SCALE, TIMELINE_IDS, TIMELINE_LABELS } from "@/cut/lib/types";
+import { IMAGE_CLIP_SECONDS, REGION_MAX_SCALE, TIMELINE_IDS, TIMELINE_LABELS } from "@/cut/lib/types";
 import { BLOCKOUT_MAX } from "@/cut/lib/blockSource";
 
 /** The title sizes the assistant and the inspector set, px at a 1080 short
@@ -259,10 +259,11 @@ export const TIMELINE_TOOLS = [
   {
     name: "add_overlay_video",
     description:
-      "Put a project video or image asset on an overlay video track, composited over track 0: tracks stack bottom-up, and the topmost full-frame clip covers everything below. Pick a layout to share the frame — halves for a split screen, pip for picture-in-picture. Asset ids come from `media` in the editor state.",
+      "Put a project video or image asset on an overlay video track, composited over track 0: tracks stack bottom-up, and the topmost full-frame clip covers everything below. Pick a layout to share the frame — halves for a split screen, pip for picture-in-picture. Asset ids come from `media` in the editor state. An image over a talking head belongs to the line that speaks of it: start it as that line starts and end it as the line ends.",
     inputSchema: obj({
       asset_id: str("Project asset id (video or image)"),
       start: num("Timeline start s (default: the playhead)"),
+      end: num(`Timeline end s. An image runs from start to here; without it an image runs ${IMAGE_CLIP_SECONDS}s, stopping at the end of track 0. A video runs its source's length unless this ends it sooner`),
       track: num("Video track, 1 or higher; 1 = first layer above track 0, higher = further in front (default 1)"),
       layout: {
         type: "string",
@@ -286,11 +287,11 @@ export const TIMELINE_TOOLS = [
       layout: {
         type: "string",
         enum: ["full", "top", "bottom", "left", "right", "pip"],
-        description: "Frame region preset",
+        description: "Frame region preset; leave out when passing region",
       },
       region: obj({
-        x: num("Left edge in frame fractions; may sit past the frame (negative = off the left side), the frame crops the overhang"),
-        y: num("Top edge in frame fractions; may sit past the frame (negative = above the top)"),
+        x: num("Centre of the box, frame fractions (0.5 = the middle), as add_title and add_shape take x; the box may run past the frame, and the frame crops the overhang"),
+        y: num("Centre of the box, frame fractions (0.5 = the middle)"),
         w: num(`Width in frame fractions, 0.05..${REGION_MAX_SCALE}; past 1 the box runs off the frame`),
         h: num(`Height in frame fractions, 0.05..${REGION_MAX_SCALE}`),
       }, ["x", "y", "w", "h"]),
