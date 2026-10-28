@@ -7,6 +7,7 @@ import {
   ChevronDown,
   ChevronLeft,
   Monitor,
+  Share2,
   Smartphone,
   Sparkles,
   Upload,
@@ -47,12 +48,17 @@ export function MockTopBar({ project }: { project: MockProject }) {
           <Check className="size-3" /> {t("topBar.saved")}
         </span>
       </div>
+      {/* Share and Export are ghost buttons; Chat is the primary control and
+          reads as pressed, since the chat column is open beside the cut. */}
       <div className="flex items-center gap-2">
         <span className="flex h-8 items-center gap-1.5 rounded-md px-3 text-xs font-medium text-foreground">
-          <Sparkles className="size-3.5" /> {t("topBar.chat")}
+          <Share2 className="size-3.5" /> {t("topBar.share")}
+        </span>
+        <span className="flex h-8 items-center gap-1.5 rounded-md px-3 text-xs font-medium text-foreground">
+          <Upload className="size-3.5" /> {t("topBar.export")}
         </span>
         <span className="flex h-8 items-center gap-1.5 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground shadow-xs">
-          <Upload className="size-3.5" /> {t("topBar.export")}
+          <Sparkles className="size-3.5" /> {t("topBar.chat")}
         </span>
       </div>
     </header>

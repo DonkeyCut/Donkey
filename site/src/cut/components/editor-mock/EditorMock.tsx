@@ -21,13 +21,11 @@ const DESIGN_H = 726;
 // Which slice of that design is on screen. "full" is the whole editor; "ai"
 // drops the side panel and keeps the preview, timeline, and chat column, which
 // is how the same mock reads as a different picture when the subject is the
-// assistant.
-const VIEWS = {
-  full: { x: 0, w: DESIGN_W },
-  ai: { x: 300, w: DESIGN_W - 300 },
-} as const;
+// assistant. The panel is the 68px rail, plus 252px when a tab is open.
+const RAIL_W = 68;
+const PANEL_W = 252;
 
-export type EditorMockView = keyof typeof VIEWS;
+export type EditorMockView = "full" | "ai";
 
 type Props = {
   /** Show exactly the onboarding project in place of the landing's showcase
@@ -83,7 +81,8 @@ export function EditorMock({
     return () => ro.disconnect();
   }, []);
 
-  const { x, w } = VIEWS[view];
+  const x = view === "ai" ? RAIL_W + (projects[active].panel ? PANEL_W : 0) : 0;
+  const w = DESIGN_W - x;
   const byWidth = box.width / w;
   const byHeight = box.height / DESIGN_H;
   const scale =
@@ -137,7 +136,7 @@ export function EditorMock({
           >
             <div
               aria-hidden
-              className="pointer-events-none relative origin-top-left overflow-hidden bg-card font-system text-foreground antialiased select-none"
+              className="pointer-events-none relative origin-top-left overflow-hidden bg-card text-left font-system text-foreground antialiased select-none"
               style={{
                 width: DESIGN_W,
                 height: DESIGN_H,

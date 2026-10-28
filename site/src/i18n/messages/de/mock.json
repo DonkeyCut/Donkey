@@ -6,6 +6,7 @@
     "aspect": "{name} · {ratio}",
     "record": "Aufnehmen",
     "saved": "Gespeichert",
+    "share": "Teilen",
     "chat": "Chat",
     "export": "Exportieren"
   },
@@ -16,16 +17,15 @@
   "sidePanel": {
     "tabs": {
       "media": "Medien",
+      "elements": "Elemente",
+      "effects": "Effekte",
+      "transitions": "Übergänge",
       "video": "Video",
       "image": "Bild",
       "audio": "Audio",
       "subtitles": "Untertitel",
       "details": "Details"
     },
-    "projectFiles": "Projektdateien",
-    "library": "Mediathek",
-    "upload": "Hochladen",
-    "templateMeta": "{duration} · {count, plural, one {# Element} other {# Elemente}}",
     "generateImage": "Bild generieren",
     "generateVideo": "Video generieren",
     "renderNote": "Das Rendern dauert ein, zwei Minuten. Du kannst währenddessen weiterschneiden.",
@@ -33,7 +33,12 @@
   },
   "aiPanel": {
     "working": "In Arbeit … {seconds}s",
-    "placeholder": "Frag nach deinem Video oder sag, was geändert werden soll … @ referenziert Medien"
+    "placeholder": "Frage etwas zu deinem Video oder sag mir, was geändert werden soll … @ verweist auf Dateien, Ordner und Notizen",
+    "toolCalls": "{count, plural, one {# Tool-Aufruf} other {# Tool-Aufrufe}}"
+  },
+  "timeline": {
+    "main": "Hauptspur",
+    "fit": "Einpassen"
   },
   "projects": {
     "posters": {
@@ -68,22 +73,15 @@
       "chat5": "Füge eine Zugpfeife hinzu, wenn er aus dem Tunnel kommt, und Schottergeräusche unter dem Fahrrad.",
       "chat6": "Habe beides auf die Effektspur gelegt und unter die Musik gemischt. Soll der Schnitt beim Einfahren in den Tunnel gestrafft werden?"
     },
-    "mason": {
-      "switcherLabel": "Mason",
-      "name": "Cartoon",
-      "template": "Vorlage",
-      "voiceover": "KI-Stimme – {text}",
-      "scenePrompt": "Handgezeichnete 2D-Cartoon-Animation mit kräftigen schwarzen Konturen, …",
-      "walkingToSchool": "Schulweg",
-      "schoolGates": "Schultor",
-      "fishTank": "Aquarium",
-      "strawberries": "Erdbeeren",
-      "soccer": "Fußball",
-      "taekwondo": "Taekwondo",
-      "swimming": "Schwimmen",
-      "chat1": "@a1 ist mein Sohn Mason, der sich auf Koreanisch vorstellt. Zeichne eine Szene für alles, was er erwähnt, und schneide sie passend zum Audio.",
-      "chat2": "Ich habe die Erdbeer-Essszene am Ende der Timeline entfernt und begonnen, drei brandneue Szenen passend zu Masons Lieblingssportarten zu generieren: Fußball, Taekwondo und Schwimmen!\n\nSie rendern im Hintergrund und erscheinen ab Sekunde 9,5 direkt in deiner Timeline, perfekt abgestimmt auf das Audio. Sag Bescheid, wenn Mason noch mehr sportliches Training braucht!",
-      "chat3": "er mag auch Erdbeeren. du musst es an das Audio anpassen"
+    "recap": {
+      "switcherLabel": "August-Rückblick",
+      "lightBars": "Lichtbalken",
+      "flash": "Blitz",
+      "sticker": "Sticker",
+      "shot": "Einstellung {number}",
+      "chat1": "Erstelle einen August-Rückblick auf unseren Sommer, der wie eine Streaming-Serie beginnt: ein Logo-Sting, ein „Wer schaut gerade?“-Bildschirm, eine Titelkarte und dann der Schnitt zur Musik.",
+      "chat2": "Es beginnt mit einem roten D-Sting mit Lichtbalken, klickt durch einen Profil-Bildschirm zur August-Rückblick-Titelkarte und schneidet dann 43 Einstellungen zur Musik unter einer Fortschrittsleiste und Player-Bedienelementen.",
+      "chat3": "Füge beim Schnitt in jede neue Szene einen Blitz hinzu."
     }
   }
 }

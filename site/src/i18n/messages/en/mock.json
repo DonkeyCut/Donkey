@@ -6,6 +6,7 @@
     "aspect": "{name} · {ratio}",
     "record": "Record",
     "saved": "Saved",
+    "share": "Share",
     "chat": "Chat",
     "export": "Export"
   },
@@ -16,16 +17,15 @@
   "sidePanel": {
     "tabs": {
       "media": "Media",
+      "elements": "Elements",
+      "effects": "Effects",
+      "transitions": "Transitions",
       "video": "Video",
       "image": "Image",
       "audio": "Audio",
       "subtitles": "Subtitles",
       "details": "Details"
     },
-    "projectFiles": "Project Files",
-    "library": "Library",
-    "upload": "Upload",
-    "templateMeta": "{duration} · {count, plural, one {# item} other {# items}}",
     "generateImage": "Generate image",
     "generateVideo": "Generate video",
     "renderNote": "Renders take a minute or two. Keep editing while it runs.",
@@ -33,7 +33,12 @@
   },
   "aiPanel": {
     "working": "Working… {seconds}s",
-    "placeholder": "Ask about your video, or tell me what to change… @ references media"
+    "placeholder": "Ask about your video, or tell me what to change… @ references files, folders, and notes",
+    "toolCalls": "{count, plural, one {# tool call} other {# tool calls}}"
+  },
+  "timeline": {
+    "main": "Main",
+    "fit": "Fit"
   },
   "projects": {
     "posters": {
@@ -68,22 +73,15 @@
       "chat5": "Add a train whistle when it clears the tunnel, and gravel under the bicycle.",
       "chat6": "Placed both on the effects track and mixed them under the score. Want the cut tightened where the train enters the tunnel?"
     },
-    "mason": {
-      "switcherLabel": "Mason",
-      "name": "Cartoon",
-      "template": "Template",
-      "voiceover": "AI voice — {text}",
-      "scenePrompt": "Hand-drawn 2D cartoon animation with bold black outlines,…",
-      "walkingToSchool": "Walking to school",
-      "schoolGates": "School gates",
-      "fishTank": "Fish tank",
-      "strawberries": "Strawberries",
-      "soccer": "Soccer",
-      "taekwondo": "Taekwondo",
-      "swimming": "Swimming",
-      "chat1": "@a1 is my son Mason introducing himself in Korean. Draw a scene for everything he mentions and cut it to the audio.",
-      "chat2": "I've cleared the strawberry eating scene at the end of the timeline and started generating three brand new scenes matching Mason's favorite sports: soccer, taekwondo, and swimming!\n\nThey will render in the background and pop right onto your timeline starting at 9.5 seconds to match the audio perfectly. Let me know if Mason needs any more athletic training!",
-      "chat3": "he also likes strawberries. you need to match the audio"
+    "recap": {
+      "switcherLabel": "August Recap",
+      "lightBars": "Light bars",
+      "flash": "Flash",
+      "sticker": "Sticker",
+      "shot": "Shot {number}",
+      "chat1": "Make an August recap of our summer that opens like a streaming show: a logo sting, a who's watching screen, a title card, then the montage cut to the music.",
+      "chat2": "It opens on a red D sting with light bars, clicks through a profile screen into the August Recap title card, then cuts 43 shots to the music under a progress bar and player controls.",
+      "chat3": "Add a flash on the cut into each new scene."
     }
   }
 }

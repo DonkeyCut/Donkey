@@ -85,6 +85,7 @@ function MockMessage({
   message: MockChatMessage;
   index: number;
 }) {
+  const t = useTranslations("mock.aiPanel");
   const delay = { animationDelay: `${index * 120}ms` };
   if (message.role === "user") {
     return (
@@ -100,14 +101,12 @@ function MockMessage({
   }
   return (
     <div className="mock-chat-msg mb-3 flex flex-col gap-1.5" style={delay}>
-      {message.tool && (
-        <span className="flex w-fit max-w-full items-center gap-1.5 rounded-md border border-border px-2 py-1 text-[11px] text-muted-foreground">
+      {message.toolCalls && (
+        <span className="flex w-full items-center gap-1.5 rounded-md border border-border px-2 py-1.5 text-[11px] text-muted-foreground">
           <Wrench className="size-3 shrink-0" />
-          <span className="font-mono">{message.tool.name}</span>
-          {message.tool.count && (
-            <span className="text-[10px] tabular-nums">×{message.tool.count}</span>
-          )}
+          {t("toolCalls", { count: message.toolCalls })}
           <Check className="size-3 text-emerald-600" />
+          <ChevronDown className="ml-auto size-3" />
         </span>
       )}
       <div className="max-w-full text-[12.5px] leading-relaxed whitespace-pre-line">

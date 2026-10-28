@@ -6,6 +6,7 @@
     "aspect": "{name} · {ratio}",
     "record": "Grabar",
     "saved": "Guardado",
+    "share": "Compartir",
     "chat": "Chat",
     "export": "Exportar"
   },
@@ -16,16 +17,15 @@
   "sidePanel": {
     "tabs": {
       "media": "Multimedia",
+      "elements": "Elementos",
+      "effects": "Efectos",
+      "transitions": "Transiciones",
       "video": "Video",
       "image": "Imagen",
       "audio": "Audio",
       "subtitles": "Subtítulos",
       "details": "Detalles"
     },
-    "projectFiles": "Archivos del proyecto",
-    "library": "Biblioteca",
-    "upload": "Subir",
-    "templateMeta": "{duration} · {count, plural, one {# elemento} other {# elementos}}",
     "generateImage": "Generar imagen",
     "generateVideo": "Generar video",
     "renderNote": "Los renders tardan un minuto o dos. Sigue editando mientras tanto.",
@@ -33,7 +33,12 @@
   },
   "aiPanel": {
     "working": "Trabajando… {seconds}s",
-    "placeholder": "Pregunta sobre tu video o dime qué cambiar… @ hace referencia a multimedia"
+    "placeholder": "Pregunta sobre tu video o dime qué cambiar… @ hace referencia a archivos, carpetas y notas",
+    "toolCalls": "{count, plural, one {# llamada a herramienta} other {# llamadas a herramientas}}"
+  },
+  "timeline": {
+    "main": "Principal",
+    "fit": "Ajustar"
   },
   "projects": {
     "posters": {
@@ -68,22 +73,15 @@
       "chat5": "Agrega un silbato de tren cuando salga del túnel y grava bajo la bicicleta.",
       "chat6": "Puse ambos en la pista de efectos y los mezclé bajo la música. ¿Quieres ajustar el corte donde el tren entra al túnel?"
     },
-    "mason": {
-      "switcherLabel": "Mason",
-      "name": "Caricatura",
-      "template": "Plantilla",
-      "voiceover": "Voz de IA — {text}",
-      "scenePrompt": "Animación de caricatura en 2D dibujada a mano con trazos negros gruesos,…",
-      "walkingToSchool": "Caminando a la escuela",
-      "schoolGates": "Portón de la escuela",
-      "fishTank": "Pecera",
-      "strawberries": "Fresas",
-      "soccer": "Fútbol",
-      "taekwondo": "Taekwondo",
-      "swimming": "Natación",
-      "chat1": "@a1 es mi hijo Mason presentándose en coreano. Dibuja una escena para todo lo que mencione y córtala al audio.",
-      "chat2": "¡Eliminé la escena comiendo fresas al final de la línea de tiempo y comencé a generar tres escenas totalmente nuevas que coinciden con los deportes favoritos de Mason: fútbol, taekwondo y natación!\\n\\nSe renderizarán en segundo plano y aparecerán directo en tu línea de tiempo a partir de los 9.5 segundos para coincidir a la perfección con el audio. ¡Avísame si Mason necesita más entrenamiento deportivo!",
-      "chat3": "también le gustan las fresas. tienes que sincronizarlo con el audio"
+    "recap": {
+      "switcherLabel": "Resumen de agosto",
+      "lightBars": "Barras de luz",
+      "flash": "Flash",
+      "sticker": "Sticker",
+      "shot": "Toma {number}",
+      "chat1": "Haz un resumen de agosto de nuestro verano que empiece como un programa de streaming: un sting del logo, una pantalla de «¿quién está viendo?», una tarjeta de título y luego el montaje al ritmo de la música.",
+      "chat2": "Abre con un sting de una D roja con barras de luz, pasa por una pantalla de perfiles hacia la tarjeta de título Resumen de agosto y luego corta 43 tomas al ritmo de la música bajo una barra de progreso y controles de reproducción.",
+      "chat3": "Agrega un flash en el corte hacia cada nueva escena."
     }
   }
 }

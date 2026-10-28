@@ -6,6 +6,7 @@
     "aspect": "{name} · {ratio}",
     "record": "Gravar",
     "saved": "Salvo",
+    "share": "Compartilhar",
     "chat": "Chat",
     "export": "Exportar"
   },
@@ -16,16 +17,15 @@
   "sidePanel": {
     "tabs": {
       "media": "Mídia",
+      "elements": "Elementos",
+      "effects": "Efeitos",
+      "transitions": "Transições",
       "video": "Vídeo",
       "image": "Imagem",
       "audio": "Áudio",
       "subtitles": "Legendas",
       "details": "Detalhes"
     },
-    "projectFiles": "Arquivos do projeto",
-    "library": "Biblioteca",
-    "upload": "Fazer upload",
-    "templateMeta": "{duration} · {count, plural, one {# item} other {# itens}}",
     "generateImage": "Gerar imagem",
     "generateVideo": "Gerar vídeo",
     "renderNote": "A renderização leva um ou dois minutos. Continue editando enquanto ela roda.",
@@ -33,7 +33,12 @@
   },
   "aiPanel": {
     "working": "Processando… {seconds}s",
-    "placeholder": "Pergunte sobre seu vídeo ou diga o que mudar… @ menciona mídias"
+    "placeholder": "Pergunte sobre seu vídeo ou diga o que alterar… @ faz referência a arquivos, pastas e notas",
+    "toolCalls": "{count, plural, one {# chamada de ferramenta} other {# chamadas de ferramentas}}"
+  },
+  "timeline": {
+    "main": "Principal",
+    "fit": "Ajustar"
   },
   "projects": {
     "posters": {
@@ -68,22 +73,15 @@
       "chat5": "Adicione um apito de trem quando ele sair do túnel e cascalho sob a bicicleta.",
       "chat6": "Coloquei ambos na faixa de efeitos e os mixei sob a trilha. Quer ajustar o corte onde o trem entra no túnel?"
     },
-    "mason": {
-      "switcherLabel": "Mason",
-      "name": "Desenho animado",
-      "template": "Modelo",
-      "voiceover": "Voz de IA — {text}",
-      "scenePrompt": "Animação 2D desenhada à mão estilo cartoon com contornos pretos marcantes,…",
-      "walkingToSchool": "Caminhando para a escola",
-      "schoolGates": "Portões da escola",
-      "fishTank": "Aquário",
-      "strawberries": "Morangos",
-      "soccer": "Futebol",
-      "taekwondo": "Taekwondo",
-      "swimming": "Natação",
-      "chat1": "@a1 é meu filho Mason se apresentando em coreano. Desenhe uma cena para tudo o que ele mencionar e corte de acordo com o áudio.",
-      "chat2": "Removi a cena comendo morangos no fim da linha do tempo e comecei a gerar três cenas novinhas com os esportes favoritos do Mason: futebol, taekwondo e natação!\\n\\nElas serão renderizadas em segundo plano e aparecerão direto na sua linha do tempo a partir de 9,5 segundos para sincronizar perfeitamente com o áudio. Me avise se o Mason precisar de mais algum treino de atleta!",
-      "chat3": "ele também gosta de morangos. você precisa sincronizar com o áudio"
+    "recap": {
+      "switcherLabel": "Retrospectiva de Agosto",
+      "lightBars": "Barras de luz",
+      "flash": "Flash",
+      "sticker": "Adesivo",
+      "shot": "Tomada {number}",
+      "chat1": "Faça uma retrospectiva de agosto do nosso verão que comece como uma série de streaming: uma vinheta de logo, uma tela de quem está assistindo, um cartão de título e depois a montagem no ritmo da música.",
+      "chat2": "Começa com uma vinheta de um D vermelho com barras de luz, passa pela tela de perfis até o cartão de título Retrospectiva de Agosto e depois corta 43 tomadas no ritmo da música sob uma barra de progresso e controles do player.",
+      "chat3": "Adicione um flash no corte para cada nova cena."
     }
   }
 }

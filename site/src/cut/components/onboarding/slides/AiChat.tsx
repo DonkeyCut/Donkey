@@ -19,10 +19,10 @@ export function AiChatSlide() {
         {/* Copy and scrim are positioned against the mock, not the slide, so
             the composition holds the same proportions however wide the window
             gets — the editor can't drift away from the words. */}
-        {/* Centered, and capped by height as well as width: the mock is 1.24×
+        {/* Centered, and capped by height as well as width: the mock is 1.56×
             as wide as it is tall, so a short window has to bound it or it runs
             past the bottom of the slide. */}
-        <div className="relative mx-auto w-[min(100%,86vh)]">
+        <div className="relative mx-auto w-[min(100%,108vh)]">
           <div className="pointer-events-none [mask-image:linear-gradient(to_right,transparent_10%,black_70%)] [-webkit-mask-image:linear-gradient(to_right,transparent_10%,black_70%)]">
             <EditorMock
               project="onboarding"

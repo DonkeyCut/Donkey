@@ -22,10 +22,14 @@ export function MockPreview({ project, active }: { project: MockProject; active:
     }
   }, [active]);
 
+  // With the side panel folded to its rail the preview has most of the frame,
+  // and a widescreen stage grows into it the way the editor's does.
   const stage =
     project.aspect === "9:16"
       ? { width: 250, height: 444 }
-      : { width: 480, height: 270 };
+      : project.panel
+        ? { width: 480, height: 270 }
+        : { width: 704, height: 396 };
 
   return (
     <div className="flex min-w-0 items-center justify-center bg-muted/40 px-6">

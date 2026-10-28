@@ -6,6 +6,7 @@
     "aspect": "{name} · {ratio}",
     "record": "录制",
     "saved": "已保存",
+    "share": "分享",
     "chat": "对话",
     "export": "导出"
   },
@@ -16,16 +17,15 @@
   "sidePanel": {
     "tabs": {
       "media": "媒体",
+      "elements": "元素",
+      "effects": "特效",
+      "transitions": "转场",
       "video": "视频",
       "image": "图片",
       "audio": "音频",
       "subtitles": "字幕",
       "details": "详情"
     },
-    "projectFiles": "项目文件",
-    "library": "素材库",
-    "upload": "上传",
-    "templateMeta": "{duration} · {count, plural, other {# 项}}",
     "generateImage": "生成图片",
     "generateVideo": "生成视频",
     "renderNote": "渲染需要一到两分钟。后台渲染期间你可以继续编辑。",
@@ -33,7 +33,12 @@
   },
   "aiPanel": {
     "working": "正在处理… {seconds}秒",
-    "placeholder": "询问有关视频的问题，或告诉我需要调整什么… 输入 @ 引用媒体"
+    "placeholder": "询问关于视频的问题，或告诉我需要修改什么… 输入 @ 可引用文件、文件夹和笔记",
+    "toolCalls": "{count, plural, other {# 次工具调用}}"
+  },
+  "timeline": {
+    "main": "主轨道",
+    "fit": "适应"
   },
   "projects": {
     "posters": {
@@ -68,22 +73,15 @@
       "chat5": "火车出隧道时加上鸣笛声，再给自行车加上碾过碎石的声音。",
       "chat6": "已将两者都放在特效轨道上，并混音置于配乐之下。火车进隧道那里的剪辑需要收紧一点吗？"
     },
-    "mason": {
-      "switcherLabel": "Mason",
-      "name": "卡通",
-      "template": "模板",
-      "voiceover": "AI 旁白 — {text}",
-      "scenePrompt": "粗黑色轮廓的手绘 2D 卡通动画，…",
-      "walkingToSchool": "上学路上",
-      "schoolGates": "校门口",
-      "fishTank": "鱼缸",
-      "strawberries": "草莓",
-      "soccer": "足球",
-      "taekwondo": "跆拳道",
-      "swimming": "游泳",
-      "chat1": "@a1 是我儿子 Mason 用韩语做自我介绍。为他提到的每件事绘制一个场景，并对齐音频进行剪辑。",
-      "chat2": "我已清除时间线末尾吃草莓的场景，并开始生成与 Mason 最喜欢的运动（足球、跆拳道和游泳）匹配的三个全新场景！\\n\\n它们将在后台渲染，并从 9.5 秒处直接出现在你的时间线上，与音频完美对齐。如果 Mason 还需要其他体育训练，随时告诉我！",
-      "chat3": "他也喜欢草莓。你需要对齐音频"
+    "recap": {
+      "switcherLabel": "八月回顾",
+      "lightBars": "光条",
+      "flash": "闪光",
+      "sticker": "贴纸",
+      "shot": "镜头 {number}",
+      "chat1": "为我们的夏天制作一个八月回顾，开场风格类似流媒体节目：一个 logo 片头动效、“谁在观看”界面、一张标题卡，然后是跟随音乐节拍剪辑的蒙太奇。",
+      "chat2": "开场是一个带有光条的红色 D 标志动效，点击个人资料界面进入“八月回顾”标题卡，接着在进度条和播放控件下方跟随音乐卡点剪辑 43 个镜头。",
+      "chat3": "在切入每个新场景时添加闪光。"
     }
   }
 }

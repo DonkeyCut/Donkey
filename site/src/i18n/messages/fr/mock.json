@@ -6,6 +6,7 @@
     "aspect": "{name} · {ratio}",
     "record": "Enregistrer",
     "saved": "Enregistré",
+    "share": "Partager",
     "chat": "Chat",
     "export": "Exporter"
   },
@@ -16,16 +17,15 @@
   "sidePanel": {
     "tabs": {
       "media": "Médias",
+      "elements": "Éléments",
+      "effects": "Effets",
+      "transitions": "Transitions",
       "video": "Vidéo",
       "image": "Image",
       "audio": "Audio",
       "subtitles": "Sous-titres",
       "details": "Détails"
     },
-    "projectFiles": "Fichiers du projet",
-    "library": "Bibliothèque",
-    "upload": "Importer",
-    "templateMeta": "{duration} · {count, plural, one {# élément} other {# éléments}}",
     "generateImage": "Générer une image",
     "generateVideo": "Générer une vidéo",
     "renderNote": "Le rendu prend une minute ou deux. Continuez à monter pendant ce temps.",
@@ -33,7 +33,12 @@
   },
   "aiPanel": {
     "working": "Traitement… {seconds}s",
-    "placeholder": "Posez une question sur votre vidéo ou dites quoi modifier… @ pour référencer un média"
+    "placeholder": "Posez une question sur votre vidéo ou indiquez ce qu'il faut modifier… @ référence fichiers, dossiers et notes",
+    "toolCalls": "{count, plural, one {# appel d'outil} other {# appels d'outils}}"
+  },
+  "timeline": {
+    "main": "Principale",
+    "fit": "Ajuster"
   },
   "projects": {
     "posters": {
@@ -68,22 +73,15 @@
       "chat5": "Ajoutez un sifflet de train à la sortie du tunnel et le bruit des graviers sous le vélo.",
       "chat6": "Les deux sont placés sur la piste d'effets et mixés sous la musique. Voulez-vous resserrer la coupe à l'entrée du train dans le tunnel ?"
     },
-    "mason": {
-      "switcherLabel": "Mason",
-      "name": "Dessin animé",
-      "template": "Modèle",
-      "voiceover": "Voix IA — {text}",
-      "scenePrompt": "Animation cartoon 2D dessinée à la main aux contours noirs marqués,…",
-      "walkingToSchool": "Sur le chemin de l'école",
-      "schoolGates": "Grille de l'école",
-      "fishTank": "Aquarium",
-      "strawberries": "Fraises",
-      "soccer": "Football",
-      "taekwondo": "Taekwondo",
-      "swimming": "Natation",
-      "chat1": "@a1 est mon fils Mason qui se présente en coréen. Dessinez une scène pour chaque élément qu'il mentionne et calez-la sur l'audio.",
-      "chat2": "J'ai supprimé la scène de dégustation de fraises à la fin de la timeline et commencé à générer trois toutes nouvelles scènes correspondant aux sports préférés de Mason : le football, le taekwondo et la natation !\\n\\nLeur rendu s'effectuera en arrière-plan et elles apparaîtront directement sur votre timeline à partir de 9,5 secondes pour s'aligner parfaitement sur l'audio. Dites-moi si Mason a besoin d'autres entraînements sportifs !",
-      "chat3": "il aime aussi les fraises. vous devez vous caler sur l'audio"
+    "recap": {
+      "switcherLabel": "Récap d'août",
+      "lightBars": "Barres lumineuses",
+      "flash": "Flash",
+      "sticker": "Autocollant",
+      "shot": "Plan {number}",
+      "chat1": "Faites un récap d'août de notre été qui commence comme une série en streaming : un jingle avec logo, un écran « Qui regarde ? », un carton de titre, puis le montage calé sur la musique.",
+      "chat2": "Elle commence par un jingle avec un D rouge et des barres lumineuses, passe par un écran de profil vers le carton de titre Récap d'août, puis enchaîne 43 plans calés sur le rythme sous une barre de progression et les commandes de lecture.",
+      "chat3": "Ajoutez un flash à la coupe vers chaque nouvelle scène."
     }
   }
 }
