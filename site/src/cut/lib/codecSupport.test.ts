@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { readCodecs, type CodecProbes } from "./codecSupport";
+import { compatNeedOf, noteUndecoded, readCodecs, type CodecProbes } from "./codecSupport";
 
 /** A storage that keeps what it is given, like a browser's localStorage. */
 function memoryStorage(): Pick<Storage, "getItem" | "setItem"> {
@@ -43,5 +43,23 @@ describe("browser codecs", () => {
     const { io } = probes({ h264: false, aac: true });
     io.storage = null;
     expect(await readCodecs(io)).toEqual({ h264: false, aac: true });
+  });
+});
+
+describe("streams this page could not decode", () => {
+  test("a stream that failed to decode asks for its compat cover", async () => {
+    const asset = { id: "a1", type: "video" as const, url: "https://media.example/a.mp4" };
+    expect(await compatNeedOf(asset)).toBeNull();
+
+    expect(noteUndecoded("a1", "audio")).toBe(true);
+    expect(await compatNeedOf(asset)).toBe("audio");
+
+    // A second failure of the same stream is the file's own.
+    expect(noteUndecoded("a1", "audio")).toBe(false);
+
+    // Picture widens the cover, and a VP9 proxy carries the sound as well.
+    expect(noteUndecoded("a1", "video")).toBe(true);
+    expect(await compatNeedOf(asset)).toBe("video");
+    expect(noteUndecoded("a1", "audio")).toBe(false);
   });
 });

@@ -18,12 +18,15 @@ import { FONT_RE, LUT_RE } from "./libraryFileType";
 import { markUploadStored, startUpload, uploadInFlight } from "./importQueue";
 import { convertProjectFile, dropProjectFile, mp4DisplayName } from "./mediaConvert";
 import { awaitsCompat, ensureProxy } from "./mediaProxy";
+import { noteUndecoded } from "./codecSupport";
+import { compatCovers, type CompatCover } from "./proxyNames";
 import {
   audioChunks,
   audioPeaks,
   audioTrackOf,
   decodeAudioSpan,
   frameSink,
+  frameSinkIsCustom,
   openMedia,
   openMediaShared,
   probeMediaColor,
@@ -2102,6 +2105,37 @@ function readFailed(asset: MediaAsset, what: string, err: unknown, subject = ass
   reportSwallowed(what, err, subject);
 }
 
+// The DOMException names WebCodecs gives a decoder that refused its input: a
+// config it cannot open, or packets it failed on.
+const DECODER_REFUSALS = new Set(["EncodingError", "NotSupportedError"]);
+
+/** Whether `err` is this page's decoders refusing a stream: a track no decoder
+ * here opens (HEVC in Firefox), or a decoder failing on the packets it was
+ * handed (a malformed MP3 track in a screen recording). */
+function decodeRefused(err: unknown): boolean {
+  if (err instanceof DOMException) return DECODER_REFUSALS.has(err.name);
+  if (err instanceof UnreadableMediaError) return err.undecodable;
+  return err instanceof UserError && err.code === "media_no_readable_video";
+}
+
+/**
+ * Hand a stream this page failed to decode to a compat proxy, which a
+ * converter writes in codecs every browser decodes and whose landing enriches
+ * the asset again. True when the failure went that way; false when it is the
+ * file's own: the stream already reads from a compat proxy, or failed here
+ * before.
+ */
+function coverRefused(asset: MediaAsset, cover: CompatCover, err: unknown): boolean {
+  if (frameSinkIsCustom() || !decodeRefused(err)) return false;
+  const live = liveAsset(asset.id) ?? asset;
+  if (live.proxy && compatCovers(live.proxy.fileName, cover)) return false;
+  if (!noteUndecoded(asset.id, cover)) return false;
+  // An upload still running asks for its proxy when it lands (importQueue.ts).
+  const projectId = useEditor.getState().projectId;
+  if (projectId && !live.upload) void ensureProxy(projectId, live);
+  return true;
+}
+
 // A failed enrich books itself more tries. Filmstrip and waveform reads drop
 // out together with the preview's when media reads fail, and the sweep that
 // would try again runs only on project open — so a blip at open used to leave
@@ -2368,6 +2402,7 @@ export async function enrichAsset(asset: MediaAsset, src = asset.url) {
                 // next open reads the file again in place of keeping a
                 // strip that stops partway.
                 landDerived(asset.id, { peaks: undefined });
+                if (coverRefused(asset, "audio", err)) return;
                 readFailed(asset, "[cut] peaks failed", err);
               })
           : undefined;
@@ -2429,6 +2464,9 @@ export async function enrichAsset(asset: MediaAsset, src = asset.url) {
       enrichRetries.delete(asset.id);
     }
   } catch (err) {
+    // A stream this page cannot decode reads from a compat proxy, whose
+    // landing enriches the asset again.
+    if ((asset.type === "video" || asset.type === "audio") && coverRefused(asset, asset.type, err)) return;
     // Thumbnails and waveforms are decorative; editing works without them.
     // The failure still gets recorded — clips stop their loading pulse — and
     // reported, which carries it into PostHog error tracking with the file's
@@ -2508,6 +2546,7 @@ export async function ensurePeaks(asset: MediaAsset) {
     // Waveforms are decorative; editing works without them. A walk that
     // published partway comes off the asset, so the next read starts clean.
     landDerived(asset.id, { peaks: undefined });
+    if (coverRefused(asset, "audio", err)) return;
     readFailed(asset, "[cut] peaks failed", err);
   }
 }

@@ -115,19 +115,43 @@ function codecsOf(asset: Pick<MediaAsset, "url">) {
   return read;
 }
 
+/** Streams this page found it cannot decode by trying, by asset id, for the
+ * session: a decoder that refused a track the codec checks passed, e.g. HEVC
+ * in Firefox, or a malformed MP3 track in a screen recording. */
+const refusedHere = new Map<string, CompatCover>();
+
+/** Record that this page could not decode the asset's `cover` stream, so its
+ * readers move to a compat proxy. False when that stream was already covered
+ * this way: a second failure is the file's own. */
+export function noteUndecoded(assetId: string, cover: CompatCover): boolean {
+  const held = refusedHere.get(assetId);
+  if (held === "video" || held === cover) {
+    return false;
+  }
+  refusedHere.set(assetId, cover);
+  return true;
+}
+
 /** The stream of the asset's master this browser cannot decode, as the compat
  * cover that carries it (proxyNames.ts): "video" for H.264 picture, which
  * covers the sound too, "audio" for AAC sound. Null when this browser decodes
  * the master — every browser that decodes both codecs answers without reading
  * the file. ProRes has its own proxy and WASM decoder, and takes none. */
 export async function compatNeedOf(
-  asset: Pick<MediaAsset, "type" | "url" | "block" | "color">
+  asset: Pick<MediaAsset, "id" | "type" | "url" | "block" | "color">
 ): Promise<CompatCover | null> {
   if ((asset.type !== "video" && asset.type !== "audio") || asset.block) {
     return null;
   }
   if (asset.color?.codec?.startsWith("ap")) {
     return null;
+  }
+
+  // A stream that already failed to decode here needs its cover whatever the
+  // codec checks say.
+  const refused = refusedHere.get(asset.id);
+  if (refused) {
+    return refused;
   }
   const codecs = await browserCodecs();
   if (codecs.h264 && codecs.aac) {

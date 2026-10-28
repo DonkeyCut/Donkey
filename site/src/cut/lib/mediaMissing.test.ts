@@ -130,9 +130,10 @@ describe("other read failures", () => {
     expect(reported).toEqual([]);
   });
 
-  test("an undecodable file is reported against its stage", async () => {
+  test("an undecodable file its compat proxy already covers is reported against its stage", async () => {
     failure = new DOMException("Decoding error.", "EncodingError");
-    const asset = audio();
+    const asset = audio({ proxy: { fileName: "a.mp3.compat.mp4", sizeBytes: 1 } });
+    useEditor.setState({ assets: [asset] });
 
     await ensurePeaks(asset);
 

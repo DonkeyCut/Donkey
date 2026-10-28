@@ -253,6 +253,30 @@ describe("compat proxy", () => {
     expect(coveredSrc("audio", asset.url)).toBe("stored:p/a.mp4.compat.webm");
   });
 
+  test("an ask that arrives while one runs goes again once it lands", async () => {
+    // The enrich asks at open and builds the preview proxy; the strip then
+    // finds the picture undecodable here and asks for a cover mid-build.
+    hevc = true;
+    const asset = h264("a");
+    useEditor.setState({ projectId: "p", assets: [asset] });
+    let land!: () => void;
+    const landed = new Promise<void>((r) => (land = r));
+    const b = backend("cloud", ((_path: string, body: { compat?: string }) =>
+      body.compat
+        ? Response.json({ fileName: "a.mp4.compat.light.webm", sizeBytes: 9 })
+        : landed.then(() => Response.json({ fileName: "a.mp4.light.mp4", sizeBytes: 9 }))) as never);
+    const first = ensureProxy("p", asset, b.api);
+    await new Promise((r) => setTimeout(r, 0));
+
+    compatNeeds = { a: "video" };
+    await ensureProxy("p", asset, b.api);
+    land();
+    await first;
+    for (let i = 0; i < 20 && b.calls.length < 2; i++) await new Promise((r) => setTimeout(r, 0));
+
+    expect(b.calls[1]?.body).toEqual({ file: "a.mp4", compat: "video", maxHeight: HEAVY_PROXY_MAX_HEIGHT });
+  });
+
   test("a heavy cloud video gets the light cover", async () => {
     compatNeeds = { a: "audio" };
     const asset = h264("a");

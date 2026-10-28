@@ -124,6 +124,10 @@ export const useProxyJobs = create<ProxyJobs>((set) => ({
 }));
 
 const inFlight = new Set<string>();
+// Asks that arrived while one was running, by asset id. Each goes again once
+// the running one lands: a stream found undecodable mid-build asks for a
+// cover the running ask did not know it needed.
+const askAgain = new Set<string>();
 
 /** The proxy an asset wants in this page: the compat proxy of a stream this
  * browser cannot decode (light for a heavy video the cloud streams), or the
@@ -160,7 +164,11 @@ export async function ensureProxy(
   // project is next opened.
   if (frameSinkIsCustom()) return;
   watchCovers();
-  if (asset.upload || asset.block || inFlight.has(asset.id)) return;
+  if (asset.upload || asset.block) return;
+  if (inFlight.has(asset.id)) {
+    askAgain.add(asset.id);
+    return;
+  }
   inFlight.add(asset.id);
   try {
     const ask = await proxyAsk(asset, backend);
@@ -189,6 +197,9 @@ export async function ensureProxy(
     }
   } finally {
     inFlight.delete(asset.id);
+    const s = useEditor.getState();
+    const live = s.assets.find((a) => a.id === asset.id);
+    if (askAgain.delete(asset.id) && live && s.projectId === projectId) void ensureProxy(projectId, live, backend);
   }
 }
 
