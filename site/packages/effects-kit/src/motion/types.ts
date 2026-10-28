@@ -145,7 +145,8 @@ export interface MotionPreset {
   /** Loops only: one cycle in seconds at speed 1. */
   period?: number;
   /** Edges only: the longest the ramp may run, seconds, over the shared cap
-   * (a count can run for as long as a loading bar does). */
+   * (a count can run for as long as a loading bar does, a typewriter as
+   * long as its line takes to type). */
   maxSeconds?: number;
   selector?: RangeSelector;
   wiggly?: WigglySelector;

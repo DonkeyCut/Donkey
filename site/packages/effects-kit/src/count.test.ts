@@ -70,6 +70,10 @@ describe("the count entrance", () => {
     expect(edgeMaxSeconds("fade")).toBe(OVERLAY_ANIM_MAX_SECONDS);
   });
 
+  test("a typewriter types for as long as the line takes, like a count", () => {
+    expect(edgeMaxSeconds("typewriter")).toBe(edgeMaxSeconds("count"));
+  });
+
   test("counts up over the entrance, holds, and counts down on the exit", () => {
     const o = title("100 %", anim);
     expect(drawnAt(o, 0)).toBe("0 %");

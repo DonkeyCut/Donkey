@@ -633,6 +633,7 @@
   },
   "typewriter": {
     "label": "Typewriter",
+    "maxSeconds": 10,
     "slots": [
       "in",
       "out"
