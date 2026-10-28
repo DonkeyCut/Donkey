@@ -25,17 +25,13 @@
   "plans": {
     "free": {
       "name": "Free",
-      "detail": "すべてのユーザー向け",
       "body": "クラウドでも、お使いのMacでも、すべてのエディター機能を利用可能。",
-      "cta": "新規プロジェクトを開始",
       "editor": "動画エディターへのフルアクセス",
       "storage": "{mb, number} MBのクラウドストレージ",
       "tools": "インポート、書き出し、ローカル文字起こし",
       "subscriptions": "ClaudeやCodexのサブスクリプションと連携"
     },
     "paid": {
-      "detail": "{plan, select, plus {まずはここから} pro {最もお得} other {大量の生成向け}}",
-      "cta": "{plan}を入手",
       "everythingInFree": "Freeプランの全機能"
     }
   },

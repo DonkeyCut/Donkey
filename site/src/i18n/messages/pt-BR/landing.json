@@ -25,17 +25,13 @@
   "plans": {
     "free": {
       "name": "Gratuito",
-      "detail": "Para todos",
       "body": "O editor completo, na nuvem ou no seu próprio Mac.",
-      "cta": "Começar um novo projeto",
       "editor": "Acesso completo ao editor de vídeo",
       "storage": "{mb, number} MB de armazenamento na nuvem",
       "tools": "Importação, exportação e transcrição local",
       "subscriptions": "Conecte sua assinatura do Claude ou Codex"
     },
     "paid": {
-      "detail": "{plan, select, plus {Para começar} pro {Melhor custo-benefício} other {Para geração intensa}}",
-      "cta": "Obter {plan}",
       "everythingInFree": "Tudo do plano Gratuito"
     }
   },

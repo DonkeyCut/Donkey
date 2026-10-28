@@ -2,10 +2,7 @@
 
 import { Check } from "lucide-react";
 
-import {
-  PillButton,
-  TapedCard,
-} from "@/app/_components/landing/LandingPrimitives";
+import { TapedCard } from "@/app/_components/landing/LandingPrimitives";
 import type { PricingPlan } from "@/app/_components/landing/pricingPlans";
 import { useMediaQuery } from "@/app/_components/landing/useMediaQuery";
 
@@ -15,13 +12,6 @@ type Props = {
 
 export function PricingPlanCard({ plan }: Props) {
   const isDesktop = useMediaQuery("(min-width: 768px)");
-  const action = plan.action;
-
-  const button = (
-    <PillButton href={action.href} variant="dark" width="full">
-      {action.label}
-    </PillButton>
-  );
 
   return (
     <TapedCard
@@ -39,35 +29,17 @@ export function PricingPlanCard({ plan }: Props) {
           padding: isDesktop ? 36 : 28,
         }}
       >
-        <div style={{ fontWeight: 600, fontSize: 22, marginBottom: 18 }}>
-          {plan.name}
-        </div>
-        <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-          <span
-            style={{
-              fontWeight: 600,
-              fontSize: isDesktop ? 54 : 42,
-              lineHeight: 0.95,
-            }}
-          >
-            {plan.price}
-          </span>
-          {plan.cadence ? (
-            <span style={{ fontWeight: 600, fontSize: 16, opacity: 0.7 }}>
-              {plan.cadence}
-            </span>
-          ) : null}
-        </div>
+        <div style={{ fontWeight: 600, fontSize: 26 }}>{plan.name}</div>
         <div
           style={{
-            fontSize: 13,
+            fontSize: 15,
             fontWeight: 600,
             color: plan.color === "coral" ? "#201715" : "#444",
-            marginBottom: 24,
-            marginTop: 10,
+            marginBottom: 20,
+            marginTop: 4,
           }}
         >
-          {plan.detail}
+          {plan.price}
         </div>
         <p
           style={{
@@ -83,7 +55,6 @@ export function PricingPlanCard({ plan }: Props) {
           style={{
             display: "grid",
             gap: 10,
-            marginBottom: 28,
           }}
         >
           {plan.features.map((feature) => (
@@ -116,7 +87,6 @@ export function PricingPlanCard({ plan }: Props) {
             </div>
           ))}
         </div>
-        <div style={{ marginTop: "auto" }}>{button}</div>
       </div>
     </TapedCard>
   );

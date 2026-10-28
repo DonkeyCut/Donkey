@@ -25,17 +25,13 @@
   "plans": {
     "free": {
       "name": "免费版",
-      "detail": "面向所有人",
       "body": "完整的编辑器功能，支持云端或在你的 Mac 本地运行。",
-      "cta": "新建项目",
       "editor": "完整使用视频编辑器",
       "storage": "{mb, number} MB 云存储空间",
       "tools": "导入、导出及本地转录",
       "subscriptions": "关联你的 Claude 或 Codex 订阅"
     },
     "paid": {
-      "detail": "{plan, select, plus {新手入门} pro {超值首选} other {适合高频生成}}",
-      "cta": "获取 {plan}",
       "everythingInFree": "包含免费版的所有功能"
     }
   },

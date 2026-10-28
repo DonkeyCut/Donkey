@@ -25,17 +25,13 @@
   "plans": {
     "free": {
       "name": "Free",
-      "detail": "For everyone",
       "body": "The whole editor, in the cloud or on your own Mac.",
-      "cta": "Start a new project",
       "editor": "Full access to the video editor",
       "storage": "{mb, number} MB of cloud storage",
       "tools": "Import, export, and local transcription",
       "subscriptions": "Connect your Claude or Codex subscription"
     },
     "paid": {
-      "detail": "{plan, select, plus {To get started} pro {Best value} other {For heavy generation}}",
-      "cta": "Get {plan}",
       "everythingInFree": "Everything in Free"
     }
   },

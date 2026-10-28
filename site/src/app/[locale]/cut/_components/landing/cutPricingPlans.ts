@@ -91,14 +91,8 @@ export function useCutPricingPlans(): PricingPlan[] {
   const plans = useCutPlans();
   return [
     {
-      action: {
-        href: "/app",
-        kind: "link",
-        label: t("free.cta"),
-      },
       body: t("free.body"),
       color: "cream",
-      detail: t("free.detail"),
       features: [
         t("free.editor"),
         t("free.storage", { mb: FREE_STORAGE_MB }),
@@ -110,14 +104,8 @@ export function useCutPricingPlans(): PricingPlan[] {
       tapeColor: "coral",
     },
     ...plans.map((copy, i): PricingPlan => ({
-      action: {
-        href: "/app/settings",
-        kind: "link",
-        label: t("paid.cta", { plan: copy.name }),
-      },
       body: copy.body,
       ...PLAN_COLORS[copy.plan],
-      detail: t("paid.detail", { plan: copy.plan }),
       // The first plan names what it adds to Free after its credits, the way
       // each higher plan names the one under it.
       features: [
@@ -126,8 +114,7 @@ export function useCutPricingPlans(): PricingPlan[] {
         ...copy.features.slice(1).map((feature) => feature.text),
       ],
       name: copy.name,
-      price: copy.amount,
-      cadence: copy.cadence,
+      price: copy.price,
       ...(copy.plan === RECOMMENDED_PLAN ? { tapePosition: "right" as const } : {}),
     })),
   ];
