@@ -1,7 +1,7 @@
 // The intro offer, as the introOffer setting states it: a percent off the
-// first months of Pro for an account that subscribes within a window after
-// signup and has never held Pro. Pure, so the checkout, the offer read and
-// the tests share one rule.
+// first months of Pro for an account that has never held a plan, open for a
+// window that starts the first time the account sees it. Pure, so the
+// checkout, the offer read and the tests share one rule.
 
 export type IntroOfferSetting = {
   percentOff: number;
@@ -26,17 +26,23 @@ export function heldPro(status: string | null): boolean {
   return status !== null && !NEVER_PAID_STATUSES.has(status);
 }
 
-/** The offer open to an account right now, or null. */
+/** Whether the account is one the offer is for, seen or not. */
+export function offersIntro(setting: IntroOfferSetting, facts: { heldPro: boolean }): boolean {
+  return setting.percentOff > 0 && !facts.heldPro;
+}
+
+/** The offer open to an account right now, or null. An account that has not
+ * seen the offer yet has none open; its window starts at `seenAt`. */
 export function introOfferAt(
   setting: IntroOfferSetting,
-  facts: { createdAt: Date; heldPro: boolean },
+  facts: { seenAt: Date | null; heldPro: boolean },
   now: Date,
 ): IntroOffer | null {
-  if (setting.percentOff <= 0 || facts.heldPro) {
+  if (!offersIntro(setting, facts) || !facts.seenAt) {
     return null;
   }
 
-  const endsAt = new Date(facts.createdAt.getTime() + setting.windowHours * HOUR_MS);
+  const endsAt = new Date(facts.seenAt.getTime() + setting.windowHours * HOUR_MS);
   if (now.getTime() >= endsAt.getTime()) {
     return null;
   }

@@ -1,14 +1,35 @@
 import Stripe from "stripe";
 
-import { proPriceId } from "@/lib/billing/pro-subscription";
+import { planPriceId } from "@/lib/billing/pro-subscription";
 import { getStripe } from "@/lib/billing/stripe";
 import { getSetting, type ConfigContext } from "@/lib/config/effective";
 import { prisma } from "@/lib/prisma";
 
-import { heldPro, introCouponId, introOfferAt, type IntroOffer } from "./intro-offer";
+import { heldPro, introCouponId, introOfferAt, offersIntro, type IntroOffer } from "./intro-offer";
 
-/** The intro offer open to this account right now, or null. */
+/** The intro offer open to this account right now, or null. Reading never
+ * starts the window; checkout reads it this way. */
 export async function readIntroOffer(ctx: ConfigContext, now = new Date()): Promise<IntroOffer | null> {
+  if (!ctx.hasAccount) {
+    return null;
+  }
+
+  const [setting, subscription, view] = await Promise.all([
+    getSetting("introOffer", ctx),
+    prisma.proSubscription.findUnique({ where: { userId: ctx.userId }, select: { status: true } }),
+    prisma.introOfferView.findUnique({ where: { userId: ctx.userId }, select: { seenAt: true } }),
+  ]);
+  return introOfferAt(
+    setting,
+    { seenAt: view?.seenAt ?? null, heldPro: heldPro(subscription?.status ?? null) },
+    now,
+  );
+}
+
+/** The offer for a surface about to show it. The first time an account the
+ * offer is for gets here, its window starts; every later view reads the same
+ * window, so it runs once and is gone. */
+export async function openIntroOffer(ctx: ConfigContext, now = new Date()): Promise<IntroOffer | null> {
   if (!ctx.hasAccount) {
     return null;
   }
@@ -17,7 +38,15 @@ export async function readIntroOffer(ctx: ConfigContext, now = new Date()): Prom
     getSetting("introOffer", ctx),
     prisma.proSubscription.findUnique({ where: { userId: ctx.userId }, select: { status: true } }),
   ]);
-  return introOfferAt(setting, { createdAt: ctx.createdAt, heldPro: heldPro(subscription?.status ?? null) }, now);
+  const facts = { heldPro: heldPro(subscription?.status ?? null) };
+  if (!offersIntro(setting, facts)) {
+    return null;
+  }
+
+  // Two surfaces opening at once both land on the first view's time.
+  await prisma.introOfferView.createMany({ data: [{ userId: ctx.userId, seenAt: now }], skipDuplicates: true });
+  const view = await prisma.introOfferView.findUniqueOrThrow({ where: { userId: ctx.userId }, select: { seenAt: true } });
+  return introOfferAt(setting, { ...facts, seenAt: view.seenAt }, now);
 }
 
 const stripeCode = (e: unknown) => (e instanceof Stripe.errors.StripeError ? e.code : undefined);
@@ -53,28 +82,32 @@ export async function introCoupon(offer: IntroOffer): Promise<string> {
   return id;
 }
 
-// The Pro price's amount never changes under a price id, so one read per
-// process serves every offer.
-let proPriceCents: Promise<number> | null = null;
+// A price's amount never changes under its id, so one read per process
+// serves every offer; moving Pro to a new price reads that one fresh.
+const priceCents = new Map<string, Promise<number>>();
 
 /** The Pro price in cents, as Stripe holds it. */
-export function readProPriceCents(): Promise<number> {
-  const priceId = proPriceId();
+export async function readProPriceCents(): Promise<number> {
+  const priceId = await planPriceId("pro");
   if (!priceId) {
-    throw new Error("STRIPE_PRO_PRICE_ID is not set");
+    throw new Error("The Pro plan has no price in the planPrices setting");
   }
 
-  proPriceCents ??= getStripe()
-    .prices.retrieve(priceId)
-    .then((price) => {
-      if (typeof price.unit_amount !== "number") {
-        throw new Error(`Pro price ${priceId} has no unit amount`);
-      }
-      return price.unit_amount;
-    })
-    .catch((e: unknown) => {
-      proPriceCents = null;
-      throw e;
-    });
-  return proPriceCents;
+  let cents = priceCents.get(priceId);
+  if (!cents) {
+    cents = getStripe()
+      .prices.retrieve(priceId)
+      .then((price) => {
+        if (typeof price.unit_amount !== "number") {
+          throw new Error(`Pro price ${priceId} has no unit amount`);
+        }
+        return price.unit_amount;
+      })
+      .catch((e: unknown) => {
+        priceCents.delete(priceId);
+        throw e;
+      });
+    priceCents.set(priceId, cents);
+  }
+  return cents;
 }

@@ -1,25 +1,37 @@
 import { describe, expect, test } from "bun:test";
 
-import { heldPro, introCouponId, introOfferAt, introPriceCents } from "./intro-offer";
+import { heldPro, introCouponId, introOfferAt, introPriceCents, offersIntro } from "./intro-offer";
 
 const HOUR_MS = 3_600_000;
-const signup = new Date("2026-10-16T12:00:00Z");
+const seen = new Date("2026-10-16T12:00:00Z");
 const setting = { percentOff: 50, months: 1, windowHours: 24 };
-const fresh = { createdAt: signup, heldPro: false };
+const fresh = { seenAt: seen, heldPro: false };
 
 describe("introOfferAt", () => {
   test("opens inside the window and closes at its end", () => {
-    const offer = introOfferAt(setting, fresh, new Date(signup.getTime() + HOUR_MS));
-    expect(offer).toEqual({ percentOff: 50, months: 1, endsAt: new Date(signup.getTime() + 24 * HOUR_MS) });
-    expect(introOfferAt(setting, fresh, new Date(signup.getTime() + 24 * HOUR_MS))).toBeNull();
+    const offer = introOfferAt(setting, fresh, new Date(seen.getTime() + HOUR_MS));
+    expect(offer).toEqual({ percentOff: 50, months: 1, endsAt: new Date(seen.getTime() + 24 * HOUR_MS) });
+    expect(introOfferAt(setting, fresh, new Date(seen.getTime() + 24 * HOUR_MS))).toBeNull();
   });
 
   test("makes no offer at 0 percent, the default", () => {
-    expect(introOfferAt({ ...setting, percentOff: 0 }, fresh, signup)).toBeNull();
+    expect(introOfferAt({ ...setting, percentOff: 0 }, fresh, seen)).toBeNull();
   });
 
   test("makes no offer to an account that held Pro", () => {
-    expect(introOfferAt(setting, { ...fresh, heldPro: true }, signup)).toBeNull();
+    expect(introOfferAt(setting, { ...fresh, heldPro: true }, seen)).toBeNull();
+  });
+
+  test("has nothing open before the account first sees it", () => {
+    expect(introOfferAt(setting, { ...fresh, seenAt: null }, seen)).toBeNull();
+  });
+});
+
+describe("offersIntro", () => {
+  test("is for an account that never held a plan, while the offer is on", () => {
+    expect(offersIntro(setting, { heldPro: false })).toBe(true);
+    expect(offersIntro(setting, { heldPro: true })).toBe(false);
+    expect(offersIntro({ ...setting, percentOff: 0 }, { heldPro: false })).toBe(false);
   });
 });
 

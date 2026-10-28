@@ -25,3 +25,13 @@ model ProSubscription {
 
   @@map("pro_subscription")
 }
+
+// When an account first saw the intro offer. Its window runs once, from here;
+// a row exists only for an account a surface has shown the offer to.
+model IntroOfferView {
+  userId String   @id
+  user   User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  seenAt DateTime @default(now())
+
+  @@map("intro_offer_view")
+}

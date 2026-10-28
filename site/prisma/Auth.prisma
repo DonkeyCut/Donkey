@@ -28,6 +28,7 @@ model User {
   apiKeys       Apikey[]
   chatgptGrants ChatgptGrant[]
   proSubscription ProSubscription?
+  introOfferView IntroOfferView?
   avatar        UserAvatar?
   onboarding    UserOnboarding?
   emailSettings UserEmailSettings?
