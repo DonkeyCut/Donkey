@@ -56,7 +56,10 @@ export function PlansDialog({
   const intro = useIntroOffer({ enabled: subscription.data?.isActive === false });
   const checkout = usePlanCheckout({ surface: "plans_dialog", reason: source, entry });
   // Held until the plan is known, so no column opens buyable and then locks.
-  const ready = subscription.isSuccess && (current !== null || !intro.isPending);
+  // A billing read that fails still opens it, with the failure said, so a
+  // refusal is never followed by nothing.
+  const ready = subscription.isError || (subscription.isSuccess && (current !== null || !intro.isPending));
+  const error = checkout.error ?? subscription.error;
 
   // Opening focuses the card itself, so no plan's button starts out looking
   // picked; Tab moves into the plans.
@@ -119,9 +122,9 @@ export function PlansDialog({
           </div>
         </DialogBody>
         <div className="px-6 pt-5 pb-6 text-center text-xs text-muted-foreground sm:px-10">
-          {checkout.error ? (
+          {error ? (
             <p className="mb-2 text-sm text-destructive">
-              {apiErrorText(checkout.error, tBilling("billingUnavailable"))}
+              {apiErrorText(error, tBilling("billingUnavailable"))}
             </p>
           ) : null}
           {t("footer")}
