@@ -20,18 +20,21 @@
   },
   "pricing": {
     "title": "シンプルな<italic>料金プラン</italic>",
-    "body": "エディターは無料です。料金が発生するのはAI生成メディアの利用時のみです。"
+    "body": "エディターは無料です。料金が発生するのはAI生成メディアの利用時のみです。",
+    "notePlan": "{plan}プラン: {price}"
   },
   "plans": {
     "free": {
       "name": "Free",
       "body": "クラウドでも、お使いのMacでも、すべてのエディター機能を利用可能。",
+      "cta": "新規プロジェクトを開始",
       "editor": "動画エディターへのフルアクセス",
       "storage": "{mb, number} MBのクラウドストレージ",
       "tools": "インポート、書き出し、ローカル文字起こし",
       "subscriptions": "ClaudeやCodexのサブスクリプションと連携"
     },
     "paid": {
+      "cta": "{plan}を入手",
       "everythingInFree": "Freeプランの全機能"
     }
   },

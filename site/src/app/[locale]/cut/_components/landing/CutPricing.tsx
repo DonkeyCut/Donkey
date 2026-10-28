@@ -4,13 +4,25 @@ import { useTranslations } from "next-intl";
 
 import { Headline } from "@/app/_components/landing/LandingPrimitives";
 import { PricingPlanCard } from "@/app/_components/landing/PricingPlanCard";
+import { useAppEntryHref } from "@/app/_components/landing/useAppEntryHref";
 import { useMediaQuery } from "@/app/_components/landing/useMediaQuery";
-import { useCutPricingPlans } from "@/app/[locale]/cut/_components/landing/cutPricingPlans";
+import {
+  NOTE_PLAN,
+  useCutPlan,
+  useCutPricingPlans,
+} from "@/app/[locale]/cut/_components/landing/cutPricingPlans";
 
 export function CutPricing() {
   const isDesktop = useMediaQuery("(min-width: 768px)");
+  const appHref = useAppEntryHref();
   const t = useTranslations("landing.pricing");
-  const plans = useCutPricingPlans();
+
+  // Every plan CTA enters the app, so gate them the same way as the hero: a
+  // signed-out click lands on sign-in first, then returns to the app target.
+  const plans = useCutPricingPlans().map((plan) => ({
+    ...plan,
+    action: { ...plan.action, href: appHref(plan.action.href) },
+  }));
 
   return (
     <section
@@ -39,9 +51,11 @@ export function CutPricing() {
             gap: 24,
           }}
         >
-          {plans.map((plan) => (
-            <PricingPlanCard key={plan.name} plan={plan} />
-          ))}
+          {plans
+            .filter((plan) => plan.id !== NOTE_PLAN)
+            .map((plan) => (
+              <PricingPlanCard key={plan.id} plan={plan} />
+            ))}
         </div>
       ) : (
         // Phones scroll the cards sideways. The row bleeds past the section
@@ -61,12 +75,25 @@ export function CutPricing() {
           }}
         >
           {plans.map((plan) => (
-            <div key={plan.name} style={{ flex: "0 0 80%", scrollSnapAlign: "start" }}>
+            <div key={plan.id} style={{ flex: "0 0 80%", scrollSnapAlign: "start" }}>
               <PricingPlanCard plan={plan} />
             </div>
           ))}
         </div>
       )}
+      {isDesktop ? <NotePlan /> : null}
     </section>
+  );
+}
+
+// The plan without a card on a wide window, as one line under the row.
+function NotePlan() {
+  const t = useTranslations("landing.pricing");
+  const copy = useCutPlan(NOTE_PLAN);
+
+  return (
+    <p className="mt-6 text-[17px] font-semibold text-foreground md:mt-10">
+      {t("notePlan", { plan: copy.name, price: copy.price })}
+    </p>
   );
 }

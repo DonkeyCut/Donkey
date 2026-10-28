@@ -20,18 +20,21 @@
   },
   "pricing": {
     "title": "단순한 <italic>요금제</italic>",
-    "body": "편집기는 무료예요. AI로 생성하는 미디어에 대해서만 결제하세요."
+    "body": "편집기는 무료예요. AI로 생성하는 미디어에 대해서만 결제하세요.",
+    "notePlan": "{plan} 플랜: {price}"
   },
   "plans": {
     "free": {
       "name": "Free",
       "body": "클라우드나 Mac에서 편집기 전체 기능을 무료로 이용하세요.",
+      "cta": "새 프로젝트 시작하기",
       "editor": "동영상 편집기 전체 기능 이용",
       "storage": "클라우드 스토리지 {mb, number} MB",
       "tools": "가져오기, 내보내기 및 온디바이스 텍스트 변환",
       "subscriptions": "보유한 Claude 또는 Codex 구독 연동"
     },
     "paid": {
+      "cta": "{plan} 시작하기",
       "everythingInFree": "Free 플랜의 모든 기능"
     }
   },

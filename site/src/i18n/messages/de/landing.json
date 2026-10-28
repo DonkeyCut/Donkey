@@ -20,18 +20,21 @@
   },
   "pricing": {
     "title": "Einfache <italic>Preise</italic>",
-    "body": "Der Editor ist kostenlos. Zahle nur für KI-generierte Medien."
+    "body": "Der Editor ist kostenlos. Zahle nur für KI-generierte Medien.",
+    "notePlan": "{plan}-Plan: {price}"
   },
   "plans": {
     "free": {
       "name": "Free",
       "body": "Der gesamte Editor, in der Cloud oder auf deinem Mac.",
+      "cta": "Neues Projekt starten",
       "editor": "Voller Zugriff auf den Video-Editor",
       "storage": "{mb, number} MB Cloud-Speicher",
       "tools": "Import, Export und lokale Transkription",
       "subscriptions": "Verbinde dein Claude- oder Codex-Abo"
     },
     "paid": {
+      "cta": "{plan} holen",
       "everythingInFree": "Alles aus Free"
     }
   },

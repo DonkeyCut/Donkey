@@ -85,12 +85,22 @@ const PLAN_COLORS: Record<PaidPlan, { color: CardColor; tapeColor: CardColor }> 
   max: { color: "cream", tapeColor: "pink" },
 };
 
+// The plan a wide landing names in a line under the cards, without a card
+// of its own, so the row stays short. Phones scroll through every card.
+export const NOTE_PLAN: PaidPlan = "max";
+
 export function useCutPricingPlans(): PricingPlan[] {
   const t = useTranslations("landing.plans");
   const locale = useLocale();
   const plans = useCutPlans();
   return [
     {
+      id: "free",
+      action: {
+        href: "/app",
+        kind: "link",
+        label: t("free.cta"),
+      },
       body: t("free.body"),
       color: "cream",
       features: [
@@ -104,6 +114,12 @@ export function useCutPricingPlans(): PricingPlan[] {
       tapeColor: "coral",
     },
     ...plans.map((copy, i): PricingPlan => ({
+      id: copy.plan,
+      action: {
+        href: "/app/settings",
+        kind: "link",
+        label: t("paid.cta", { plan: copy.name }),
+      },
       body: copy.body,
       ...PLAN_COLORS[copy.plan],
       // The first plan names what it adds to Free after its credits, the way

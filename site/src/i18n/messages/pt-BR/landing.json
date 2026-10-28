@@ -20,18 +20,21 @@
   },
   "pricing": {
     "title": "Preços <italic>simples</italic>",
-    "body": "O editor é gratuito. Pague apenas pelas mídias geradas por IA."
+    "body": "O editor é gratuito. Pague apenas pelas mídias geradas por IA.",
+    "notePlan": "Plano {plan}: {price}"
   },
   "plans": {
     "free": {
       "name": "Gratuito",
       "body": "O editor completo, na nuvem ou no seu próprio Mac.",
+      "cta": "Começar um novo projeto",
       "editor": "Acesso completo ao editor de vídeo",
       "storage": "{mb, number} MB de armazenamento na nuvem",
       "tools": "Importação, exportação e transcrição local",
       "subscriptions": "Conecte sua assinatura do Claude ou Codex"
     },
     "paid": {
+      "cta": "Obter {plan}",
       "everythingInFree": "Tudo do plano Gratuito"
     }
   },

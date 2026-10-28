@@ -2,7 +2,10 @@
 
 import { Check } from "lucide-react";
 
-import { TapedCard } from "@/app/_components/landing/LandingPrimitives";
+import {
+  PillButton,
+  TapedCard,
+} from "@/app/_components/landing/LandingPrimitives";
 import type { PricingPlan } from "@/app/_components/landing/pricingPlans";
 import { useMediaQuery } from "@/app/_components/landing/useMediaQuery";
 
@@ -12,6 +15,13 @@ type Props = {
 
 export function PricingPlanCard({ plan }: Props) {
   const isDesktop = useMediaQuery("(min-width: 768px)");
+  const action = plan.action;
+
+  const button = (
+    <PillButton href={action.href} variant="dark" width="full">
+      {action.label}
+    </PillButton>
+  );
 
   return (
     <TapedCard
@@ -55,6 +65,7 @@ export function PricingPlanCard({ plan }: Props) {
           style={{
             display: "grid",
             gap: 10,
+            marginBottom: 28,
           }}
         >
           {plan.features.map((feature) => (
@@ -87,6 +98,7 @@ export function PricingPlanCard({ plan }: Props) {
             </div>
           ))}
         </div>
+        <div style={{ marginTop: "auto" }}>{button}</div>
       </div>
     </TapedCard>
   );
