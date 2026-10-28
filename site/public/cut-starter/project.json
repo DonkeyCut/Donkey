@@ -6518,10 +6518,6 @@
         "detected": "rec709",
         "fullRange": false
       },
-      "proxy": {
-        "fileName": "08e5bbba-4570-42be-857b-d171ad61a09e.mp4.light.mp4",
-        "sizeBytes": 5653968
-      },
       "width": 1920,
       "height": 1080,
       "origin": "chat",
@@ -7118,10 +7114,6 @@
         "bitDepth": 8,
         "detected": "rec709",
         "fullRange": false
-      },
-      "proxy": {
-        "fileName": "109acb6a-0305-4319-8f6c-ce6f469140ee.mp4.light.mp4",
-        "sizeBytes": 8030942
       },
       "width": 1920,
       "height": 810,

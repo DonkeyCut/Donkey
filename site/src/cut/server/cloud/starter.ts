@@ -64,7 +64,8 @@ export async function seedStarterProject(userId: string): Promise<void> {
   doc.createdAt = now;
   doc.updatedAt = now;
 
-  const fileNames = [...new Set(doc.assets.map((a) => a.fileName))];
+  // A proxy rides with its master, so the account's copy reads like the doc.
+  const fileNames = [...new Set(doc.assets.flatMap((a) => (a.proxy ? [a.fileName, a.proxy.fileName] : [a.fileName])))];
   const media = await Promise.all(
     fileNames.map(async (fileName) => {
       const info = await ensureStarterObject(fileName);
