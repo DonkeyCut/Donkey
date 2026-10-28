@@ -247,11 +247,15 @@ test("a source of another shape fills the cut's frame when asked, centre-cropped
   useEditor.setState({ aspect: "16:9" });
   const boxed = (await runAiTool("compare_to_source", { asset_id: "ref", times: [1] })) as { frame?: string };
   expect(boxed.frame).toContain('fit "fill"');
+  // The fill crops a tall source into a wide frame and blows its type up
+  // with it, so type is sized from the letterboxed read.
+  expect(boxed.frame).toContain("size type and shapes from this read");
 
   draws.length = 0;
   const out = (await runAiTool("compare_to_source", { asset_id: "ref", times: [1], fit: "fill" })) as { frame?: string };
   expect(out.frame).toContain("fill");
   expect(out.frame).not.toContain("letterboxed");
+  expect(out.frame).toContain('size type and shapes from fit "letterbox"');
   // The source covers the surface it is scored on: as wide as it, taller,
   // and centred, so its top and bottom run off the edges.
   const placed = draws.filter((d) => d.h > d.into.h);

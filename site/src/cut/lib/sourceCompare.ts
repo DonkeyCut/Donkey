@@ -199,13 +199,13 @@ function frameNote(
   if (fit === "fill") {
     return (
       `${shapes}, so scores read the source scaled to fill the cut's frame, centre-cropped. ` +
-      "What the crop cuts off is not checked, and type and shapes read at the fill's scale; fit \"letterbox\" reads the whole source."
+      "What the crop cuts off is not checked, and type and shapes read here blown up with the crop: check colour fields with this, but size type and shapes from fit \"letterbox\", which keeps them in proportion to the frame."
     );
   }
   return (
     `${shapes}, so scores read the source letterboxed into the cut's frame over its background. ` +
-    "Bars the cut does not have count as difference; set_aspect to the source's shape when the copy should match it, " +
-    'or pass fit "fill" when the copy fills its own frame edge to edge.'
+    "Bars the cut does not have count as difference; set_aspect to the source's shape when the copy should match it. " +
+    'In another shape, size type and shapes from this read, and pass fit "fill" only to check full-bleed colour edge to edge.'
   );
 }
 

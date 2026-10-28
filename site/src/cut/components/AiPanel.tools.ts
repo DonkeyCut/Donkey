@@ -233,7 +233,7 @@ export const AI_PANEL_TOOLS = [
           type: "string",
           enum: ["letterbox", "fill"],
           description:
-            "How a source of another shape sits in the cut's frame to be scored. letterbox (the default): whole, over the background, the way a clip of that shape sits on the timeline. fill: scaled to cover the frame and centre-cropped, for a copy that fills its own frame edge to edge in another shape — what the crop cuts off is not checked, and type and shapes read at the fill's scale",
+            "How a source of another shape sits in the cut's frame to be scored. letterbox (the default): whole, over the background, the way a clip of that shape sits on the timeline. fill: scaled to cover the frame and centre-cropped, to check full-bleed colour edge to edge in another shape — what the crop cuts off is not checked, and type and shapes come out blown up with the crop, so size them from letterbox",
         },
         picture: pictureArg,
       },
