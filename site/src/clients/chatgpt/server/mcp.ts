@@ -55,6 +55,9 @@ const editAnnotations = {
 // Undo and redo overwrite the document with another revision of it.
 const historyAnnotations = { ...editAnnotations, destructiveHint: true };
 
+/** The tool behind the composer's @-mention menu. */
+const MENTION_TOOL = "find_projects";
+
 export const REPOSITORY_URL = "https://github.com/DonkeyCut/Donkey";
 
 /** What ChatGPT reads before it picks a tool. The first 512 characters carry
@@ -68,6 +71,7 @@ export const SERVER_INSTRUCTIONS = [
   "Every edit runs inside the Donkey Cut editor in the card, on the document the user is looking at: open_project puts that editor in the card, timeline and panels included, when the connection can edit, and the editing and inspection tools, import_media, undo and redo answer that no card is open until it is. A read-only connection sees the current preview playing. Call render_preview only after an edit or when the card reports no current preview.",
   "If the editor shows Reconnect, ask the user to click it to renew the embedded session and reload the editor in ChatGPT. If a tool reports no card open, ask the user to open the project card and keep it open, then resume when it is ready. When the catalog lacks an operation, explain the limit and ask for the required media or a user action in Donkey Cut.",
   "Inspect before editing. Watch and listen to the relevant media before content-based cuts; use silence, beat, level and color measurements for timing and adjustments. Save observations with note_source. Verify changes with the returned state, frames and audio, and give the user a preview to review. Claim only coverage and completed work confirmed by tool results.",
+  "A project the user @-mentions arrives as a link ending in /app/p/<projectId>.",
   "Times are seconds; ids come from inspect_project. A tool that answers with a job still running is finished by get_job_status.",
 ].join("\n");
 
@@ -150,8 +154,12 @@ export function createChatgptServer(
   t: ChatgptTranslator = ENGLISH,
 ) {
   const server = new McpServer(
-    { name: "donkey-cut", title: "Donkey Cut", version: "1.2.0" },
-    { instructions: SERVER_INSTRUCTIONS },
+    { name: "donkey-cut", title: "Donkey Cut", version: "1.3.0" },
+    {
+      instructions: SERVER_INSTRUCTIONS,
+      // The composer's @-menu lists the account's projects through this tool.
+      capabilities: { extensions: { "openai/mentions": { searchTool: MENTION_TOOL } } },
+    },
   );
   const readMetadata = {
     securitySchemes: [{ type: "oauth2", scopes: ["projects:read"] }],
@@ -227,13 +235,18 @@ export function createChatgptServer(
   server.registerTool(
     "open_project",
     {
-      title: "Open a Donkey Cut project",
+      // The sidebar and the thread panel open the picker under this title.
+      title: "Donkey Cut",
       description:
         "Open a cloud project initially, switch projects, or recover a missing card. Keep the existing card during edits and preview checks: reopening creates a fresh editor with empty undo history. The editable card holds the full editor, timeline, media panel, inspector and preview. A read-only connection sees the preview; use render_preview when its revision is stale or missing. With no projectId, show the project picker. A deleted project answers view \"missing\" and the card offers to create a new one.",
       inputSchema: z.object({ projectId: idSchema.optional() }),
       outputSchema: viewSchema,
       annotations: readOnlyAnnotations,
-      _meta: { ...readMetadata, ui: { resourceUri: WIDGET_URI } },
+      _meta: {
+        ...readMetadata,
+        ui: { resourceUri: WIDGET_URI },
+        "openai/ui": { entrypoints: [{ type: "global" }, { type: "thread" }] },
+      },
     },
     ({ projectId }) =>
       runTool(() => (projectId ? projects.open(projectId) : projects.list())),
@@ -276,6 +289,24 @@ export function createChatgptServer(
     identity.scopes.includes("projects:write")
       ? run()
       : Promise.resolve(scopeChallenge("projects:write", "Reconnect Donkey Cut to allow editing."));
+
+  server.registerTool(
+    MENTION_TOOL,
+    {
+      title: "Find Donkey Cut projects",
+      description: "Search the connected user's cloud projects by name for the composer's @-mention menu.",
+      inputSchema: z.object({ query: z.string().max(200) }),
+      annotations: readOnlyAnnotations,
+      _meta: { ...readMetadata, ui: { visibility: ["app"] } },
+    },
+    async ({ query }) => {
+      const found = await projects.search(query.trim());
+      return {
+        content: [],
+        structuredContent: { items: found.map((p) => ({ type: "resource_link" as const, uri: p.url, name: p.name, mimeType: "text/html" })) },
+      };
+    },
+  );
 
   server.registerTool(
     "create_project",
@@ -498,6 +529,9 @@ export function createChatgptServer(
                 frameDomains: [config.issuer],
               },
             },
+            // Inline in the conversation; the user can expand it, and
+            // entrypoints always open fullscreen.
+            "openai/ui": { availableDisplayModes: ["inline", "fullscreen"], preferredDisplayMode: "inline" },
             "openai/widgetDescription":
               "Donkey Cut cloud project picker and video preview with render progress, export download, and an Open in Donkey Cut link.",
           },

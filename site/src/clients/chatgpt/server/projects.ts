@@ -25,6 +25,8 @@ import { READ_COMMANDS, unknownCommandNames } from "@/clients/chatgpt/server/cat
 
 type Identity = { userId: string; scopes: string[]; grantId: string };
 export class ProjectToolError extends Error {}
+
+const MENTION_RESULTS = 20;
 export type ProjectResult = { view: ProjectView; playback: Playback | null; download?: Download | null; editor?: Editor | null };
 
 /** A queue helper's refusal, read out of its Response as a message. */
@@ -405,6 +407,17 @@ export function projectTools(
         },
         playback: null,
       };
+    },
+    /** Projects whose name holds the query, most recent first: the
+     * composer's @-mention picker. An empty query lists the latest ones. */
+    async search(query: string) {
+      const rows = await db.cutProject.findMany({
+        where: { userId: identity.userId, ...(query ? { name: { contains: query, mode: "insensitive" as const } } : {}) },
+        select: { id: true, name: true, version: true },
+        orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+        take: MENTION_RESULTS,
+      });
+      return rows.map(projectSummary);
     },
     status: getPreviewStatus,
     /** open_project's answer. A project the account no longer has is a

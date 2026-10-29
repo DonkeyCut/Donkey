@@ -64,6 +64,7 @@ const fakeProjects = (overrides: Partial<Projects> = {}): Projects => {
     exportStatus: answer,
     jobStatus: answer,
     account: answer,
+    search: async () => [{ id: "project", name: "Launch cut", revision: "cloud:1", url: "https://donkeycut.com/app/p/project" }],
     ...overrides,
   };
 };
@@ -87,6 +88,7 @@ describe("ChatGPT MCP protocol", () => {
           "account_status",
           "create_project",
           "export_video",
+          "find_projects",
           "get_export_status",
           "get_job_status",
           "get_preview_status",
@@ -138,6 +140,20 @@ describe("ChatGPT MCP protocol", () => {
         destructiveHint: false,
         openWorldHint: false,
       });
+      // The sidebar and thread panel open the picker; the composer's @-menu
+      // searches projects through an app-only read.
+      expect(tools.find((tool) => tool.name === "open_project")?._meta).toMatchObject({
+        "openai/ui": { entrypoints: [{ type: "global" }, { type: "thread" }] },
+      });
+      expect(client.getServerCapabilities()?.extensions).toEqual({ "openai/mentions": { searchTool: "find_projects" } });
+      expect(tools.find((tool) => tool.name === "find_projects")?._meta).toMatchObject({ ui: { visibility: ["app"] } });
+      const mentions = await client.callTool({ name: "find_projects", arguments: { query: "launch" } });
+      expect(mentions.structuredContent).toEqual({
+        items: [{ type: "resource_link", uri: "https://donkeycut.com/app/p/project", name: "Launch cut", mimeType: "text/html" }],
+      });
+      const picker = await client.callTool({ name: "open_project", arguments: {} });
+      expect(picker.isError).toBeFalsy();
+
       const result = await client.callTool({
         name: "open_project",
         arguments: { projectId: "project" },
@@ -156,6 +172,7 @@ describe("ChatGPT MCP protocol", () => {
       const resource = await client.readResource({ uri: WIDGET_URI });
       expect(resource.contents[0].mimeType).toBe("text/html;profile=mcp-app");
       expect(resource.contents[0]._meta).toMatchObject({
+        "openai/ui": { availableDisplayModes: ["inline", "fullscreen"], preferredDisplayMode: "inline" },
         ui: {
           csp: {
             resourceDomains: [config.issuer, "https://media.donkeycut.com"],
