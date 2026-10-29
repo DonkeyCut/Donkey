@@ -49,6 +49,7 @@
     "eval:cut-export": "bun run scripts/eval-cut-export.ts",
     "eval:cut-export-memory": "bun run scripts/eval-cut-export-memory.ts",
     "chatgpt:build": "bun run scripts/build-chatgpt-widget.ts",
+    "chatgpt:plugin": "bun run scripts/build-chatgpt-plugin.ts",
     "predev": "npm run chatgpt:build",
     "prebuild": "npm run chatgpt:build",
     "eval:chatgpt-widget": "bun run scripts/eval-chatgpt-widget.ts"

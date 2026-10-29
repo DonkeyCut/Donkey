@@ -90,7 +90,46 @@ set_publish edits the project's caption, tags, sound title and handle. These fie
 export_video renders the saved cloud project with one of these presets: ${DOC_EXPORT_PRESETS.join(", ")}. Read its tool description for the preset choices. loudness masters the mix to a LUFS target for its destination, and stems adds a zip of one WAV per lane for mixing elsewhere. A returned export job is completed through get_export_status, and the card offers the finished download. render_preview and get_preview_status provide a playable preview for review. Only report a preview or export as ready when its result confirms completion.`,
 };
 
+// What each guide is for, as the plugin's skill description: ChatGPT reads
+// it to decide when to load the guide.
+const DESCRIPTIONS: Record<string, string> = {
+  "color-grading": "Grade and match color in Donkey Cut: exposure, contrast, curves, wheels, hue bands, LUTs and presets. Use when the user asks to change the look or color of footage.",
+  "replicating-a-video": "Recreate the structure and style of a reference video with the user's own footage in Donkey Cut. Use when the user shares a video to copy.",
+  "transitions-and-fades": "Add transitions between clips and fade clips in and out in Donkey Cut. Use when the user asks for smoother cuts, fades or transition effects.",
+  "text-videos": "Build Donkey Cut videos driven by on-screen text: lyric videos, kinetic typography, quotes and timed captions. Use when text is the main visual.",
+  "text-creativity": "Choose fonts, colors, layout and motion for on-screen text in Donkey Cut. Use when the user wants titles or captions to look designed.",
+  "editing-taste": "Pacing, hooks and structure for short social videos in Donkey Cut. Use when the user asks to make an edit better, tighter or more engaging.",
+  "talking-head-videos": "Edit talking-head footage in Donkey Cut: cut pauses and filler, add captions, punch-ins and b-roll. Use for vlogs, interviews and direct-to-camera videos.",
+  "editor-overview": "How Donkey Cut works inside ChatGPT: cloud projects, the editor card, shared undo history, and which tools read or edit. Use at the start of any Donkey Cut editing session.",
+  "timeline-editing": "Place, trim, split, move, retime and delete clips on the Donkey Cut timeline. Use when the user asks to cut, reorder, speed up or rearrange footage.",
+  "watching-and-cutting": "Watch and listen to footage, measure silence, beats and levels, and cut by content in Donkey Cut. Use before content-based edits such as removing pauses, picking highlights or cutting to music.",
+  "background-removal": "Remove or replace the background behind a person or subject in a Donkey Cut clip. Use when the user asks for a cutout or a background swap.",
+  "graphics": "Add and animate titles, shapes, stickers, masks and effects in Donkey Cut. Use when the user asks for on-screen text, graphics, motion or layered composites.",
+  "audio-and-subtitles": "Mix audio, level and duck tracks, and create, style, translate or correct subtitles in Donkey Cut. Use for sound, music, voiceover and caption requests.",
+  "ai-generation": "Find stock media and generate images, voiceover, music and stickers in Donkey Cut with the account's credits. Use when the user needs media the project does not have.",
+  "media-and-library": "Import, organize, convert and delete Donkey Cut project media and Library assets. Use when the user manages files, folders, notes or templates.",
+  "replicating-a-project": "Reuse another Donkey Cut project's edit, media or template in this one. Use when the user points at an existing project or share link to copy.",
+  "publish-and-export": "Export the finished Donkey Cut video and set its publish caption and tags. Use when the user wants a file to download or post.",
+};
+
+/** The plugin's setup skill: ChatGPT runs it once the plugin is installed. */
+const ONBOARDING_SKILL = {
+  name: "setup",
+  description: "Set up Donkey Cut after installing the plugin: confirm the connected account, then open or create the first cloud project. Use right after installation or when the user asks how to start with Donkey Cut.",
+  body: `# Getting started with Donkey Cut
+1. Call account_status. Tell the user their plan, AI credit balance and cloud storage in one line. Editing, previews and exports are free; hosted AI generation spends credits.
+2. Call list_projects. When projects exist, name the three most recent and ask which to open. When there are none, ask what the video is for and its shape (9:16 for TikTok, Reels and Shorts, 16:9 for YouTube, 1:1 square), then call create_project.
+3. Call open_project for the chosen project. The editor card holds the timeline, media panel and preview; keep it open while editing.
+4. Ask the user to attach footage or paste a link, and bring it in with import_media.
+Projects saved on a Mac or in a browser reach ChatGPT once the user saves them to the cloud in Donkey Cut. Ask before creating a project the user did not request.`,
+};
+
 export const SKILL_INDEX = Object.keys(SKILLS);
+
+/** Every guide as a plugin skill, the setup skill first. */
+export function pluginSkills(): { name: string; description: string; body: string }[] {
+  return [ONBOARDING_SKILL, ...SKILL_INDEX.map((name) => ({ name, description: DESCRIPTIONS[name], body: SKILLS[name] }))];
+}
 
 export function readSkill(name: string): string | undefined {
   return Object.hasOwn(SKILLS, name) ? SKILLS[name] : undefined;
