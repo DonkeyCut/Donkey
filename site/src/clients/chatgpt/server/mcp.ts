@@ -236,12 +236,9 @@ export function createChatgptServer(
     "open_project",
     {
       // The sidebar and the thread panel open the picker under this title and
-      // show the donkey glyph in the theme's ink beside it.
+      // paint the donkey glyph in the menu's own ink.
       title: "Donkey Cut",
-      icons: [
-        { src: `${config.issuer}/chatgpt-entry-light.png`, mimeType: "image/png", sizes: ["128x128"], theme: "light" },
-        { src: `${config.issuer}/chatgpt-entry-dark.png`, mimeType: "image/png", sizes: ["128x128"], theme: "dark" },
-      ],
+      icons: [{ src: `${config.issuer}/chatgpt-entry.svg`, mimeType: "image/svg+xml", sizes: ["any"] }],
       description:
         "Open a cloud project initially, switch projects, or recover a missing card. Keep the existing card during edits and preview checks: reopening creates a fresh editor with empty undo history. The editable card holds the full editor, timeline, media panel, inspector and preview. A read-only connection sees the preview; use render_preview when its revision is stale or missing. With no projectId, show the project picker. A deleted project answers view \"missing\" and the card offers to create a new one.",
       inputSchema: z.object({ projectId: idSchema.optional() }),
