@@ -18,20 +18,19 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { usePlanTerms } from "@/app/_components/PlanTermsProvider";
 import { activeProPromotion, useCutPlan } from "@/app/[locale]/cut/_components/landing/cutPricingPlans";
 import { useApiErrorText } from "@/app/[locale]/cut/app/(home)/settings/_components/useApiErrorText";
 import { useIntroTerms } from "@/cut/components/IntroOffer";
 import { useCreditLifeClause, useFormatDeadline } from "@/cut/components/SubscribeBonusPill";
 import { openUpgrade } from "@/cut/lib/upgrade";
 import { track } from "@/lib/analytics";
-import { PAID_PLANS, PLAN_TERMS } from "@/lib/billing/plans";
-import { creditCountLabel, creditsFromDollars, creditsPerDollar, formatCreditCount, formatCredits } from "@/lib/credits/format-credits";
+import { PAID_PLANS, PLAN_NAMES } from "@/lib/billing/plans";
+import { creditCountLabel, creditsFromDollars, formatCreditCount, formatCredits } from "@/lib/credits/format-credits";
 import type { Locale } from "@/i18n/locales";
 import { useSubscribeBonus } from "@/queries/credits";
 import { useAccountConfig } from "@/queries/accountConfig";
 
-// A whole-dollar allowance as the credits it buys: $20 → "20,000 credits".
-const allowanceCredits = (dollars: number, locale: Locale) => creditCountLabel(dollars * creditsPerDollar, locale);
 
 // The left-over half of "12,300 of 20,000 credits"; the total carries the unit.
 const leftCount = (dollars: string, locale: Locale) => formatCreditCount(creditsFromDollars(dollars, "down"), locale);
@@ -54,7 +53,8 @@ export function ProCard() {
   const portal = useOpenBillingPortal();
   const bonus = useSubscribeBonus();
   const config = useAccountConfig({ enabled: true });
-  const promotion = config.data ? activeProPromotion(config.data.settings.proAllowancePromotion) : null;
+  const terms = usePlanTerms();
+  const promotion = config.data ? activeProPromotion(config.data.settings.proAllowancePromotion, terms.pro) : null;
   const intro = useIntroOffer({ enabled: pro.data?.isActive === false });
 
   if (pro.isLoading) {
@@ -80,7 +80,7 @@ export function ProCard() {
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-3">
-          {plan ? t("titlePlan", { plan: PLAN_TERMS[plan].name }) : t("title")}
+          {plan ? t("titlePlan", { plan: PLAN_NAMES[plan] }) : t("title")}
           {isActive && data ? (
             <Badge variant="default">{t("status", { status: data.status ?? "" })}</Badge>
           ) : null}
@@ -93,14 +93,14 @@ export function ProCard() {
             ? t.rich("promotionUntil", {
                 b: (chunks) => <span className="font-medium">{chunks}</span>,
                 day: lastDayLabel(promotion.lastDay),
-                allowance: allowanceCredits(promotion.allowanceDollars, locale),
+                allowance: creditCountLabel(promotion.allowanceCredits, locale),
                 multiplier: format.number(promotion.multiplier),
-                usual: allowanceCredits(PLAN_TERMS.pro.monthlyDollars, locale),
+                usual: creditCountLabel(terms.pro.monthlyCredits, locale),
               })
             : t("promotionOpen", {
-                allowance: allowanceCredits(promotion.allowanceDollars, locale),
+                allowance: creditCountLabel(promotion.allowanceCredits, locale),
                 multiplier: format.number(promotion.multiplier),
-                usual: allowanceCredits(PLAN_TERMS.pro.monthlyDollars, locale),
+                usual: creditCountLabel(terms.pro.monthlyCredits, locale),
               })}
         </CardContent>
       ) : null}
@@ -129,9 +129,9 @@ export function ProCard() {
                 {promotion.lastDay !== null
                   ? t("activePromotionUntil", {
                       day: lastDayLabel(promotion.lastDay),
-                      allowance: allowanceCredits(promotion.allowanceDollars, locale),
+                      allowance: creditCountLabel(promotion.allowanceCredits, locale),
                     })
-                  : t("activePromotionOpen", { allowance: allowanceCredits(promotion.allowanceDollars, locale) })}
+                  : t("activePromotionOpen", { allowance: creditCountLabel(promotion.allowanceCredits, locale) })}
               </div>
             ) : null}
             {offer?.status === "claimed" ? (

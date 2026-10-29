@@ -5,7 +5,8 @@ import { stubModule } from "@/lib/testing/stubModule";
 // The account the charge point weighs every object against: free tier, no Pro.
 const prisma = {
   cutRenderJob: { findMany: mock(async (args: unknown): Promise<QueueRow[]> => { void args; return []; }) },
-  settingOverride: { findUnique: mock(async () => ({ value: { maxAttempts: 3 } })) },
+  // No overrides: the plan terms read their defaults.
+  settingOverride: { findUnique: mock(async () => ({ value: { maxAttempts: 3 } })), findMany: mock(async () => []) },
   user: { findUnique: mock(async () => ({ superUser: false })) },
   proSubscription: { findUnique: mock(async () => null) },
   $transaction: mock(async (

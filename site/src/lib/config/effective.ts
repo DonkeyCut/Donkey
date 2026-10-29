@@ -112,7 +112,8 @@ export async function getEffectiveConfig(ctx: ConfigContext): Promise<EffectiveC
     const needs = new Set<AudienceFact>();
     for (const e of candidates) for (const fact of audienceNeeds(e.audience)) needs.add(fact);
     const now = new Date();
-    const facts = await collectFacts(ctx.userId, { country: ctx.country, createdAt: ctx.createdAt }, needs);
+    const terms = resolveSettings(overrides, []).settings.planTerms;
+    const facts = await collectFacts(ctx.userId, { country: ctx.country, createdAt: ctx.createdAt }, needs, terms);
     const assign = { userId: ctx.userId, facts, now };
     const fresh: Prisma.ExperimentAssignmentCreateManyInput[] = [];
     for (const experiment of candidates) {

@@ -1,7 +1,7 @@
 import type Stripe from "stripe";
 
 import { DONKEYCUT_CANONICAL } from "@/cut/lib/hosts";
-import type { PlanTerms } from "@/lib/billing/plans";
+import type { PLAN_NAMES } from "@/lib/billing/plans";
 import { metaBrowser, type MetaBrowser, trackMetaEvent } from "@/lib/meta/conversions";
 
 // A purchase completes in Stripe's webhook, far from the browser that paid.
@@ -30,7 +30,7 @@ const CENTS_PER_DOLLAR = 100;
 const CONVERTED: ReadonlySet<Stripe.Checkout.Session["payment_status"]> = new Set(["paid", "no_payment_required"]);
 
 // The plan a checkout sells, by its display name.
-export type CheckoutProduct = PlanTerms["name"];
+export type CheckoutProduct = (typeof PLAN_NAMES)[keyof typeof PLAN_NAMES];
 
 /** The browser behind a checkout request, as checkout session metadata. */
 export function metaCheckoutMetadata(headers: Headers): Record<string, string> {

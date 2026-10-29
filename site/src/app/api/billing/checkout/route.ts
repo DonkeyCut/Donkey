@@ -7,7 +7,7 @@ import { auth } from "@/lib/auth";
 import { introCouponId } from "@/lib/billing/intro-offer";
 import { introCoupon, readIntroOffer } from "@/lib/billing/intro-offer-server";
 import { metaCheckoutMetadata, trackCheckoutStarted } from "@/lib/billing/meta-checkout";
-import { PAID_PLANS, PLAN_TERMS, planRank, type PaidPlan } from "@/lib/billing/plans";
+import { PAID_PLANS, PLAN_NAMES, planRank, type PaidPlan } from "@/lib/billing/plans";
 import { dropIntroDiscount, INTRO_OFFER_METADATA_KEY, liftScheduledCancel, upgradeKey } from "@/lib/billing/plan-upgrade";
 import {
   getActiveSubscription,
@@ -101,7 +101,7 @@ export const POST = withDonkeyAuth(async (request) => {
     customer: customerId,
     line_items: [{ price: priceId, quantity: 1 }],
     locale: STRIPE_LOCALE[requestLocale(request)],
-    metadata: { ...metaCheckoutMetadata(request.headers), plan: PLAN_TERMS[plan].name },
+    metadata: { ...metaCheckoutMetadata(request.headers), plan: PLAN_NAMES[plan] },
     mode: "subscription",
     subscription_data: {
       metadata: {
@@ -120,7 +120,7 @@ export const POST = withDonkeyAuth(async (request) => {
     );
   }
 
-  trackCheckoutStarted(checkout.id, PLAN_TERMS[plan].name, request.headers, session.user);
+  trackCheckoutStarted(checkout.id, PLAN_NAMES[plan], request.headers, session.user);
   return NextResponse.json({ url: checkout.url });
 });
 

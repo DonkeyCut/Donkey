@@ -11,6 +11,17 @@ import { z } from "zod";
 
 import { maxCreditGrantDollars, maxCreditGrantExpiryDays } from "@/lib/credits/top-up";
 
+// One paid plan's terms in the planTerms setting (src/lib/billing/plans.ts).
+const planTermsSchema = z
+  .object({
+    monthlyDollars: z.number().multipleOf(0.01).min(0.5).max(10_000),
+    monthlyCredits: z.number().int().min(0).max(10_000_000),
+    storageGb: z.number().int().min(1).max(100_000),
+    rendersPerDay: z.number().int().min(1).max(100_000),
+    unlimitedProjects: z.boolean(),
+  })
+  .strict();
+
 // The settings registry: every lever su runs, declared once
 // with a schema and a default. A value resolves default < override < variant
 // (src/lib/config/resolve.ts); a database row holds the override, an
@@ -218,6 +229,18 @@ export const SETTINGS = defineSettings({
     title: "Free project limit",
     description:
       "How many projects a free account may hold besides its starter project. Creating one more opens the upgrade dialog.",
+  },
+  planTerms: {
+    schema: z.object({ plus: planTermsSchema, pro: planTermsSchema, max: planTermsSchema }).strict(),
+    default: {
+      plus: { monthlyDollars: 5, monthlyCredits: 5_000, storageGb: 10, rendersPerDay: 10, unlimitedProjects: false },
+      pro: { monthlyDollars: 20, monthlyCredits: 20_000, storageGb: 100, rendersPerDay: 200, unlimitedProjects: true },
+      max: { monthlyDollars: 49, monthlyCredits: 60_000, storageGb: 500, rendersPerDay: 500, unlimitedProjects: true },
+    },
+    public: true,
+    title: "Plan terms",
+    description:
+      "What each paid plan sells: its monthly USD price, which has to match its Stripe price, the AI credits each period starts with, cloud storage, renders a day, and whether the free project limit is lifted. Credits cost about 0.77 of their face value when spent in full.",
   },
   planPrices: {
     schema: z

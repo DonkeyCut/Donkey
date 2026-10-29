@@ -13,6 +13,8 @@ import { LOCALES, isLocale } from "@/i18n/locales";
 import { THEME_HEAD_SCRIPT } from "@/lib/theme";
 import { QueryProvider } from "@/queries/QueryProvider";
 import { MetaPageView } from "@/app/_components/MetaPageView";
+import { PlanTermsProvider } from "@/app/_components/PlanTermsProvider";
+import { cachedPlanTerms } from "@/lib/billing/plan-terms-server";
 import { PostHogProvider } from "@/app/_components/PostHogProvider";
 
 export async function generateMetadata(): Promise<Metadata> {
@@ -58,6 +60,8 @@ export default async function RootLayout({
   if (!isLocale(locale)) {
     notFound();
   }
+  // Cached, so the terms are in every page's static shell.
+  const planTerms = await cachedPlanTerms();
   return (
     <html
       lang={locale}
@@ -71,7 +75,9 @@ export default async function RootLayout({
       <body className="min-h-full flex flex-col">
         <PostHogProvider>
           <QueryProvider>
-            <IntlScope namespaces={["common"]}>{children}</IntlScope>
+            <PlanTermsProvider terms={planTerms}>
+              <IntlScope namespaces={["common"]}>{children}</IntlScope>
+            </PlanTermsProvider>
           </QueryProvider>
           <Suspense fallback={null}>
             <MetaPageView />

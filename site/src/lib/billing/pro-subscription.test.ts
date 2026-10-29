@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type Stripe from "stripe";
 
 import { planAllowanceMicros, scheduledProEnd, subscriptionCancelAt, subscriptionPlan } from "@/lib/billing/pro-subscription";
+import { SETTINGS } from "@/lib/config/registry";
 
 const PERIOD_START = 1_767_225_600; // 2026-01-01T00:00:00Z
 const PERIOD_END = 1_769_904_000; // 2026-02-01T00:00:00Z
@@ -94,8 +95,9 @@ describe("subscriptionPlan", () => {
 describe("planAllowanceMicros", () => {
   // 1,000 credits a dollar; a dollar is a million micros.
   test("grants each plan's credits", () => {
-    expect(planAllowanceMicros("plus")).toBe(BigInt(5_000_000));
-    expect(planAllowanceMicros("pro")).toBe(BigInt(20_000_000));
-    expect(planAllowanceMicros("max")).toBe(BigInt(60_000_000));
+    const terms = SETTINGS.planTerms.default;
+    expect(planAllowanceMicros(terms.plus)).toBe(BigInt(5_000_000));
+    expect(planAllowanceMicros(terms.pro)).toBe(BigInt(20_000_000));
+    expect(planAllowanceMicros(terms.max)).toBe(BigInt(60_000_000));
   });
 });

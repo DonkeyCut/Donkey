@@ -14,7 +14,7 @@ import { useEngineUser } from "@/cut/lib/backend/hooks";
 import { useHostedBalance, useInvalidateOnSettle } from "@/cut/lib/hosted";
 import { openUpgrade } from "@/cut/lib/upgrade";
 import { track } from "@/lib/analytics";
-import { PAID_PLANS, PLAN_TERMS } from "@/lib/billing/plans";
+import { PAID_PLANS, PLAN_NAMES } from "@/lib/billing/plans";
 import { compactCredits, creditsFromDollars, formatCreditCount, formatCredits } from "@/lib/credits/format-credits";
 import { CREDITS_PILL_FLAG } from "@/lib/feature-flags";
 import { useProSubscription } from "@/queries/billing";
@@ -108,7 +108,7 @@ function PlanCard({ balance }: { balance: string }) {
   return (
     <div className="text-sm">
       <div className="flex items-center justify-between gap-3 px-4 py-3">
-        <span className="font-semibold">{plan ? PLAN_TERMS[plan].name : t("creditsPill.free")}</span>
+        <span className="font-semibold">{plan ? PLAN_NAMES[plan] : t("creditsPill.free")}</span>
         {subscription.data && plan !== PAID_PLANS[PAID_PLANS.length - 1] ? (
           <Button size="sm" onClick={() => openUpgrade("plans", "credits_pill")}>
             {t("creditsPill.upgrade")}

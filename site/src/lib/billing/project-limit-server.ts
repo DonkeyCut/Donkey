@@ -1,7 +1,7 @@
 import { starterProjectId } from "@/cut/lib/starter";
-import { PLAN_TERMS, isPaidPlan } from "@/lib/billing/plans";
+import { isPaidPlan } from "@/lib/billing/plans";
 import { getActiveSubscription } from "@/lib/billing/pro-subscription";
-import { contextForUser, getSetting } from "@/lib/config/effective";
+import { contextForUser, getGlobalSetting, getSetting } from "@/lib/config/effective";
 import { prisma } from "@/lib/prisma";
 
 import { projectLimitFull } from "./project-limit";
@@ -14,7 +14,7 @@ export async function cloudProjectsFull(userId: string): Promise<boolean> {
     return false;
   }
   const subscription = await getActiveSubscription(userId);
-  if (subscription && isPaidPlan(subscription.planKey) && PLAN_TERMS[subscription.planKey].unlimitedProjects) {
+  if (subscription && isPaidPlan(subscription.planKey) && (await getGlobalSetting("planTerms"))[subscription.planKey].unlimitedProjects) {
     return false;
   }
 

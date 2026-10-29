@@ -5,7 +5,6 @@
 import type { QueryClient } from "@tanstack/react-query";
 
 import { track } from "@/lib/analytics";
-import { PLAN_TERMS } from "@/lib/billing/plans";
 import { countedProjects, projectLimitFull } from "@/lib/billing/project-limit";
 import { accountConfigQueryKey, fetchAccountConfig } from "@/queries/accountConfig";
 import { fetchProSubscription, proSubscriptionQueryKey } from "@/queries/billing";
@@ -31,7 +30,7 @@ export async function newProjectAllowed(client: QueryClient): Promise<boolean> {
 
   // Plus keeps the free limit; Pro and Max lift it.
   const subscription = await client.ensureQueryData({ queryKey: proSubscriptionQueryKey, queryFn: fetchProSubscription });
-  if (subscription.plan && PLAN_TERMS[subscription.plan].unlimitedProjects) {
+  if (subscription.plan && config.settings.planTerms[subscription.plan].unlimitedProjects) {
     return true;
   }
 

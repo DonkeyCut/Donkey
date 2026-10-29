@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test";
 
-import { cutLimitsForTier, FREE_STORAGE_BYTES } from "./limits";
+import { SETTINGS } from "@/lib/config/registry";
+
+import { cutLimitsForTier as limitsForTier, FREE_STORAGE_BYTES } from "./limits";
+
+const cutLimitsForTier = (tier: { superUser: boolean; plan: string | null }) =>
+  limitsForTier(tier, SETTINGS.planTerms.default);
 
 const GB = 1024 ** 3;
 
@@ -24,6 +29,11 @@ describe("cutLimitsForTier", () => {
     expect(cutLimitsForTier({ superUser: false, plan: "legacy" })).toEqual(
       cutLimitsForTier({ superUser: false, plan: "pro" }),
     );
+  });
+
+  test("a plan's storage and render cap follow its terms", () => {
+    const terms = { ...SETTINGS.planTerms.default, plus: { ...SETTINGS.planTerms.default.plus, storageGb: 25, rendersPerDay: 40 } };
+    expect(limitsForTier({ superUser: false, plan: "plus" }, terms)).toMatchObject({ storageBytes: 25 * GB, renderJobsPerDay: 40 });
   });
 
   test("super users are unlimited", () => {

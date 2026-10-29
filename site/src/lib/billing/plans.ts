@@ -1,15 +1,21 @@
-// The paid plans and what each one buys, in one place: checkout, the webhook
-// grant, the storage and project limits, and every card that sells a plan
-// read these, so a price can't say two things in two parts of the product.
-// Client-safe: no server imports.
+// The paid plans: their order, their names and the shape of what each one
+// sells. Checkout, the webhook grant, the storage and project limits, and
+// every card that sells a plan read the terms from one setting, so a price
+// can't say two things in two parts of the product. Client-safe: no server
+// imports.
 
 // Cheapest first; a plan's place in this list is its rank.
 export const PAID_PLANS = ["plus", "pro", "max"] as const;
 export type PaidPlan = (typeof PAID_PLANS)[number];
 
+// The display name of each plan, the same in every language.
+export const PLAN_NAMES: Record<PaidPlan, string> = { plus: "Plus", pro: "Pro", max: "Max" };
+
+// What a plan sells. su runs these through the planTerms setting, which
+// holds one per plan; the server reads it fresh, the pages read it baked into
+// their HTML (plan-terms-server.ts).
 export type PlanTerms = {
-  // The display name, the same in every language.
-  name: string;
+  // The monthly price in USD; su checks it against the plan's Stripe price.
   monthlyDollars: number;
   // The AI credits each billing period starts with.
   monthlyCredits: number;
@@ -20,14 +26,7 @@ export type PlanTerms = {
   rendersPerDay: number;
 };
 
-// Credits are charged at provider cost plus 30%, so a period's credits cost
-// Donkey about 0.77 of their face value when spent in full. Max's 60,000
-// credits come to ~$46 of provider cost against its $49 price.
-export const PLAN_TERMS: Record<PaidPlan, PlanTerms> = {
-  plus: { name: "Plus", monthlyDollars: 5, monthlyCredits: 5_000, storageGb: 10, unlimitedProjects: false, rendersPerDay: 10 },
-  pro: { name: "Pro", monthlyDollars: 20, monthlyCredits: 20_000, storageGb: 100, unlimitedProjects: true, rendersPerDay: 200 },
-  max: { name: "Max", monthlyDollars: 49, monthlyCredits: 60_000, storageGb: 500, unlimitedProjects: true, rendersPerDay: 500 },
-};
+export type PlanTermsTable = Record<PaidPlan, PlanTerms>;
 
 // The plan every upsell marks as the best value.
 export const RECOMMENDED_PLAN: PaidPlan = "pro";

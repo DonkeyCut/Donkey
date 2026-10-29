@@ -9,7 +9,7 @@ import { useEffect, useState } from "react";
 import { PlansDialog } from "@/cut/components/PlansDialog";
 import { onOperationFailure } from "@/cut/lib/operationFailure";
 import { onUpgrade, openUpgrade, type UpgradeRequest } from "@/cut/lib/upgrade";
-import { PAID_PLANS, PLAN_TERMS } from "@/lib/billing/plans";
+import { PAID_PLANS, PLAN_NAMES } from "@/lib/billing/plans";
 import { useProSubscription } from "@/queries/billing";
 
 export function UpgradeDialog() {
@@ -49,7 +49,7 @@ function OpenDialog({ request, onClose }: { request: UpgradeRequest; onClose: ()
     if (!plan || !periodEnd) {
       return { title: t("plans.freeOutTitle") };
     }
-    const words = { plan: PLAN_TERMS[plan].name, date: format.dateTime(new Date(periodEnd), { day: "numeric", month: "long" }) };
+    const words = { plan: PLAN_NAMES[plan], date: format.dateTime(new Date(periodEnd), { day: "numeric", month: "long" }) };
     return plan === PAID_PLANS[PAID_PLANS.length - 1]
       ? { title: t("plans.topOutTitle", words) }
       : { title: t("plans.paidOutTitle"), body: t("plans.paidOutBody", words) };

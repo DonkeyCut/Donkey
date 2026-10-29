@@ -1,9 +1,10 @@
 import { useLocale, useTranslations } from "next-intl";
 
 import type { PricingPlan } from "@/app/_components/landing/pricingPlans";
+import { usePlanTerms } from "@/app/_components/PlanTermsProvider";
 import type { CardColor } from "@/app/_components/landing/theme";
 import { promotionCovers, type AllowancePromotion } from "@/lib/billing/allowance-promotion";
-import { PAID_PLANS, PLAN_TERMS, RECOMMENDED_PLAN, type PaidPlan } from "@/lib/billing/plans";
+import { PAID_PLANS, PLAN_NAMES, RECOMMENDED_PLAN, type PaidPlan, type PlanTerms } from "@/lib/billing/plans";
 import { formatCreditCount } from "@/lib/credits/format-credits";
 import { formatUsdPlain } from "@/lib/credits/format-usd";
 
@@ -31,15 +32,17 @@ export type PlanCopy = {
 export function useCutPlans(): PlanCopy[] {
   const t = useTranslations("common.plans");
   const locale = useLocale();
+  const table = usePlanTerms();
   return PAID_PLANS.map((plan, i) => {
-    const terms = PLAN_TERMS[plan];
-    const below = i > 0 ? PLAN_TERMS[PAID_PLANS[i - 1]] : null;
+    const terms = table[plan];
+    const below = i > 0 ? PAID_PLANS[i - 1] : null;
+    const belowTerms = below ? table[below] : null;
     const amount = formatUsdPlain(String(terms.monthlyDollars), locale);
     const features: PlanFeature[] = [
       { kind: "credits", text: t("credits", { credits: formatCreditCount(terms.monthlyCredits, locale) }) },
-      ...(below ? [{ kind: "inherits" as const, text: t("everythingIn", { plan: below.name }) }] : []),
+      ...(below ? [{ kind: "inherits" as const, text: t("everythingIn", { plan: PLAN_NAMES[below] }) }] : []),
       { kind: "check", text: t("storage", { gb: terms.storageGb }) },
-      ...(terms.unlimitedProjects && !below?.unlimitedProjects
+      ...(terms.unlimitedProjects && !belowTerms?.unlimitedProjects
         ? [{ kind: "check" as const, text: t("unlimitedProjects") }]
         : []),
       ...(below ? [{ kind: "check" as const, text: t("renders", { count: terms.rendersPerDay }) }] : []),
@@ -47,7 +50,7 @@ export function useCutPlans(): PlanCopy[] {
     ];
     return {
       plan,
-      name: terms.name,
+      name: PLAN_NAMES[plan],
       body: t("body", { plan }),
       price: t("price", { price: amount }),
       amount,
@@ -63,15 +66,16 @@ export function useCutPlan(plan: PaidPlan): PlanCopy {
 }
 
 // The allowance promotion as the Pro card states it, while a period starting
-// now would get it: the multiplied allowance in USD and the last day. Null
-// when the plain plan applies.
+// now would get it: the multiplied allowance in credits and the last day.
+// Null when the plain plan applies.
 export function activeProPromotion(
   promotion: AllowancePromotion,
+  pro: PlanTerms,
   now = new Date(),
-): { allowanceDollars: number; multiplier: number; lastDay: string | null } | null {
+): { allowanceCredits: number; multiplier: number; lastDay: string | null } | null {
   if (!promotionCovers(promotion, now)) return null;
   return {
-    allowanceDollars: PLAN_TERMS.pro.monthlyDollars * promotion.multiplier,
+    allowanceCredits: pro.monthlyCredits * promotion.multiplier,
     multiplier: promotion.multiplier,
     lastDay: promotion.lastDay,
   };

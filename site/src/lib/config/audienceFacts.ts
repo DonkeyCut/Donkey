@@ -1,5 +1,6 @@
 import { cutLimitsForTier } from "@/cut/server/cloud/limits";
 import type { AudienceFact, AudienceFacts } from "@donkeycut/abexp";
+import type { PlanTermsTable } from "@/lib/billing/plans";
 import { ACTIVE_PRO_STATUSES } from "@/lib/billing/pro-subscription";
 import { PURCHASE_SOURCES } from "@/lib/config/purchases";
 import { prisma } from "@/lib/prisma";
@@ -14,9 +15,11 @@ const clampPercent = (x: number) => Math.min(100, Math.max(0, x));
 
 export type KnownUser = { id: string; country: string | null; createdAt: Date };
 
+// `terms` sizes each plan's storage quota for storageUsedPercent.
 export async function collectFactsFor(
   users: KnownUser[],
   needs: Set<AudienceFact>,
+  terms: PlanTermsTable,
 ): Promise<Map<string, AudienceFacts>> {
   const facts = new Map<string, AudienceFacts>();
   for (const user of users) {
@@ -73,7 +76,7 @@ export async function collectFactsFor(
     const bytesBy = new Map(usage.map((row) => [row.userId, Number(row.bytes)]));
     for (const tier of tiers) {
       const fact = facts.get(tier.id)!;
-      const quota = cutLimitsForTier({ superUser: tier.superUser, plan: planBy.get(tier.id) ?? null }).storageBytes;
+      const quota = cutLimitsForTier({ superUser: tier.superUser, plan: planBy.get(tier.id) ?? null }, terms).storageBytes;
       fact.storageUsedPercent = quota === null ? null : clampPercent((100 * (bytesBy.get(tier.id) ?? 0)) / quota);
     }
   }
@@ -90,7 +93,8 @@ export async function collectFacts(
   userId: string,
   known: { country: string | null; createdAt: Date },
   needs: Set<AudienceFact>,
+  terms: PlanTermsTable,
 ): Promise<AudienceFacts> {
-  const facts = await collectFactsFor([{ id: userId, ...known }], needs);
+  const facts = await collectFactsFor([{ id: userId, ...known }], needs, terms);
   return facts.get(userId)!;
 }

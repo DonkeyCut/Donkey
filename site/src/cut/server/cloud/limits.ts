@@ -1,5 +1,6 @@
-import { PLAN_TERMS, isPaidPlan, type PaidPlan } from "@/lib/billing/plans";
+import { isPaidPlan, type PaidPlan, type PlanTermsTable } from "@/lib/billing/plans";
 import { getActiveSubscription } from "@/lib/billing/pro-subscription";
+import { getGlobalSetting } from "@/lib/config/effective";
 import { isDonkeySuperUser } from "@/lib/super-user";
 import { prisma } from "@/lib/prisma";
 
@@ -54,27 +55,24 @@ const FREE: CutLimits = {
   titlesPerDay: 300,
 };
 const GB = 1024 ** 3;
-// Plus buys credits and storage; its other caps are the free ones.
-const PLUS: CutLimits = {
-  ...FREE,
-  storageBytes: PLAN_TERMS.plus.storageGb * GB,
-  renderJobsPerDay: PLAN_TERMS.plus.rendersPerDay,
+
+// Each plan's storage and render cap come from its terms (the planTerms
+// setting); the live caps are engineering bounds.
+const PLAN_CAPS: Record<PaidPlan, Pick<CutLimits, "liveJobs" | "liveTurns" | "titlesPerDay">> = {
+  // Plus buys credits and storage; its other caps are the free ones.
+  plus: { liveJobs: FREE.liveJobs, liveTurns: FREE.liveTurns, titlesPerDay: FREE.titlesPerDay },
+  pro: { liveJobs: 32, liveTurns: 8, titlesPerDay: 2000 },
+  max: { liveJobs: 48, liveTurns: 12, titlesPerDay: 5000 },
 };
-const PRO: CutLimits = {
-  storageBytes: PLAN_TERMS.pro.storageGb * GB,
-  renderJobsPerDay: PLAN_TERMS.pro.rendersPerDay,
-  liveJobs: 32,
-  liveTurns: 8,
-  titlesPerDay: 2000,
-};
-const MAX: CutLimits = {
-  storageBytes: PLAN_TERMS.max.storageGb * GB,
-  renderJobsPerDay: PLAN_TERMS.max.rendersPerDay,
-  liveJobs: 48,
-  liveTurns: 12,
-  titlesPerDay: 5000,
-};
-const PLAN_LIMITS: Record<PaidPlan, CutLimits> = { plus: PLUS, pro: PRO, max: MAX };
+
+function planLimits(plan: PaidPlan, terms: PlanTermsTable): CutLimits {
+  return {
+    ...PLAN_CAPS[plan],
+    storageBytes: terms[plan].storageGb * GB,
+    renderJobsPerDay: terms[plan].rendersPerDay,
+  };
+}
+
 const UNLIMITED: CutLimits = {
   storageBytes: null,
   renderJobsPerDay: null,
@@ -86,16 +84,19 @@ const UNLIMITED: CutLimits = {
 /** The limits an account's tier earns: its plan's, or free's without one.
  * Super users are unlimited. A row with a plan key this build doesn't know
  * reads as Pro, the plan every row was before the ladder. */
-export function cutLimitsForTier(tier: { superUser: boolean; plan: string | null }): CutLimits {
+export function cutLimitsForTier(
+  tier: { superUser: boolean; plan: string | null },
+  terms: PlanTermsTable,
+): CutLimits {
   if (tier.superUser) return UNLIMITED;
   if (tier.plan === null) return FREE;
-  return isPaidPlan(tier.plan) ? PLAN_LIMITS[tier.plan] : PRO;
+  return planLimits(isPaidPlan(tier.plan) ? tier.plan : "pro", terms);
 }
 
 export async function cutLimitsFor(userId: string): Promise<CutLimits> {
   if (await isDonkeySuperUser(userId)) return UNLIMITED;
-  const subscription = await getActiveSubscription(userId);
-  return cutLimitsForTier({ superUser: false, plan: subscription?.planKey ?? null });
+  const [subscription, terms] = await Promise.all([getActiveSubscription(userId), getGlobalSetting("planTerms")]);
+  return cutLimitsForTier({ superUser: false, plan: subscription?.planKey ?? null }, terms);
 }
 
 /** 429 when the account already has as many asked-for jobs in flight as its

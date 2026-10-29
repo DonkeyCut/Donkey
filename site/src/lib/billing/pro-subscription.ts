@@ -7,7 +7,7 @@ import {
 } from "@/lib/billing/stripe";
 import { promotedAllowanceMicros } from "@/lib/billing/allowance-promotion";
 import { getGlobalSetting } from "@/lib/config/effective";
-import { isPaidPlan, PAID_PLANS, PLAN_TERMS, type PaidPlan } from "@/lib/billing/plans";
+import { isPaidPlan, PAID_PLANS, PLAN_NAMES, type PaidPlan, type PlanTerms } from "@/lib/billing/plans";
 import { creditStringToMicros, zeroCreditMicros } from "@/lib/credits/amounts";
 import { creditsPerDollar } from "@/lib/credits/format-credits";
 import { grantCredits } from "@/lib/credits/inference";
@@ -64,8 +64,8 @@ export async function planPriceId(plan: PaidPlan): Promise<string | null> {
 }
 
 // The credits a plan's billing period starts with, as ledger micros.
-export function planAllowanceMicros(plan: PaidPlan): bigint {
-  return creditStringToMicros(String(PLAN_TERMS[plan].monthlyCredits / creditsPerDollar));
+export function planAllowanceMicros(terms: PlanTerms): bigint {
+  return creditStringToMicros(String(terms.monthlyCredits / creditsPerDollar));
 }
 
 // The account's running subscription, whichever plan it is on; null for a
@@ -156,13 +156,10 @@ export async function syncProSubscription(
   const periodEnd = unixToDate(item.current_period_end);
   const cancelAt = subscriptionCancelAt(subscription);
   const endedAt = unixToDate(subscription.ended_at);
+  const plainMicros = planAllowanceMicros((await getGlobalSetting("planTerms"))[plan]);
   const allowanceMicros = periodStart
-    ? promotedAllowanceMicros(
-        planAllowanceMicros(plan),
-        await getGlobalSetting("proAllowancePromotion"),
-        periodStart,
-      )
-    : planAllowanceMicros(plan);
+    ? promotedAllowanceMicros(plainMicros, await getGlobalSetting("proAllowancePromotion"), periodStart)
+    : plainMicros;
 
   await prisma.proSubscription.upsert({
     create: {
@@ -211,7 +208,7 @@ export async function syncProSubscription(
   ) {
     await grantCredits({
       amountMicros: allowanceMicros,
-      description: `Donkey ${PLAN_TERMS[plan].name} monthly allowance`,
+      description: `Donkey ${PLAN_NAMES[plan]} monthly allowance`,
       expiresAt: periodEnd,
       metadata: { plan },
       periodEnd,
