@@ -23,6 +23,10 @@ import { planRank, RECOMMENDED_PLAN, type PaidPlan } from "@/lib/billing/plans";
 import { cn } from "@/lib/utils";
 import { useIntroOffer, useProSubscription, type IntroOffer } from "@/queries/billing";
 
+// A glow of the accent around the card, so it stands off the editor behind it.
+const BACKLIGHT =
+  "shadow-[0_0_36px_8px_rgba(0,90,230,0.41),0_0_170px_44px_rgba(0,60,200,0.35)]";
+
 export type PlansSource = "credits" | "projects" | "storage" | "plans" | "onboarding";
 
 export function PlansDialog({
@@ -102,7 +106,7 @@ export function PlansDialog({
         ref={popup}
         initialFocus={popup}
         showCloseButton={!dismissLabel}
-        className="gap-0 overflow-hidden p-0 sm:max-w-[60rem]"
+        className={cn("gap-0 overflow-hidden p-0 sm:max-w-[60rem]", BACKLIGHT)}
       >
         {/* A wash of the accent behind the heading. */}
         <div className="bg-gradient-to-b from-[#0071e3]/12 to-transparent px-6 pt-9 pb-7 text-center dark:from-[#0a84ff]/18 sm:px-10">
@@ -117,7 +121,10 @@ export function PlansDialog({
           </DialogHeader>
         </div>
         <DialogBody className="mx-0 px-6 pt-1 pb-2 sm:px-10">
-          <div className="grid gap-10 md:grid-cols-3 md:gap-0 md:divide-x md:divide-border">
+          {/* Each column spans the same six rows, so a line one plan adds
+              (the struck price, the offer's terms) lowers that row in every
+              column and the buttons stay level. */}
+          <div className="grid gap-10 md:grid-cols-3 md:grid-rows-[repeat(5,auto)_1fr] md:gap-0 md:divide-x md:divide-border">
             {plans.map((copy) => (
               <PlanColumn
                 key={copy.plan}
@@ -170,7 +177,7 @@ function PlanColumn({
   const held = planRank(copy.plan) <= planRank(current);
 
   return (
-    <section className="relative flex flex-col md:px-7 md:first:pl-0 md:last:pr-0">
+    <section className="relative flex flex-col md:row-span-6 md:grid md:grid-rows-subgrid md:px-7 md:first:pl-0 md:last:pr-0">
       {/* An open offer's sticker sits beside the heading, which makes room. */}
       {offer ? <OfferSticker offer={offer} tone="blue" className="absolute top-0 right-0 md:right-7" /> : null}
       <div className={cn("flex h-7 items-center gap-2", offer && "pr-24")}>
@@ -184,6 +191,7 @@ function PlanColumn({
       <p className={cn("mt-1 min-h-10 text-sm leading-snug text-muted-foreground", offer && "pr-24")}>{copy.body}</p>
 
       <Price copy={copy} offer={offer} />
+      <OfferTerms offer={offer} />
 
       <PlanButton
         copy={copy}
@@ -207,28 +215,36 @@ function PlanColumn({
   );
 }
 
-// The monthly price, large, with its cadence beside it; an open intro offer
-// shows its discounted first months beside the struck list price, and what
-// follows them.
+// The monthly price, large, with its cadence beside it. An open intro offer
+// shows its discounted price, with the struck list price above it. The row
+// sits at the bottom of its grid row, so the large prices share a line.
 function Price({ copy, offer }: { copy: PlanCopy; offer: IntroOffer | null }) {
-  const t = useTranslations("billing.plans");
   const locale = useLocale();
   return (
-    <div className="mt-4">
+    <div className="mt-4 md:self-end">
+      {offer ? (
+        <div className="text-sm font-medium text-muted-foreground line-through tabular-nums">{copy.amount}</div>
+      ) : null}
       <div className="flex items-baseline gap-1.5">
         <span className="text-4xl font-semibold tracking-tight tabular-nums">
           {offer ? formatMinorPrice(offer.introMinor, offer.currency, locale) : copy.amount}
         </span>
-        {offer ? (
-          <span className="text-lg font-medium text-muted-foreground line-through tabular-nums">{copy.amount}</span>
-        ) : null}
         <span className="text-sm text-muted-foreground">{copy.cadence}</span>
       </div>
-      {offer ? (
-        <div className={cn("mt-1 text-xs font-medium", BLUE_TEXT)}>
-          {t("introThen", { months: offer.months, price: formatMinorPrice(offer.priceMinor, offer.currency, locale) })}
-        </div>
-      ) : null}
+    </div>
+  );
+}
+
+// What follows the offer's first months. Rendered empty without an offer, so
+// every column fills the same grid row.
+function OfferTerms({ offer }: { offer: IntroOffer | null }) {
+  const t = useTranslations("billing.plans");
+  const locale = useLocale();
+  return (
+    <div className={cn("mt-1 text-xs font-medium", BLUE_TEXT)}>
+      {offer
+        ? t("introThen", { months: offer.months, price: formatMinorPrice(offer.priceMinor, offer.currency, locale) })
+        : null}
     </div>
   );
 }

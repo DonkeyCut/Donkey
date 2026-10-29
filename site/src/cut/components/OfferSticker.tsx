@@ -15,7 +15,7 @@ const TONE: Record<StickerTone, string> = {
   // The landing's ink and yellow, with its hard shadow.
   yellow: "size-[104px] border-2 border-ink bg-[#F5D875] text-ink shadow-[4px_4px_0_#0F0E0D]",
   // The modal's accent; white on it reads at 4.7:1 in either theme.
-  blue: "size-[88px] bg-[#0071e3] text-white shadow-lg shadow-[#0071e3]/30",
+  blue: "h-[100px] w-[88px] bg-[#0071e3] text-white shadow-lg shadow-[#0071e3]/30",
 };
 
 export function OfferSticker({
