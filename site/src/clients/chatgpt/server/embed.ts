@@ -64,7 +64,9 @@ async function redeem(request: Request, refuse: Refuse) {
 
   const params = new URL(request.url).searchParams;
   const project = params.get("project");
-  if (project !== null && !/^[A-Za-z0-9_-]{1,128}$/.test(project)) return refuse("badRequest", 400);
+  if (project !== null && !/^[A-Za-z0-9_-]{1,128}$/.test(project)) {
+    return refuse("badRequest", 400);
+  }
   const redeemed = await redeemEditorCode(params.get("code") ?? "", config);
   if (!redeemed) return refuse("expired", 403);
   try {

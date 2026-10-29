@@ -30,13 +30,17 @@ export function useHostDisplayMode() {
 }
 
 export function requestHostFullscreen() {
-  if (editorHost() !== "chatgpt") return;
+  if (editorHost() !== "chatgpt") {
+    return;
+  }
   window.parent.postMessage({ type: "donkeycut:fullscreen" }, "*");
 }
 
 /** Renew the frame's partitioned session through the authenticated tool bridge. */
 export function reconnectThroughHost() {
-  if (editorHost() !== "chatgpt") return;
+  if (editorHost() !== "chatgpt") {
+    return;
+  }
   window.parent.postMessage({ type: "donkeycut:reconnect" }, "*");
 }
 
@@ -85,7 +89,9 @@ export function useHostReady(ready: boolean) {
 /** Tell the card which project the frame shows, null on the projects home,
  * so the model's context follows a project opened inside the frame. */
 export function reportHostPage(projectId: string | null, name: string | null) {
-  if (editorHost() !== "chatgpt") return;
+  if (editorHost() !== "chatgpt") {
+    return;
+  }
   window.parent.postMessage({ type: "donkeycut:page", projectId, name }, "*");
 }
 
@@ -105,7 +111,9 @@ export function projectPageUrl(): string {
 
 export function useHostBridge() {
   useEffect(() => {
-    if (editorHost() !== "chatgpt") return;
+    if (editorHost() !== "chatgpt") {
+    return;
+  }
     const onMessage = (event: MessageEvent) => {
       if (event.source !== window.parent) return;
       const data = event.data as { type?: unknown; insetBottom?: unknown; theme?: unknown; displayMode?: unknown } | null;

@@ -68,7 +68,9 @@ export function RequireSession({ children }: { children: ReactNode }) {
   // offer window.
   const queryClient = useQueryClient();
   useEffect(() => {
-    if (!userId) return;
+    if (!userId) {
+      return;
+    }
     void prefetchPricing(queryClient);
   }, [userId, queryClient]);
 

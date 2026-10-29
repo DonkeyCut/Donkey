@@ -27,7 +27,9 @@ export function editorHost(): EditorHost {
 
 function rememberCard() {
   try {
-    if (sessionStorage.getItem(CARD_KEY) !== "chatgpt") sessionStorage.setItem(CARD_KEY, "chatgpt");
+    if (sessionStorage.getItem(CARD_KEY) !== "chatgpt") {
+      sessionStorage.setItem(CARD_KEY, "chatgpt");
+    }
   } catch {
     // Storage blocked: the flag in the address is all the frame has.
   }

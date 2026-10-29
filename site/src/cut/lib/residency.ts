@@ -53,7 +53,9 @@ export const RESIDENCY_LABEL: Record<Residency, string> = {
 export function availableResidencies(): Residency[] {
   // The card's tools reach cloud projects only, so the card lists and makes
   // nothing else.
-  if (editorHost() === "chatgpt") return ["cloud"];
+  if (editorHost() === "chatgpt") {
+    return ["cloud"];
+  }
   const out: Residency[] = [];
   if (servedFromEngine() || engineOrigin() !== "") out.push("local");
   if (supportsBrowserStore()) out.push("browser");

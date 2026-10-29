@@ -45,7 +45,9 @@ test("every path the manifest names ships in the package, and no secret does", (
     expect(paths.has(ref)).toBe(true);
   }
   for (const file of files) {
-    if ("from" in file) expect(existsSync(path.resolve(process.cwd(), file.from))).toBe(true);
+    if ("from" in file) {
+      expect(existsSync(path.resolve(process.cwd(), file.from))).toBe(true);
+    }
   }
   const text = files.map((f) => ("text" in f ? f.text : "")).join("\n");
   expect(text).not.toMatch(/clientSecret|test_credentials|reviewer_instructions|\.app\.json/);
@@ -56,7 +58,9 @@ test("each skill has the frontmatter ChatGPT reads to pick it", () => {
   const skills = files.filter((f) => f.path.startsWith("skills/"));
   expect(skills.length).toBeGreaterThan(10);
   for (const skill of skills) {
-    if (!("text" in skill)) throw new Error(skill.path);
+    if (!("text" in skill)) {
+      throw new Error(skill.path);
+    }
     const name = skill.path.split("/")[1];
     expect(skill.text.startsWith(`---\nname: ${name}\ndescription: "`)).toBe(true);
     const description = JSON.parse(skill.text.split("\n")[2].slice("description: ".length));

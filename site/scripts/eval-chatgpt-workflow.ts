@@ -171,7 +171,9 @@ try {
   await edit("trim_clip", { clipId, in: 0, out: Math.min(3, asset.duration) });
   await edit("add_title", { text: "MADE IN CHATGPT", start: 0, end: 2 });
   const frame = await settle(await call("capture_frame", { projectId, t: 0.5 }), "get_job_status", "capture");
-  if (frame.images < 1) fail("capture_frame returned no image block");
+  if (frame.images < 1) {
+    fail("capture_frame returned no image block");
+  }
   const titled = await doc(projectId);
   if (!(titled.overlays ?? []).some((o) => o.text === "MADE IN CHATGPT")) fail("the title did not save");
   if (!(titled.clips![0].out - titled.clips![0].in <= 3.001)) fail("the trim did not save");

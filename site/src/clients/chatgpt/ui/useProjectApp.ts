@@ -76,13 +76,17 @@ export function useProjectApp() {
     const editable = parsed.data.canEdit ? parsed.data.project?.id ?? home : null;
     const embed = editorSchema.safeParse(result._meta?.editor);
     const link = embed.success && (origin !== "card" || embed.data.expiresAt > Date.now()) ? embed.data : null;
-    if (origin === "call" && editable !== null && !link) throw new CardError("editorFailed");
+    if (origin === "call" && editable !== null && !link) {
+      throw new CardError("editorFailed");
+    }
     const media = playbackSchema.safeParse(result._meta?.playback);
     const interval = result._meta?.pollMs;
     if (typeof interval === "number" && interval >= 1000 && interval <= 30000) setPollMs(interval);
     setView(parsed.data);
     setPlayback(media.success ? media.data : null);
-    if (editable !== null && link) setEditor((current) => current ?? link);
+    if (editable !== null && link) {
+      setEditor((current) => current ?? link);
+    }
     setEditorRequest(editable !== null && !link ? editable : null);
     setError(null);
   }, []);
@@ -173,7 +177,9 @@ export function useProjectApp() {
   const framePage = useCallback((url: string, next: FramePage) => { setPage({ url, ...next }); }, []);
   useEffect(() => {
     const app = appRef.current;
-    if (!app || !ready || !view || !app.getHostCapabilities()?.updateModelContext) return;
+    if (!app || !ready || !view || !app.getHostCapabilities()?.updateModelContext) {
+      return;
+    }
     // The projects home clears what the card said, so the composer carries no
     // chip until a project opens.
     if (!shownId) {
@@ -217,7 +223,9 @@ export function useProjectApp() {
   }, []);
 
   useEffect(() => {
-    if (!ready || editorRequest === null || editor || requested.current === editorRequest) return;
+    if (!ready || editorRequest === null || editor || requested.current === editorRequest) {
+      return;
+    }
     requested.current = editorRequest;
     void run("open_project", openArgs(editorRequest), false);
   }, [ready, editorRequest, editor, run]);
@@ -225,7 +233,9 @@ export function useProjectApp() {
    * on the page the frame was showing. */
   const retryEditor = () => {
     const target = reported ? reported.projectId ?? HOME : projectId ?? (view?.view === "projects" ? HOME : null);
-    if (!ready || busy || reconnecting.current || target === null) return;
+    if (!ready || busy || reconnecting.current || target === null) {
+      return;
+    }
     reconnecting.current = true;
     requested.current = target;
     setEditorRequest(null);

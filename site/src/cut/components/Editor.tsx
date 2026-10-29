@@ -335,7 +335,9 @@ export function Editor({
       // the person while the tour is owed.
       const play = () => {
         const onboarding = queryClient.getQueryData<OnboardingState>(onboardingQueryKey);
-        if (!chatgpt && onboardingStage(onboarding) === "tour") return;
+        if (!chatgpt && onboardingStage(onboarding) === "tour") {
+          return;
+        }
         useEditor.getState().setPlaying(true);
       };
       if (!useOnboardingCover.getState().up) {

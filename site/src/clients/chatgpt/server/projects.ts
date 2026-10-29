@@ -433,7 +433,9 @@ export function projectTools(
     async withEditor(result: ProjectResult): Promise<ProjectResult> {
       const projectId = result.view.project?.id;
       const home = result.view.view === "projects";
-      if (!canEdit || (!projectId && !home) || result.editor) return result;
+      if (!canEdit || (!projectId && !home) || result.editor) {
+        return result;
+      }
       const code = await createEditorCode(identity.grantId, db);
       const target = projectId ? `&project=${encodeURIComponent(projectId)}` : "";
       const url = `${config.issuer}/api/chatgpt/embed?code=${code}${target}`;
