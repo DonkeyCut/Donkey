@@ -145,6 +145,10 @@ describe("ChatGPT MCP protocol", () => {
       expect(tools.find((tool) => tool.name === "open_project")?._meta).toMatchObject({
         "openai/ui": { entrypoints: [{ type: "global" }, { type: "thread" }] },
       });
+      expect(tools.find((tool) => tool.name === "open_project")?.icons?.map((icon) => [icon.theme, icon.src])).toEqual([
+        ["light", `${config.issuer}/chatgpt-entry-light.svg`],
+        ["dark", `${config.issuer}/chatgpt-entry-dark.svg`],
+      ]);
       expect(client.getServerCapabilities()?.extensions).toEqual({ "openai/mentions": { searchTool: "find_projects" } });
       expect(tools.find((tool) => tool.name === "find_projects")?._meta).toMatchObject({ ui: { visibility: ["app"] } });
       const mentions = await client.callTool({ name: "find_projects", arguments: { query: "launch" } });
