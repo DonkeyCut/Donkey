@@ -11,6 +11,7 @@ import { DONKEYCUT_CANONICAL } from "@/cut/lib/hosts";
 import { IntlScope } from "@/i18n/IntlScope";
 import { LOCALES, isLocale } from "@/i18n/locales";
 import { THEME_HEAD_SCRIPT } from "@/lib/theme";
+import { SCROLLBARS_HEAD_SCRIPT } from "@/lib/scrollbars";
 import { QueryProvider } from "@/queries/QueryProvider";
 import { MetaPageView } from "@/app/_components/MetaPageView";
 import { PlanTermsProvider } from "@/app/_components/PlanTermsProvider";
@@ -71,6 +72,7 @@ export default async function RootLayout({
     >
       <head>
         <script dangerouslySetInnerHTML={{ __html: THEME_HEAD_SCRIPT }} />
+        <script dangerouslySetInnerHTML={{ __html: SCROLLBARS_HEAD_SCRIPT }} />
       </head>
       <body className="min-h-full flex flex-col">
         <PostHogProvider>

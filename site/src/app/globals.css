@@ -292,3 +292,38 @@ html:has(.app-surface) {
     animation: none;
   }
 }
+
+/* Classic scrollbars draw as the ScrollArea's hairline: a 4px rounded thumb
+   inset in a 10px clear track. The head script sets the flag
+   (lib/scrollbars.ts). */
+[data-scrollbars=classic]::-webkit-scrollbar,
+[data-scrollbars=classic] ::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+[data-scrollbars=classic]::-webkit-scrollbar-track,
+[data-scrollbars=classic] ::-webkit-scrollbar-track,
+[data-scrollbars=classic]::-webkit-scrollbar-corner,
+[data-scrollbars=classic] ::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+[data-scrollbars=classic]::-webkit-scrollbar-thumb,
+[data-scrollbars=classic] ::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 9999px;
+  background-clip: padding-box;
+  background-color: color-mix(in oklab, var(--foreground) 25%, transparent);
+}
+
+[data-scrollbars=classic]::-webkit-scrollbar-thumb:hover,
+[data-scrollbars=classic] ::-webkit-scrollbar-thumb:hover {
+  background-color: color-mix(in oklab, var(--foreground) 40%, transparent);
+}
+
+@supports not selector(::-webkit-scrollbar) {
+  [data-scrollbars=classic] * {
+    scrollbar-width: thin;
+  }
+}
