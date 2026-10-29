@@ -170,6 +170,21 @@ jobs:
         # eval's exit code, whatever tee behind it returns.
         shell: bash
         working-directory: site
+    # The server renders the pages, and the root layout reads settings: a
+    # throwaway Postgres with the schema and no rows reads every default.
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: donkey
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 30
     steps:
       - uses: actions/checkout@v7
 
@@ -192,7 +207,8 @@ jobs:
 
       # Placeholder values: the eval's project lives on the dev server's own
       # disk and the page answers its session check itself, so nothing reads
-      # these — they only have to exist for the dev server to boot.
+      # these — they only have to exist for the dev server to boot. The
+      # database is the throwaway service above.
       - name: Write placeholder env
         run: |
           for key in BETTER_AUTH_SECRET GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET \
@@ -200,8 +216,12 @@ jobs:
             CUT_MEDIA_SIGNING_SECRET; do
             echo "$key=placeholder" >> .env
           done
-          echo "DATABASE_URL=postgresql://placeholder:placeholder@localhost:5432/placeholder" >> .env
-          echo "DIRECT_URL=postgresql://placeholder:placeholder@localhost:5432/placeholder" >> .env
+          echo "DATABASE_URL=postgresql://postgres:postgres@localhost:5432/donkey" >> .env
+          echo "DIRECT_URL=postgresql://postgres:postgres@localhost:5432/donkey" >> .env
+
+      # The schema only, into the service database that ends with the job.
+      - name: Create the tables
+        run: npx prisma db push
 
       - name: Start dev server
         env:

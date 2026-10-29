@@ -3,8 +3,9 @@ name: Browser Export Eval
 # Renders the export eval project through the browser pipeline — framePlan,
 # FrameCompositor, WebCodecs, the mediabunny muxer, the audio mix — in a real
 # Chrome against a hermetic dev server (scripts/eval-cut-export.ts --hermetic).
-# Every API call is answered inside the browser context, so the server needs
-# no database and boots on placeholder env values.
+# Every API call is answered inside the browser context. The server renders
+# the pages, and the root layout reads settings, so it gets a throwaway
+# Postgres with the schema and no rows: every setting reads its default.
 #
 # The job runs on a Mac: the default delivery is H.264 + AAC, and Chrome
 # encodes AAC through the platform's encoder, which Linux has none of. A Linux
@@ -55,9 +56,25 @@ jobs:
           HOMEBREW_NO_INSTALL_CLEANUP: "1"
         run: brew install ffmpeg
 
+      # macOS runners take no service containers, so Postgres comes from
+      # Homebrew, whose install already initialized a cluster for this user.
+      - name: Start Postgres
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+          HOMEBREW_NO_INSTALL_CLEANUP: "1"
+        run: |
+          brew install postgresql@17
+          brew services start postgresql@17
+          for i in $(seq 1 30); do
+            if "$(brew --prefix postgresql@17)/bin/pg_isready" -h localhost -q; then break; fi
+            sleep 1
+          done
+          "$(brew --prefix postgresql@17)/bin/createdb" -h localhost donkey
+
       # Placeholder values: the hermetic eval answers every API call inside
       # the browser context, so nothing on the server ever reads these — they
-      # only have to exist for the dev server to boot.
+      # only have to exist for the dev server to boot. The database is the
+      # throwaway one above.
       - name: Write placeholder env
         run: |
           for key in BETTER_AUTH_SECRET GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET \
@@ -65,8 +82,12 @@ jobs:
             CUT_MEDIA_SIGNING_SECRET; do
             echo "$key=placeholder" >> .env
           done
-          echo "DATABASE_URL=postgresql://placeholder:placeholder@localhost:5432/placeholder" >> .env
-          echo "DIRECT_URL=postgresql://placeholder:placeholder@localhost:5432/placeholder" >> .env
+          echo "DATABASE_URL=postgresql://$USER@localhost:5432/donkey" >> .env
+          echo "DIRECT_URL=postgresql://$USER@localhost:5432/donkey" >> .env
+
+      # The schema only, into the database this job made and drops with it.
+      - name: Create the tables
+        run: npx prisma db push
 
       - name: Start dev server
         run: |
