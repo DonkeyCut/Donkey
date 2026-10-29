@@ -86,13 +86,14 @@ async function expireBatch(row: Pick<JobRow, "id">): Promise<void> {
 
 /** Poll a job row until it settles or the budget runs out. The row comes back
  * either way; the caller reads its state. A command batch no card claims
- * within `editorClaimMs` is dismissed; one whose editor stops beating ends
- * in error. Any other kind of job is the worker's, which is woken as needed. */
+ * within `editorClaimMs` is dismissed, unless `editorBootDeadline` says a
+ * card is still booting its editor; one whose editor stops beating ends in
+ * error. Any other kind of job is the worker's, which is woken as needed. */
 export async function waitForJob(
   userId: string,
   jobId: string,
   budgetMs: number,
-  opts: { editorClaimMs?: number } = {}
+  opts: { editorClaimMs?: number; editorBootDeadline?: () => Promise<number> } = {}
 ): Promise<JobRow | null> {
   const deadline = Date.now() + budgetMs;
   const claimMs = opts.editorClaimMs ?? 3000;
@@ -101,7 +102,9 @@ export async function waitForJob(
     if (!row) return null;
     if (TERMINAL.has(row.state)) return row;
     if (row.kind === "commands") {
-      if (row.state === "queued" && claimWindowClosed(row, claimMs)) {
+      // A card that framed a moment ago claims once its editor boots.
+      const booting = row.state === "queued" && opts.editorBootDeadline && Date.now() < (await opts.editorBootDeadline());
+      if (row.state === "queued" && claimWindowClosed(row, claimMs) && !booting) {
         await dismissBatch(row);
         continue;
       }

@@ -323,6 +323,21 @@ export async function redeemEditorCode(
   return { userId: grant.userId, grantId: grant.id };
 }
 
+/** How long a card that just redeemed its link takes to boot the editor and
+ * claim its first batch. */
+const EDITOR_BOOT_MS = 20_000;
+
+/** When the card this connection framed last is done booting; 0 when none is
+ * booting. An edit queued before then waits for that card. */
+export async function editorBootDeadline(grantId: string, db = prisma): Promise<number> {
+  const latest = await db.chatgptToken.findFirst({
+    where: { grantId, kind: "embed", consumedAt: { gte: new Date(Date.now() - EDITOR_BOOT_MS) } },
+    orderBy: { consumedAt: "desc" },
+    select: { consumedAt: true },
+  });
+  return latest?.consumedAt ? latest.consumedAt.getTime() + EDITOR_BOOT_MS : 0;
+}
+
 /** The editor session a code produced, kept so revoking the connection ends it. */
 export async function recordEditorSession(
   grantId: string,

@@ -92,6 +92,27 @@ test("a batch no card claims in time is dismissed with the answer the tool gives
   expect(await claimEditorBatch("u", "p")).toBeNull();
 });
 
+test("a batch waits past the claim window for a card that is still booting its editor", async () => {
+  const queued = await queueCommands("u", "p", { commands: [{ name: "set_aspect", input: { aspect: "1:1" } }] });
+  const id = (queued as { id: string }).id;
+  rows[0].createdAt = new Date(Date.now() - 5000);
+
+  // The card framed a moment ago; its editor claims and settles the batch
+  // while the tool waits.
+  setTimeout(async () => {
+    await claimEditorBatch("u", "p");
+    await settleEditorBatch("u", id, { ok: true, results: [], changed: true, docVersion: "cloud:5" });
+  }, 100);
+  const row = await waitForJob("u", id, 3000, { editorClaimMs: 1000, editorBootDeadline: async () => Date.now() + 10_000 });
+  expect(row?.state).toBe("done");
+
+  // Once the boot allowance is spent, an unclaimed batch is dismissed.
+  await queueCommands("u", "p", { commands: [{ name: "undo", input: {} }] });
+  rows[1].createdAt = new Date(Date.now() - 5000);
+  const late = await waitForJob("u", rows[1].id, 50, { editorClaimMs: 1000, editorBootDeadline: async () => Date.now() - 1 });
+  expect(late?.state).toBe("dismissed");
+});
+
 test("a claimed batch whose editor stops beating ends in error, and a late report changes nothing", async () => {
   await queueCommands("u", "p", { commands: [{ name: "set_aspect", input: {} }] });
   await claimEditorBatch("u", "p");

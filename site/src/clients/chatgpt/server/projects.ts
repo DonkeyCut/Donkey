@@ -19,7 +19,7 @@ import { usageBytes } from "@/cut/server/cloud/usage";
 import { wakeRenderWorker } from "@/cut/server/cloud/wake";
 import type { ImportUrlResult } from "@/cut/worker/importUrlJob";
 import type { Download, Editor, Playback, ProjectView } from "@/clients/chatgpt/contracts";
-import { createEditorCode } from "@/clients/chatgpt/server/oauthTokens";
+import { createEditorCode, editorBootDeadline } from "@/clients/chatgpt/server/oauthTokens";
 import type { ChatgptConfig } from "@/clients/chatgpt/server/config";
 import { READ_COMMANDS, unknownCommandNames } from "@/clients/chatgpt/server/catalog";
 
@@ -108,6 +108,13 @@ export function projectTools(
   async function projectView(projectId: string): Promise<ProjectView> {
     return { ...emptyProjectView(), view: "project", project: await getOwnedProject(projectId) };
   }
+
+  /** How long a batch waits for the card: the claim window, or longer while
+   * a card this connection just framed boots its editor. */
+  const claimWait = {
+    editorClaimMs: config.editorClaimMs,
+    editorBootDeadline: () => editorBootDeadline(identity.grantId, db),
+  };
 
   function requireEdit() {
     if (!canEdit) throw new ProjectToolError("Reconnect Donkey Cut with editing permission.");
@@ -323,7 +330,7 @@ export function projectTools(
     if (!record.files?.length || !row.projectId) return { state: "adopted", assets: [] };
     const queued = await adoptionBatch(row, record);
     if (queued instanceof Response) return { state: "failed", error: await refusalText(queued) };
-    const batch = await waitForJob(identity.userId, queued.id, config.commandWaitMs, { editorClaimMs: config.editorClaimMs });
+    const batch = await waitForJob(identity.userId, queued.id, config.commandWaitMs, claimWait);
     if (!batch) return { state: "failed", error: "The import could not be added to the project." };
     if (batch.state === "queued" || batch.state === "running") return { state: "pending" };
     if (batch.state === "dismissed") return { state: "failed", error: NO_CARD_OPEN };
@@ -365,7 +372,7 @@ export function projectTools(
       throw new ProjectToolError(`Unknown command${unknown.length > 1 ? "s" : ""}: ${unknown.join(", ")}.`);
     const queued = await queueCommands(identity.userId, projectId, { commands, ...opts });
     if (queued instanceof Response) return refusal(queued);
-    const row = await waitForJob(identity.userId, queued.id, config.commandWaitMs, { editorClaimMs: config.editorClaimMs });
+    const row = await waitForJob(identity.userId, queued.id, config.commandWaitMs, claimWait);
     if (!row) throw new ProjectToolError("The job disappeared. Try again.");
     return jobView(row);
   }
