@@ -49,15 +49,14 @@ nobody waits on a render to watch. A
 render is for a revision with no current proxy, such as one edited from
 ChatGPT; it uses the existing headless renderer and a captured document, and
 repeated requests for the same saved revision reuse a queued, running, or
-completed preview. Browser and Mac projects reach ChatGPT once the user saves
-them to the cloud.
+completed preview. Only cloud projects reach ChatGPT.
 
 The widget polls while visible and renews expiring playback URLs through the
 host bridge; it holds no account cookie or OAuth token.
 
-Editable cards frame Donkey Cut through a one-use, one-minute link that creates
-a partitioned session cookie. Reconnect renews that link through the tool bridge
-and reloads the editor. Revoking the connection ends its sessions, and `frameDomains` permits the app's own domain.
+Editable cards frame the editor or the projects home through a one-use,
+one-minute link that creates a partitioned session cookie. Reconnect mints a
+fresh link. Revoking the connection ends its sessions, and `frameDomains` permits the app's own domain.
 
 ## Account linking
 
