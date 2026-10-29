@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type Stripe from "stripe";
 
-import { dropIntroDiscount, liftScheduledCancel, upgradeKey } from "@/lib/billing/plan-upgrade";
+import { declinedUpgrade, dropIntroDiscount, liftScheduledCancel, upgradeKey } from "@/lib/billing/plan-upgrade";
 
 const INTRO = "donkey-intro-50-3m";
 
@@ -68,5 +68,14 @@ describe("upgradeKey", () => {
     expect(upgradeKey(subscription({ latest_invoice: "in_2" }), "price_plus", "price_max")).not.toBe(
       upgradeKey(subscription(), "price_plus", "price_max"),
     );
+  });
+
+  test("a declined attempt gives the retry a new key", () => {
+    const declined = subscription(declinedUpgrade(subscription()));
+    expect(upgradeKey(declined, "price_plus", "price_max")).not.toBe(
+      upgradeKey(subscription(), "price_plus", "price_max"),
+    );
+    const again = subscription(declinedUpgrade(declined));
+    expect(upgradeKey(again, "price_plus", "price_max")).not.toBe(upgradeKey(declined, "price_plus", "price_max"));
   });
 });

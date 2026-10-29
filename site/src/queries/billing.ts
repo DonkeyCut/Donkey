@@ -106,11 +106,15 @@ export function useIntroOffer({ enabled = true }: { enabled?: boolean } = {}): {
     if (!unstarted) {
       return;
     }
-    void apiFetch<{ endsAt: string | null }>(INTRO_OFFER_URL, { method: "POST" }).then(({ endsAt }) => {
-      queryClient.setQueryData<PricingRead>(pricingQueryKey, (prev) =>
-        prev?.intro ? { ...prev, intro: endsAt ? { ...prev.intro, endsAt } : null } : prev,
-      );
-    });
+    // A start that fails leaves the window to checkout, which opens the same
+    // offer, so the discount on screen is the one charged.
+    void apiFetch<{ endsAt: string | null }>(INTRO_OFFER_URL, { method: "POST" })
+      .then(({ endsAt }) => {
+        queryClient.setQueryData<PricingRead>(pricingQueryKey, (prev) =>
+          prev?.intro ? { ...prev, intro: endsAt ? { ...prev.intro, endsAt } : null } : prev,
+        );
+      })
+      .catch(() => {});
   }, [unstarted, queryClient]);
 
   if (!enabled) {
@@ -132,12 +136,13 @@ export function useIntroOffer({ enabled = true }: { enabled?: boolean } = {}): {
 // claim link passes the offer's token, so the credit that lands is the one the
 // dialog described. An account already on a plan moves up in place and comes
 // back with the settings URL.
-// Every checkout names the currency its surface showed. The route refuses
-// one the account no longer checks out in, so a charge never differs from
-// the card.
+// Every checkout names the currency the account's pricing read gave its
+// surface. The route refuses one the account no longer checks out in, so a
+// charge never differs from the card; a checkout sent before that read
+// landed showed no price and names none.
 export function useStartCheckout() {
   const queryClient = useQueryClient();
-  const { currency } = useAccountCurrency({ enabled: true });
+  const currency = usePricing().data?.currency;
   return useMutation({
     mutationFn: (input?: { plan?: PaidPlan; offerToken?: string } | void) =>
       apiFetch<{ url: string }>("/api/billing/checkout", {

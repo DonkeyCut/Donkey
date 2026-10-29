@@ -16,16 +16,6 @@ async function introFacts(ctx: ConfigContext) {
   return { setting, facts: { seenAt: view?.seenAt ?? null, heldPro: heldPro(subscription?.status ?? null) } };
 }
 
-/** The intro offer open to this account right now, or null. Reading never
- * starts the window; checkout reads it this way. */
-export async function readIntroOffer(ctx: ConfigContext, now = new Date()): Promise<IntroOffer | null> {
-  if (!ctx.hasAccount) {
-    return null;
-  }
-  const { setting, facts } = await introFacts(ctx);
-  return introOfferAt(setting, facts, now);
-}
-
 /** The offer as the app loads it ahead of any surface, which never starts
  * the window; see introOfferPreview. */
 export async function previewIntroOffer(ctx: ConfigContext, now = new Date()) {

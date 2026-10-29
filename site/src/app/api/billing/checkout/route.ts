@@ -5,12 +5,19 @@ import { z } from "zod";
 import { requestLocale } from "@/i18n/requestLocale";
 import { auth } from "@/lib/auth";
 import { introCouponId } from "@/lib/billing/intro-offer";
-import { chargeCurrency } from "@/lib/billing/charge-currency";
-import { CURRENCIES, DEFAULT_CURRENCY } from "@/lib/billing/currencies";
-import { introCoupon, readIntroOffer } from "@/lib/billing/intro-offer-server";
+import { chargeCurrency, currencyFor } from "@/lib/billing/charge-currency";
+import { CURRENCIES } from "@/lib/billing/currencies";
+import { introCoupon, openIntroOffer } from "@/lib/billing/intro-offer-server";
+import { ensureLocalPrice } from "@/lib/billing/local-price";
 import { metaCheckoutMetadata, trackCheckoutStarted } from "@/lib/billing/meta-checkout";
-import { PAID_PLANS, PLAN_NAMES, planRank, type PaidPlan } from "@/lib/billing/plans";
-import { dropIntroDiscount, INTRO_OFFER_METADATA_KEY, liftScheduledCancel, upgradeKey } from "@/lib/billing/plan-upgrade";
+import { PAID_PLANS, PLAN_NAMES, planPrice, planRank, type PaidPlan, type PlanTermsTable } from "@/lib/billing/plans";
+import {
+  declinedUpgrade,
+  dropIntroDiscount,
+  INTRO_OFFER_METADATA_KEY,
+  liftScheduledCancel,
+  upgradeKey,
+} from "@/lib/billing/plan-upgrade";
 import {
   getActiveSubscription,
   isActiveProStatus,
@@ -22,7 +29,7 @@ import {
 import { STRIPE_LOCALE } from "@/lib/billing/stripe-locale";
 import { drainStripe, ensureStripeCustomer, getStripe } from "@/lib/billing/stripe";
 import { countryFromHeaders } from "@/lib/config/country";
-import { contextFromRequest } from "@/lib/config/effective";
+import { contextFromRequest, getGlobalSetting } from "@/lib/config/effective";
 import { verifyCreditOfferToken } from "@/lib/credits/offers";
 import { openOfferForSubscribing, SUBSCRIBE_BONUS_METADATA_KEY } from "@/lib/credits/subscribe-bonus-claim";
 import {
@@ -33,10 +40,11 @@ import {
 
 // The plan to buy, Pro when unnamed. A checkout opened from an offer's claim
 // link names the offer by its token, so the credit that lands is the one the
-// dialog described. The currency is the one the surface priced the plan in.
+// dialog described. The currency is the one the surface priced the plan in;
+// a surface that showed no price sends none.
 const bodySchema = z
   .object({
-    currency: z.enum(CURRENCIES).default(DEFAULT_CURRENCY),
+    currency: z.enum(CURRENCIES).optional(),
     offerToken: z.string().min(1).optional(),
     plan: z.enum(PAID_PLANS).optional(),
   })
@@ -62,11 +70,11 @@ export const POST = withDonkeyAuth(async (request) => {
   const plan = parsed.data.plan ?? "pro";
 
   // The account checks out in one currency: the one Stripe already bills it
-  // in, or its country's. A card priced in another, such as one drawn before
-  // the account's pricing read landed, is refused, so the charge always
-  // matches what the person saw and no account buys another country's price.
+  // in, or its country's. A card priced in another is refused, so the charge
+  // always matches what the person saw and no account buys another country's
+  // price.
   const currency = await chargeCurrency(session.user.id, countryFromHeaders(request.headers));
-  if (parsed.data.currency !== currency) {
+  if (parsed.data.currency && parsed.data.currency !== currency) {
     return NextResponse.json(
       { error: "currency_changed", message: "Prices for your account changed. Check the new price and try again." },
       { status: HTTP_CONFLICT },
@@ -75,7 +83,7 @@ export const POST = withDonkeyAuth(async (request) => {
 
   // A not-yet-configured price stays a 404 (not 401) so the landing card does
   // not treat it as a sign-in prompt.
-  const prices = await readPlanPrices();
+  const [prices, terms] = await Promise.all([readPlanPrices(), getGlobalSetting("planTerms")]);
   const priceId = prices[plan];
   if (!priceId) {
     return notFoundResponse();
@@ -85,7 +93,7 @@ export const POST = withDonkeyAuth(async (request) => {
   // would double-bill it.
   const current = await getActiveSubscription(session.user.id);
   if (current) {
-    return upgradeInPlace(current.stripeSubscriptionId, plan, prices, request.nextUrl.origin);
+    return upgradeInPlace(current.stripeSubscriptionId, plan, prices, terms, request.nextUrl.origin);
   }
 
   const customerId = await ensureStripeCustomer({
@@ -98,19 +106,20 @@ export const POST = withDonkeyAuth(async (request) => {
   // ago whose webhook is still on its way. That account moves up in place too.
   const live = await adoptLiveSubscription(customerId);
   if (live) {
-    return upgradeInPlace(live, plan, prices, request.nextUrl.origin);
+    return upgradeInPlace(live, plan, prices, terms, request.nextUrl.origin);
   }
   await expireOpenCheckouts(customerId);
   // A Pro checkout started while an offer for subscribing is open carries the
   // offer, so the webhook lands the credit on the subscription it creates.
   const offer = plan === "pro" ? await openOfferForSubscribing(session.user.id, namedOfferId) : null;
-  // An account inside its intro window checks out of Pro with the discount
-  // already on. Stripe takes either a discount or a promotion code field,
-  // never both.
-  const intro = plan === "pro" ? await readIntroOffer(await contextFromRequest(request)) : null;
+  // An account the intro offer is open to checks out of Pro with the
+  // discount already on, its window starting here if no surface started it.
+  // Stripe takes either a discount or a promotion code field, never both.
+  const intro = plan === "pro" ? await openIntroOffer(await contextFromRequest(request)) : null;
   const pricing = intro
     ? { discounts: [{ coupon: await introCoupon(intro) }] }
     : { allow_promotion_codes: true };
+  await ensureLocalPrice(priceId, planPrice(terms[plan], currency), currency);
   const stripe = getStripe();
   const origin = request.nextUrl.origin;
   const checkout = await stripe.checkout.sessions.create({
@@ -145,9 +154,10 @@ export const POST = withDonkeyAuth(async (request) => {
 });
 
 // A plan subscription Stripe holds for the customer, synced to the account
-// so every surface reads it; null when the customer has none.
+// so every surface reads it; null when the customer has none. Stripe's list
+// leaves out canceled subscriptions, so the read skips the history.
 async function adoptLiveSubscription(customerId: string): Promise<string | null> {
-  const subscriptions = await drainStripe(getStripe().subscriptions.list({ customer: customerId, status: "all" }));
+  const subscriptions = await drainStripe(getStripe().subscriptions.list({ customer: customerId }));
   for (const subscription of subscriptions) {
     if (!isActiveProStatus(subscription.status)) {
       continue;
@@ -184,6 +194,7 @@ async function upgradeInPlace(
   subscriptionId: string | null,
   plan: PaidPlan,
   prices: PlanPrices,
+  terms: PlanTermsTable,
   origin: string,
 ): Promise<Response> {
   if (!subscriptionId) {
@@ -197,6 +208,11 @@ async function upgradeInPlace(
   if (!line || planRank(plan) <= planRank(line.plan)) {
     return notAnUpgrade();
   }
+
+  // The subscription keeps the currency Stripe bills it in, so the new
+  // plan's price has to sell in it too.
+  const billed = currencyFor(subscription.currency, null);
+  await ensureLocalPrice(toPrice, planPrice(terms[plan], billed), billed);
 
   let updated: Stripe.Subscription;
   try {
@@ -213,7 +229,10 @@ async function upgradeInPlace(
       { idempotencyKey: upgradeKey(subscription, line.item.price.id, toPrice) },
     );
   } catch (e) {
+    // A declined card leaves the old plan in place. The decline is recorded,
+    // so the retry after a card fix sends a fresh update.
     if (e instanceof Stripe.errors.StripeCardError) {
+      await stripe.subscriptions.update(subscription.id, declinedUpgrade(subscription));
       return NextResponse.json(
         { error: "upgrade_payment_failed", message: e.message },
         { status: HTTP_PAYMENT_REQUIRED },

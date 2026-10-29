@@ -19,11 +19,35 @@ export function currencyFor(billed: string | null, country: string | null): Curr
   return billed;
 }
 
+// Each customer's billed currency, once Stripe has one. Stripe never changes
+// it after that, so the read is kept for the life of the server and only a
+// customer not yet billed asks Stripe again. Bounded in entries; the oldest
+// goes first.
+const BILLED_CACHE_MAX = 10_000;
+const billedCurrency = new Map<string, string>();
+
+async function customerCurrency(customerId: string): Promise<string | null> {
+  const known = billedCurrency.get(customerId);
+  if (known) {
+    return known;
+  }
+
+  const customer = await getStripe().customers.retrieve(customerId);
+  const billed = customer.deleted ? null : customer.currency ?? null;
+  if (!billed) {
+    return null;
+  }
+  if (billedCurrency.size >= BILLED_CACHE_MAX) {
+    billedCurrency.delete(billedCurrency.keys().next().value!);
+  }
+  billedCurrency.set(customerId, billed);
+  return billed;
+}
+
 export async function chargeCurrency(userId: string, country: string | null): Promise<Currency> {
   const user = await prisma.user.findUnique({ where: { id: userId }, select: { stripeCustomerId: true } });
   if (!user?.stripeCustomerId) {
     return marketCurrency(country);
   }
-  const customer = await getStripe().customers.retrieve(user.stripeCustomerId);
-  return currencyFor(customer.deleted ? null : customer.currency ?? null, country);
+  return currencyFor(await customerCurrency(user.stripeCustomerId), country);
 }
