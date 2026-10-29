@@ -10,7 +10,9 @@ export async function componentFixture(entrypoint: string) {
   const site = path.resolve(import.meta.dir, "../../..");
   const build = await Bun.build({
     entrypoints: [path.join(import.meta.dir, entrypoint)],
-    target: "browser", define: { "process.env.NODE_ENV": JSON.stringify("development") },
+    // Next's client modules (Link, the router) read build flags off
+    // process.env, which a browser bundle has none of: every flag reads unset.
+    target: "browser", define: { "process.env.NODE_ENV": JSON.stringify("development"), "process.env": "{}" },
   });
   assert(build.success, build.logs.join("\n"));
   const js = await build.outputs.find((o) => o.path.endsWith(".js"))!.text();

@@ -1,4 +1,5 @@
 import { createRoot } from "react-dom/client";
+import { WithIntl } from "@/i18n/testing";
 import { Timeline } from "@/cut/components/Timeline";
 import { useEditor } from "@/cut/lib/store";
 import { copyTimelineSelection, pasteCutPayload, payloadFromHtml } from "@/cut/lib/cutClipboard";
@@ -20,5 +21,5 @@ window.addEventListener("paste", (event) => {
   else s.paste();
 });
 createRoot(document.getElementById("root")!).render(
-  <div className="flex h-full flex-col justify-end"><Timeline /></div>
+  <WithIntl><div className="flex h-full flex-col justify-end"><Timeline /></div></WithIntl>
 );
