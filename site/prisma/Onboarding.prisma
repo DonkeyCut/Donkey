@@ -12,6 +12,10 @@ model UserOnboarding {
   // Null until the sequence ends; `skipped` says how it ended.
   completedAt        DateTime?
   skipped            Boolean   @default(false)
+  // When the slides ended and the starter tour took over; null until then.
+  slidesDoneAt       DateTime?
+  // The starter tour steps this account has done (TOUR_STEPS ids).
+  tourSteps          String[]  @default([])
   // Every source the account picked; the question takes more than one answer.
   referralSources    String[] @default([])
   // The free text that comes with picking "other".

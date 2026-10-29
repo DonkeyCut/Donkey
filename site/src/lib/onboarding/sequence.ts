@@ -31,3 +31,13 @@ export const isKnownReferralSource = (id: string): id is ReferralSource =>
 // The sequence an account is measured against. Raise it when the slides change
 // enough that people who finished the old one should see the new one.
 export const ONBOARDING_VERSION = 1;
+
+// The starter tour that follows the slides: each step is something the account
+// does in the starter project. New projects stay locked until every step is
+// done, and the route accepts only these ids.
+export const TOUR_STEPS = ["play", "clip", "media", "chat"] as const;
+
+export type TourStep = (typeof TOUR_STEPS)[number];
+
+export const isTourStep = (id: string): id is TourStep =>
+  (TOUR_STEPS as readonly string[]).includes(id);
