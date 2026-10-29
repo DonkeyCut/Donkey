@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { heldPro, introCouponId, introOfferAt, introPriceCents, offersIntro } from "./intro-offer";
+import { heldPro, introCouponId, introOfferAt, introOfferPreview, introPriceCents, offersIntro } from "./intro-offer";
 
 const HOUR_MS = 3_600_000;
 const seen = new Date("2026-10-16T12:00:00Z");
@@ -53,4 +53,31 @@ test("one coupon per pair of terms", () => {
 test("the intro price rounds to the cent", () => {
   expect(introPriceCents(2000, 50)).toBe(1000);
   expect(introPriceCents(1999, 33)).toBe(1339);
+});
+
+describe("introOfferPreview", () => {
+  const setting = { percentOff: 50, months: 1, windowHours: 73 };
+  const now = new Date("2026-10-29T00:00:00Z");
+
+  test("an account that has not seen it gets the terms with the window unstarted", () => {
+    expect(introOfferPreview(setting, { seenAt: null, heldPro: false }, now)).toEqual({
+      percentOff: 50,
+      months: 1,
+      windowHours: 73,
+      endsAt: null,
+    });
+  });
+
+  test("an account inside its window gets the window's end", () => {
+    const seenAt = new Date("2026-10-28T00:00:00Z");
+    expect(introOfferPreview(setting, { seenAt, heldPro: false }, now)?.endsAt).toEqual(
+      new Date("2026-10-31T01:00:00Z"),
+    );
+  });
+
+  test("a closed window, a past subscriber, or no offer is null", () => {
+    expect(introOfferPreview(setting, { seenAt: new Date("2026-10-01T00:00:00Z"), heldPro: false }, now)).toBeNull();
+    expect(introOfferPreview(setting, { seenAt: null, heldPro: true }, now)).toBeNull();
+    expect(introOfferPreview({ ...setting, percentOff: 0 }, { seenAt: null, heldPro: false }, now)).toBeNull();
+  });
 });

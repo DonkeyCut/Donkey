@@ -5,7 +5,17 @@ import { getStripe } from "@/lib/billing/stripe";
 import { getSetting, type ConfigContext } from "@/lib/config/effective";
 import { prisma } from "@/lib/prisma";
 
-import { heldPro, introCouponId, introOfferAt, offersIntro, type IntroOffer } from "./intro-offer";
+import { heldPro, introCouponId, introOfferAt, introOfferPreview, offersIntro, type IntroOffer } from "./intro-offer";
+
+// The setting and what the account has done, for the reads below.
+async function introFacts(ctx: ConfigContext) {
+  const [setting, subscription, view] = await Promise.all([
+    getSetting("introOffer", ctx),
+    prisma.proSubscription.findUnique({ where: { userId: ctx.userId }, select: { status: true } }),
+    prisma.introOfferView.findUnique({ where: { userId: ctx.userId }, select: { seenAt: true } }),
+  ]);
+  return { setting, facts: { seenAt: view?.seenAt ?? null, heldPro: heldPro(subscription?.status ?? null) } };
+}
 
 /** The intro offer open to this account right now, or null. Reading never
  * starts the window; checkout reads it this way. */
@@ -13,17 +23,18 @@ export async function readIntroOffer(ctx: ConfigContext, now = new Date()): Prom
   if (!ctx.hasAccount) {
     return null;
   }
+  const { setting, facts } = await introFacts(ctx);
+  return introOfferAt(setting, facts, now);
+}
 
-  const [setting, subscription, view] = await Promise.all([
-    getSetting("introOffer", ctx),
-    prisma.proSubscription.findUnique({ where: { userId: ctx.userId }, select: { status: true } }),
-    prisma.introOfferView.findUnique({ where: { userId: ctx.userId }, select: { seenAt: true } }),
-  ]);
-  return introOfferAt(
-    setting,
-    { seenAt: view?.seenAt ?? null, heldPro: heldPro(subscription?.status ?? null) },
-    now,
-  );
+/** The offer as the app loads it ahead of any surface, which never starts
+ * the window; see introOfferPreview. */
+export async function previewIntroOffer(ctx: ConfigContext, now = new Date()) {
+  if (!ctx.hasAccount) {
+    return null;
+  }
+  const { setting, facts } = await introFacts(ctx);
+  return introOfferPreview(setting, facts, now);
 }
 
 /** The offer for a surface about to show it. The first time an account the

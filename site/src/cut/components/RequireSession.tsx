@@ -1,5 +1,6 @@
 "use client";
 
+import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, type ReactNode } from "react";
 import { useEnvironment } from "@/cut/lib/environment";
 import { EmbeddedSignInFallback } from "@/cut/components/EmbeddedSignInFallback";
@@ -15,6 +16,7 @@ import {
 import { reportExposures, useAppLoaded } from "@/lib/analytics";
 import { useSession } from "@/lib/auth-client";
 import { useAccountConfig } from "@/queries/accountConfig";
+import { prefetchIntroOffer } from "@/queries/billing";
 import { useNoteOutboxSync } from "@/cut/hooks/useNoteOutboxSync";
 
 // Session gate for the whole Cut app surface. The landing CTAs already route
@@ -60,6 +62,14 @@ export function RequireSession({ children }: { children: ReactNode }) {
     if (!userId || !config.data) return;
     reportExposures(config.data);
   }, [userId, config.data]);
+
+  // The intro offer, loaded with the account so every card that sells Pro
+  // has it on its first frame. Loading it starts no window.
+  const queryClient = useQueryClient();
+  useEffect(() => {
+    if (!userId) return;
+    void prefetchIntroOffer(queryClient);
+  }, [userId, queryClient]);
 
   // Paint first, verify behind: the account remembered from the last visit
   // opens the gate immediately, so a reload shows cached shelves while the

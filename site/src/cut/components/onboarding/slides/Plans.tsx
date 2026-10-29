@@ -65,8 +65,10 @@ export function PlansSlide({ run, exit, onSkipPro }: { run: OnboardingRun; exit:
           slide's gutter to the screen edge so the next card peeks in on the
           right, and the top padding keeps the tape and offer sticker. The
           recommended plan comes first so it is the one on screen when the
-          slide opens. */}
-      <div className="-mx-6 mt-3 flex scroll-px-6 snap-x snap-mandatory gap-4 overflow-x-auto px-6 pt-5 pb-3 [scrollbar-width:none] md:mx-0 md:mt-8 md:grid md:grid-cols-3 md:items-stretch md:gap-5 md:overflow-visible md:p-0 [&::-webkit-scrollbar]:hidden">
+          slide opens. The row holds until the offer read settles, which the
+          app has normally done long before this slide, so the Pro card never
+          paints a price the offer then replaces. */}
+      <div aria-busy={intro.isPending} className={cn(intro.isPending && "invisible", "-mx-6 mt-3 flex scroll-px-6 snap-x snap-mandatory gap-4 overflow-x-auto px-6 pt-5 pb-3 [scrollbar-width:none] md:mx-0 md:mt-8 md:grid md:grid-cols-3 md:items-stretch md:gap-5 md:overflow-visible md:p-0 [&::-webkit-scrollbar]:hidden")}>
         {plans.map((copy) => (
           <div
             key={copy.plan}

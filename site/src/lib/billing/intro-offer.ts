@@ -49,6 +49,26 @@ export function introOfferAt(
   return { percentOff: setting.percentOff, months: setting.months, endsAt };
 }
 
+/** The offer as a surface may show it before it is opened: the open window
+ * when the account has seen it, or a window not yet started (endsAt null),
+ * which runs `windowHours` from the moment a surface first shows it. Null
+ * when no offer is or will be open. */
+export function introOfferPreview(
+  setting: IntroOfferSetting,
+  facts: { seenAt: Date | null; heldPro: boolean },
+  now: Date,
+): (Omit<IntroOffer, "endsAt"> & { endsAt: Date | null; windowHours: number }) | null {
+  if (!offersIntro(setting, facts)) {
+    return null;
+  }
+  const terms = { percentOff: setting.percentOff, months: setting.months, windowHours: setting.windowHours };
+  if (!facts.seenAt) {
+    return { ...terms, endsAt: null };
+  }
+  const open = introOfferAt(setting, facts, now);
+  return open ? { ...terms, endsAt: open.endsAt } : null;
+}
+
 /** The Stripe coupon id for an offer's terms. One coupon per pair of terms,
  * so changing the setting needs no step in the Stripe dashboard. */
 export function introCouponId(offer: Pick<IntroOffer, "percentOff" | "months">): string {

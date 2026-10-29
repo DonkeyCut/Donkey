@@ -1,6 +1,7 @@
 "use client";
 
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
 
 import type { PaidPlan } from "@/lib/billing/plans";
 import { apiFetch } from "@/queries/apiClient";
@@ -45,17 +46,62 @@ export type IntroOffer = {
   introCents: number;
 };
 
+// The offer as the app loads it: endsAt is null while the window has not
+// started, and it runs windowHours from the moment a surface first shows it.
+type IntroOfferRead = Omit<IntroOffer, "endsAt"> & { endsAt: string | null; windowHours: number };
+
+const INTRO_OFFER_URL = "/api/billing/intro-offer";
+const INTRO_STALE_MS = 5 * 60_000;
+const HOUR_MS = 3_600_000;
+
+const fetchIntroOffer = async () => (await apiFetch<{ offer: IntroOfferRead | null }>(INTRO_OFFER_URL)).offer;
+
+/** Load the offer as the app starts, ahead of every surface that shows it,
+ * so a card selling Pro paints with it on its first frame. Reading starts
+ * nothing. */
+export function prefetchIntroOffer(client: QueryClient): Promise<void> {
+  return client.prefetchQuery({ queryFn: fetchIntroOffer, queryKey: introOfferQueryKey, staleTime: INTRO_STALE_MS });
+}
+
 // The discount an account inside its intro window gets on Pro. Checkout
 // applies it on its own; this read is for the surfaces that show it, and the
-// first one starts the window.
-export function useIntroOffer({ enabled = true }: { enabled?: boolean } = {}) {
-  return useQuery({
-    enabled,
-    queryFn: async () =>
-      (await apiFetch<{ offer: IntroOffer | null }>("/api/billing/intro-offer", { method: "POST" })).offer,
-    queryKey: introOfferQueryKey,
-    staleTime: 5 * 60_000,
-  });
+// first one to show it starts the window.
+export function useIntroOffer({ enabled = true }: { enabled?: boolean } = {}): {
+  data: IntroOffer | null | undefined;
+  isPending: boolean;
+} {
+  const queryClient = useQueryClient();
+  const read = useQuery({ enabled, queryFn: fetchIntroOffer, queryKey: introOfferQueryKey, staleTime: INTRO_STALE_MS });
+  const offer = read.data;
+
+  // A window this surface is the first to show runs from its mount, the
+  // moment the start below lands on the server too; the countdown keeps that
+  // anchor, so it never jumps when the server's answer arrives.
+  const [mountedAt] = useState(() => Date.now());
+  const [startedHere, setStartedHere] = useState(false);
+  const unstarted = enabled && offer !== undefined && offer !== null && offer.endsAt === null;
+  if (unstarted && !startedHere) {
+    setStartedHere(true);
+  }
+  useEffect(() => {
+    if (!unstarted) {
+      return;
+    }
+    void apiFetch<{ endsAt: string | null }>(INTRO_OFFER_URL, { method: "POST" }).then(({ endsAt }) => {
+      queryClient.setQueryData<IntroOfferRead | null>(introOfferQueryKey, (prev) =>
+        prev && endsAt ? { ...prev, endsAt } : null,
+      );
+    });
+  }, [unstarted, queryClient]);
+
+  if (!offer) {
+    return { data: offer, isPending: read.isPending };
+  }
+  const endsAt =
+    startedHere || offer.endsAt === null
+      ? new Date(mountedAt + offer.windowHours * HOUR_MS).toISOString()
+      : offer.endsAt;
+  return { data: { ...offer, endsAt }, isPending: read.isPending };
 }
 
 // Mutations return the Stripe URL; the caller redirects the browser. We don't
