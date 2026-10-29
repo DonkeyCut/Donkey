@@ -7,7 +7,7 @@ import { CLIENT_ID, MCP_PATH, SCOPES } from "@/clients/chatgpt/server/config";
 import { pluginSkills } from "@/clients/chatgpt/server/guidance";
 
 /** The package name the portal gave the listing; uploads update it. */
-const PACKAGE_NAME = "app-6ab37f0e13e88191a96ea418d230fe55";
+const PACKAGE_NAME = "donkey-cut";
 const SERVER_NAME = "donkey-cut";
 const LOGO_SOURCE = "public/chatgpt-app-icon.png";
 const LOGO = "./assets/logo.png";
