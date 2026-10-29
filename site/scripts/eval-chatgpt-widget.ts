@@ -114,12 +114,16 @@ try {
   const contexts = await page.evaluate(() => (window as unknown as { contexts: { structuredContent?: { projectId?: string } }[] }).contexts);
   assert.equal(contexts.at(-1)?.structuredContent?.projectId, "project", "the model knows which project the card shows");
   assert.equal(await app.locator("button").count(), 0, "the editor card has no controls of its own");
+  assert.equal(await app.locator("main.editing").evaluate((m) => getComputedStyle(m).borderTopWidth), "0px", "an inline card keeps the host's own border");
   await app.frameLocator("iframe.editor").locator("#inset").filter({ hasText: /^0$/ }).waitFor();
   await app.frameLocator("iframe.editor").locator("#mode").filter({ hasText: /^inline$/ }).waitFor();
   await app.frameLocator("iframe.editor").getByRole("button", { name: "Fullscreen" }).click();
   await app.frameLocator("iframe.editor").locator("#mode").filter({ hasText: /^fullscreen$/ }).waitFor();
   await app.frameLocator("iframe.editor").locator("#inset").filter({ hasText: /^120$/ }).waitFor();
   assert.deepEqual(await page.evaluate(() => (window as unknown as { modes: string[] }).modes), ["fullscreen"], "the editor's button asks for the whole window");
+  // The host's title sits above a fullscreen card; a hairline in the editor's
+  // own border color parts it from the editor's top bar.
+  assert.equal(await app.locator("main.editing").evaluate((m) => getComputedStyle(m).borderTopWidth), "1px", "a fullscreen card parts the host title from the editor");
   // A host in dark with a rail over the card's left edge: the card pads the
   // rail's band, wears dark, and hands the theme to the editor.
   await app.frameLocator("iframe.editor").locator("#theme").filter({ hasText: /^light$/ }).waitFor();
