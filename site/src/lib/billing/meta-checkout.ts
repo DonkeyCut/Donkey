@@ -1,6 +1,7 @@
 import type Stripe from "stripe";
 
 import { DONKEYCUT_CANONICAL } from "@/cut/lib/hosts";
+import { DEFAULT_CURRENCY, fromMinor, isCurrency } from "@/lib/billing/currencies";
 import type { PLAN_NAMES } from "@/lib/billing/plans";
 import { metaBrowser, type MetaBrowser, trackMetaEvent } from "@/lib/meta/conversions";
 
@@ -20,9 +21,6 @@ const METADATA_KEYS = {
 
 // Checkouts open from the editor and its settings; Meta needs a page on the site.
 const CHECKOUT_PAGE = `${DONKEYCUT_CANONICAL}/app/settings`;
-
-// Stripe amounts are in the currency's minor unit; Donkey charges in dollars.
-const CENTS_PER_DOLLAR = 100;
 
 // A checkout converts once it is paid, or needs no payment at all (a Pro
 // checkout under a full discount). An async method settles later, through
@@ -83,6 +81,20 @@ export function trackCheckoutPurchase(session: Stripe.Checkout.Session): void {
     name: "Purchase",
     url: CHECKOUT_PAGE,
     user: { email: session.customer_details?.email, id: session.client_reference_id },
-    value: { amount: (session.amount_total ?? 0) / CENTS_PER_DOLLAR, currency: session.currency ?? "usd" },
+    value: purchaseValue(session),
   });
+}
+
+// What a checkout charged, in its own currency. Stripe states amounts in the
+// currency's minor unit, which for yen and won is the whole unit; a currency
+// Stripe presented on its own, outside the ones the plans sell in, reads its
+// ISO digits.
+function purchaseValue(session: Stripe.Checkout.Session): { amount: number; currency: string } {
+  const currency = session.currency ?? DEFAULT_CURRENCY;
+  const minor = session.amount_total ?? 0;
+  if (isCurrency(currency)) {
+    return { amount: fromMinor(minor, currency), currency };
+  }
+  const digits = new Intl.NumberFormat("en", { currency, style: "currency" }).resolvedOptions().maximumFractionDigits ?? 2;
+  return { amount: minor / 10 ** digits, currency };
 }
