@@ -111,7 +111,8 @@ try {
   await app.locator(".skeleton").waitFor({ state: "detached" });
   assert.deepEqual(await page.evaluate(() => (window as unknown as { modes: string[] }).modes), [], "an opened editor stays inline");
   // A project picked in the card reaches the model, which never saw that call.
-  const contexts = await page.evaluate(() => (window as unknown as { contexts: { structuredContent?: { projectId?: string } }[] }).contexts);
+  const contexts = await page.evaluate(() => (window as unknown as { contexts: { content?: unknown[]; structuredContent?: { projectId?: string } }[] }).contexts);
+  assert.deepEqual(contexts.at(-2)?.content, [], "the picker clears the card's context");
   assert.equal(contexts.at(-1)?.structuredContent?.projectId, "project", "the model knows which project the card shows");
   assert.equal(await app.locator("button").count(), 0, "the editor card has no controls of its own");
   assert.equal(await app.locator("main.editing").evaluate((m) => getComputedStyle(m).borderTopWidth), "0px", "an inline card keeps the host's own border");

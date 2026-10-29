@@ -158,10 +158,14 @@ export function useProjectApp() {
   useEffect(() => {
     const app = appRef.current;
     if (!app || !ready || !view || !app.getHostCapabilities()?.updateModelContext) return;
-    const text = projectId
-      ? `The Donkey Cut card shows the project "${projectName}" (projectId ${projectId}). Requests about this project or video mean this one.`
-      : "The Donkey Cut card shows the project list; no project is open.";
-    void app.updateModelContext({ content: [{ type: "text", text }], structuredContent: { projectId: projectId ?? null, name: projectName ?? null } }).catch(() => {});
+    // The picker clears what the card said, so the composer carries no chip
+    // until a project opens.
+    if (!projectId) {
+      void app.updateModelContext({ content: [] }).catch(() => {});
+      return;
+    }
+    const text = `The Donkey Cut card shows the project "${projectName}" (projectId ${projectId}). Requests about this project or video mean this one.`;
+    void app.updateModelContext({ content: [{ type: "text", text }], structuredContent: { projectId, name: projectName } }).catch(() => {});
   }, [ready, view, projectId, projectName]);
 
   const playbackFailed = useCallback(() => {
