@@ -21,6 +21,7 @@ import { localBackend } from "./backend/local";
 import type { CutBackend, CutMode } from "./backend/types";
 import { readSnapshot, snapshotKey } from "./cache";
 import type { ProjectSummary } from "./types";
+import { editorHost } from "./environment";
 
 /** Where a piece of the user's own data lives. ("shared" is a view of someone
  * else's cloud project, never a residency of yours, so it never lists here.) */
@@ -50,6 +51,9 @@ export const RESIDENCY_LABEL: Record<Residency, string> = {
  * before the gate opens would hang on its latch.
  */
 export function availableResidencies(): Residency[] {
+  // The card's tools reach cloud projects only, so the card lists and makes
+  // nothing else.
+  if (editorHost() === "chatgpt") return ["cloud"];
   const out: Residency[] = [];
   if (servedFromEngine() || engineOrigin() !== "") out.push("local");
   if (supportsBrowserStore()) out.push("browser");

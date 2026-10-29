@@ -18,10 +18,9 @@ import { errorFromBody } from "@/cut/lib/userError";
 import { useDescribeError } from "@/i18n/describeError";
 import { track } from "@/lib/analytics";
 
-// The card's way forward when the project it was opened on can't be shown.
-// The card is the whole surface, so there is no projects home to go back to:
-// a new cloud project is made and opened here in its place.
-export function EmbeddedNewProject() {
+/** Make an untitled cloud project and open it in the card: the card rail's
+ * New project, and the way forward from a project that can't be shown. */
+export function useCardCreate() {
   const t = useTranslations("home.embeddedNewProject");
   const describeError = useDescribeError();
   const router = useRouter();
@@ -48,12 +47,22 @@ export function EmbeddedNewProject() {
       const project = (await res.json()) as ProjectSummary;
       seedNewProjectDoc(project.id, project.name, "cloud", aspect);
       track("project_created", { source: "chatgpt_card" });
-      router.replace(framedHref(projectHref(base, project.id, "projects")));
+      router.push(framedHref(projectHref(base, project.id, "projects")));
     } catch (e) {
       setError(describeError(e, t("failed")));
-      setBusy(false);
     }
+    // The projects home stays mounted behind the editor, so its button is
+    // ready again on the way back.
+    setBusy(false);
   };
+  return { create, busy, error };
+}
+
+// The card's way forward when the project it was opened on can't be shown: a
+// new cloud project is made and opened here in its place.
+export function EmbeddedNewProject() {
+  const t = useTranslations("home.embeddedNewProject");
+  const { create, busy, error } = useCardCreate();
 
   return (
     <>

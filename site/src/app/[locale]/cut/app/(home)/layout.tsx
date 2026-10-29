@@ -1,6 +1,6 @@
 import { Suspense } from "react";
 
-import { AppSidebar } from "@/cut/components/AppSidebar";
+import { HomeNav } from "@/cut/components/CardRail";
 import { ClaimCreditsDialog } from "@/cut/components/ClaimCreditsDialog";
 import { StorageUpgradeDialog } from "@/cut/components/StorageUpgradeDialog";
 import { UpgradeDialog } from "@/cut/components/UpgradeDialog";
@@ -8,7 +8,7 @@ import { UpgradeDialog } from "@/cut/components/UpgradeDialog";
 export default function HomeLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex h-full bg-background">
-      <AppSidebar />
+      <HomeNav />
       <main className="min-w-0 flex-1 overflow-y-auto">{children}</main>
       {/* Every home surface uploads — projects, library — so the quota wall
           answers from the layout rather than from each page. */}

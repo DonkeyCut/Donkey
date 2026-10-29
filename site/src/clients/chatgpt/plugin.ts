@@ -24,7 +24,7 @@ Open Donkey Cut from the sidebar or beside a conversation to pick a project, or 
 // one comma-separated string.
 const POSITIVE = [
   {
-    description: "Lists the account's cloud projects and opens the picker.",
+    description: "Lists the account's cloud projects and opens the projects home.",
     prompt: "Show me my Donkey Cut projects.",
     tools_triggered: "list_projects",
     expected_behavior: "Lists the connected account's cloud projects with their names, most recent first.",

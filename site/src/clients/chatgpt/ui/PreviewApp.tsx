@@ -1,12 +1,14 @@
 import { ArtifactVideo } from "@donkeycut/artifact-player/ArtifactVideo";
 import { useEffect, useRef, useState } from "react";
 import { useTranslations } from "use-intl";
-import { useProjectApp, type HostEdges, type HostTheme } from "./useProjectApp";
+import { useProjectApp, type FramePage, type HostEdges, type HostTheme } from "./useProjectApp";
 import "./preview.css";
 
 export function PreviewApp() {
-  const { ready, view, playback, editor, fullscreen, hostInset, edges, theme, error, busy, visible, run, playbackFailed, openDonkey, openFromFrame, saveFromFrame, requestFullscreen, retryEditor, createProject } = useProjectApp();
+  const { ready, view, playback, editor, fullscreen, hostInset, edges, theme, error, busy, visible, run, playbackFailed, openDonkey, openFromFrame, saveFromFrame, requestFullscreen, retryEditor, createProject, framePage } = useProjectApp();
   const project = view?.project;
+  // An editable projects card is the projects home, framed like the editor.
+  const home = view?.view === "projects" && view.canEdit;
   const preview = view?.preview;
   const rendering = preview?.status === "queued" || preview?.status === "running";
   // The frame whose editor has said it is on screen.
@@ -26,37 +28,30 @@ export function PreviewApp() {
       </div>
     </main>;
   }
-  // An editable project is the editor, and its own chrome carries every
-  // control. The card holds the editor's inline space from the first paint,
-  // so a card ChatGPT shows again after a reload is the editor while it
-  // fetches a fresh link. The editor's skeleton covers the frame until the
-  // frame reports something to see.
-  if (view ? project && view.canEdit : !error) {
+  // An editable project is the editor, and an editable projects card is the
+  // projects home; their own chrome carries every control. The card holds the
+  // editor's inline space from the first paint, so a card ChatGPT shows again
+  // after a reload is the editor while it fetches a fresh link. A skeleton in
+  // the page's shape covers the frame until the frame reports something to see.
+  if (view ? (project && view.canEdit) || home : !error) {
     const loading = !editor || shown !== editor.url;
     return <main className="editing" data-mode={fullscreen ? "fullscreen" : "inline"} style={edgePadding(edges)} aria-busy={loading}>
-      {editor && project && <EditorFrame key={editor.url} url={editor.url} name={project.name} inset={hostInset} theme={theme} fullscreen={fullscreen} onReady={() => setShown(editor.url)} onFullscreen={requestFullscreen} onOpen={openFromFrame} onSave={saveFromFrame} onDownloadError={setDownloadError} onReconnect={retryEditor} />}
+      {editor && (project || home) && <EditorFrame key={editor.url} url={editor.url} label={project ? t("editing", { name: project.name }) : t("home")} inset={hostInset} theme={theme} fullscreen={fullscreen} onReady={() => setShown(editor.url)} onPage={framePage} onFullscreen={requestFullscreen} onOpen={openFromFrame} onSave={saveFromFrame} onDownloadError={setDownloadError} onReconnect={retryEditor} />}
       {downloadError && <div className="download-error"><p role="alert">{downloadError}</p><button onClick={() => setDownloadError(null)}>{t("dismiss")}</button></div>}
-      {error && project && !editor
+      {error && (project || home) && !editor
         ? <div className="waiting">
           <p role="alert">{problem}</p>
           <button disabled={busy || !ready} onClick={retryEditor}>{t("tryAgain")}</button>
         </div>
-        : loading && <EditorSkeleton />}
+        : loading && (home ? <HomeSkeleton /> : <EditorSkeleton />)}
     </main>;
   }
-  return <main style={pickerPadding(edges, hostInset)} aria-busy={busy}>
+  // A read-only connection has no projects home: the model opens a project
+  // and the card plays its preview.
+  return <main style={cardPadding(edges, hostInset)} aria-busy={busy}>
     {problem && <p role="alert" className="error">{problem}</p>}
-    {!view && <p role="status">{ready ? t("chooseProject") : t("connecting")}</p>}
-    {!view && ready && <button onClick={() => void run("list_projects", {})}>{t("loadProjects")}</button>}
-    {view?.view === "projects" && <>
-      <h1>{t("yourProjects")}</h1>
-      {view.projects.length === 0 && <p>{t("noProjects")}</p>}
-      <div className="projects">{view.projects.map((p) => <button key={p.id} disabled={busy || !ready} onClick={() => void run("open_project", { projectId: p.id })}>
-        <span>{p.name}</span><span aria-hidden="true">→</span>
-      </button>)}</div>
-      <nav>{view.nextCursor && <button disabled={busy} onClick={() => void run("list_projects", { cursor: view.nextCursor! })}>{t("moreProjects")}</button>}
-        <button disabled={busy || !ready} onClick={() => void run("list_projects", {})}>{t("refreshList")}</button></nav>
-    </>}
+    {!view && ready && <button onClick={() => void run("open_project", {})}>{t("tryAgain")}</button>}
+    {view?.view === "projects" && <p role="status">{t("readOnlyHome")}</p>}
     {project && <>
       <h1>{project.name}</h1>
       {playback && <ArtifactVideo src={playback.url} format="file" active={visible} onError={playbackFailed} aria-label={t("previewOf", { name: project.name })} />}
@@ -68,7 +63,6 @@ export function PreviewApp() {
       <nav>
         {view.canRender && <button className="primary" disabled={busy || rendering || !ready} onClick={() => void run("render_preview", { projectId: project.id })}>{t("renderPreview")}</button>}
         <button disabled={!ready} onClick={() => openDonkey()}>{t("openInDonkey")}</button>
-        <button disabled={busy || !ready} onClick={() => void run("list_projects", {})}>{t("projects")}</button>
         {error && <button disabled={busy || !ready} onClick={() => void run("open_project", { projectId: project.id })}>{t("tryAgain")}</button>}
       </nav>
     </>}
@@ -78,14 +72,14 @@ export function PreviewApp() {
 /** Keeps the editor out of the bands the host draws over. */
 const edgePadding = (edges: HostEdges) => ({ paddingTop: edges.top, paddingRight: edges.right, paddingLeft: edges.left });
 
-/** The picker's own 20px margin inside those bands, with its last rows
+/** The preview card's own 20px margin inside those bands, with its last rows
  * scrolling clear of the host's composer. */
-const PICKER_GAP = 20;
-const pickerPadding = (edges: HostEdges, bottom: number) => ({
-  paddingTop: PICKER_GAP + edges.top,
-  paddingRight: PICKER_GAP + edges.right,
-  paddingBottom: PICKER_GAP + bottom,
-  paddingLeft: PICKER_GAP + edges.left,
+const CARD_GAP = 20;
+const cardPadding = (edges: HostEdges, bottom: number) => ({
+  paddingTop: CARD_GAP + edges.top,
+  paddingRight: CARD_GAP + edges.right,
+  paddingBottom: CARD_GAP + bottom,
+  paddingLeft: CARD_GAP + edges.left,
 });
 
 /** The editor's shape in the host's theme while it loads: the top bar, the tab
@@ -103,14 +97,23 @@ function EditorSkeleton() {
   </div>;
 }
 
-/** The editor, framed. It learns the host's display mode, its theme and how
+/** The projects home's shape while it loads: the card rail and a shelf of
+ * project tiles. */
+function HomeSkeleton() {
+  const t = useTranslations("chatgpt.widget");
+  return <div className="skeleton home" role="status" aria-label={t("openingHome")}>
+    <div className="rail">{[0, 1, 2].map((i) => <i key={i} className="slab" />)}</div>
+    <div className="tiles"><i className="slab head" />{[0, 1, 2, 3, 4, 5].map((i) => <i key={i} className="slab" />)}</div>
+  </div>;
+}
+
+/** The editor, or the projects home, framed. It learns the host's display mode, its theme and how
  * tall the bottom overlay is when it loads, whenever that changes, and whenever it
  * asks; it says when it has something on screen, and its own toolbar asks
  * for fullscreen, for a tab on donkeycut.com, and for the saves the sandbox
  * blocks inside the frame. */
-function EditorFrame({ url, name, inset, theme, fullscreen, onReady, onFullscreen, onOpen, onSave, onDownloadError, onReconnect }: { url: string; name: string; inset: number; theme: HostTheme; fullscreen: boolean; onReady: () => void; onFullscreen: () => void; onOpen: (url: string) => void; onSave: (text: string, name: string, mimeType: string) => void; onDownloadError: (message: string | null) => void; onReconnect: () => void }) {
+function EditorFrame({ url, label, inset, theme, fullscreen, onReady, onPage, onFullscreen, onOpen, onSave, onDownloadError, onReconnect }: { url: string; label: string; inset: number; theme: HostTheme; fullscreen: boolean; onReady: () => void; onPage: (url: string, page: FramePage) => void; onFullscreen: () => void; onOpen: (url: string) => void; onSave: (text: string, name: string, mimeType: string) => void; onDownloadError: (message: string | null) => void; onReconnect: () => void }) {
   const frame = useRef<HTMLIFrameElement>(null);
-  const t = useTranslations("chatgpt.widget");
   const origin = new URL(url).origin;
   const tell = () => frame.current?.contentWindow?.postMessage({ type: "donkeycut:host", insetBottom: inset, theme, displayMode: fullscreen ? "fullscreen" : "inline" }, origin);
   useEffect(tell, [inset, theme, fullscreen, origin]);
@@ -119,6 +122,11 @@ function EditorFrame({ url, name, inset, theme, fullscreen, onReady, onFullscree
       if (event.origin !== origin || event.source !== frame.current?.contentWindow) return;
       if (event.data?.type === "donkeycut:host?") tell();
       if (event.data?.type === "donkeycut:ready") onReady();
+      // The page the frame moved to on its own: a project, or null for home.
+      if (event.data?.type === "donkeycut:page") {
+        const { projectId, name: projectName } = event.data as { projectId?: unknown; name?: unknown };
+        if (projectId === null || typeof projectId === "string") onPage(url, { projectId, name: typeof projectName === "string" ? projectName : null });
+      }
       if (event.data?.type === "donkeycut:fullscreen") onFullscreen();
       if (event.data?.type === "donkeycut:reconnect") onReconnect();
       if (event.data?.type === "donkeycut:download-error" && (event.data.message === null || typeof event.data.message === "string")) onDownloadError(event.data.message);
@@ -137,5 +145,5 @@ function EditorFrame({ url, name, inset, theme, fullscreen, onReady, onFullscree
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
   });
-  return <iframe ref={frame} className="editor" src={url} onLoad={tell} aria-label={t("editing", { name })} allow="fullscreen; clipboard-read; clipboard-write" />;
+  return <iframe ref={frame} className="editor" src={url} onLoad={tell} aria-label={label} allow="fullscreen; clipboard-read; clipboard-write" />;
 }

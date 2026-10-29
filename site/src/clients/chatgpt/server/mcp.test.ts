@@ -140,7 +140,7 @@ describe("ChatGPT MCP protocol", () => {
         destructiveHint: false,
         openWorldHint: false,
       });
-      // The sidebar and thread panel open the picker; the composer's @-menu
+      // The sidebar and thread panel open the projects home; the composer's @-menu
       // searches projects through an app-only read.
       expect(tools.find((tool) => tool.name === "open_project")?._meta).toMatchObject({
         "openai/ui": { entrypoints: [{ type: "global" }, { type: "thread" }] },

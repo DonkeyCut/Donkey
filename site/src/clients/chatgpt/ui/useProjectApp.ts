@@ -31,6 +31,15 @@ export type HostTheme = "light" | "dark";
 export type HostEdges = { top: number; right: number; left: number };
 const NO_EDGES: HostEdges = { top: 0, right: 0, left: 0 };
 
+/** The page the frame shows after moving on its own: a project, or null on
+ * the projects home. */
+export type FramePage = { projectId: string | null; name: string | null };
+
+/** What a frame link opens: a project id, or HOME for the projects home. No
+ * project id is empty, so the two never collide. */
+const HOME = "";
+const openArgs = (target: string): Record<string, string> => (target === HOME ? {} : { projectId: target });
+
 /** The host carries authentication; the iframe only calls the MCP Apps bridge. */
 export function useProjectApp() {
   const appRef = useRef<App | null>(null);
@@ -44,6 +53,8 @@ export function useProjectApp() {
   const [edges, setEdges] = useState<HostEdges>(NO_EDGES);
   const [theme, setTheme] = useState<HostTheme>("light");
   const [editorRequest, setEditorRequest] = useState<string | null>(null);
+  // Tied to the frame that reported it, so a new frame starts from its link.
+  const [page, setPage] = useState<{ url: string } & FramePage | null>(null);
   const requested = useRef<string | null>(null);
   const reconnecting = useRef(false);
   const [error, setError] = useState<CardProblem | null>(null);
@@ -58,19 +69,21 @@ export function useProjectApp() {
     if (result.isError) throw new CardError("requestFailed");
     const parsed = viewSchema.safeParse(result.structuredContent);
     if (!parsed.success) throw new CardError("unreadable");
-    // An editable project is the editor. Its link is good for one minute, so
-    // the card's own result counts it only inside that minute.
-    const editable = parsed.data.canEdit && parsed.data.project ? parsed.data.project.id : null;
+    // An editable project is the editor and an editable projects view is the
+    // projects home. A link is good for one minute, so the card's own result
+    // counts it only inside that minute.
+    const home = parsed.data.view === "projects" ? HOME : null;
+    const editable = parsed.data.canEdit ? parsed.data.project?.id ?? home : null;
     const embed = editorSchema.safeParse(result._meta?.editor);
     const link = embed.success && (origin !== "card" || embed.data.expiresAt > Date.now()) ? embed.data : null;
-    if (origin === "call" && editable && !link) throw new CardError("editorFailed");
+    if (origin === "call" && editable !== null && !link) throw new CardError("editorFailed");
     const media = playbackSchema.safeParse(result._meta?.playback);
     const interval = result._meta?.pollMs;
     if (typeof interval === "number" && interval >= 1000 && interval <= 30000) setPollMs(interval);
     setView(parsed.data);
     setPlayback(media.success ? media.data : null);
-    if (editable && link) setEditor((current) => current ?? link);
-    setEditorRequest(editable && !link ? editable : null);
+    if (editable !== null && link) setEditor((current) => current ?? link);
+    setEditorRequest(editable !== null && !link ? editable : null);
     setError(null);
   }, []);
 
@@ -151,22 +164,26 @@ export function useProjectApp() {
     return () => window.clearTimeout(timeout);
   }, [ready, visible, busy, error, framed, projectId, jobId, status, playback, pollMs, run, view]);
 
-  // The model sees the tool calls it made, never a project picked in the
-  // card, so the card tells it what it shows. "Make this square" then edits
-  // the project on screen, e.g. one opened from the Codex sidebar.
-  const projectName = view?.project?.name;
+  // The model sees the tool calls it made, never a project opened inside the
+  // card, so the card tells it what the frame shows. "Make this square" then
+  // edits the project on screen, e.g. one opened from the projects home.
+  const reported = page && page.url === editor?.url ? page : null;
+  const shownId = reported ? reported.projectId : projectId ?? null;
+  const shownName = reported ? reported.name ?? (shownId === projectId ? view?.project?.name : null) : view?.project?.name;
+  const framePage = useCallback((url: string, next: FramePage) => { setPage({ url, ...next }); }, []);
   useEffect(() => {
     const app = appRef.current;
     if (!app || !ready || !view || !app.getHostCapabilities()?.updateModelContext) return;
-    // The picker clears what the card said, so the composer carries no chip
-    // until a project opens.
-    if (!projectId) {
+    // The projects home clears what the card said, so the composer carries no
+    // chip until a project opens.
+    if (!shownId) {
       void app.updateModelContext({ content: [] }).catch(() => {});
       return;
     }
-    const text = `The Donkey Cut card shows the project "${projectName}" (projectId ${projectId}). Requests about this project or video mean this one.`;
-    void app.updateModelContext({ content: [{ type: "text", text }], structuredContent: { projectId, name: projectName } }).catch(() => {});
-  }, [ready, view, projectId, projectName]);
+    const named = shownName ? `"${shownName}" ` : "";
+    const text = `The Donkey Cut card shows the project ${named}(projectId ${shownId}). Requests about this project or video mean this one.`;
+    void app.updateModelContext({ content: [{ type: "text", text }], structuredContent: { projectId: shownId, name: shownName ?? null } }).catch(() => {});
+  }, [ready, view, shownId, shownName]);
 
   const playbackFailed = useCallback(() => {
     if (!projectId || !jobId) return;
@@ -200,18 +217,20 @@ export function useProjectApp() {
   }, []);
 
   useEffect(() => {
-    if (!ready || !editorRequest || editor || requested.current === editorRequest) return;
+    if (!ready || editorRequest === null || editor || requested.current === editorRequest) return;
     requested.current = editorRequest;
-    void run("open_project", { projectId: editorRequest }, false);
+    void run("open_project", openArgs(editorRequest), false);
   }, [ready, editorRequest, editor, run]);
-  /** A fresh one-use link replaces the frame and renews its session cookie. */
+  /** A fresh one-use link replaces the frame and renews its session cookie,
+   * on the page the frame was showing. */
   const retryEditor = () => {
-    if (!ready || busy || reconnecting.current || !projectId) return;
+    const target = reported ? reported.projectId ?? HOME : projectId ?? (view?.view === "projects" ? HOME : null);
+    if (!ready || busy || reconnecting.current || target === null) return;
     reconnecting.current = true;
-    requested.current = projectId;
+    requested.current = target;
     setEditorRequest(null);
     setEditor(null);
-    void run("open_project", { projectId }).finally(() => { reconnecting.current = false; });
+    void run("open_project", openArgs(target)).finally(() => { reconnecting.current = false; });
   };
 
   /** The way forward from a project the account no longer has: a new cloud
@@ -230,5 +249,5 @@ export function useProjectApp() {
       setHostInset(full ? (app.getHostContext()?.safeAreaInsets?.bottom ?? 120) : 0);
     } catch { /* the inline card still works */ }
   }, []);
-  return { ready, view, playback, editor, fullscreen, hostInset, edges, theme, error, busy, visible, run, playbackFailed, openDonkey, openFromFrame, saveFromFrame, requestFullscreen, retryEditor, createProject };
+  return { ready, view, playback, editor, fullscreen, hostInset, edges, theme, error, busy, visible, run, playbackFailed, openDonkey, openFromFrame, saveFromFrame, requestFullscreen, retryEditor, createProject, framePage };
 }

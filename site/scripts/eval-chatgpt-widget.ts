@@ -55,7 +55,9 @@ const reply = (id, result) => frame.contentWindow.postMessage({jsonrpc:'2.0',id,
 // A card ChatGPT shows again after a reload replays its own result: a stale
 // preview with an expired playback link, and an editor link whose minute is
 // spent unless the fixture says the card was just opened.
-const cardResult = () => !window.editable ? result(view(false)) : result(view(true,{id:'job',status:'done',progress:1,revision:'cloud:1'}),{url:location.origin+'/preview.mp4?stale',expiresAt:Date.now()-1},window.freshCard ? {url:location.origin+'/embed?embed=chatgpt&code='+ (window.signedOut ? 'signed-out' : 'card') +'&project=project',expiresAt:Date.now()+60000} : {url:location.origin+'/embed?embed=chatgpt&code=spent&project=project',expiresAt:Date.now()-1});
+const cardResult = () => !window.editable ? result(view(true)) : result(view(true,{id:'job',status:'done',progress:1,revision:'cloud:1'}),{url:location.origin+'/preview.mp4?stale',expiresAt:Date.now()-1},window.freshCard ? {url:location.origin+'/embed?embed=chatgpt&code='+ (window.signedOut ? 'signed-out' : 'card') +'&project=project',expiresAt:Date.now()+60000} : {url:location.origin+'/embed?embed=chatgpt&code=spent&project=project',expiresAt:Date.now()-1});
+// A tool result the host hands the card after it is open: the projects view.
+window.showProjects = () => frame.contentWindow.postMessage({jsonrpc:'2.0',method:'ui/notifications/tool-result',params:result(view(false),null,window.editable ? {url:location.origin+'/embed?embed=chatgpt&code=one-use-'+ ++window.editorCodes,expiresAt:Date.now()+60000} : null)},'*');
 window.addEventListener('message', ({source,data}) => {
  if(source !== frame.contentWindow || !data.method) return;
  if(data.method === 'ui/initialize') reply(data.id,{protocolVersion:data.params.protocolVersion,hostInfo:{name:'fixture',version:'1'},hostCapabilities:{serverTools:{},openLinks:{},updateModelContext:{text:{},structuredContent:{}}},hostContext:{theme:'light',displayMode:'inline',availableDisplayModes:['inline','fullscreen'],safeAreaInsets:{top:0,right:0,bottom:120,left:0}}});
@@ -84,7 +86,6 @@ try {
   page.on("request", (request) => requests.push(request.url()));
   await page.goto(`http://localhost:${server.port}`);
   const app = page.frameLocator("iframe");
-  await app.getByRole("button", { name: "Launch film" }).click();
   await app.getByRole("button", { name: "Render preview", exact: true }).click();
   await app.locator("video").waitFor();
   const frame = page.frames().find((f) => f.url().endsWith("/widget"))!;
@@ -102,18 +103,25 @@ try {
   await page.waitForFunction(() => (window as unknown as { links: string[] }).links.length === 1);
   assert.deepEqual(await page.evaluate(() => (window as unknown as { links: string[] }).links), ["https://donkeycut.com/app/p/project"]);
   await page.screenshot({ path: "/tmp/donkey-chatgpt-widget.png" });
-  await app.getByRole("button", { name: "Projects", exact: true }).click();
+  // A read-only connection has no projects home to frame.
+  await page.evaluate(() => (window as unknown as { showProjects: () => void }).showProjects());
   await app.locator("video").waitFor({ state: "detached" });
-  assert.equal(await app.locator("video").count(), 0, "project picker releases the video");
-  await page.evaluate(() => { (window as unknown as { editable: boolean }).editable = true; });
-  await app.getByRole("button", { name: "Launch film" }).click();
-  await app.frameLocator("iframe.editor").locator("#editor").waitFor();
+  assert.equal(await app.locator("video").count(), 0, "the projects view releases the video");
+  await app.getByRole("status").filter({ hasText: "Ask ChatGPT to open one of your projects" }).waitFor();
+  assert.equal(await app.locator("iframe.editor").count(), 0, "a read-only projects card frames nothing");
+  // An editing connection's projects view is the projects home, framed.
+  await page.evaluate(() => { const host = window as unknown as { editable: boolean; showProjects: () => void }; host.editable = true; host.showProjects(); });
+  await app.frameLocator("iframe.editor").locator("#editor").filter({ hasText: "Editor for null" }).waitFor();
   await app.locator(".skeleton").waitFor({ state: "detached" });
+  assert.equal(await app.locator("iframe.editor").getAttribute("aria-label"), "Your Donkey Cut projects");
   assert.deepEqual(await page.evaluate(() => (window as unknown as { modes: string[] }).modes), [], "an opened editor stays inline");
-  // A project picked in the card reaches the model, which never saw that call.
-  const contexts = await page.evaluate(() => (window as unknown as { contexts: { content?: unknown[]; structuredContent?: { projectId?: string } }[] }).contexts);
-  assert.deepEqual(contexts.at(-2)?.content, [], "the picker clears the card's context");
-  assert.equal(contexts.at(-1)?.structuredContent?.projectId, "project", "the model knows which project the card shows");
+  // A project opened inside the frame reaches the model, which never saw that call.
+  type Contexts = { contexts: { content?: unknown[]; structuredContent?: { projectId?: string; name?: string } }[] };
+  assert.deepEqual(await page.evaluate(() => (window as unknown as Contexts).contexts.at(-1)?.content), [], "the projects home clears the card's context");
+  const homeFrame = page.frames().find((f) => f.url().includes("/embed?"))!;
+  await homeFrame.evaluate(() => parent.postMessage({ type: "donkeycut:page", projectId: "project", name: "Launch film" }, "*"));
+  await page.waitForFunction(() => (window as unknown as Contexts).contexts.at(-1)?.structuredContent?.projectId === "project");
+  assert.equal(await page.evaluate(() => (window as unknown as Contexts).contexts.at(-1)?.structuredContent?.name), "Launch film", "the model knows which project the frame shows");
   assert.equal(await app.locator("button").count(), 0, "the editor card has no controls of its own");
   assert.equal(await app.locator("main.editing").evaluate((m) => getComputedStyle(m).borderTopWidth), "0px", "an inline card keeps the host's own border");
   await app.frameLocator("iframe.editor").locator("#inset").filter({ hasText: /^0$/ }).waitFor();
@@ -226,7 +234,6 @@ try {
   await frame.evaluate(() => { location.reload(); });
   await app.getByRole("status").filter({ hasText: "This project was deleted." }).waitFor();
   assert.equal(await app.locator("iframe.editor").count(), 0, "a deleted project shows no editor frame");
-  assert.equal(await app.getByText("Your projects").count(), 0, "a deleted project shows no projects home");
   await page.evaluate(() => { (window as unknown as Host).missing = false; });
   await app.getByRole("button", { name: "Create New Project", exact: true }).click();
   await app.frameLocator("iframe.editor").locator("#editor").filter({ hasText: "one-use" }).waitFor();

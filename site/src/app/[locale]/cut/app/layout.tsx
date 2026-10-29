@@ -2,6 +2,7 @@ import { Suspense, type ReactNode } from "react";
 
 import { NoSessionReplay } from "@/app/_components/NoSessionReplay";
 import { NoTranslate } from "@/app/_components/NoTranslate";
+import { CardHost } from "@/cut/components/CardHost";
 import { ConnectGate } from "@/cut/components/ConnectGate";
 import { ExportsDock } from "@/cut/components/ExportsDock";
 import { CutOnboarding } from "@/cut/components/onboarding/CutOnboarding";
@@ -51,6 +52,7 @@ export default function CutAppLayout({ children }: { children: ReactNode }) {
         <Suspense fallback={<AppLoading />}>
           <RequireSession>
             <LocaleSync />
+            <CardHost />
             {/* A phone gets the page that asks for a computer in the app's place. */}
             <PhoneGate>
               <ConnectGate>

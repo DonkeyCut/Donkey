@@ -82,6 +82,13 @@ export function useHostReady(ready: boolean) {
   }, [ready]);
 }
 
+/** Tell the card which project the frame shows, null on the projects home,
+ * so the model's context follows a project opened inside the frame. */
+export function reportHostPage(projectId: string | null, name: string | null) {
+  if (editorHost() !== "chatgpt") return;
+  window.parent.postMessage({ type: "donkeycut:page", projectId, name }, "*");
+}
+
 /** An address the frame itself navigates to keeps the embed flag, so the page
  * it lands on is still the card. On the web the address is returned as is. */
 export function framedHref(href: string): string {

@@ -427,13 +427,16 @@ export function projectTools(
       if (!row) return { view: { ...emptyProjectView(), view: "missing", missing: { id: projectId } }, playback: null };
       return previewStatus(row);
     },
-    /** A project card is the full editor, signed in through a one-use link,
-     * whenever the connection can edit; a read-only one shows the preview. */
+    /** A project card is the full editor, and a projects card is the
+     * projects home, signed in through a one-use link whenever the connection
+     * can edit; a read-only one shows the preview. */
     async withEditor(result: ProjectResult): Promise<ProjectResult> {
       const projectId = result.view.project?.id;
-      if (!canEdit || !projectId || result.editor) return result;
+      const home = result.view.view === "projects";
+      if (!canEdit || (!projectId && !home) || result.editor) return result;
       const code = await createEditorCode(identity.grantId, db);
-      const url = `${config.issuer}/api/chatgpt/embed?code=${code}&project=${encodeURIComponent(projectId)}`;
+      const target = projectId ? `&project=${encodeURIComponent(projectId)}` : "";
+      const url = `${config.issuer}/api/chatgpt/embed?code=${code}${target}`;
       return { ...result, editor: { url, expiresAt: Date.now() + 60_000 } };
     },
     async render(projectId: string): Promise<ProjectResult> {

@@ -194,7 +194,8 @@ export function createChatgptServer(
       const { view, playback, download, editor } = await projects.withEditor(await run());
       const media = liftMedia(view);
       liftDisplay(view);
-      const text = describeProjectView(view) + (editor ? "\nThe Donkey Cut editor is open in the card." : "");
+      const opened = view.project ? "\nThe Donkey Cut editor is open in the card." : "\nThe Donkey Cut projects home is open in the card.";
+      const text = describeProjectView(view) + (editor ? opened : "");
       return {
         content: [{ type: "text" as const, text }, ...media],
         structuredContent: view,
@@ -235,12 +236,12 @@ export function createChatgptServer(
   server.registerTool(
     "open_project",
     {
-      // The sidebar and the thread panel open the picker under this title and
+      // The sidebar and the thread panel open the projects home under this title and
       // paint the donkey glyph in the menu's own ink.
       title: "Donkey Cut",
       icons: [{ src: `${config.issuer}/chatgpt-entry.svg`, mimeType: "image/svg+xml", sizes: ["any"] }],
       description:
-        "Open a cloud project initially, switch projects, or recover a missing card. Keep the existing card during edits and preview checks: reopening creates a fresh editor with empty undo history. The editable card holds the full editor, timeline, media panel, inspector and preview. A read-only connection sees the preview; use render_preview when its revision is stale or missing. With no projectId, show the project picker. A deleted project answers view \"missing\" and the card offers to create a new one.",
+        "Open a cloud project initially, switch projects, or recover a missing card. Keep the existing card during edits and preview checks: reopening creates a fresh editor with empty undo history. The editable card holds the full editor, timeline, media panel, inspector and preview. A read-only connection sees the preview; use render_preview when its revision is stale or missing. With no projectId, show the projects home, where the user opens or starts a project or browses their library; the card then tells you which project it shows. A deleted project answers view \"missing\" and the card offers to create a new one.",
       inputSchema: z.object({ projectId: idSchema.optional() }),
       outputSchema: viewSchema,
       annotations: readOnlyAnnotations,
@@ -535,7 +536,7 @@ export function createChatgptServer(
             // entrypoints always open fullscreen.
             "openai/ui": { availableDisplayModes: ["inline", "fullscreen"], preferredDisplayMode: "inline" },
             "openai/widgetDescription":
-              "Donkey Cut cloud project picker and video preview with render progress, export download, and an Open in Donkey Cut link.",
+              "Donkey Cut projects home and editor, or a video preview with render progress, export download, and an Open in Donkey Cut link.",
           },
         },
       ],

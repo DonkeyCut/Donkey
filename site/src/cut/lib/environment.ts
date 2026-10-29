@@ -11,9 +11,34 @@ import { useSyncExternalStore } from "react";
  */
 export type EditorHost = "web" | "chatgpt";
 
+// The frame remembers it is the card for the rest of its session, so a page
+// it navigates to on its own (a project opened from its projects home) is
+// still the card without the flag in its address.
+const CARD_KEY = "cut-embed";
+
 export function editorHost(): EditorHost {
   if (typeof window === "undefined" || window.self === window.top) return "web";
-  return new URLSearchParams(window.location.search).get("embed") === "chatgpt" ? "chatgpt" : "web";
+  if (new URLSearchParams(window.location.search).get("embed") === "chatgpt") {
+    rememberCard();
+    return "chatgpt";
+  }
+  return rememberedCard() ? "chatgpt" : "web";
+}
+
+function rememberCard() {
+  try {
+    if (sessionStorage.getItem(CARD_KEY) !== "chatgpt") sessionStorage.setItem(CARD_KEY, "chatgpt");
+  } catch {
+    // Storage blocked: the flag in the address is all the frame has.
+  }
+}
+
+function rememberedCard(): boolean {
+  try {
+    return sessionStorage.getItem(CARD_KEY) === "chatgpt";
+  } catch {
+    return false;
+  }
 }
 
 const subscribe = () => () => {};

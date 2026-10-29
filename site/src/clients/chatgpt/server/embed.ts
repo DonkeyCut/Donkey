@@ -36,8 +36,9 @@ type RefusalKey = keyof Messages["chatgpt"]["embed"];
 type Refuse = (key: RefusalKey, status: number, retryAfter?: string) => Response;
 
 /**
- * GET /api/chatgpt/embed?code=…&project=…: the card's frame redeems its one-use
- * code for a session and lands on the editor. The session cookie is
+ * GET /api/chatgpt/embed?code=…[&project=…]: the card's frame redeems its
+ * one-use code for a session and lands on the editor, or on the projects home
+ * when no project is named. The session cookie is
  * partitioned, so it exists only inside that frame under ChatGPT: the account's
  * own sign-in never crosses into the frame, and the frame's never leaves it.
  */
@@ -62,8 +63,8 @@ async function redeem(request: Request, refuse: Refuse) {
   if (limited) return refuse("tooMany", 429, limited.headers.get("Retry-After") ?? undefined);
 
   const params = new URL(request.url).searchParams;
-  const project = params.get("project") ?? "";
-  if (!/^[A-Za-z0-9_-]{1,128}$/.test(project)) return refuse("badRequest", 400);
+  const project = params.get("project");
+  if (project !== null && !/^[A-Za-z0-9_-]{1,128}$/.test(project)) return refuse("badRequest", 400);
   const redeemed = await redeemEditorCode(params.get("code") ?? "", config);
   if (!redeemed) return refuse("expired", 403);
   try {
@@ -90,7 +91,7 @@ async function redeem(request: Request, refuse: Refuse) {
     headers: {
       ...NO_STORE_HEADERS,
       "Set-Cookie": cookie,
-      Location: `${config.issuer}/app/p/${encodeURIComponent(project)}?embed=chatgpt`,
+      Location: project === null ? `${config.issuer}/app?embed=chatgpt` : `${config.issuer}/app/p/${encodeURIComponent(project)}?embed=chatgpt`,
     },
   });
 }

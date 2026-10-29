@@ -494,7 +494,7 @@ export function TopBar({
     // toward whichever side has slack instead of colliding with the rail.
     <header ref={headerRef} className="relative flex items-center border-b border-border bg-card">
       <div ref={leftRef} className="flex shrink-0 items-center gap-1 pl-2">
-        {!chatgpt && <Button
+        <Button
           variant="ghost"
           size="icon-sm"
           aria-label={t("backTo", { tab: back.tab })}
@@ -502,7 +502,7 @@ export function TopBar({
           render={<Link href={back.href} />}
         >
           <ChevronLeft />
-        </Button>}
+        </Button>
         {logo}
         {editing ? (
           <input

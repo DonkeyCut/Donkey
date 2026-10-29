@@ -1,7 +1,7 @@
 "use client";
 
 import { CHAT_RUNTIME } from "@/cut/lib/chatRuntime";
-import { useHostBridge, useHostReady } from "@/cut/lib/hostBridge";
+import { useHostReady } from "@/cut/lib/hostBridge";
 import { useCutMode } from "@/cut/lib/backend/hooks";
 import { usePhoneInbox } from "@/cut/hooks/usePhoneInbox";
 import { useTabTitle } from "@/cut/hooks/useTabTitle";
@@ -170,7 +170,6 @@ export function Editor({
   const aiOpen = useEditor((s) => s.aiOpen);
   const timelineOpen = useEditor((s) => s.timelineOpen);
   const sharedFeatures = useEditor((s) => s.sharedFeatures);
-  useHostBridge();
   // The timeline's height is bounded by the window, and the window changes
   // size under it: a browser resize, or the ChatGPT card leaving fullscreen.
   // The clamp is for this window only, so the height the user chose stays
