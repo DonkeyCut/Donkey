@@ -94,6 +94,9 @@ export function CutOnboarding() {
   const referralOther = otherDraft ?? savedOther;
   const [dismissed, setDismissed] = useState(false);
   const [handedOver, setHandedOver] = useState(false);
+  // Whether the write that hands over to the tour landed, with the starter
+  // seeded behind it.
+  const [seeded, setSeeded] = useState(false);
   const openedStarter = useRef(false);
   const router = useRouter();
   const [replaying, setReplaying] = useState(false);
@@ -199,29 +202,18 @@ export function CutOnboarding() {
 
   // An account past the slides teaches this browser to stop waiting.
   useEffect(() => {
-    if (!state || onboardingStage(state) === "slides") return;
-    localStorage.setItem(doneKey(userId), String(state.version));
-  }, [state, userId]);
-
-  // A replay is the whole run again: the account row starts over, so the
-  // slides hand over to the starter tour and the plans close it, the same as a
-  // first run. Once per open.
-  const restarted = useRef(false);
-  useEffect(() => {
-    if (run !== "replay") {
-      restarted.current = false;
+    if (!state || onboardingStage(state) === "slides") {
       return;
     }
-    if (restarted.current || !state || onboardingStage(state) === "slides") return;
-    restarted.current = true;
-    save.mutate({ restart: true });
-  }, [run, state, save]);
+    localStorage.setItem(doneKey(userId), String(state.version));
+  }, [state, userId]);
 
   useEffect(
     () =>
       onOpenOnboarding(() => {
         setStep(0);
         setHandedOver(false);
+        setSeeded(false);
         openedStarter.current = false;
         setReplaying(true);
       }),
@@ -244,7 +236,9 @@ export function CutOnboarding() {
 
   const finish = useCallback(
     (skipped: boolean) => {
-      if (!run) return;
+      if (!run) {
+        return;
+      }
       commitReferrals();
       track("onboarding_completed", { source: run, skipped, step });
       save.mutate({ completed: true, skipped });
@@ -257,14 +251,20 @@ export function CutOnboarding() {
 
   // The slides' end on a computer: the account records it and the overlay
   // lifts onto the starter project, where the tour picks up. Subscribers take
-  // the tour too; the plans at its end show the plan they hold.
+  // the tour too; the plans at its end show the plan they hold. A replay
+  // starts the account's tour over here, at the slides' end, so a replay
+  // closed partway leaves a finished account finished.
   const leave = useCallback(
     (skipped: boolean) => {
-      if (!run) return;
-      if (!toTour) return finish(skipped);
+      if (!run) {
+        return;
+      }
+      if (!toTour) {
+        return finish(skipped);
+      }
       commitReferrals();
       track("onboarding_slides_done", { source: run, skipped, step });
-      save.mutate({ slidesDone: true });
+      save.mutate(run === "replay" ? { restart: true } : { slidesDone: true }, { onSuccess: () => setSeeded(true) });
       setHandedOver(true);
       localStorage.setItem(doneKey(userId), String(ONBOARDING_VERSION));
       setReplaying(false);
@@ -275,16 +275,23 @@ export function CutOnboarding() {
 
   // The tour runs on the starter project, so on a computer it opens behind
   // the slides, and lifting them reveals it loaded. A starter the server only
-  // seeds as the slides end opens then. Once per open, and never over the
-  // starter already underneath.
+  // seeds as the slides end opens once that write lands. Once per open, and
+  // never over the starter already underneath.
   const starterReady = state?.starterReady ?? false;
   useEffect(() => {
-    if (!toTour || !starterReady || !userId || (!run && !handedOver) || openedStarter.current) return;
+    if (!toTour || !starterReady || !userId || (!run && !handedOver) || openedStarter.current) {
+      return;
+    }
+    if (handedOver && !seeded) {
+      return;
+    }
     openedStarter.current = true;
     const href = projectHref(base, starterProjectId(userId), "projects");
-    if (underneath.current === href) return;
+    if (underneath.current === href) {
+      return;
+    }
     router.push(href);
-  }, [toTour, handedOver, run, starterReady, userId, router, base]);
+  }, [toTour, handedOver, seeded, run, starterReady, userId, router, base]);
 
   const back = useCallback(() => {
     commitReferrals();
@@ -301,7 +308,9 @@ export function CutOnboarding() {
       // third, silent one, so forward stops there. A subscriber never sees that
       // slide, and on a computer the tour comes next, so forward off their last
       // one is how the sequence ends.
-      if (isPro || toTour) leave(false);
+      if (isPro || toTour) {
+        leave(false);
+      }
       return;
     }
     setStep(step + 1);

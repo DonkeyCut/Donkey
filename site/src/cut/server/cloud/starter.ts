@@ -15,12 +15,14 @@ import path from "node:path";
 import { DONKEYCUT_CANONICAL } from "@/cut/lib/hosts";
 import { starterProjectId } from "@/cut/lib/starter";
 import type { ProjectDoc } from "@/cut/lib/types";
-import type { Prisma } from "@/generated/prisma/client";
+import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { contentTypeFor } from "../serveFile";
 import { copy, head, projectMediaKey, putObject } from "./r2";
 
 const STARTER_DIR = "cut-starter";
+// Prisma's code for a unique constraint the write would break.
+const UNIQUE_VIOLATION = "P2002";
 const starterMediaKey = (fileName: string) => `cut/starter/media/${fileName}`;
 
 /** A file from public/cut-starter — from disk where the public folder is on the
@@ -74,6 +76,25 @@ export async function seedStarterProject(userId: string): Promise<void> {
     })
   );
 
+  // Two seeds racing on one account land one project; the second finds the
+  // id taken and has nothing left to do.
+  try {
+    await landStarter(userId, id, doc, media, threads);
+  } catch (e) {
+    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === UNIQUE_VIOLATION) {
+      return;
+    }
+    throw e;
+  }
+}
+
+async function landStarter(
+  userId: string,
+  id: string,
+  doc: ProjectDoc,
+  media: { fileName: string; bytes: number; mime: string }[],
+  threads: { id: string }[],
+): Promise<void> {
   await prisma.$transaction(async (tx) => {
     await tx.cutProject.create({
       data: { id, userId, name: doc.name, doc: doc as unknown as Prisma.InputJsonValue },

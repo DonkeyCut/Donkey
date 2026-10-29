@@ -78,6 +78,7 @@ import { creatorLocale, creatorNames } from "@/cut/lib/defaultNames";
 import { dropLocalProjectCopy, localMediaUrl } from "@/cut/lib/mediaSync";
 import { copyProjectAcross } from "@/cut/lib/projectCopy";
 import { newProjectAllowed } from "@/cut/lib/projectLimit";
+import { useStarterGone } from "@/cut/lib/tourLock";
 import { checkoutErrorCode } from "@/cut/lib/proUpgrade";
 import { homeHref, projectHref, useCutBase } from "@/cut/lib/nav";
 import { daysUntil, formatDate, formatTime } from "@/cut/lib/time";
@@ -279,6 +280,7 @@ export function ProjectsHome() {
   );
 
   const client = useQueryClient();
+  const starterGone = useStarterGone();
   // Hooks can't run in a loop, so both sections are always wired and the
   // inactive one simply stays disabled.
   const localSection = useProjectsSection("local", {
@@ -642,6 +644,7 @@ export function ProjectsHome() {
       // with the project itself, as does a cloud project's browser-store copy.
       clearProjectThreads(p.id);
       if (source === "cloud") void dropLocalProjectCopy(p.id);
+      starterGone(p.id);
       await Promise.all([refresh(source), refresh(dest)]);
     } catch (e) {
       setDupError(describeError(e, t("projects.moveFailed")));
@@ -656,6 +659,7 @@ export function ProjectsHome() {
   // render-resume guard reads to keep a deleted thread's render from
   // landing), and the cached copy of its document.
   const purgeProject = (id: string, residency: Residency) => {
+    starterGone(id);
     useGenScene.getState().killProject(id);
     useGenerate.getState().cancelForOwner({ projectId: id });
     clearProjectThreads(id);

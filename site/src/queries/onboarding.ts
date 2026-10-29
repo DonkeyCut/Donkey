@@ -27,9 +27,14 @@ type OnboardingUpdate =
   | { restart: true }
   | { tourStep: TourStep };
 
+/** The account's onboarding row as it stands now. */
+export async function fetchOnboardingState(): Promise<OnboardingState> {
+  return readState(await apiFetch<Partial<OnboardingState>>("/api/account/onboarding"));
+}
+
 export function useOnboardingState() {
   return useQuery({
-    queryFn: async () => readState(await apiFetch<Partial<OnboardingState>>("/api/account/onboarding")),
+    queryFn: fetchOnboardingState,
     queryKey: onboardingQueryKey,
     // The sequence decides once per load whether to open; refetching behind an
     // open overlay could only close it mid-run.
@@ -94,12 +99,20 @@ function readState(state: Partial<OnboardingState>): OnboardingState {
 
 // What the account row will say once the write lands.
 function applyUpdate(state: OnboardingState, update: OnboardingUpdate): OnboardingState {
-  // The server seeds the starter as the slides end.
+  // The server seeds the starter as the slides end, so the stage moves on to
+  // the tour; the starter itself opens once the reply lands.
   if ("slidesDone" in update) {
     return { ...state, slidesDoneAt: new Date().toISOString(), starterReady: true };
   }
   if ("restart" in update) {
-    return { ...state, completedAt: null, skipped: false, slidesDoneAt: null, tourSteps: [] };
+    return {
+      ...state,
+      completedAt: null,
+      skipped: false,
+      slidesDoneAt: new Date().toISOString(),
+      starterReady: true,
+      tourSteps: [],
+    };
   }
   if ("tourStep" in update) {
     return state.tourSteps.includes(update.tourStep)

@@ -79,7 +79,7 @@ const updateSchema = z
 
 // One write for everything the sequence records: the referral answer when it's
 // given, the slides' end, each tour step, the run's end, and a restart that
-// sends a finished account through the whole run again. Any of them can be the
+// sends an account whose replayed slides just ended through the tour again. Any of them can be the
 // account's first row, so all upsert.
 export const PUT = withDonkeyAuth(async (request: DonkeyAuthenticatedRequest) => {
   const parsed = updateSchema.safeParse(await request.json().catch(() => null));
@@ -103,18 +103,11 @@ export const PUT = withDonkeyAuth(async (request: DonkeyAuthenticatedRequest) =>
     return NextResponse.json(await toState(userId, row));
   }
 
-  // The tour runs on the starter project, which opens behind the slides, so a
-  // restart and the slides' end put it back for an account that deleted it.
-  // Seeding an existing starter is a no-op.
-  if ("slidesDone" in update || "restart" in update) {
-    await seedStarterProject(userId);
-  }
-
   const data =
     "slidesDone" in update
       ? { slidesDoneAt: new Date() }
       : "restart" in update
-      ? { completedAt: null, skipped: false, slidesDoneAt: null, tourSteps: [] }
+      ? { completedAt: null, skipped: false, slidesDoneAt: new Date(), tourSteps: [] }
       : "referralSources" in update
       ? {
           referralSources: [...new Set(update.referralSources)],
@@ -137,6 +130,15 @@ export const PUT = withDonkeyAuth(async (request: DonkeyAuthenticatedRequest) =>
     create: { userId, version: ONBOARDING_VERSION, ...data },
     update: data,
   });
+
+  // The tour runs on the starter project, which opens behind the slides, so a
+  // restart and the slides' end put it back for an account that deleted it.
+  // The progress is written first: a seed that fails still fails the call,
+  // and the account row it leaves sends the account on to the plans.
+  // Seeding an existing starter is a no-op.
+  if ("slidesDone" in update || "restart" in update) {
+    await seedStarterProject(userId);
+  }
   return NextResponse.json(await toState(userId, row));
 });
 

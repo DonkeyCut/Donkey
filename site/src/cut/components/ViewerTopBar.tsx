@@ -12,7 +12,8 @@ import { apiFetch } from "@/cut/lib/backend";
 import { projectHref, useCutBase } from "@/cut/lib/nav";
 import { OperationError, operationFailure } from "@/cut/lib/operationFailure";
 import { useEditor } from "@/cut/lib/store";
-import { tourHoldsProjects } from "@/cut/lib/tourLock";
+import { useEnvironment } from "@/cut/lib/environment";
+import { tourHoldsCopy } from "@/cut/lib/tourLock";
 import { errorFromBody } from "@/cut/lib/userError";
 import { useSession } from "@/lib/auth-client";
 
@@ -29,6 +30,7 @@ export function ViewerTopBar({ chatStatus }: { chatStatus: ChatStatus }) {
   const projectName = useEditor((s) => s.projectName);
   const chatShared = useEditor((s) => s.sharedFeatures?.chat === true);
   const { data: session } = useSession();
+  const { chatgpt } = useEnvironment();
   const [copying, setCopying] = useState(false);
   const [copyError, setCopyError] = useState<string | null>(null);
 
@@ -38,13 +40,13 @@ export function ViewerTopBar({ chatStatus }: { chatStatus: ChatStatus }) {
       window.location.href = authHrefFor("/sign-in", here);
       return;
     }
-    // A copy is a new project, and the starter tour holds those.
-    if (tourHoldsProjects()) {
-      return;
-    }
     setCopying(true);
     setCopyError(null);
     try {
+      // A copy is a new project, and the starter tour holds those.
+      if (!chatgpt && (await tourHoldsCopy(session.user.id, base))) {
+        return;
+      }
       const res = await apiFetch("/api/cut/copy", { method: "POST" });
       const body = (await res.json().catch(() => null)) as
         | { jobId?: string; error?: string }

@@ -279,7 +279,8 @@ export function StarterTour({ projectId }: { projectId: string }) {
       });
     };
 
-    // Doing the thing counts from the start, even before the highlight lands.
+    // Doing the thing counts from the start, even before the highlight lands,
+    // once the state it reads is clear.
     unwatch = watchDone(spec.done, complete);
     void (spec.approach?.(abort.signal) ?? Promise.resolve()).then(show);
 
@@ -514,11 +515,18 @@ function replyLanded(): Promise<void> {
   });
 }
 
-// Calls `onDone` once `done` holds, checking now and on every editor or tour
-// signal change.
+// Calls `onDone` once `done` turns true, checking now and on every editor or
+// tour signal change. It has to read false first, so state left from before
+// the step, such as the Media tab already open, waits for the step's prepare
+// to clear it and counts only once the person does the thing again.
 function watchDone(done: () => boolean, onDone: () => void): () => void {
+  let armed = false;
   const check = () => {
-    if (done()) {
+    if (!done()) {
+      armed = true;
+      return;
+    }
+    if (armed) {
       onDone();
     }
   };
