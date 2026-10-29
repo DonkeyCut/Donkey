@@ -114,6 +114,7 @@ import type { MediaAsset, SidePanelTab } from "@/cut/lib/types";
 import { cn } from "@/lib/utils";
 import { containerOfName, isStemsName } from "@/cut/lib/exportDelivery";
 import { useRevealEffect } from "@/cut/lib/refReveal";
+import { reportSideTab } from "@/cut/lib/onboarding";
 import { usePanelRequestEffect } from "@/cut/lib/panelRequest";
 import { CopyNameLabel } from "./AssetRefs";
 import { AudioCardFace, AudioPanel } from "./AudioPanel";
@@ -318,6 +319,11 @@ export function SidePanel({
   // collapse the panel so the canvas gets the room.
   usePanelRequestEffect(setTab);
 
+  // The starter tour waits on the Media tab opening.
+  useEffect(() => {
+    reportSideTab(tab);
+  }, [tab]);
+
   // The Audio tab's second column; when it's absent the audio generator is the
   // outermost column and takes the floating close button on its own corner.
   const musicLibrary = !sharedFeatures && audioSub === "music" && STOCK_MUSIC.length > 0;
@@ -392,6 +398,7 @@ export function SidePanel({
             <button
               className={tileClass}
               aria-pressed={tab === id}
+              data-tour={`side-${id}`}
               onClick={() => {
                 // In the card the panel and the inspector share the room next
                 // to the preview, so opening one closes the other. The clip

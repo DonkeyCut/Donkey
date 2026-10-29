@@ -4,7 +4,8 @@
     "skip": "Passer",
     "back": "Retour",
     "next": "Suivant",
-    "done": "Terminé"
+    "done": "Terminé",
+    "startTour": "Commencer le montage"
   },
   "welcome": {
     "title": "Montez vos vidéos en discutant.",
@@ -55,12 +56,34 @@
   },
   "plans": {
     "title": "Tarifs simples",
-    "subtitle": "L'éditeur est gratuit. Ne payez que pour les médias générés par IA.",
+    "subtitle": "L'éditeur est gratuit. Ne payez que pour les médias générés par l'IA et le stockage.",
     "bestValue": "Meilleure offre",
     "getPlan": "Obtenir {plan}",
     "getProOff": "Obtenez {percent} % de réduction sur Pro",
     "continueFree": "Continuer avec la version gratuite",
+    "continue": "Continuer",
     "paywallSubtitle": "Choisissez un forfait pour commencer. Le montage se fait sur ordinateur : connectez-vous-y avec ce compte.",
     "covers": "{months, plural, one {Pour votre premier mois, puis {price}/mois} other {Par mois pendant vos # premiers mois, puis {price}/mois}}"
+  },
+  "tour": {
+    "play": {
+      "title": "Cliquez sur Lecture pour regarder"
+    },
+    "clip": {
+      "title": "Sélectionner un clip",
+      "body": "Cliquez sur un clip sur la timeline. Ses paramètres s'affichent à côté de l'aperçu."
+    },
+    "media": {
+      "title": "Ouvrir Médias",
+      "body": "Vos fichiers importés arrivent ici. Glissez-en un sur la timeline pour l'utiliser."
+    },
+    "chat": {
+      "title": "Demander à l'assistant",
+      "body": "Appuyez sur Enter pour l'envoyer. L'assistant modifie le projet pour vous.",
+      "prompt": "Agrandir le titre Récap d'août"
+    },
+    "progress": "{current} sur {total}",
+    "locked": "Terminez la visite pour démarrer votre propre projet",
+    "backLocked": "Terminez la visite pour quitter ce projet"
   }
 }

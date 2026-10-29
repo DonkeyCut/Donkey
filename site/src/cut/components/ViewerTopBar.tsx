@@ -12,6 +12,7 @@ import { apiFetch } from "@/cut/lib/backend";
 import { projectHref, useCutBase } from "@/cut/lib/nav";
 import { OperationError, operationFailure } from "@/cut/lib/operationFailure";
 import { useEditor } from "@/cut/lib/store";
+import { tourHoldsProjects } from "@/cut/lib/tourLock";
 import { errorFromBody } from "@/cut/lib/userError";
 import { useSession } from "@/lib/auth-client";
 
@@ -35,6 +36,10 @@ export function ViewerTopBar({ chatStatus }: { chatStatus: ChatStatus }) {
     if (!session) {
       const here = window.location.pathname + window.location.search;
       window.location.href = authHrefFor("/sign-in", here);
+      return;
+    }
+    // A copy is a new project, and the starter tour holds those.
+    if (tourHoldsProjects()) {
       return;
     }
     setCopying(true);

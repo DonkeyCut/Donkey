@@ -74,13 +74,11 @@
     "paidOutBody": "Vos crédits {plan} seront renouvelés le {date}.",
     "topOutTitle": "Vos crédits {plan} seront renouvelés le {date}",
     "bestValue": "Meilleure offre",
-    "billedMonthly": "Facturé mensuellement",
     "introThen": "{months, plural, one {Premier mois, puis {price}/mois} other {# premiers mois, puis {price}/mois}}",
     "stickerPercent": "{percent} %",
     "stickerOff": "de réduction",
     "get": "Obtenir {plan}",
     "upgrade": "Passer à {plan}",
-    "current": "Forfait actuel",
-    "footer": "Prix en {currency}. Les forfaits se renouvellent chaque mois jusqu’à votre résiliation. Passer à un forfait supérieur facture la différence aujourd’hui."
+    "current": "Forfait actuel"
   }
 }

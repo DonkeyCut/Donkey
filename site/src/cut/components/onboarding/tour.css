@@ -1,0 +1,208 @@
+/* The starter tour's popover, in the app's popover tokens so it follows the
+   light and dark themes, with the onboarding's accent blue on the progress and
+   around the control being taught. */
+
+/* The accent in each theme: the text shade reads on the popover, the ring
+   shade on the editor around the control. Dark follows the app: the .dark
+   class, or a dark system with no .light override. */
+:root {
+  --tour-blue: #0062c4;
+  --tour-ring: #0071e3;
+  --tour-shadow: rgb(0 0 0 / 0.18);
+  /* Light mode's glow sits on the dimmed editor, so it runs denser and wider
+     than dark mode's to read at all. */
+  --tour-glow-ring: color-mix(in oklab, var(--tour-ring) 55%, transparent);
+  --tour-glow: 0 0 56px 18px color-mix(in oklab, var(--tour-ring) 90%, transparent);
+  --tour-glow-low: 0.7;
+}
+
+.dark {
+  --tour-blue: #4aa3ff;
+  --tour-ring: #0a84ff;
+  --tour-shadow: rgb(0 0 0 / 0.5);
+  --tour-glow-ring: color-mix(in oklab, var(--tour-ring) 25%, transparent);
+  --tour-glow: 0 0 40px 10px color-mix(in oklab, var(--tour-ring) 50%, transparent);
+  --tour-glow-low: 0.45;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not(.light) {
+    --tour-blue: #4aa3ff;
+    --tour-ring: #0a84ff;
+    --tour-shadow: rgb(0 0 0 / 0.5);
+  --tour-glow-ring: color-mix(in oklab, var(--tour-ring) 25%, transparent);
+  --tour-glow: 0 0 40px 10px color-mix(in oklab, var(--tour-ring) 50%, transparent);
+  --tour-glow-low: 0.45;
+  }
+}
+
+/* The popover glows in the accent, bobs toward the control it points at, and
+   its glow breathes at rest, so it reads against a busy editor. Both animate
+   only translate and opacity, which stay on the compositor. Scoped under the
+   body's driver-active class so the library's own fade-in rule, which comes
+   in at the same weight, never replaces them. */
+body.driver-active .driver-popover.donkey-tour {
+  font-family: var(--font-system);
+  color: var(--popover-foreground);
+  background-color: var(--popover);
+  border: 1px solid var(--tour-ring);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 12px 32px var(--tour-shadow);
+  padding: 14px 16px;
+  min-width: 240px;
+  max-width: 300px;
+  animation:
+    animate-fade-in var(--driver-animation-duration, 0.4s),
+    donkey-tour-bob 1.6s ease-in-out 0.4s infinite;
+}
+
+body.driver-active .driver-popover.donkey-tour::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  box-shadow:
+    0 0 0 4px var(--tour-glow-ring),
+    var(--tour-glow);
+  pointer-events: none;
+  animation: donkey-tour-breathe 2.4s ease-in-out infinite;
+}
+
+/* Which way is toward the control: the side class names where the popover
+   sits relative to it. */
+.driver-popover.donkey-tour.driver-popover-side-top {
+  --tour-bob: 0 6px;
+}
+
+.driver-popover.donkey-tour.driver-popover-side-bottom {
+  --tour-bob: 0 -6px;
+}
+
+.driver-popover.donkey-tour.driver-popover-side-left {
+  --tour-bob: 6px 0;
+}
+
+.driver-popover.donkey-tour.driver-popover-side-right {
+  --tour-bob: -6px 0;
+}
+
+@keyframes donkey-tour-bob {
+  0%,
+  100% {
+    translate: 0 0;
+  }
+  50% {
+    translate: var(--tour-bob, 0 0);
+  }
+}
+
+@keyframes donkey-tour-breathe {
+  0%,
+  100% {
+    opacity: var(--tour-glow-low);
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body.driver-active .driver-popover.donkey-tour,
+  body.driver-active .driver-popover.donkey-tour::before {
+    animation: none;
+  }
+}
+
+.driver-popover.donkey-tour .driver-popover-title {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.driver-popover.donkey-tour .driver-popover-description {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+}
+
+.driver-popover.donkey-tour .driver-popover-footer {
+  margin-top: 10px;
+}
+
+.driver-popover.donkey-tour .driver-popover-progress-text {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--tour-blue);
+}
+
+/* The arrow is a square turned 45 degrees in the popover's fill, centred on
+   the popover's border line, with the accent on its two outer sides, so the
+   border runs out to the point and back. The library names the arrow by the
+   side the popover sits on: side-left sits on the popover's right edge and
+   points right. It places the arrow along the edge itself. */
+body.driver-active .driver-popover.donkey-tour .driver-popover-arrow {
+  box-sizing: border-box;
+  width: 10px;
+  height: 10px;
+  border: 0 solid var(--tour-ring);
+  background-color: var(--popover);
+  rotate: 45deg;
+}
+
+body.driver-active .driver-popover.donkey-tour .driver-popover-arrow-side-left {
+  left: calc(100% - 4.5px);
+  border-top-width: 1px;
+  border-right-width: 1px;
+}
+
+body.driver-active .driver-popover.donkey-tour .driver-popover-arrow-side-right {
+  right: calc(100% - 4.5px);
+  border-bottom-width: 1px;
+  border-left-width: 1px;
+}
+
+body.driver-active .driver-popover.donkey-tour .driver-popover-arrow-side-top {
+  top: calc(100% - 4.5px);
+  border-right-width: 1px;
+  border-bottom-width: 1px;
+}
+
+body.driver-active .driver-popover.donkey-tour .driver-popover-arrow-side-bottom {
+  bottom: calc(100% - 4.5px);
+  border-top-width: 1px;
+  border-left-width: 1px;
+}
+
+/* The control being taught carries the accent ring, drawn inside its own edge:
+   the rail, the timeline and the chat panel all clip what spills past it. */
+.driver-active .driver-active-element {
+  outline: 2px solid var(--tour-ring);
+  outline-offset: -2px;
+}
+
+/* A timeline clip's thumbnails and badges (up to z-4) paint over its own
+   outline, so its ring rides a layer above them. The clip is already
+   positioned. */
+body.driver-active .tl-clip.driver-active-element {
+  outline: none;
+}
+
+body.driver-active .tl-clip.driver-active-element::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  border: 2px solid var(--tour-ring);
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+/* Inside the control being taught, everything takes back the pointer events
+   the app gave it. The library forces auto on every descendant, which lifts
+   pass-through layers (the composer's mirror over its textarea) into the way
+   of the clicks they exist to let through. revert-layer drops the library's
+   unlayered rules and lands on the app's layered ones. */
+body.driver-active .driver-active-element * {
+  pointer-events: revert-layer;
+}

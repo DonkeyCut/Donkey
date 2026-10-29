@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronDown, Cloud, Laptop, Plus } from "lucide-react";
+import { ChevronDown, Cloud, Laptop, Lock, Plus } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import {
@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/tooltip";
 import { useNewProjectTarget } from "@/cut/lib/newProject";
 import type { Residency } from "@/cut/lib/residency";
+import { useTourLock } from "@/cut/lib/tourLock";
 import { useLabels } from "@/i18n/labels";
 import { cn } from "@/lib/utils";
 
@@ -60,10 +61,27 @@ export function NewProjectButton({
   className?: string;
 }) {
   const t = useTranslations("home.newProject");
+  const tTour = useTranslations("onboarding.tour");
   const residencyLabel = useLabels("residency");
   const { target, choices, pick } = useNewProjectTarget();
+  const lock = useTourLock();
   const r = pinned ?? target;
   const Icon = RESIDENCY_ICON[r];
+
+  // While the starter tour is owed the button takes the account back to it,
+  // and says why on hover.
+  if (lock.locked) {
+    return (
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger render={<Button className={className} onClick={lock.resume} />}>
+            <Lock data-icon="inline-start" /> <span className="truncate">{t("button")}</span>
+          </TooltipTrigger>
+          <TooltipContent>{tTour("locked")}</TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+    );
+  }
 
   if (!picker || pinned || choices.length < 2) {
     return (

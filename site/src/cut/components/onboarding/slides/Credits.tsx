@@ -3,8 +3,10 @@
 import { useFormatter, useLocale, useTranslations } from "next-intl";
 import { useEffect, useRef } from "react";
 
+import { BLUE_TEXT } from "@/cut/components/accent";
 import { burstConfetti } from "@/cut/components/onboarding/confetti";
 import { creditCountLabel, creditsFromDollars } from "@/lib/credits/format-credits";
+import { cn } from "@/lib/utils";
 
 // The signup grant already landed when the account was created, so this slide
 // never grants anything — it says what's there: the credits the grant carried,
@@ -41,10 +43,10 @@ export function CreditsSlide({
         className="pointer-events-none fixed inset-0 h-full w-full"
       />
       <div className="relative max-w-[900px]">
-        {/* One line, two sizes: the amount at display size in coral, the words
+        {/* One line, two sizes: the amount at display size in the accent blue, the words
             a couple of steps down and thin beside it. */}
         <h2 className="flex flex-wrap items-baseline justify-center gap-x-4 leading-[1.02] tracking-[-0.03em]">
-          <span className="text-[clamp(40px,7.4vw,84px)] font-semibold text-coral tabular-nums">
+          <span className={cn("text-[clamp(40px,7.4vw,84px)] font-semibold tabular-nums", BLUE_TEXT)}>
             {creditCountLabel(creditsFromDollars(credits, "down"), locale)}
           </span>
           <span className="text-[clamp(26px,4.4vw,52px)] font-light">

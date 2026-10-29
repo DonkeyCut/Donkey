@@ -74,13 +74,11 @@
     "paidOutBody": "Seus créditos do {plan} serão renovados em {date}.",
     "topOutTitle": "Seus créditos do {plan} serão renovados em {date}",
     "bestValue": "Melhor custo-benefício",
-    "billedMonthly": "Cobrado mensalmente",
     "introThen": "{months, plural, one {Primeiro mês, depois {price}/mês} other {Primeiros # meses, depois {price}/mês}}",
     "stickerPercent": "{percent}%",
     "stickerOff": "OFF",
     "get": "Obter {plan}",
     "upgrade": "Fazer upgrade para o {plan}",
-    "current": "Plano atual",
-    "footer": "Preços em {currency}. Os planos renovam mensalmente até você cancelar. Ao mudar para um plano superior, a diferença é cobrada hoje."
+    "current": "Plano atual"
   }
 }

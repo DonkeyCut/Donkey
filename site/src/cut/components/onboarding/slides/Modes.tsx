@@ -23,7 +23,7 @@ export function ModesSlide() {
         <Mode
           icon={<Cloud className="size-5" />}
           title={t("cloudTitle")}
-          tape="coral"
+          tape="blue"
           points={[t("cloudNoInstall"), t("cloudAnyBrowser"), t("cloudRendering")]}
         />
         <Mode
@@ -49,7 +49,7 @@ function Mode({
 }: {
   icon: React.ReactNode;
   points: string[];
-  tape: "coral" | "yellow";
+  tape: "blue" | "yellow";
   title: string;
 }) {
   return (

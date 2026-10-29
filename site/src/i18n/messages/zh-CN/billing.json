@@ -74,13 +74,11 @@
     "paidOutBody": "你的 {plan} 积分将于 {date} 充值补满。",
     "topOutTitle": "你的 {plan} 积分将于 {date} 充值补满",
     "bestValue": "超值推荐",
-    "billedMonthly": "按月计费",
     "introThen": "{months, plural, other {前 # 个月，之后 {price}/月}}",
     "stickerPercent": "{percent}%",
     "stickerOff": "优惠",
     "get": "获取 {plan}",
     "upgrade": "升级到 {plan}",
-    "current": "当前方案",
-    "footer": "价格以 {currency} 结算。方案按月自动续订，直至取消。升级方案今日收取差价。"
+    "current": "当前方案"
   }
 }

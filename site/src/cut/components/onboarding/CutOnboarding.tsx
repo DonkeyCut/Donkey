@@ -2,10 +2,12 @@
 
 import { DonkeyMark } from "@/components/DonkeyMark";
 import { useTranslations } from "next-intl";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, ArrowRight } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { BLUE_FILL, BLUE_MARK } from "@/cut/components/accent";
 import { AiChatSlide } from "@/cut/components/onboarding/slides/AiChat";
 import { CreditsSlide } from "@/cut/components/onboarding/slides/Credits";
 import { ModesSlide } from "@/cut/components/onboarding/slides/Modes";
@@ -14,8 +16,9 @@ import { ReferralSlide } from "@/cut/components/onboarding/slides/Referral";
 import { WelcomeSlide } from "@/cut/components/onboarding/slides/Welcome";
 import { useEngineUser } from "@/cut/lib/backend/hooks";
 import { useEnvironment, useFormFactor } from "@/cut/lib/environment";
-import { useCutBase } from "@/cut/lib/nav";
+import { projectHref, useCutBase } from "@/cut/lib/nav";
 import { onOpenOnboarding, setOnboardingCover } from "@/cut/lib/onboarding";
+import { starterProjectId } from "@/cut/lib/starter";
 import { track } from "@/lib/analytics";
 import {
   ONBOARDING_VERSION,
@@ -23,10 +26,10 @@ import {
   type OnboardingRun,
   type ReferralSource,
 } from "@/lib/onboarding/sequence";
+import { onboardingStage } from "@/lib/onboarding/stage";
 import { cn } from "@/lib/utils";
 import { useProSubscription } from "@/queries/billing";
 import {
-  needsOnboarding,
   useOnboardingState,
   useSaveOnboarding,
 } from "@/queries/onboarding";
@@ -75,11 +78,13 @@ export function CutOnboarding() {
   const userId = useEngineUser() ?? "";
   const { data: state, isPending } = useOnboardingState();
   const save = useSaveOnboarding();
-  // A phone ends on the plans with no free way out: the editor needs a
-  // computer, so the phone's job is the account and the plan. The ChatGPT card
-  // keeps the editor on a phone and sells no plans, so it keeps the free exit.
+  // The ChatGPT card has no onboarding: the sequence never opens there.
   const { chatgpt } = useEnvironment();
-  const exit: PlansExit = useFormFactor() === "phone" && !chatgpt ? "paywall" : "free";
+  // A phone ends on the plans with no free way out: the editor needs a
+  // computer, so the phone's job is the account and the plan. A computer's
+  // slides hand over to the starter tour, and the plans come after it.
+  const exit: PlansExit = useFormFactor() === "phone" ? "paywall" : "free";
+  const toTour = exit === "free";
   const [rawStep, setStep] = useState(0);
   const saved = useMemo(() => (state?.referralSources ?? []).filter(isKnownReferralSource), [state]);
   const savedOther = saved.includes("other") ? (state?.referralOther ?? "") : "";
@@ -88,6 +93,9 @@ export function CutOnboarding() {
   const referrals = referralDraft ?? saved;
   const referralOther = otherDraft ?? savedOther;
   const [dismissed, setDismissed] = useState(false);
+  const [handedOver, setHandedOver] = useState(false);
+  const openedStarter = useRef(false);
+  const router = useRouter();
   const [replaying, setReplaying] = useState(false);
   // Read once per mount: whether this browser can skip the wait below.
   const [skipWait] = useState(() => doneHere(userId));
@@ -107,17 +115,19 @@ export function CutOnboarding() {
   // sequence's address the run opens before that read answers; it is a first
   // run until the read says the account already finished, which makes it the
   // replay that account linked back to.
-  const run: OnboardingRun | null = replaying
-    ? "replay"
-    : dismissed
-      ? null
-      : needsOnboarding(state)
-        ? "first_run"
-        : askedByAddress
-          ? isPending
-            ? "first_run"
-            : "replay"
-          : null;
+  const run: OnboardingRun | null = chatgpt
+    ? null
+    : replaying
+      ? "replay"
+      : dismissed
+        ? null
+        : onboardingStage(state) === "slides"
+          ? "first_run"
+          : askedByAddress
+            ? isPending
+              ? "first_run"
+              : "replay"
+            : null;
   const { data: pro } = useProSubscription({ pollMs: run && exit === "paywall" ? PAYWALL_POLL_MS : undefined });
 
   // Navigation and progress use the slides this account can see.
@@ -126,8 +136,8 @@ export function CutOnboarding() {
   const slides = useMemo(
     () => SLIDES.filter((slide) =>
       (slide !== "credits" || signupCredits !== null) &&
-      (slide !== "plans" || !isPro)),
-    [signupCredits, isPro],
+      (slide !== "plans" || (!isPro && !toTour))),
+    [signupCredits, isPro, toTour],
   );
   const slideCount = slides.length;
   const step = Math.min(rawStep, slideCount - 1);
@@ -172,10 +182,12 @@ export function CutOnboarding() {
   // rather than navigating: the page underneath is already the right one, and
   // routing away would tear down the overlay showing over it. Closing puts back
   // the address the user arrived with.
+  const underneath = useRef<string | null>(null);
   useEffect(() => {
     if (!run) return;
     const target = `${base}/onboarding`;
     const here = window.location.pathname + window.location.search;
+    underneath.current = window.location.pathname;
     const back = here.startsWith(target) ? base : here;
     if (here !== target) window.history.replaceState(null, "", target);
     return () => {
@@ -185,16 +197,32 @@ export function CutOnboarding() {
     };
   }, [run, base]);
 
-  // An account that's already done teaches this browser to stop waiting.
+  // An account past the slides teaches this browser to stop waiting.
   useEffect(() => {
-    if (!state || needsOnboarding(state)) return;
+    if (!state || onboardingStage(state) === "slides") return;
     localStorage.setItem(doneKey(userId), String(state.version));
   }, [state, userId]);
+
+  // A replay is the whole run again: the account row starts over, so the
+  // slides hand over to the starter tour and the plans close it, the same as a
+  // first run. Once per open.
+  const restarted = useRef(false);
+  useEffect(() => {
+    if (run !== "replay") {
+      restarted.current = false;
+      return;
+    }
+    if (restarted.current || !state || onboardingStage(state) === "slides") return;
+    restarted.current = true;
+    save.mutate({ restart: true });
+  }, [run, state, save]);
 
   useEffect(
     () =>
       onOpenOnboarding(() => {
         setStep(0);
+        setHandedOver(false);
+        openedStarter.current = false;
         setReplaying(true);
       }),
     [],
@@ -227,6 +255,37 @@ export function CutOnboarding() {
     [commitReferrals, run, save, step, userId],
   );
 
+  // The slides' end on a computer: the account records it and the overlay
+  // lifts onto the starter project, where the tour picks up. Subscribers take
+  // the tour too; the plans at its end show the plan they hold.
+  const leave = useCallback(
+    (skipped: boolean) => {
+      if (!run) return;
+      if (!toTour) return finish(skipped);
+      commitReferrals();
+      track("onboarding_slides_done", { source: run, skipped, step });
+      save.mutate({ slidesDone: true });
+      setHandedOver(true);
+      localStorage.setItem(doneKey(userId), String(ONBOARDING_VERSION));
+      setReplaying(false);
+      setDismissed(true);
+    },
+    [commitReferrals, finish, run, save, step, toTour, userId],
+  );
+
+  // The tour runs on the starter project, so on a computer it opens behind
+  // the slides, and lifting them reveals it loaded. A starter the server only
+  // seeds as the slides end opens then. Once per open, and never over the
+  // starter already underneath.
+  const starterReady = state?.starterReady ?? false;
+  useEffect(() => {
+    if (!toTour || !starterReady || !userId || (!run && !handedOver) || openedStarter.current) return;
+    openedStarter.current = true;
+    const href = projectHref(base, starterProjectId(userId), "projects");
+    if (underneath.current === href) return;
+    router.push(href);
+  }, [toTour, handedOver, run, starterReady, userId, router, base]);
+
   const back = useCallback(() => {
     commitReferrals();
     setStep(Math.max(0, step - 1));
@@ -240,12 +299,13 @@ export function CutOnboarding() {
       // The plans slide ends the sequence through its own two answers — Get
       // Pro, or continue with free. Arrowing or Entering past it would be a
       // third, silent one, so forward stops there. A subscriber never sees that
-      // slide, so forward off their last one is how the sequence ends.
-      if (isPro) finish(false);
+      // slide, and on a computer the tour comes next, so forward off their last
+      // one is how the sequence ends.
+      if (isPro || toTour) leave(false);
       return;
     }
     setStep(step + 1);
-  }, [commitReferrals, finish, isPro, referrals, slide, slideCount, step]);
+  }, [commitReferrals, isPro, leave, referrals, slide, slideCount, step, toTour]);
 
   useEffect(() => {
     if (!run) return;
@@ -253,7 +313,7 @@ export function CutOnboarding() {
       if (event.key === "Escape") {
         // Behind the paywall Escape is no way out; a subscriber has no paywall.
         if (exit === "paywall" && !isPro) return;
-        return finish(true);
+        return leave(true);
       }
       if (event.key === "ArrowLeft") return back();
       if (event.key === "ArrowRight") return advance();
@@ -269,7 +329,7 @@ export function CutOnboarding() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [run, back, advance, finish, exit, isPro]);
+  }, [run, back, advance, leave, exit, isPro]);
 
   // The landing nav's lockup, same icon box and wordmark size. Shared by the
   // hold below and the open sequence, so one becoming the other repaints
@@ -294,7 +354,7 @@ export function CutOnboarding() {
   // to be done pays a single cream frame here once, then the record above
   // skips the hold for good.
   if (!run) {
-    const waiting = isPending && !skipWait;
+    const waiting = isPending && !skipWait && !chatgpt;
     return waiting ? (
       <div className="fixed inset-0 z-[80] flex flex-col bg-cream font-system text-foreground antialiased dark:bg-background">
         <div className="flex shrink-0 items-center justify-between px-6 py-2 md:px-10 md:py-2.5">
@@ -314,9 +374,10 @@ export function CutOnboarding() {
   };
 
   const last = step === slideCount - 1;
-  // A subscriber's last slide ends the sequence from the footer, where everyone
-  // else finds the plans slide's own two answers.
-  const done = last && isPro;
+  // A subscriber's last slide ends the sequence from the footer, and so does a
+  // computer's, where the tour comes next. A phone finds the plans slide's own
+  // answers.
+  const done = last && (isPro || toTour);
 
   return (
     <div
@@ -329,12 +390,12 @@ export function CutOnboarding() {
         {lockup}
 
         {/* A subscriber is being told about what they already pay for, so they
-            get the door: the same way out Escape takes. Everyone else meets it
-            at the end, where the plans slide asks its question. */}
+            get the door: the same way out Escape takes, on to the tour on a
+            computer. Everyone else meets it at the end. */}
         {isPro ? (
           <Button
             variant="ghost"
-            onClick={() => finish(true)}
+            onClick={() => leave(true)}
             className="text-foreground/70"
           >
             {t("skip")}
@@ -385,7 +446,7 @@ export function CutOnboarding() {
               key={i}
               className={cn(
                 "size-1.5 rounded-full transition-colors",
-                i === step ? "bg-coral" : "bg-foreground/20",
+                i === step ? BLUE_MARK : "bg-foreground/20",
               )}
             />
           ))}
@@ -399,12 +460,13 @@ export function CutOnboarding() {
           onClick={advance}
           disabled={slide === "referral" && !referrals.length}
           className={cn(
-            "gap-1.5 rounded-full bg-primary px-5 text-primary-foreground hover:bg-primary/90",
+            "gap-1.5 rounded-full px-5",
+            BLUE_FILL,
             last && !done && "invisible",
           )}
         >
           {done ? (
-            t("done")
+            toTour ? t("startTour") : t("done")
           ) : (
             <>
               {t("next")}

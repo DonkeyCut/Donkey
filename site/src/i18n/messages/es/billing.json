@@ -74,13 +74,11 @@
     "paidOutBody": "Tus créditos de {plan} se recargan el {date}.",
     "topOutTitle": "Tus créditos de {plan} se recargan el {date}",
     "bestValue": "Mejor valor",
-    "billedMonthly": "Facturación mensual",
     "introThen": "{months, plural, one {Primer mes, luego {price}/mes} other {Primeros # meses, luego {price}/mes}}",
     "stickerPercent": "{percent} %",
     "stickerOff": "de descuento",
     "get": "Obtener {plan}",
     "upgrade": "Mejorar a {plan}",
-    "current": "Plan actual",
-    "footer": "Precios en {currency}. Los planes se renuevan mensualmente hasta que canceles. Si pasas a un plan superior, se cobra la diferencia hoy."
+    "current": "Plan actual"
   }
 }

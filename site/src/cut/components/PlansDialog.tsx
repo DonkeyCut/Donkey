@@ -13,6 +13,7 @@ import { useApiErrorText } from "@/app/[locale]/cut/app/(home)/settings/_compone
 import { useCutPlans, type PlanCopy, type PlanFeature } from "@/app/[locale]/cut/_components/landing/cutPricingPlans";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogBody, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { BLUE_FILL, BLUE_TEXT } from "@/cut/components/accent";
 import { OfferSticker } from "@/cut/components/OfferSticker";
 import { usePlanCheckout } from "@/cut/lib/proUpgrade";
 import type { UpgradeEntry } from "@/cut/lib/upgrade";
@@ -22,12 +23,7 @@ import { planRank, RECOMMENDED_PLAN, type PaidPlan } from "@/lib/billing/plans";
 import { cn } from "@/lib/utils";
 import { useIntroOffer, useProSubscription, type IntroOffer } from "@/queries/billing";
 
-// The accent blue. The fill carries white text at 4.7:1; the light-theme text
-// shade reads on white, the dark one on the dark popover.
-const BLUE_FILL = "bg-[#0071e3] text-white hover:bg-[#0077ed]";
-const BLUE_TEXT = "text-[#0062c4] dark:text-[#4aa3ff]";
-
-export type PlansSource = "credits" | "projects" | "storage" | "plans";
+export type PlansSource = "credits" | "projects" | "storage" | "plans" | "onboarding";
 
 export function PlansDialog({
   source,
@@ -35,6 +31,7 @@ export function PlansDialog({
   title,
   body,
   notice,
+  dismissLabel,
   onClose,
 }: {
   // What raised it, and the button or limit that did, for analytics.
@@ -46,9 +43,11 @@ export function PlansDialog({
   body?: React.ReactNode;
   // A warning under the message, such as storage about to be reclaimed.
   notice?: React.ReactNode;
+  // The way out as a text button at the bottom right, in place of the close
+  // button. Onboarding ends on the plans, and free is one of its answers.
+  dismissLabel?: string;
   onClose: () => void;
 }) {
-  const t = useTranslations("billing.plans");
   const tBilling = useTranslations("billing");
   const apiErrorText = useApiErrorText();
   const plans = useCutPlans();
@@ -99,7 +98,12 @@ export function PlansDialog({
 
   return (
     <Dialog open={ready} onOpenChange={(open) => !open && close()}>
-      <DialogContent ref={popup} initialFocus={popup} className="gap-0 overflow-hidden p-0 sm:max-w-[60rem]">
+      <DialogContent
+        ref={popup}
+        initialFocus={popup}
+        showCloseButton={!dismissLabel}
+        className="gap-0 overflow-hidden p-0 sm:max-w-[60rem]"
+      >
         {/* A wash of the accent behind the heading. */}
         <div className="bg-gradient-to-b from-[#0071e3]/12 to-transparent px-6 pt-9 pb-7 text-center dark:from-[#0a84ff]/18 sm:px-10">
           <DialogHeader className="items-center gap-2">
@@ -126,13 +130,21 @@ export function PlansDialog({
             ))}
           </div>
         </DialogBody>
-        <div className="px-6 pt-5 pb-6 text-center text-xs text-muted-foreground sm:px-10">
+        <div className="flex flex-col gap-3 px-6 pt-5 pb-6 sm:px-10">
           {error ? (
-            <p className="mb-2 text-sm text-destructive">
+            <p className="text-center text-sm text-destructive">
               {apiErrorText(error, tBilling("billingUnavailable"))}
             </p>
           ) : null}
-          {t("footer", { currency: charge.currency.toUpperCase() })}
+          {dismissLabel ? (
+            <button
+              type="button"
+              onClick={close}
+              className="self-end text-sm text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline"
+            >
+              {dismissLabel}
+            </button>
+          ) : null}
         </div>
       </DialogContent>
     </Dialog>
@@ -195,8 +207,9 @@ function PlanColumn({
   );
 }
 
-// The monthly price, large; an open intro offer shows its discounted first
-// months beside the struck list price, and what follows them.
+// The monthly price, large, with its cadence beside it; an open intro offer
+// shows its discounted first months beside the struck list price, and what
+// follows them.
 function Price({ copy, offer }: { copy: PlanCopy; offer: IntroOffer | null }) {
   const t = useTranslations("billing.plans");
   const locale = useLocale();
@@ -211,11 +224,11 @@ function Price({ copy, offer }: { copy: PlanCopy; offer: IntroOffer | null }) {
         ) : null}
         <span className="text-sm text-muted-foreground">{copy.cadence}</span>
       </div>
-      <div className={cn("mt-1 text-xs font-medium", offer ? BLUE_TEXT : "text-muted-foreground")}>
-        {offer
-          ? t("introThen", { months: offer.months, price: formatMinorPrice(offer.priceMinor, offer.currency, locale) })
-          : t("billedMonthly")}
-      </div>
+      {offer ? (
+        <div className={cn("mt-1 text-xs font-medium", BLUE_TEXT)}>
+          {t("introThen", { months: offer.months, price: formatMinorPrice(offer.priceMinor, offer.currency, locale) })}
+        </div>
+      ) : null}
     </div>
   );
 }

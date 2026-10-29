@@ -74,13 +74,11 @@
     "paidOutBody": "{plan} 크레딧은 {date}에 다시 충전돼요.",
     "topOutTitle": "{plan} 크레딧 충전일: {date}",
     "bestValue": "최고 혜택",
-    "billedMonthly": "매월 청구",
     "introThen": "{months, plural, other {첫 #개월 이용 후 월 {price}}}",
     "stickerPercent": "{percent}%",
     "stickerOff": "할인",
     "get": "{plan} 선택",
     "upgrade": "{plan}(으)로 업그레이드",
-    "current": "현재 요금제",
-    "footer": "가격은 {currency} 기준이에요. 취소할 때까지 매월 갱신돼요. 상위 플랜으로 변경하면 오늘 차액이 청구돼요."
+    "current": "현재 요금제"
   }
 }

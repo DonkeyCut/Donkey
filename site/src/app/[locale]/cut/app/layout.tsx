@@ -6,6 +6,7 @@ import { CardHost } from "@/cut/components/CardHost";
 import { ConnectGate } from "@/cut/components/ConnectGate";
 import { ExportsDock } from "@/cut/components/ExportsDock";
 import { CutOnboarding } from "@/cut/components/onboarding/CutOnboarding";
+import { OnboardingHost } from "@/cut/components/onboarding/OnboardingHost";
 import { PhoneGate } from "@/cut/components/PhoneGate";
 import { RequireSession } from "@/cut/components/RequireSession";
 import { AppLoading, AppLoadingOverlay, SessionGate } from "@/cut/components/SessionGate";
@@ -24,7 +25,7 @@ import { APP_NAMESPACES } from "@/i18n/namespaces";
 // it answers without raising the browser's local-network prompt, the cloud
 // otherwise — and owns the banner that reports an engine this browser can no
 // longer reach. CutOnboarding is the welcome sequence a new account sees before
-// any of it.
+// any of it; OnboardingHost carries it on through the starter tour and the plans.
 //
 // Everything the app draws reads the engine, and every engine URL carries the
 // account id, so the shell has nothing true to show before the session lands:
@@ -62,6 +63,7 @@ export default function CutAppLayout({ children }: { children: ReactNode }) {
                   shape worth drawing before then. */}
                 <SessionGate>
                   <ExportsDock placement="window" />
+                  <OnboardingHost />
                 </SessionGate>
               </ConnectGate>
             </PhoneGate>

@@ -1,5 +1,7 @@
 "use client";
 
+import { useQueryClient } from "@tanstack/react-query";
+
 import { CHAT_RUNTIME } from "@/cut/lib/chatRuntime";
 import { useHostReady } from "@/cut/lib/hostBridge";
 import { useCutMode } from "@/cut/lib/backend/hooks";
@@ -58,6 +60,8 @@ import { noteProjectRevision, projectRevision } from "@/cut/lib/projectRevision"
 import { readProjectThreads, writeActiveChat } from "@/cut/lib/chatThreads";
 import { backTarget, useCutBase } from "@/cut/lib/nav";
 import { useOnboardingCover } from "@/cut/lib/onboarding";
+import { onboardingStage } from "@/lib/onboarding/stage";
+import { onboardingQueryKey, type OnboardingState } from "@/queries/onboarding";
 import { requestSidePanel } from "@/cut/lib/panelRequest";
 import { reportSwallowed } from "@/cut/lib/report";
 import { resolveProjectPlacement } from "@/cut/lib/residency";
@@ -80,6 +84,7 @@ import { AiPanel } from "./AiPanel";
 import type { ChatStatus } from "./ChatStatusBadge";
 import { EmbeddedNewProject } from "./EmbeddedNewProject";
 import { ExportDialog } from "./ExportDialog";
+import { StarterTour } from "./onboarding/StarterTour";
 import { Inspector, useHasInspector } from "./Inspector";
 import { Lightbox } from "./Lightbox";
 import { Preview } from "./Preview";
@@ -183,6 +188,7 @@ export function Editor({
     return () => window.removeEventListener("resize", clamp);
   }, []);
   const { chatgpt } = useEnvironment();
+  const queryClient = useQueryClient();
   const cutMode = useCutMode();
   // ChatGPT's edits run in this editor while it is the card.
   useHostCommands(projectId, chatgpt && cutMode === "cloud");
@@ -325,13 +331,20 @@ export function Editor({
       });
     }
     if (intro.play) {
-      if (!useOnboardingCover.getState().up) {
+      // The starter tour's first step is pressing play, so playback waits for
+      // the person while the tour is owed.
+      const play = () => {
+        const onboarding = queryClient.getQueryData<OnboardingState>(onboardingQueryKey);
+        if (!chatgpt && onboardingStage(onboarding) === "tour") return;
         useEditor.getState().setPlaying(true);
+      };
+      if (!useOnboardingCover.getState().up) {
+        play();
       } else {
         const unsub = useOnboardingCover.subscribe((s) => {
           if (s.up) return;
           unsub();
-          useEditor.getState().setPlaying(true);
+          play();
         });
         cleanups.push(unsub);
       }
@@ -340,7 +353,7 @@ export function Editor({
       alive = false;
       cleanups.forEach((fn) => fn());
     };
-  }, [loaded, viewer, projectId]);
+  }, [loaded, viewer, projectId, chatgpt, queryClient]);
 
   // Delayed follow of the owner's edits: poll the doc version and reload on
   // change, keeping the playhead. A 401/403/404 means the share was revoked or
@@ -1318,6 +1331,7 @@ export function Editor({
           onClose={() => useEditor.getState().setAiOpen(false)}
         />
       )}
+      {!viewer && !chatgpt && <StarterTour projectId={projectId} />}
       {exportOpen && <ExportDialog />}
       {shareGone && (
         <div className="fixed top-14 left-1/2 z-50 max-w-[calc(100%-2rem)] -translate-x-1/2 rounded-full bg-foreground/90 px-3.5 py-1.5 text-center text-xs font-medium text-background shadow-lg">

@@ -21,3 +21,58 @@ export function onOpenOnboarding(handler: () => void): () => void {
   window.addEventListener(EVENT, handler);
   return () => window.removeEventListener(EVENT, handler);
 }
+
+/** What the starter tour waits on that the editor store doesn't hold: the side
+ * panel's open tab, which lives in the panel's own state, whether a chat
+ * message went out, and whether a chat turn is running. The panel and the chat
+ * report here; the tour reads. `hold` is the tour's own pause after a step,
+ * while the person watches what their action did: the next step and the plans
+ * both wait it out. It carries a token, so a pause only ends itself. */
+export const useTourSignals = create<{
+  sideTab: string | null;
+  chatSent: boolean;
+  chatRunning: boolean;
+  hold: number | null;
+}>(() => ({
+  sideTab: null,
+  chatSent: false,
+  chatRunning: false,
+  hold: null,
+}));
+
+export const reportSideTab = (sideTab: string | null) => useTourSignals.setState({ sideTab });
+
+export const reportChatSent = () => useTourSignals.setState({ chatSent: true });
+
+export const reportChatRunning = (chatRunning: boolean) => useTourSignals.setState({ chatRunning });
+
+let fillComposer: ((text: string) => void) | null = null;
+
+/** Registers the chat composer the tour types into; returns the release. */
+export function onComposerFill(handler: (text: string) => void): () => void {
+  fillComposer = handler;
+  return () => {
+    if (fillComposer === handler) {
+      fillComposer = null;
+    }
+  };
+}
+
+/** Sets the chat composer's text, as the tour types its example message. */
+export const fillChatComposer = (text: string) => fillComposer?.(text);
+
+let holdSeq = 0;
+
+/** Starts a pause; returns the token that ends it. */
+export function holdTour(): number {
+  holdSeq += 1;
+  useTourSignals.setState({ hold: holdSeq });
+  return holdSeq;
+}
+
+/** Ends the pause the token started, if it is still the one running. */
+export function releaseTour(token: number): void {
+  if (useTourSignals.getState().hold === token) {
+    useTourSignals.setState({ hold: null });
+  }
+}

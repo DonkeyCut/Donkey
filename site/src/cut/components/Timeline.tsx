@@ -3633,6 +3633,7 @@ function Transport({ total }: { total: number }) {
         title={tr("playPause")}
         disabled={!hasClips}
         onClick={toggle}
+        data-tour="play"
       >
         {playing ? (
           <Pause className="size-4 fill-current stroke-none" />

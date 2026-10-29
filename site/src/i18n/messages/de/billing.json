@@ -74,13 +74,11 @@
     "paidOutBody": "Deine {plan}-Credits werden am {date} aufgeladen.",
     "topOutTitle": "Deine {plan}-Credits werden am {date} aufgeladen",
     "bestValue": "Bestes Angebot",
-    "billedMonthly": "Monatliche Abrechnung",
     "introThen": "{months, plural, one {Erster Monat, danach {price}/Monat} other {Erste # Monate, danach {price}/Monat}}",
     "stickerPercent": "{percent}%",
     "stickerOff": "Rabatt",
     "get": "{plan} holen",
     "upgrade": "Upgrade auf {plan}",
-    "current": "Aktueller Plan",
-    "footer": "Preise in {currency}. Abos verlängern sich monatlich, bis du kündigst. Beim Upgrade zahlst du heute die Differenz."
+    "current": "Aktueller Plan"
   }
 }

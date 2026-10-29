@@ -10,10 +10,12 @@ import type { UpgradeEntry } from "@/cut/lib/upgrade";
 import type {
   OnboardingRun,
   ReferralSource,
+  TourStep,
 } from "@/lib/onboarding/sequence";
 
-// What the plans modal opened for: a limit hit, or the plans asked for.
-type PlansReason = "projects" | "credits" | "storage" | "plans";
+// What the plans modal opened for: a limit hit, the plans asked for, or the
+// end of onboarding.
+type PlansReason = "projects" | "credits" | "storage" | "plans" | "onboarding";
 
 type AuthMode = "sign-in" | "sign-up";
 type AuthMethod = "google" | "email";
@@ -59,6 +61,12 @@ export type AnalyticsEvents = {
     referralOther?: string;
   };
   onboarding_completed: { source: OnboardingRun; skipped: boolean; step: number };
+  // The slides ended on a computer and handed over to the starter tour.
+  onboarding_slides_done: { source: OnboardingRun; skipped: boolean; step: number };
+  // A starter tour step done, and a locked project button sending the
+  // account back to the tour.
+  onboarding_tour_step: { step: TourStep };
+  onboarding_tour_resumed: void;
   // The sequence's plans slide came up; intro as on the plans modal.
   // exit is "paywall" on a phone, where the slide has no free way on.
   onboarding_plans_shown: { source: OnboardingRun; intro: number; exit: "free" | "paywall" };

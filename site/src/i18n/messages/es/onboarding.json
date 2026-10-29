@@ -4,7 +4,8 @@
     "skip": "Omitir",
     "back": "Atrás",
     "next": "Siguiente",
-    "done": "Listo"
+    "done": "Listo",
+    "startTour": "Empieza a editar"
   },
   "welcome": {
     "title": "Edita videos chateando.",
@@ -55,12 +56,34 @@
   },
   "plans": {
     "title": "Precios simples",
-    "subtitle": "El editor es gratis. Paga solo por multimedia generada por IA.",
+    "subtitle": "El editor es gratis. Paga solo por la multimedia generada por IA y el almacenamiento.",
     "bestValue": "Mejor opción",
     "getPlan": "Obtén {plan}",
     "getProOff": "Obtén {percent}% de descuento en Pro",
     "continueFree": "Continuar gratis",
+    "continue": "Continuar",
     "paywallSubtitle": "Elige un plan para comenzar. Editas en una computadora: inicia sesión ahí con esta cuenta.",
     "covers": "{months, plural, one {Durante tu primer mes, luego {price}/mes} other {Al mes durante tus primeros # meses, luego {price}/mes}}"
+  },
+  "tour": {
+    "play": {
+      "title": "Haz clic en reproducir para ver"
+    },
+    "clip": {
+      "title": "Selecciona un clip",
+      "body": "Haz clic en un clip en la línea de tiempo. Sus ajustes se abrirán junto a la vista previa."
+    },
+    "media": {
+      "title": "Abre Multimedia",
+      "body": "Los archivos que importes aparecerán aquí. Arrastra uno a la línea de tiempo para usarlo."
+    },
+    "chat": {
+      "title": "Pregúntale al asistente",
+      "body": "Presiona Enter para enviarlo. El asistente edita el proyecto por ti.",
+      "prompt": "Haz más grande el título Resumen de agosto"
+    },
+    "progress": "{current} de {total}",
+    "locked": "Completa el recorrido para empezar tu propio proyecto",
+    "backLocked": "Termina el recorrido para salir de este proyecto"
   }
 }

@@ -39,6 +39,7 @@ import { localBackend } from "@/cut/lib/backend/local";
 import { clearProjectThreads } from "@/cut/lib/chatThreads";
 import { retryFailedUploads } from "@/cut/lib/importQueue";
 import { backTarget, projectHref, useCutBase } from "@/cut/lib/nav";
+import { useTourHoldsStarter } from "@/cut/lib/tourLock";
 import { copyProjectAcross } from "@/cut/lib/projectCopy";
 import { projectDuration, useEditor } from "@/cut/lib/store";
 import { useEnvironment } from "@/cut/lib/environment";
@@ -106,9 +107,12 @@ export function TopBar({
 }) {
   const t = useTranslations("editor.topBar");
   const tColor = useTranslations("inspector.colorField");
+  const tTour = useTranslations("onboarding.tour");
   const describeError = useDescribeError();
   const base = useCutBase();
   const back = backTarget(base, from, folder);
+  // The starter tour keeps the account in its starter project until it ends.
+  const backHeld = useTourHoldsStarter(useEditor((s) => s.projectId));
   // Something to render, which footage is only one way to have: a cut of
   // titles and shapes over the background frame exports like any other.
   const hasPicture = useEditor((s) => projectDuration(s) > 0);
@@ -494,15 +498,37 @@ export function TopBar({
     // toward whichever side has slack instead of colliding with the rail.
     <header ref={headerRef} className="relative flex items-center border-b border-border bg-card">
       <div ref={leftRef} className="flex shrink-0 items-center gap-1 pl-2">
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          aria-label={t("backTo", { tab: back.tab })}
-          nativeButton={false}
-          render={<Link href={back.href} />}
-        >
-          <ChevronLeft />
-        </Button>
+        {backHeld ? (
+          // aria-disabled keeps the hover that shows why.
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label={t("backTo", { tab: back.tab })}
+                    aria-disabled
+                    className="cursor-not-allowed opacity-50 hover:bg-transparent"
+                  />
+                }
+              >
+                <ChevronLeft />
+              </TooltipTrigger>
+              <TooltipContent>{tTour("backLocked")}</TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        ) : (
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label={t("backTo", { tab: back.tab })}
+            nativeButton={false}
+            render={<Link href={back.href} />}
+          >
+            <ChevronLeft />
+          </Button>
+        )}
         {logo}
         {editing ? (
           <input

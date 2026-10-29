@@ -19,10 +19,10 @@ import { useIntroOffer, type IntroOffer } from "@/queries/billing";
 
 import "../onboarding.css";
 
-// The landing's own card colors, so a plan looks the same wherever it's met.
+// The landing's card palette, with the recommended plan in the onboarding's blue.
 const PLAN_CARD: Record<PaidPlan, { color: CardColor; tapeColor: CardColor }> = {
   plus: { color: "cream", tapeColor: "mint" },
-  pro: { color: "coral", tapeColor: "yellow" },
+  pro: { color: "blue", tapeColor: "yellow" },
   max: { color: "cream", tapeColor: "pink" },
 };
 

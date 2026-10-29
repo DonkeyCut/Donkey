@@ -15,7 +15,8 @@ export type UpgradeEntry =
   | "project_limit"
   | "storage_pill"
   | "storage_refused"
-  | "render_refused";
+  | "render_refused"
+  | "onboarding_tour";
 
 export type UpgradeRequest = { reason: UpgradeReason; entry: UpgradeEntry };
 

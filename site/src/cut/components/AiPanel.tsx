@@ -111,6 +111,7 @@ import { cutChatLive, dropPiSession, foldIntoCutChat, hydratePiSession, readPiSe
 import { dueForRetriage, toolProgress } from "@/cut/lib/queueTriage";
 import { registerQueueSink } from "@/cut/lib/chatQueue";
 import { previewAt } from "@/cut/lib/playhead";
+import { onComposerFill, reportChatRunning, reportChatSent } from "@/cut/lib/onboarding";
 import { resolvePlayheadTokens, syncTimes, type TimeMark } from "@/cut/lib/timeMark";
 import { productionDeps } from "@/cut/lib/pi/prodDeps";
 import { withChatProject } from "@/cut/lib/projectChatTools";
@@ -613,6 +614,10 @@ export function AiPanel({
   useEffect(() => {
     onStatusChange(projectId, chatStatus);
   }, [projectId, chatStatus, onStatusChange]);
+  // The starter tour holds its last step until the reply lands.
+  useEffect(() => {
+    reportChatRunning(anyRunning);
+  }, [anyRunning]);
   // The owner's chat opens once this browser's stored history has loaded
   // (IndexedDB, so a beat after mount — opening before it would show an empty
   // thread and save it over the real one); the cloud copy merges in behind it
@@ -1090,6 +1095,22 @@ function ChatSession({
     }
     micWasActive.current = mic.state !== "idle";
   }, [mic.state]);
+  // The starter tour types its example message here, caret at the end, so
+  // Enter sends it.
+  useEffect(
+    () =>
+      onComposerFill((text) => {
+        setInput(text);
+        requestAnimationFrame(() => {
+          const el = composerRef.current;
+          if (el) {
+            el.focus();
+            el.setSelectionRange(el.value.length, el.value.length);
+          }
+        });
+      }),
+    [],
+  );
   const [attachments, setAttachments] = useState<AssetRef[]>([]);
   // Moments the composer's `@` tokens point at, in the order they were
   // written. They ride with the message so the time can be re-read against
@@ -1960,6 +1981,7 @@ function ChatSession({
     }
     const queued = busy || requests.snapshot();
     track("chat_message_sent", { provider: provider(currentModel()), attachments: all.length, queued });
+    reportChatSent();
     if (queued) {
       // A paused queue stays paused: parked rows fire only from the tray's
       // resume button, never as a side effect of submitting something new.
@@ -2381,6 +2403,7 @@ function ChatSession({
           </div>
           <div
             ref={composerBoxRef}
+            data-tour="chat"
             className={cn(
               // z above the floating stack so the box paints over its tucked
               // bottom edge. Dark mode lifts the opaque fill a step above the

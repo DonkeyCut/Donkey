@@ -4,7 +4,8 @@
     "skip": "Skip",
     "back": "Back",
     "next": "Next",
-    "done": "Done"
+    "done": "Done",
+    "startTour": "Start editing"
   },
   "welcome": {
     "title": "Edit videos by chatting.",
@@ -55,12 +56,34 @@
   },
   "plans": {
     "title": "Simple pricing",
-    "subtitle": "The editor is free. Pay only for AI generated media.",
+    "subtitle": "The editor is free. Pay only for AI generated media and storage.",
     "bestValue": "Best value",
     "getPlan": "Get {plan}",
     "getProOff": "Get {percent}% off Pro",
     "continueFree": "Continue with free",
+    "continue": "Continue",
     "paywallSubtitle": "Pick a plan to start. You edit on a computer: sign in there with this account.",
     "covers": "{months, plural, one {For your first month, then {price}/month} other {Per month for your first # months, then {price}/month}}"
+  },
+  "tour": {
+    "play": {
+      "title": "Click play to watch"
+    },
+    "clip": {
+      "title": "Select a clip",
+      "body": "Click a clip on the timeline. Its settings open beside the preview."
+    },
+    "media": {
+      "title": "Open Media",
+      "body": "Files you import land here. Drag one onto the timeline to use it."
+    },
+    "chat": {
+      "title": "Ask the assistant",
+      "body": "Press Enter to send it. The assistant edits the project for you.",
+      "prompt": "Make the August Recap title bigger"
+    },
+    "progress": "{current} of {total}",
+    "locked": "Finish the tour to start your own project",
+    "backLocked": "Finish the tour to leave this project"
   }
 }

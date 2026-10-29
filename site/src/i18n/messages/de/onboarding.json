@@ -4,7 +4,8 @@
     "skip": "Überspringen",
     "back": "Zurück",
     "next": "Weiter",
-    "done": "Fertig"
+    "done": "Fertig",
+    "startTour": "Bearbeitung starten"
   },
   "welcome": {
     "title": "Videos schneiden per Chat.",
@@ -55,12 +56,34 @@
   },
   "plans": {
     "title": "Einfache Preise",
-    "subtitle": "Der Editor ist kostenlos. Zahle nur für KI-generierte Medien.",
+    "subtitle": "Der Editor ist kostenlos. Zahle nur für KI-generierte Medien und Speicher.",
     "bestValue": "Bester Wert",
     "getPlan": "Hol dir {plan}",
     "getProOff": "{percent} % Rabatt auf Pro sichern",
     "continueFree": "Kostenlos weitermachen",
+    "continue": "Weiter",
     "paywallSubtitle": "Wähle einen Plan, um loszulegen. Du bearbeitest auf einem Computer: Melde dich dort mit diesem Account an.",
     "covers": "{months, plural, one {Für deinen ersten Monat, danach {price}/Monat} other {Pro Monat für deine ersten # Monate, danach {price}/Monat}}"
+  },
+  "tour": {
+    "play": {
+      "title": "Klicke auf Play zum Ansehen"
+    },
+    "clip": {
+      "title": "Wähle einen Clip aus",
+      "body": "Klicke auf einen Clip in der Timeline. Seine Einstellungen öffnen sich neben der Vorschau."
+    },
+    "media": {
+      "title": "Medien öffnen",
+      "body": "Importierte Dateien landen hier. Ziehe eine auf die Timeline, um sie zu verwenden."
+    },
+    "chat": {
+      "title": "Frag den Assistenten",
+      "body": "Drücke Enter zum Senden. Der Assistent bearbeitet das Projekt für dich.",
+      "prompt": "Mach den Titel „August Recap“ größer"
+    },
+    "progress": "{current} von {total}",
+    "locked": "Schließe die Tour ab, um dein eigenes Projekt zu starten",
+    "backLocked": "Beende die Tour, um dieses Projekt zu verlassen"
   }
 }

@@ -74,13 +74,11 @@
     "paidOutBody": "{plan}のクレジットは{date}に補充されます。",
     "topOutTitle": "{plan}のクレジットは{date}に補充されます",
     "bestValue": "最もお得",
-    "billedMonthly": "月額請求",
     "introThen": "{months, plural, other {最初の#か月、その後は{price}/月}}",
     "stickerPercent": "{percent}%",
     "stickerOff": "OFF",
     "get": "{plan}を入手",
     "upgrade": "{plan}にアップグレード",
-    "current": "現在のプラン",
-    "footer": "表示価格は{currency}です。プランは解約するまで毎月自動更新されます。上位プランへの変更時は、本日差額が請求されます。"
+    "current": "現在のプラン"
   }
 }

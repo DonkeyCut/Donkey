@@ -74,13 +74,11 @@
     "paidOutBody": "Your {plan} credits refill on {date}.",
     "topOutTitle": "Your {plan} credits refill on {date}",
     "bestValue": "Best value",
-    "billedMonthly": "Billed monthly",
     "introThen": "{months, plural, one {First month, then {price}/month} other {First # months, then {price}/month}}",
     "stickerPercent": "{percent}%",
     "stickerOff": "off",
     "get": "Get {plan}",
     "upgrade": "Upgrade to {plan}",
-    "current": "Current plan",
-    "footer": "Prices in {currency}. Plans renew monthly until you cancel. Moving up a plan charges the difference today."
+    "current": "Current plan"
   }
 }
