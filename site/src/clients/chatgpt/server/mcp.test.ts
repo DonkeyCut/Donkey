@@ -146,8 +146,8 @@ describe("ChatGPT MCP protocol", () => {
         "openai/ui": { entrypoints: [{ type: "global" }, { type: "thread" }] },
       });
       expect(tools.find((tool) => tool.name === "open_project")?.icons?.map((icon) => [icon.theme, icon.src])).toEqual([
-        ["light", `${config.issuer}/chatgpt-entry-light.svg`],
-        ["dark", `${config.issuer}/chatgpt-entry-dark.svg`],
+        ["light", `${config.issuer}/chatgpt-entry-light.png`],
+        ["dark", `${config.issuer}/chatgpt-entry-dark.png`],
       ]);
       expect(client.getServerCapabilities()?.extensions).toEqual({ "openai/mentions": { searchTool: "find_projects" } });
       expect(tools.find((tool) => tool.name === "find_projects")?._meta).toMatchObject({ ui: { visibility: ["app"] } });
