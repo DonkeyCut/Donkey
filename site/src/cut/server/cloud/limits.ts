@@ -95,8 +95,13 @@ export function cutLimitsForTier(
 
 export async function cutLimitsFor(userId: string): Promise<CutLimits> {
   if (await isDonkeySuperUser(userId)) return UNLIMITED;
-  const [subscription, terms] = await Promise.all([getActiveSubscription(userId), getGlobalSetting("planTerms")]);
-  return cutLimitsForTier({ superUser: false, plan: subscription?.planKey ?? null }, terms);
+
+  // A free account's limits are constants; only a plan reads its terms.
+  const subscription = await getActiveSubscription(userId);
+  if (!subscription) {
+    return FREE;
+  }
+  return cutLimitsForTier({ superUser: false, plan: subscription.planKey }, await getGlobalSetting("planTerms"));
 }
 
 /** 429 when the account already has as many asked-for jobs in flight as its
