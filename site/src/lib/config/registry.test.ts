@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
+import type { PlanTerms } from "@/lib/billing/plans";
+
 import { PUBLIC_SETTING_KEYS, SETTINGS, SETTING_KEYS, defaultSettings } from "./registry";
 import { publicSubset, resolveSettings } from "./resolve";
 
@@ -18,6 +20,14 @@ describe("the product's settings registry", () => {
     const resolved = resolveSettings({ databasePool: { maxConnections: "many" } }, []);
     expect(resolved.settings.databasePool).toEqual(SETTINGS.databasePool.default);
     expect(resolved.invalid).toEqual([{ key: "databasePool", layer: "override" }]);
+  });
+
+  test("plan terms saved before local prices read the default ones", () => {
+    const { plus, pro, max } = SETTINGS.planTerms.default;
+    const strip = ({ localPrices: _, ...rest }: PlanTerms) => rest;
+    const resolved = resolveSettings({ planTerms: { plus: strip(plus), pro: strip(pro), max: strip(max) } }, []);
+    expect(resolved.invalid).toEqual([]);
+    expect(resolved.settings.planTerms.pro.localPrices).toEqual(pro.localPrices);
   });
 
   test("the signup grant is set to the cent", () => {

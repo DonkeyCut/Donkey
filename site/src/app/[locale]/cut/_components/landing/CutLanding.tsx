@@ -6,18 +6,20 @@ import { CutOpenSource } from "@/app/[locale]/cut/_components/landing/CutOpenSou
 import { CutPricing } from "@/app/[locale]/cut/_components/landing/CutPricing";
 import { CutTopNav } from "@/app/[locale]/cut/_components/landing/CutTopNav";
 import { CutWorksWith } from "@/app/[locale]/cut/_components/landing/CutWorksWith";
+import type { Currency } from "@/lib/billing/currencies";
 
 // The donkeycut.com marketing page, on the cream visual system. Every CTA into
 // the app is gated on session (useAppEntryHref): signed-out clicks route to
 // sign-in first. The nav mirrors this — a "Log in" link with a "Sign up" pill
-// when signed out, "Go to App" when signed in.
-export function CutLanding() {
+// when signed out, "Go to App" when signed in. The plans price in the
+// visitor's currency, which the page has from its address.
+export function CutLanding({ currency }: { currency: Currency }) {
   return (
     <main className="min-h-screen bg-background font-system text-foreground antialiased">
       <CutTopNav />
       <CutHero />
       <CutWorksWith />
-      <CutPricing />
+      <CutPricing currency={currency} />
       <CutLocal />
       <CutOpenSource />
       <CutFinalCTA />

@@ -81,6 +81,6 @@
     "get": "Obtenir {plan}",
     "upgrade": "Passer à {plan}",
     "current": "Forfait actuel",
-    "footer": "Prix en USD. Renouvellement mensuel automatique jusqu'à résiliation. Passer à un forfait supérieur facture la différence aujourd'hui."
+    "footer": "Prix en {currency}. Les forfaits se renouvellent chaque mois jusqu’à votre résiliation. Passer à un forfait supérieur facture la différence aujourd’hui."
   }
 }

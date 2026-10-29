@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { heldPro, introCouponId, introOfferAt, introOfferPreview, introPriceCents, offersIntro } from "./intro-offer";
+import { heldPro, introCouponId, introOfferAt, introOfferPreview, introPriceMinor, offersIntro } from "./intro-offer";
 
 const HOUR_MS = 3_600_000;
 const seen = new Date("2026-10-16T12:00:00Z");
@@ -51,8 +51,8 @@ test("one coupon per pair of terms", () => {
 });
 
 test("the intro price rounds to the cent", () => {
-  expect(introPriceCents(2000, 50)).toBe(1000);
-  expect(introPriceCents(1999, 33)).toBe(1339);
+  expect(introPriceMinor(2000, 50)).toBe(1000);
+  expect(introPriceMinor(1999, 33)).toBe(1339);
 });
 
 describe("introOfferPreview", () => {

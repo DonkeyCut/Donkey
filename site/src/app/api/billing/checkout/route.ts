@@ -5,6 +5,8 @@ import { z } from "zod";
 import { requestLocale } from "@/i18n/requestLocale";
 import { auth } from "@/lib/auth";
 import { introCouponId } from "@/lib/billing/intro-offer";
+import { chargeCurrency } from "@/lib/billing/charge-currency";
+import { CURRENCIES, DEFAULT_CURRENCY } from "@/lib/billing/currencies";
 import { introCoupon, readIntroOffer } from "@/lib/billing/intro-offer-server";
 import { metaCheckoutMetadata, trackCheckoutStarted } from "@/lib/billing/meta-checkout";
 import { PAID_PLANS, PLAN_NAMES, planRank, type PaidPlan } from "@/lib/billing/plans";
@@ -19,6 +21,7 @@ import {
 } from "@/lib/billing/pro-subscription";
 import { STRIPE_LOCALE } from "@/lib/billing/stripe-locale";
 import { drainStripe, ensureStripeCustomer, getStripe } from "@/lib/billing/stripe";
+import { countryFromHeaders } from "@/lib/config/country";
 import { contextFromRequest } from "@/lib/config/effective";
 import { verifyCreditOfferToken } from "@/lib/credits/offers";
 import { openOfferForSubscribing, SUBSCRIBE_BONUS_METADATA_KEY } from "@/lib/credits/subscribe-bonus-claim";
@@ -30,9 +33,13 @@ import {
 
 // The plan to buy, Pro when unnamed. A checkout opened from an offer's claim
 // link names the offer by its token, so the credit that lands is the one the
-// dialog described.
+// dialog described. The currency is the one the surface priced the plan in.
 const bodySchema = z
-  .object({ offerToken: z.string().min(1).optional(), plan: z.enum(PAID_PLANS).optional() })
+  .object({
+    currency: z.enum(CURRENCIES).default(DEFAULT_CURRENCY),
+    offerToken: z.string().min(1).optional(),
+    plan: z.enum(PAID_PLANS).optional(),
+  })
   .strict();
 
 const HTTP_CONFLICT = 409;
@@ -53,6 +60,18 @@ export const POST = withDonkeyAuth(async (request) => {
   }
   const namedOfferId = parsed.data.offerToken ? verifyCreditOfferToken(parsed.data.offerToken) : null;
   const plan = parsed.data.plan ?? "pro";
+
+  // The account checks out in one currency: the one Stripe already bills it
+  // in, or its country's. A card priced in another, such as one drawn before
+  // the account's pricing read landed, is refused, so the charge always
+  // matches what the person saw and no account buys another country's price.
+  const currency = await chargeCurrency(session.user.id, countryFromHeaders(request.headers));
+  if (parsed.data.currency !== currency) {
+    return NextResponse.json(
+      { error: "currency_changed", message: "Prices for your account changed. Check the new price and try again." },
+      { status: HTTP_CONFLICT },
+    );
+  }
 
   // A not-yet-configured price stays a 404 (not 401) so the landing card does
   // not treat it as a sign-in prompt.
@@ -98,6 +117,7 @@ export const POST = withDonkeyAuth(async (request) => {
     ...pricing,
     cancel_url: `${origin}/app/settings?checkout=cancelled`,
     client_reference_id: session.user.id,
+    currency,
     customer: customerId,
     line_items: [{ price: priceId, quantity: 1 }],
     locale: STRIPE_LOCALE[requestLocale(request)],

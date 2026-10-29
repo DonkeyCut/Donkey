@@ -105,7 +105,7 @@
     "plans.get": "36572be917c8",
     "plans.upgrade": "413370c98be7",
     "plans.current": "ec5cfba8f01b",
-    "plans.footer": "38d6bda2e5b1"
+    "plans.footer": "9f7466d09417"
   },
   "de/chat": {
     "panel.signInToChat": "8b2dd174b118",
@@ -334,6 +334,7 @@
     "apiErrors.image_too_large": "3fdb4028f18f",
     "apiErrors.plan_not_an_upgrade": "d968260313e6",
     "apiErrors.upgrade_in_progress": "105dee90239b",
+    "apiErrors.currency_changed": "691fd3c84c07",
     "apiErrors.upgrade_payment_failed": "9f81fe318848",
     "languageSaveFailed": "8d8a247bafe6",
     "languageBlocked": "6cdf84383309"
@@ -3131,7 +3132,7 @@
     "plans.get": "36572be917c8",
     "plans.upgrade": "413370c98be7",
     "plans.current": "ec5cfba8f01b",
-    "plans.footer": "38d6bda2e5b1"
+    "plans.footer": "9f7466d09417"
   },
   "es/chat": {
     "panel.signInToChat": "8b2dd174b118",
@@ -3360,6 +3361,7 @@
     "apiErrors.image_too_large": "3fdb4028f18f",
     "apiErrors.plan_not_an_upgrade": "d968260313e6",
     "apiErrors.upgrade_in_progress": "105dee90239b",
+    "apiErrors.currency_changed": "691fd3c84c07",
     "apiErrors.upgrade_payment_failed": "9f81fe318848",
     "languageSaveFailed": "8d8a247bafe6",
     "languageBlocked": "6cdf84383309"
@@ -6157,7 +6159,7 @@
     "plans.get": "36572be917c8",
     "plans.upgrade": "413370c98be7",
     "plans.current": "ec5cfba8f01b",
-    "plans.footer": "38d6bda2e5b1"
+    "plans.footer": "9f7466d09417"
   },
   "fr/chat": {
     "panel.signInToChat": "8b2dd174b118",
@@ -6386,6 +6388,7 @@
     "apiErrors.image_too_large": "3fdb4028f18f",
     "apiErrors.plan_not_an_upgrade": "d968260313e6",
     "apiErrors.upgrade_in_progress": "105dee90239b",
+    "apiErrors.currency_changed": "691fd3c84c07",
     "apiErrors.upgrade_payment_failed": "9f81fe318848",
     "languageSaveFailed": "8d8a247bafe6",
     "languageBlocked": "6cdf84383309"
@@ -9183,7 +9186,7 @@
     "plans.get": "36572be917c8",
     "plans.upgrade": "413370c98be7",
     "plans.current": "ec5cfba8f01b",
-    "plans.footer": "38d6bda2e5b1"
+    "plans.footer": "9f7466d09417"
   },
   "ja/chat": {
     "panel.signInToChat": "8b2dd174b118",
@@ -9412,6 +9415,7 @@
     "apiErrors.image_too_large": "3fdb4028f18f",
     "apiErrors.plan_not_an_upgrade": "d968260313e6",
     "apiErrors.upgrade_in_progress": "105dee90239b",
+    "apiErrors.currency_changed": "691fd3c84c07",
     "apiErrors.upgrade_payment_failed": "9f81fe318848",
     "languageSaveFailed": "8d8a247bafe6",
     "languageBlocked": "6cdf84383309"
@@ -12209,7 +12213,7 @@
     "plans.get": "36572be917c8",
     "plans.upgrade": "413370c98be7",
     "plans.current": "ec5cfba8f01b",
-    "plans.footer": "38d6bda2e5b1"
+    "plans.footer": "9f7466d09417"
   },
   "ko/chat": {
     "panel.signInToChat": "8b2dd174b118",
@@ -12438,6 +12442,7 @@
     "apiErrors.image_too_large": "3fdb4028f18f",
     "apiErrors.plan_not_an_upgrade": "d968260313e6",
     "apiErrors.upgrade_in_progress": "105dee90239b",
+    "apiErrors.currency_changed": "691fd3c84c07",
     "apiErrors.upgrade_payment_failed": "9f81fe318848",
     "languageSaveFailed": "8d8a247bafe6",
     "languageBlocked": "6cdf84383309"
@@ -15235,7 +15240,7 @@
     "plans.get": "36572be917c8",
     "plans.upgrade": "413370c98be7",
     "plans.current": "ec5cfba8f01b",
-    "plans.footer": "38d6bda2e5b1"
+    "plans.footer": "9f7466d09417"
   },
   "pt-BR/chat": {
     "panel.signInToChat": "8b2dd174b118",
@@ -15464,6 +15469,7 @@
     "apiErrors.image_too_large": "3fdb4028f18f",
     "apiErrors.plan_not_an_upgrade": "d968260313e6",
     "apiErrors.upgrade_in_progress": "105dee90239b",
+    "apiErrors.currency_changed": "691fd3c84c07",
     "apiErrors.upgrade_payment_failed": "9f81fe318848",
     "languageSaveFailed": "8d8a247bafe6",
     "languageBlocked": "6cdf84383309"
@@ -18261,7 +18267,7 @@
     "plans.get": "36572be917c8",
     "plans.upgrade": "413370c98be7",
     "plans.current": "ec5cfba8f01b",
-    "plans.footer": "38d6bda2e5b1"
+    "plans.footer": "9f7466d09417"
   },
   "zh-CN/chat": {
     "panel.signInToChat": "8b2dd174b118",
@@ -18490,6 +18496,7 @@
     "apiErrors.image_too_large": "3fdb4028f18f",
     "apiErrors.plan_not_an_upgrade": "d968260313e6",
     "apiErrors.upgrade_in_progress": "105dee90239b",
+    "apiErrors.currency_changed": "691fd3c84c07",
     "apiErrors.upgrade_payment_failed": "9f81fe318848",
     "languageSaveFailed": "8d8a247bafe6",
     "languageBlocked": "6cdf84383309"

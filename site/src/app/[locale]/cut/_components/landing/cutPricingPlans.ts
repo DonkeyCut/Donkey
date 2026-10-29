@@ -1,12 +1,13 @@
 import { useLocale, useTranslations } from "next-intl";
 
 import type { PricingPlan } from "@/app/_components/landing/pricingPlans";
+import { useChargeCurrency } from "@/app/_components/ChargeCurrencyProvider";
 import { usePlanTerms } from "@/app/_components/PlanTermsProvider";
 import type { CardColor } from "@/app/_components/landing/theme";
 import { promotionCovers, type AllowancePromotion } from "@/lib/billing/allowance-promotion";
-import { PAID_PLANS, PLAN_NAMES, RECOMMENDED_PLAN, type PaidPlan, type PlanTerms } from "@/lib/billing/plans";
+import { formatPrice } from "@/lib/billing/format-price";
+import { PAID_PLANS, PLAN_NAMES, planPrice, RECOMMENDED_PLAN, type PaidPlan, type PlanTerms } from "@/lib/billing/plans";
 import { formatCreditCount } from "@/lib/credits/format-credits";
-import { formatUsdPlain } from "@/lib/credits/format-usd";
 
 // The Free plan's cloud storage, as its card states it.
 const FREE_STORAGE_MB = 250;
@@ -19,7 +20,8 @@ export type PlanCopy = {
   plan: PaidPlan;
   name: string;
   body: string;
-  // "$20/month"; `amount` and `cadence` split it for a large figure.
+  // "$20/month", in the currency the reader checks out in; `amount` and
+  // `cadence` split it for a large figure.
   price: string;
   amount: string;
   cadence: string;
@@ -28,16 +30,18 @@ export type PlanCopy = {
 
 /** Every paid plan in the reader's language, cheapest first: the landing
  * cards, the welcome sequence and the upgrade modal all read it, so a plan
- * can't say two different things in two parts of the product. */
+ * can't say two different things in two parts of the product. A surface
+ * holds the cards while useChargeCurrency is pending. */
 export function useCutPlans(): PlanCopy[] {
   const t = useTranslations("common.plans");
   const locale = useLocale();
   const table = usePlanTerms();
+  const { currency } = useChargeCurrency();
   return PAID_PLANS.map((plan, i) => {
     const terms = table[plan];
     const below = i > 0 ? PAID_PLANS[i - 1] : null;
     const belowTerms = below ? table[below] : null;
-    const amount = formatUsdPlain(String(terms.monthlyDollars), locale);
+    const amount = formatPrice(planPrice(terms, currency), currency, locale);
     const features: PlanFeature[] = [
       { kind: "credits", text: t("credits", { credits: formatCreditCount(terms.monthlyCredits, locale) }) },
       ...(below ? [{ kind: "inherits" as const, text: t("everythingIn", { plan: PLAN_NAMES[below] }) }] : []),
@@ -96,6 +100,7 @@ export const NOTE_PLAN: PaidPlan = "max";
 export function useCutPricingPlans(): PricingPlan[] {
   const t = useTranslations("landing.plans");
   const locale = useLocale();
+  const { currency } = useChargeCurrency();
   const plans = useCutPlans();
   return [
     {
@@ -114,7 +119,7 @@ export function useCutPricingPlans(): PricingPlan[] {
         t("free.subscriptions"),
       ],
       name: t("free.name"),
-      price: formatUsdPlain("0", locale),
+      price: formatPrice(0, currency, locale),
       tapeColor: "coral",
     },
     ...plans.map((copy, i): PricingPlan => ({

@@ -44,6 +44,7 @@
     "image_too_large": "이미지가 너무 커요.",
     "plan_not_an_upgrade": "이 계정은 이미 이 플랜 또는 더 높은 플랜을 이용 중이에요.",
     "upgrade_in_progress": "이 업그레이드는 이미 진행 중이에요.",
+    "currency_changed": "계정의 가격이 변경되었어요. 새 가격을 확인하고 다시 시도해 보세요.",
     "upgrade_payment_failed": "카드가 승인 거부되어 플랜이 변경되지 않았어요. 결제 정보에서 카드를 업데이트하고 다시 시도해 주세요."
   },
   "languageSaveFailed": "언어를 저장하지 못했어요. 다시 시도해 주세요.",

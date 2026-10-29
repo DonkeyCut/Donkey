@@ -9,12 +9,39 @@ import {
 } from "@donkeycut/abexp";
 import { z } from "zod";
 
+import type { LocalCurrency } from "@/lib/billing/currencies";
+import type { PaidPlan } from "@/lib/billing/plans";
 import { maxCreditGrantDollars, maxCreditGrantExpiryDays } from "@/lib/credits/top-up";
 
+// A plan's monthly price in each currency besides USD, in whole units.
+const localAmount = z.number().int().min(1).max(10_000_000);
+const localPricesSchema = z
+  .object({
+    eur: localAmount,
+    gbp: localAmount,
+    cad: localAmount,
+    aud: localAmount,
+    jpy: localAmount,
+    krw: localAmount,
+    brl: localAmount,
+    mxn: localAmount,
+  } satisfies Record<LocalCurrency, typeof localAmount>)
+  .strict();
+
+// Each plan's local prices, set for what the plan is worth where it sells:
+// rounded, and lower where money buys more.
+const LOCAL_PRICES: Record<PaidPlan, z.infer<typeof localPricesSchema>> = {
+  plus: { eur: 5, gbp: 4, cad: 7, aud: 8, jpy: 700, krw: 6_900, brl: 15, mxn: 59 },
+  pro: { eur: 19, gbp: 16, cad: 27, aud: 30, jpy: 2_800, krw: 26_000, brl: 59, mxn: 229 },
+  max: { eur: 45, gbp: 39, cad: 65, aud: 75, jpy: 6_800, krw: 63_000, brl: 149, mxn: 549 },
+};
+
 // One paid plan's terms in the planTerms setting (src/lib/billing/plans.ts).
-const planTermsSchema = z
+// Terms saved before a plan had local prices read them from the table above.
+const planTermsSchema = (plan: PaidPlan) => z
   .object({
     monthlyDollars: z.number().multipleOf(0.01).min(0.5).max(10_000),
+    localPrices: localPricesSchema.default(LOCAL_PRICES[plan]),
     monthlyCredits: z.number().int().min(0).max(10_000_000),
     storageGb: z.number().int().min(1).max(100_000),
     rendersPerDay: z.number().int().min(1).max(100_000),
@@ -231,16 +258,16 @@ export const SETTINGS = defineSettings({
       "How many projects a free account may hold besides its starter project. Creating one more opens the upgrade dialog.",
   },
   planTerms: {
-    schema: z.object({ plus: planTermsSchema, pro: planTermsSchema, max: planTermsSchema }).strict(),
+    schema: z.object({ plus: planTermsSchema("plus"), pro: planTermsSchema("pro"), max: planTermsSchema("max") }).strict(),
     default: {
-      plus: { monthlyDollars: 5, monthlyCredits: 5_000, storageGb: 10, rendersPerDay: 10, unlimitedProjects: false },
-      pro: { monthlyDollars: 20, monthlyCredits: 20_000, storageGb: 100, rendersPerDay: 200, unlimitedProjects: true },
-      max: { monthlyDollars: 49, monthlyCredits: 60_000, storageGb: 500, rendersPerDay: 500, unlimitedProjects: true },
+      plus: { monthlyDollars: 5, localPrices: LOCAL_PRICES.plus, monthlyCredits: 5_000, storageGb: 10, rendersPerDay: 10, unlimitedProjects: false },
+      pro: { monthlyDollars: 20, localPrices: LOCAL_PRICES.pro, monthlyCredits: 20_000, storageGb: 100, rendersPerDay: 200, unlimitedProjects: true },
+      max: { monthlyDollars: 49, localPrices: LOCAL_PRICES.max, monthlyCredits: 60_000, storageGb: 500, rendersPerDay: 500, unlimitedProjects: true },
     },
     public: true,
     title: "Plan terms",
     description:
-      "What each paid plan sells: its monthly USD price, which has to match its Stripe price, the AI credits each period starts with, cloud storage, renders a day, and whether the free project limit is lifted. Credits cost about 0.77 of their face value when spent in full.",
+      "What each paid plan sells: its monthly USD price, which has to match its Stripe price, its price in each other currency, which a save adds to the Stripe price and which Stripe never changes once set (a new amount takes a new Stripe price), the AI credits each period starts with, cloud storage, renders a day, and whether the free project limit is lifted. Credits cost about 0.77 of their face value when spent in full.",
   },
   planPrices: {
     schema: z

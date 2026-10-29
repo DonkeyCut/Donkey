@@ -2,6 +2,7 @@
 
 import { useTranslations } from "next-intl";
 
+import { ChargeCurrencyProvider } from "@/app/_components/ChargeCurrencyProvider";
 import { Headline } from "@/app/_components/landing/LandingPrimitives";
 import { PricingPlanCard } from "@/app/_components/landing/PricingPlanCard";
 import { useAppEntryHref } from "@/app/_components/landing/useAppEntryHref";
@@ -11,8 +12,18 @@ import {
   useCutPlan,
   useCutPricingPlans,
 } from "@/app/[locale]/cut/_components/landing/cutPricingPlans";
+import type { Currency } from "@/lib/billing/currencies";
 
-export function CutPricing() {
+// The plans price in the currency the landing was rendered for.
+export function CutPricing({ currency }: { currency: Currency }) {
+  return (
+    <ChargeCurrencyProvider currency={currency}>
+      <Plans />
+    </ChargeCurrencyProvider>
+  );
+}
+
+function Plans() {
   const isDesktop = useMediaQuery("(min-width: 768px)");
   const appHref = useAppEntryHref();
   const t = useTranslations("landing.pricing");

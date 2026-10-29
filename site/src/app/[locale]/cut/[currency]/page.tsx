@@ -1,8 +1,19 @@
 import type { Metadata } from "next";
+import { notFound } from "next/navigation";
 import { getTranslations } from "next-intl/server";
 
 import { CutLanding } from "@/app/[locale]/cut/_components/landing/CutLanding";
 import { DONKEYCUT_CANONICAL } from "@/cut/lib/hosts";
+import { CURRENCIES, isCurrency } from "@/lib/billing/currencies";
+
+type Params = { params: Promise<{ currency: string }> };
+
+// The landing prices its plans in its visitor's currency, so it is
+// prerendered once per currency; the proxy picks the one for the visitor's
+// country (src/proxy.ts), and the segment never shows in a URL.
+export function generateStaticParams() {
+  return CURRENCIES.map((currency) => ({ currency }));
+}
 
 export async function generateMetadata(): Promise<Metadata> {
   const t = await getTranslations("landing.meta");
@@ -50,11 +61,15 @@ const WEBSITE_LD = {
 
 // The Cut marketing landing, served at "/" on every host by the proxy's
 // "/…" → "/cut/…" rewrite.
-export default function CutLandingPage() {
+export default async function CutLandingPage({ params }: Params) {
+  const { currency } = await params;
+  if (!isCurrency(currency)) {
+    notFound();
+  }
   return (
     <>
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(WEBSITE_LD) }} />
-      <CutLanding />
+      <CutLanding currency={currency} />
     </>
   );
 }

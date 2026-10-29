@@ -8,15 +8,16 @@ import { useEffect, useRef } from "react";
 import { ArrowLeft, Check, Loader2, Sparkles } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 
+import { useChargeCurrency } from "@/app/_components/ChargeCurrencyProvider";
 import { useApiErrorText } from "@/app/[locale]/cut/app/(home)/settings/_components/useApiErrorText";
 import { useCutPlans, type PlanCopy, type PlanFeature } from "@/app/[locale]/cut/_components/landing/cutPricingPlans";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogBody, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { priceLabel } from "@/cut/components/IntroOffer";
 import { OfferSticker } from "@/cut/components/OfferSticker";
 import { usePlanCheckout } from "@/cut/lib/proUpgrade";
 import type { UpgradeEntry } from "@/cut/lib/upgrade";
 import { track } from "@/lib/analytics";
+import { formatMinorPrice } from "@/lib/billing/format-price";
 import { planRank, RECOMMENDED_PLAN, type PaidPlan } from "@/lib/billing/plans";
 import { cn } from "@/lib/utils";
 import { useIntroOffer, useProSubscription, type IntroOffer } from "@/queries/billing";
@@ -51,14 +52,18 @@ export function PlansDialog({
   const tBilling = useTranslations("billing");
   const apiErrorText = useApiErrorText();
   const plans = useCutPlans();
+  const charge = useChargeCurrency();
   const subscription = useProSubscription();
   const current = subscription.data?.plan ?? null;
   const intro = useIntroOffer({ enabled: subscription.data?.isActive === false });
   const checkout = usePlanCheckout({ surface: "plans_dialog", reason: source, entry });
-  // Held until the plan is known, so no column opens buyable and then locks.
-  // A billing read that fails still opens it, with the failure said, so a
-  // refusal is never followed by nothing.
-  const ready = subscription.isError || (subscription.isSuccess && (current !== null || !intro.isPending));
+  // Held until the plan and the currency are known, so no column opens
+  // buyable and then locks, or repaints in another currency. A billing read
+  // that fails still opens it, with the failure said, so a refusal is never
+  // followed by nothing.
+  const ready =
+    subscription.isError ||
+    (subscription.isSuccess && !charge.isPending && (current !== null || !intro.isPending));
   const error = checkout.error ?? subscription.error;
 
   // Opening focuses the card itself, so no plan's button starts out looking
@@ -127,7 +132,7 @@ export function PlansDialog({
               {apiErrorText(error, tBilling("billingUnavailable"))}
             </p>
           ) : null}
-          {t("footer")}
+          {t("footer", { currency: charge.currency.toUpperCase() })}
         </div>
       </DialogContent>
     </Dialog>
@@ -199,7 +204,7 @@ function Price({ copy, offer }: { copy: PlanCopy; offer: IntroOffer | null }) {
     <div className="mt-4">
       <div className="flex items-baseline gap-1.5">
         <span className="text-4xl font-semibold tracking-tight tabular-nums">
-          {offer ? priceLabel(offer.introCents, locale) : copy.amount}
+          {offer ? formatMinorPrice(offer.introMinor, offer.currency, locale) : copy.amount}
         </span>
         {offer ? (
           <span className="text-lg font-medium text-muted-foreground line-through tabular-nums">{copy.amount}</span>
@@ -208,7 +213,7 @@ function Price({ copy, offer }: { copy: PlanCopy; offer: IntroOffer | null }) {
       </div>
       <div className={cn("mt-1 text-xs font-medium", offer ? BLUE_TEXT : "text-muted-foreground")}>
         {offer
-          ? t("introThen", { months: offer.months, price: priceLabel(offer.priceCents, locale) })
+          ? t("introThen", { months: offer.months, price: formatMinorPrice(offer.priceMinor, offer.currency, locale) })
           : t("billedMonthly")}
       </div>
     </div>

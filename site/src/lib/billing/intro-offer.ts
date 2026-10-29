@@ -75,7 +75,8 @@ export function introCouponId(offer: Pick<IntroOffer, "percentOff" | "months">):
   return `donkey-intro-${offer.percentOff}-${offer.months}m`;
 }
 
-/** The discounted price, in cents, rounded the way Stripe rounds it. */
-export function introPriceCents(priceCents: number, percentOff: number): number {
-  return Math.round((priceCents * (100 - percentOff)) / 100);
+/** The discounted price in the currency's minor unit, rounded the way
+ * Stripe rounds it: 2000 cents → 1000, ¥2,800 → ¥1,400. */
+export function introPriceMinor(priceMinor: number, percentOff: number): number {
+  return Math.round((priceMinor * (100 - percentOff)) / 100);
 }

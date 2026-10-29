@@ -18,6 +18,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useChargeCurrency } from "@/app/_components/ChargeCurrencyProvider";
 import { usePlanTerms } from "@/app/_components/PlanTermsProvider";
 import { activeProPromotion, useCutPlan } from "@/app/[locale]/cut/_components/landing/cutPricingPlans";
 import { useApiErrorText } from "@/app/[locale]/cut/app/(home)/settings/_components/useApiErrorText";
@@ -56,8 +57,9 @@ export function ProCard() {
   const terms = usePlanTerms();
   const promotion = config.data ? activeProPromotion(config.data.settings.proAllowancePromotion, terms.pro) : null;
   const intro = useIntroOffer({ enabled: pro.data?.isActive === false });
+  const charge = useChargeCurrency();
 
-  if (pro.isLoading) {
+  if (pro.isLoading || charge.isPending) {
     return (
       <Card>
         <CardHeader>

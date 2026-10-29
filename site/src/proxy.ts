@@ -3,6 +3,8 @@ import { NextResponse, type NextRequest } from "next/server";
 import { allowedOrigin, corsHeaders, preflightHeaders } from "@/cut/server/cors";
 import { DONKEYCUT_CANONICAL, isDonkeycutHost } from "@/cut/lib/hosts";
 import { requestLocale } from "@/i18n/requestLocale";
+import { isCurrency, marketCurrency } from "@/lib/billing/currencies";
+import { countryFromHeaders } from "@/lib/config/country";
 import { BEACON_PATH, META_COOKIE_MAX_AGE_S, metaCookies } from "@/lib/meta/identity";
 
 // Cut (the video editor, publicly "Donkey Cut") lives under /cut in this single
@@ -128,7 +130,17 @@ export function proxy(req: NextRequest) {
     return withMetaCookies(req, NextResponse.next());
   }
   if (passesThrough(pathname)) return localized(req, pathname);
-  return localized(req, `/cut${pathname === "/" ? "" : pathname}`);
+
+  // The landing is prerendered once per currency, and "/" serves the one for
+  // the visitor's country. The currency segment never shows in a URL, so a
+  // visit to one ("/eur") goes back to "/".
+  if (pathname === "/") {
+    return localized(req, `/cut/${marketCurrency(countryFromHeaders(req.headers))}`);
+  }
+  if (isCurrency(pathname.slice(1))) {
+    return NextResponse.redirect(new URL("/", req.url), 308);
+  }
+  return localized(req, `/cut${pathname}`);
 }
 
 export const config = {

@@ -8,6 +8,7 @@
 import Image from "next/image";
 import { useFormatter, useTranslations } from "next-intl";
 import { useEffect, useState } from "react";
+import { useChargeCurrency } from "@/app/_components/ChargeCurrencyProvider";
 import { useCutPlan } from "@/app/[locale]/cut/_components/landing/cutPricingPlans";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -179,7 +180,11 @@ export function OfferDialog({
   secondary?: React.ReactNode;
   error?: React.ReactNode;
 }) {
-  const ready = useBannerReady(isOfferBanner(banner) ? banner : null);
+  // Held until the picture has loaded and the account's currency is known,
+  // so the card never repaints a price.
+  const bannerReady = useBannerReady(isOfferBanner(banner) ? banner : null);
+  const charge = useChargeCurrency();
+  const ready = bannerReady && !charge.isPending;
   return (
     <Dialog open={open && ready} onOpenChange={onOpenChange}>
       <DialogContent

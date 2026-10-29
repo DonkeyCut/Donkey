@@ -16,7 +16,7 @@ import {
 import { reportExposures, useAppLoaded } from "@/lib/analytics";
 import { useSession } from "@/lib/auth-client";
 import { useAccountConfig } from "@/queries/accountConfig";
-import { prefetchIntroOffer } from "@/queries/billing";
+import { prefetchPricing } from "@/queries/billing";
 import { useNoteOutboxSync } from "@/cut/hooks/useNoteOutboxSync";
 
 // Session gate for the whole Cut app surface. The landing CTAs already route
@@ -63,12 +63,13 @@ export function RequireSession({ children }: { children: ReactNode }) {
     reportExposures(config.data);
   }, [userId, config.data]);
 
-  // The intro offer, loaded with the account so every card that sells Pro
-  // has it on its first frame. Loading it starts no window.
+  // The account's currency and intro offer, loaded with the account so every
+  // card that sells a plan has them on its first frame. Loading it starts no
+  // offer window.
   const queryClient = useQueryClient();
   useEffect(() => {
     if (!userId) return;
-    void prefetchIntroOffer(queryClient);
+    void prefetchPricing(queryClient);
   }, [userId, queryClient]);
 
   // Paint first, verify behind: the account remembered from the last visit

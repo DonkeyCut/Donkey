@@ -4,6 +4,8 @@
 // can't say two things in two parts of the product. Client-safe: no server
 // imports.
 
+import type { Currency, LocalCurrency } from "@/lib/billing/currencies";
+
 // Cheapest first; a plan's place in this list is its rank.
 export const PAID_PLANS = ["plus", "pro", "max"] as const;
 export type PaidPlan = (typeof PAID_PLANS)[number];
@@ -17,6 +19,9 @@ export const PLAN_NAMES: Record<PaidPlan, string> = { plus: "Plus", pro: "Pro", 
 export type PlanTerms = {
   // The monthly price in USD; su checks it against the plan's Stripe price.
   monthlyDollars: number;
+  // The monthly price in each other currency, in whole units (59 is R$59).
+  // su adds them to the plan's Stripe price.
+  localPrices: Record<LocalCurrency, number>;
   // The AI credits each billing period starts with.
   monthlyCredits: number;
   storageGb: number;
@@ -38,4 +43,9 @@ export function isPaidPlan(value: unknown): value is PaidPlan {
 /** Where a plan sits on the ladder: free is 0, Plus 1, Pro 2, Max 3. */
 export function planRank(plan: PaidPlan | null): number {
   return plan === null ? 0 : PAID_PLANS.indexOf(plan) + 1;
+}
+
+/** What a plan costs a month in a currency, in whole units of it. */
+export function planPrice(terms: PlanTerms, currency: Currency): number {
+  return currency === "usd" ? terms.monthlyDollars : terms.localPrices[currency];
 }

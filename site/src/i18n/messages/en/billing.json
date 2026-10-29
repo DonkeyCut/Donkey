@@ -81,6 +81,6 @@
     "get": "Get {plan}",
     "upgrade": "Upgrade to {plan}",
     "current": "Current plan",
-    "footer": "Prices in USD. Plans renew monthly until you cancel. Moving up a plan charges the difference today."
+    "footer": "Prices in {currency}. Plans renew monthly until you cancel. Moving up a plan charges the difference today."
   }
 }

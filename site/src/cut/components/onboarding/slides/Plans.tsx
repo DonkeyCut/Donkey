@@ -8,10 +8,10 @@ import { TapedCard } from "@/app/_components/landing/LandingPrimitives";
 import type { CardColor } from "@/app/_components/landing/theme";
 import { useCutPlans, type PlanCopy, type PlanFeature } from "@/app/[locale]/cut/_components/landing/cutPricingPlans";
 import { Button } from "@/components/ui/button";
-import { priceLabel } from "@/cut/components/IntroOffer";
 import { OfferSticker } from "@/cut/components/OfferSticker";
 import { usePlanCheckout } from "@/cut/lib/proUpgrade";
 import { track } from "@/lib/analytics";
+import { formatMinorPrice } from "@/lib/billing/format-price";
 import { RECOMMENDED_PLAN, type PaidPlan } from "@/lib/billing/plans";
 import type { OnboardingRun } from "@/lib/onboarding/sequence";
 import { cn } from "@/lib/utils";
@@ -65,9 +65,9 @@ export function PlansSlide({ run, exit, onSkipPro }: { run: OnboardingRun; exit:
           slide's gutter to the screen edge so the next card peeks in on the
           right, and the top padding keeps the tape and offer sticker. The
           recommended plan comes first so it is the one on screen when the
-          slide opens. The row holds until the offer read settles, which the
-          app has normally done long before this slide, so the Pro card never
-          paints a price the offer then replaces. */}
+          slide opens. The row holds until the pricing read settles, which the
+          app has normally done long before this slide, so no card paints a
+          price its currency or the offer then replaces. */}
       <div aria-busy={intro.isPending} className={cn(intro.isPending && "invisible", "-mx-6 mt-3 flex scroll-px-6 snap-x snap-mandatory gap-4 overflow-x-auto px-6 pt-5 pb-3 [scrollbar-width:none] md:mx-0 md:mt-8 md:grid md:grid-cols-3 md:items-stretch md:gap-5 md:overflow-visible md:p-0 [&::-webkit-scrollbar]:hidden")}>
         {plans.map((copy) => (
           <div
@@ -197,14 +197,14 @@ function IntroPrice({ offer }: { offer: IntroOffer }) {
     <>
       <div className="mt-4 flex items-baseline gap-3">
         <span className="text-[clamp(34px,4vw,44px)] leading-[0.95] font-semibold">
-          {priceLabel(offer.introCents, locale)}
+          {formatMinorPrice(offer.introMinor, offer.currency, locale)}
         </span>
         <span className="text-[20px] font-semibold text-[#201715]/40 line-through decoration-2">
-          {priceLabel(offer.priceCents, locale)}
+          {formatMinorPrice(offer.priceMinor, offer.currency, locale)}
         </span>
       </div>
       <div className="mt-2.5 text-[13px] font-semibold text-[#201715]">
-        {t("covers", { months: offer.months, price: priceLabel(offer.priceCents, locale) })}
+        {t("covers", { months: offer.months, price: formatMinorPrice(offer.priceMinor, offer.currency, locale) })}
       </div>
     </>
   );

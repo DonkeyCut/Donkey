@@ -1,6 +1,5 @@
 import Stripe from "stripe";
 
-import { planPriceId } from "@/lib/billing/pro-subscription";
 import { getStripe } from "@/lib/billing/stripe";
 import { getSetting, type ConfigContext } from "@/lib/config/effective";
 import { prisma } from "@/lib/prisma";
@@ -91,34 +90,4 @@ export async function introCoupon(offer: IntroOffer): Promise<string> {
     }
   }
   return id;
-}
-
-// A price's amount never changes under its id, so one read per process
-// serves every offer; moving Pro to a new price reads that one fresh.
-const priceCents = new Map<string, Promise<number>>();
-
-/** The Pro price in cents, as Stripe holds it. */
-export async function readProPriceCents(): Promise<number> {
-  const priceId = await planPriceId("pro");
-  if (!priceId) {
-    throw new Error("The Pro plan has no price in the planPrices setting");
-  }
-
-  let cents = priceCents.get(priceId);
-  if (!cents) {
-    cents = getStripe()
-      .prices.retrieve(priceId)
-      .then((price) => {
-        if (typeof price.unit_amount !== "number") {
-          throw new Error(`Pro price ${priceId} has no unit amount`);
-        }
-        return price.unit_amount;
-      })
-      .catch((e: unknown) => {
-        priceCents.delete(priceId);
-        throw e;
-      });
-    priceCents.set(priceId, cents);
-  }
-  return cents;
 }

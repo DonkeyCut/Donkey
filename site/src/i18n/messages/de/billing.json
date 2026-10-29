@@ -81,6 +81,6 @@
     "get": "{plan} holen",
     "upgrade": "Upgrade auf {plan}",
     "current": "Aktueller Plan",
-    "footer": "Preise in USD. Pläne verlängern sich monatlich, bis du kündigst. Bei einem Upgrade wird die Differenz heute berechnet."
+    "footer": "Preise in {currency}. Abos verlängern sich monatlich, bis du kündigst. Beim Upgrade zahlst du heute die Differenz."
   }
 }

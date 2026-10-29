@@ -81,6 +81,6 @@
     "get": "Obtener {plan}",
     "upgrade": "Mejorar a {plan}",
     "current": "Plan actual",
-    "footer": "Precios en USD. Los planes se renuevan cada mes hasta que canceles. Al mejorar de plan se cobra la diferencia hoy."
+    "footer": "Precios en {currency}. Los planes se renuevan mensualmente hasta que canceles. Si pasas a un plan superior, se cobra la diferencia hoy."
   }
 }

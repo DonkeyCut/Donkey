@@ -56,11 +56,26 @@ test("a picked language wins over the browser's", async () => {
 
 test("a regional or unsupported language resolves to a shipped one", async () => {
   const portuguese = await proxy(request("https://donkeycut.com/", "", "pt-PT,pt;q=0.9"));
-  expect(portuguese.headers.get("x-middleware-rewrite")).toBe("https://donkeycut.com/pt-BR/cut");
+  expect(portuguese.headers.get("x-middleware-rewrite")).toBe("https://donkeycut.com/pt-BR/cut/usd");
   const chinese = await proxy(request("https://donkeycut.com/", "", "zh"));
-  expect(chinese.headers.get("x-middleware-rewrite")).toBe("https://donkeycut.com/zh-CN/cut");
+  expect(chinese.headers.get("x-middleware-rewrite")).toBe("https://donkeycut.com/zh-CN/cut/usd");
   const dutch = await proxy(request("https://donkeycut.com/", "", "nl-NL"));
-  expect(dutch.headers.get("x-middleware-rewrite")).toBe("https://donkeycut.com/en/cut");
+  expect(dutch.headers.get("x-middleware-rewrite")).toBe("https://donkeycut.com/en/cut/usd");
+});
+
+test("the landing prices in the visitor's country's currency", async () => {
+  const brazil = request("https://donkeycut.com/", "", "pt-BR");
+  brazil.headers.set("x-vercel-ip-country", "BR");
+  expect((await proxy(brazil)).headers.get("x-middleware-rewrite")).toBe("https://donkeycut.com/pt-BR/cut/brl");
+  const poland = request("https://donkeycut.com/");
+  poland.headers.set("x-vercel-ip-country", "PL");
+  expect((await proxy(poland)).headers.get("x-middleware-rewrite")).toBe("https://donkeycut.com/en/cut/usd");
+});
+
+test("a currency segment typed into the address goes back to the landing", async () => {
+  const res = await proxy(request("https://donkeycut.com/eur"));
+  expect(res.status).toBe(308);
+  expect(res.headers.get("location")).toBe("https://donkeycut.com/");
 });
 
 test("a crawler with no language gets English", async () => {

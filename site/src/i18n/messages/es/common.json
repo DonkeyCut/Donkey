@@ -44,6 +44,7 @@
     "image_too_large": "Imagen demasiado grande.",
     "plan_not_an_upgrade": "Esta cuenta ya tiene este plan o uno superior.",
     "upgrade_in_progress": "Esta actualización ya está en curso.",
+    "currency_changed": "Los precios de tu cuenta cambiaron. Revisa el nuevo precio y vuelve a intentarlo.",
     "upgrade_payment_failed": "Tu tarjeta fue rechazada, así que tu plan no cambió. Actualiza tu tarjeta en facturación e inténtalo de nuevo."
   },
   "languageSaveFailed": "No se pudo guardar tu idioma. Inténtalo de nuevo.",

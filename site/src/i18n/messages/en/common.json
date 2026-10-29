@@ -44,6 +44,7 @@
     "image_too_large": "Image too large.",
     "plan_not_an_upgrade": "This account is already on this plan or a higher one.",
     "upgrade_in_progress": "This upgrade is already in progress.",
+    "currency_changed": "Prices for your account changed. Check the new price and try again.",
     "upgrade_payment_failed": "Your card was declined, so your plan didn't change. Update your card in billing and try again."
   },
   "languageSaveFailed": "Couldn't save your language. Try again.",
