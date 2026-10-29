@@ -101,7 +101,7 @@ jobs:
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: |
-          npx --yes vercel@59.26.0 deploy --prebuilt --prod --yes --token="$VERCEL_TOKEN" > "$RUNNER_TEMP/site-deployment-url"
+          npx --yes vercel@59.26.0 deploy --prebuilt --prod --archive=tgz --yes --token="$VERCEL_TOKEN" > "$RUNNER_TEMP/site-deployment-url"
           printf 'Deployed commit `%s`: %s\n' "$(git rev-parse HEAD)" "$(cat "$RUNNER_TEMP/site-deployment-url")" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Remove pulled credentials
