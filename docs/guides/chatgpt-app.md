@@ -93,27 +93,24 @@ to the render container.
 Create a ChatGPT developer-mode app pointing at
 `https://donkeycut.com/api/chatgpt/mcp`. Use the predefined public OAuth client
 ID `donkey-chatgpt`, no client secret, and scopes
-`projects:read previews:render projects:write openid email`. The listing
-discloses generation credits and storage limits.
+`projects:read previews:render projects:write openid email`.
 Configure the exact redirect URI supplied by ChatGPT in `chatgptApp.redirectUris`.
-The default is ChatGPT's stable callback; discovery advertises issuer
-identification, and every authorization redirect includes `iss`. The embedded
+Discovery advertises issuer identification, and every authorization redirect
+includes `iss`. The embedded
 resource declares `https://chatgpt.donkeycut.com` as its widget domain, from
 which ChatGPT derives a sandbox origin. The widget HTML arrives through MCP,
 its scripts and styles load from `donkeycut.com`, and video loads from
 `media.donkeycut.com`; `chatgpt.donkeycut.com` needs no DNS record or Worker.
 
-Public submission verifies control of `donkeycut.com` through OpenAI's
-well-known challenge URL; add the token from the submission portal when it is
-issued.
+Public submission verifies control of `donkeycut.com` with a token from the
+portal. `npm run chatgpt:plugin -- --demo <url>` builds the ZIP the portal
+imports as a new draft: the listing, review cases and guides as skills.
 
 Run the client tests with `bun test src/clients/chatgpt`. The browser fixture
 `bun run scripts/eval-chatgpt-widget.ts` checks the widget against a mock
 host. With the dev server and a local worker up,
 `bun run scripts/eval-chatgpt-workflow.ts` drives the editing workflow through
 the MCP tools in process.
-The final deployment check connects a real account in ChatGPT, opens a cloud
-project, renders it, and reconnects after revocation.
 
 ## Publishing changes
 
