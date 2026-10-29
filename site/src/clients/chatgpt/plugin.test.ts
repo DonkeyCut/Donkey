@@ -32,6 +32,7 @@ test("the manifest fits the portal's listing and review limits", () => {
   expect(openai.review.test_cases.positive).toHaveLength(5);
   expect(openai.review.test_cases.negative).toHaveLength(3);
   for (const c of openai.review.test_cases.positive) {
+    expect(typeof c.tools_triggered).toBe("string");
     expect(c.tools_triggered.length).toBeGreaterThan(0);
     expect(c.expected_behavior.length).toBeGreaterThan(0);
   }

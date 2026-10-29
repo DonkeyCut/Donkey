@@ -20,36 +20,37 @@ Open existing projects or start a new video, undo changes as you work, and expor
 
 Open Donkey Cut from the sidebar or beside a conversation to pick a project, or @-mention a project in the composer to work on it.`;
 
-// Prompts the reviewer runs. Each names the tools ChatGPT should reach for.
+// Prompts the reviewer runs. Each names the tools ChatGPT should reach for, as
+// one comma-separated string.
 const POSITIVE = [
   {
     description: "Lists the account's cloud projects and opens the picker.",
     prompt: "Show me my Donkey Cut projects.",
-    tools_triggered: ["list_projects"],
+    tools_triggered: "list_projects",
     expected_behavior: "Lists the connected account's cloud projects with their names, most recent first.",
   },
   {
     description: "Creates a vertical project and opens it in the editor card.",
     prompt: "Start a new vertical Donkey Cut video called Weekend recap.",
-    tools_triggered: ["create_project", "open_project"],
+    tools_triggered: "create_project, open_project",
     expected_behavior: "Creates a 9:16 project named Weekend recap and shows the Donkey Cut editor in the card.",
   },
   {
     description: "Edits the open project with individual editing tools.",
     prompt: "In Donkey Cut, make my newest project square and add a title that says HELLO.",
-    tools_triggered: ["list_projects", "open_project", "set_aspect", "add_title"],
+    tools_triggered: "list_projects, open_project, set_aspect, add_title",
     expected_behavior: "Opens the project, sets the aspect to 1:1 and adds a HELLO title; the card shows both changes.",
   },
   {
     description: "Steps the card's undo history.",
     prompt: "Undo that last Donkey Cut edit.",
-    tools_triggered: ["undo"],
+    tools_triggered: "undo",
     expected_behavior: "Reverts the most recent edit in the open project and says what changed.",
   },
   {
     description: "Exports the finished video for download.",
     prompt: "Export my Donkey Cut project as a video file.",
-    tools_triggered: ["export_video", "get_export_status"],
+    tools_triggered: "export_video, get_export_status",
     expected_behavior: "Starts an export, reports progress, and returns a download link when it finishes.",
   },
 ];
