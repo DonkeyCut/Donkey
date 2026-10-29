@@ -45,7 +45,6 @@ export function PreviewApp() {
     </main>;
   }
   return <main style={pickerPadding(edges, hostInset)} aria-busy={busy}>
-    <header><span className="brand">Donkey Cut</span><span>{t("cloudProjects")}</span></header>
     {problem && <p role="alert" className="error">{problem}</p>}
     {!view && <p role="status">{ready ? t("chooseProject") : t("connecting")}</p>}
     {!view && ready && <button onClick={() => void run("list_projects", {})}>{t("loadProjects")}</button>}
