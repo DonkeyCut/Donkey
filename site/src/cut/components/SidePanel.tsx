@@ -336,6 +336,7 @@ export function SidePanel({
           the floating scrollbar keeps all 68px for the tiles, so the widest
           label still fits. */}
       <ScrollArea
+        data-tour="side-rail"
         className={cn(
           "min-h-0 w-[68px] shrink-0",
           tab !== null && "border-r border-border"

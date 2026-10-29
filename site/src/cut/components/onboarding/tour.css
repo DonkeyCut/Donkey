@@ -206,3 +206,14 @@ body.driver-active .tl-clip.driver-active-element::after {
 body.driver-active .driver-active-element * {
   pointer-events: revert-layer;
 }
+
+/* The rail holds still while the tour runs: no scrollbar on hover, and no
+   scrolling the tile being taught out from under its popover. The viewport's
+   overflow is an inline style, so it takes !important to override. */
+body.driver-active [data-tour="side-rail"] [data-slot="scroll-area-scrollbar"] {
+  display: none;
+}
+
+body.driver-active [data-tour="side-rail"] [data-slot="scroll-area-viewport"] {
+  overflow: hidden !important;
+}
