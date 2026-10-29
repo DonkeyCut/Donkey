@@ -44,7 +44,7 @@ const hostHtml = `<!doctype html><html><body><iframe title="Donkey Cut preview" 
 const frame = document.querySelector('iframe');
 const project = {id:'project',name:'Launch film',revision:'cloud:2',url:'https://donkeycut.com/app/p/project'};
 let count = 0, renewals = 0;
-window.calls = []; window.links = []; window.modes = []; window.editable = false; window.holdMs = 0; window.readyMs = 0; window.freshCard = false; window.signedOut = false; window.failOpen = false; window.missing = false; window.editorCodes = 0;
+window.calls = []; window.contexts = []; window.links = []; window.modes = []; window.editable = false; window.holdMs = 0; window.readyMs = 0; window.freshCard = false; window.signedOut = false; window.failOpen = false; window.missing = false; window.editorCodes = 0;
 const view = (selected, preview = null) => ({view:selected?'project':'projects',projects:selected?[]:[project],nextCursor:null,project:selected?project:null,preview,canRender:true,canEdit:window.editable,export:null,job:null,results:[],changed:false,account:null,missing:null});
 const missingView = () => ({...view(false),view:'missing',projects:[],missing:{id:project.id}});
 const editorLink = () => ({url:location.origin+'/embed?embed=chatgpt&code=one-use-'+ ++window.editorCodes +'&project=project',expiresAt:Date.now()+60000});
@@ -58,7 +58,7 @@ const reply = (id, result) => frame.contentWindow.postMessage({jsonrpc:'2.0',id,
 const cardResult = () => !window.editable ? result(view(false)) : result(view(true,{id:'job',status:'done',progress:1,revision:'cloud:1'}),{url:location.origin+'/preview.mp4?stale',expiresAt:Date.now()-1},window.freshCard ? {url:location.origin+'/embed?embed=chatgpt&code='+ (window.signedOut ? 'signed-out' : 'card') +'&project=project',expiresAt:Date.now()+60000} : {url:location.origin+'/embed?embed=chatgpt&code=spent&project=project',expiresAt:Date.now()-1});
 window.addEventListener('message', ({source,data}) => {
  if(source !== frame.contentWindow || !data.method) return;
- if(data.method === 'ui/initialize') reply(data.id,{protocolVersion:data.params.protocolVersion,hostInfo:{name:'fixture',version:'1'},hostCapabilities:{serverTools:{},openLinks:{}},hostContext:{theme:'light',displayMode:'inline',availableDisplayModes:['inline','fullscreen'],safeAreaInsets:{top:0,right:0,bottom:120,left:0}}});
+ if(data.method === 'ui/initialize') reply(data.id,{protocolVersion:data.params.protocolVersion,hostInfo:{name:'fixture',version:'1'},hostCapabilities:{serverTools:{},openLinks:{},updateModelContext:{text:{},structuredContent:{}}},hostContext:{theme:'light',displayMode:'inline',availableDisplayModes:['inline','fullscreen'],safeAreaInsets:{top:0,right:0,bottom:120,left:0}}});
  if(data.method === 'ui/notifications/initialized') frame.contentWindow.postMessage({jsonrpc:'2.0',method:'ui/notifications/tool-result',params:cardResult()},'*');
  if(data.method === 'tools/call') {
   const name = data.params.name; window.calls.push(name);
@@ -71,6 +71,7 @@ window.addEventListener('message', ({source,data}) => {
    reply(data.id,result(view(true,{id:'job',status:done?'done':'running',progress:done?1:count/3,revision:'cloud:2'}),done?{url:location.origin+'/preview.mp4?v='+renewals++,expiresAt:Date.now()+3600000}:null));
   }
  }
+ if(data.method === 'ui/update-model-context') { window.contexts.push(data.params); reply(data.id,{}); }
  if(data.method === 'ui/open-link') { window.links.push(data.params.url); reply(data.id,{}); }
  if(data.method === 'ui/request-display-mode') { window.modes.push(data.params.mode); reply(data.id,{mode:data.params.mode}); }
 });
@@ -109,6 +110,9 @@ try {
   await app.frameLocator("iframe.editor").locator("#editor").waitFor();
   await app.locator(".skeleton").waitFor({ state: "detached" });
   assert.deepEqual(await page.evaluate(() => (window as unknown as { modes: string[] }).modes), [], "an opened editor stays inline");
+  // A project picked in the card reaches the model, which never saw that call.
+  const contexts = await page.evaluate(() => (window as unknown as { contexts: { structuredContent?: { projectId?: string } }[] }).contexts);
+  assert.equal(contexts.at(-1)?.structuredContent?.projectId, "project", "the model knows which project the card shows");
   assert.equal(await app.locator("button").count(), 0, "the editor card has no controls of its own");
   await app.frameLocator("iframe.editor").locator("#inset").filter({ hasText: /^0$/ }).waitFor();
   await app.frameLocator("iframe.editor").locator("#mode").filter({ hasText: /^inline$/ }).waitFor();

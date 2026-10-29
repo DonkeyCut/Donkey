@@ -151,6 +151,19 @@ export function useProjectApp() {
     return () => window.clearTimeout(timeout);
   }, [ready, visible, busy, error, framed, projectId, jobId, status, playback, pollMs, run, view]);
 
+  // The model sees the tool calls it made, never a project picked in the
+  // card, so the card tells it what it shows. "Make this square" then edits
+  // the project on screen, e.g. one opened from the Codex sidebar.
+  const projectName = view?.project?.name;
+  useEffect(() => {
+    const app = appRef.current;
+    if (!app || !ready || !view || !app.getHostCapabilities()?.updateModelContext) return;
+    const text = projectId
+      ? `The Donkey Cut card shows the project "${projectName}" (projectId ${projectId}). Requests about this project or video mean this one.`
+      : "The Donkey Cut card shows the project list; no project is open.";
+    void app.updateModelContext({ content: [{ type: "text", text }], structuredContent: { projectId: projectId ?? null, name: projectName ?? null } }).catch(() => {});
+  }, [ready, view, projectId, projectName]);
+
   const playbackFailed = useCallback(() => {
     if (!projectId || !jobId) return;
     if (recoveries.current++ >= 1) { setError({ key: "videoFailed" }); return; }
