@@ -77,6 +77,21 @@ test("a word appearing on a still card is a change inside the shot, with its box
   expect(changes[0].box.w).toBeLessThan(0.3);
 });
 
+test("a two-letter word joining a line is a change, however few cells it covers", () => {
+  // "in" becomes "in a" on a navy sea: the new word is a few pixels of the
+  // scan, two fine cells, each moved far past anything the ground does.
+  const sea: [number, number, number] = [28, 56, 91];
+  const ink: [number, number, number] = [239, 222, 120];
+  const line = card(128, 128, sea, ink, [44, 52, 62, 66]);
+  const joined = card(128, 128, sea, ink, [44, 52, 62, 66]);
+  for (let y = 63; y < 66; y++) for (let x = 55; x < 58; x++) joined.data.set([...ink, 255], (y * 128 + x) * 4);
+  const { cuts, changes } = scoreFrames([line, line, line, joined, joined, joined]);
+  expect(cuts).toEqual([]);
+  expect(changes).toHaveLength(1);
+  expect(changes[0].frame).toBe(3);
+  expect(changes[0].box.x).toBeCloseTo(56 / 128, 1);
+});
+
 test("a word fading in over a few frames is one change that runs those frames", () => {
   const bg: [number, number, number] = [158, 3, 2];
   const at = (a: number) => card(128, 128, bg, [Math.round(158 + a * 69), Math.round(3 + a * 174), Math.round(2 + a * 175)], [40, 88, 56, 72]);

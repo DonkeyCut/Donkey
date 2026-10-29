@@ -32,6 +32,10 @@ export const CUT_TUNING = {
   FINE_GRID: 32,
   /** % of the fine grid a change inside a shot covers at least. */
   CHANGE_MIN: 0.3,
+  /** Per-channel step of a fine cell that is a change however few cells take
+   * it: a two-letter word joining a line covers a cell or two of the scan,
+   * each moved far past anything grain or ripple does. */
+  SMALL_PEAK: 50,
   /** Frames back a frame is held against to find a change too gradual for
    * any one frame to show: a fade of faint type over half a second. */
   SLOW_SPAN: 15,
@@ -126,6 +130,8 @@ export interface FrameStep {
   faint: number;
   fine: number;
   box: ChangeBox | null;
+  /** The most any one fine cell moved, per channel, 0..255. */
+  peak?: number;
   /** How far the whole picture's mean luma moved, 0..255. */
   luma?: number;
 }
@@ -159,9 +165,10 @@ export const gridsOf = (px: Pixels): FrameGrids => ({
 });
 
 /** The fine cells that changed between two frames, and the box around them. */
-function fineChange(a: Float32Array, b: Float32Array): { pct: number; box: ChangeBox | null } {
+function fineChange(a: Float32Array, b: Float32Array): { pct: number; box: ChangeBox | null; peak: number } {
   const grid = CUT_TUNING.FINE_GRID;
   let n = 0;
+  let peak = 0;
   let x0 = grid;
   let x1 = -1;
   let y0 = grid;
@@ -169,6 +176,7 @@ function fineChange(a: Float32Array, b: Float32Array): { pct: number; box: Chang
   for (let c = 0; c < grid * grid; c++) {
     const i = c * 3;
     const d = Math.max(Math.abs(a[i] - b[i]), Math.abs(a[i + 1] - b[i + 1]), Math.abs(a[i + 2] - b[i + 2]));
+    peak = Math.max(peak, d);
     if (d <= CUT_TUNING.CELL_TOL) {
       continue;
     }
@@ -181,10 +189,10 @@ function fineChange(a: Float32Array, b: Float32Array): { pct: number; box: Chang
     y1 = Math.max(y1, gy);
   }
   if (n === 0) {
-    return { pct: 0, box: null };
+    return { pct: 0, box: null, peak };
   }
   const box = { x: (x0 + x1 + 1) / 2 / grid, y: (y0 + y1 + 1) / 2 / grid, w: (x1 - x0 + 1) / grid, h: (y1 - y0 + 1) / grid };
-  return { pct: (100 * n) / (grid * grid), box };
+  return { pct: (100 * n) / (grid * grid), box, peak };
 }
 
 /** A grid's mean luma (Rec. 709 weights), 0..255. */
@@ -202,6 +210,7 @@ export function frameStep(prev: FrameGrids, next: FrameGrids): FrameStep {
     faint: diffCellPct(prev.coarse, next.coarse, CUT_TUNING.FAINT_TOL),
     fine: fine.pct,
     box: fine.box,
+    peak: fine.peak,
     luma: Math.abs(meanLuma(next.coarse) - meanLuma(prev.coarse)),
   };
 }
@@ -233,7 +242,7 @@ export function pickShotEdges(
   steps: FrameStep[],
   fines?: ArrayLike<number>[]
 ): { cuts: number[]; changes: ShotChange[]; fades: PictureFade[] } {
-  const { FAINT_ALL, SPIKE, CHANGE_MIN, MIN_CHANGE, FLASH_LUMA } = CUT_TUNING;
+  const { FAINT_ALL, SPIKE, CHANGE_MIN, SMALL_PEAK, MIN_CHANGE, FLASH_LUMA } = CUT_TUNING;
   const hard = pickCuts(steps.map((s) => s.pct));
   const faintScores = steps.map((s) => s.faint);
 
@@ -257,7 +266,7 @@ export function pickShotEdges(
   const changes: ShotChange[] = [];
   for (let i = 0; i < steps.length; i++) {
     const s = steps[i];
-    if (cutSet.has(i) || !(s.fine >= CHANGE_MIN) || !s.box) {
+    if (cutSet.has(i) || !(s.fine >= CHANGE_MIN || (s.peak ?? 0) >= SMALL_PEAK) || !s.box) {
       continue;
     }
     if (s.fine < SPIKE * neighbourMedian(fineScores, i, cutSet)) {
