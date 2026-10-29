@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { AI_TOOLS, PROJECT_TOOLS } from "@/cut/server/ai/catalog";
-import { COMMAND_NAMES, COMMANDS, READ_COMMANDS, SKILL_INDEX, readSkill, unknownCommandNames, unmappedCommands } from "./catalog";
+import { COMMAND_NAMES, COMMANDS, READ_COMMANDS, SKILL_INDEX, commandHints, readSkill, unknownCommandNames, unmappedCommands } from "./catalog";
 import { SERVER_INSTRUCTIONS } from "./mcp";
 
 test("first-class history tools can queue their editor commands", () => {
@@ -54,10 +54,18 @@ test("ChatGPT preserves the shared inspection schemas and teaches their use", ()
     const shared = PROJECT_TOOLS.find((tool) => tool.name === name)!;
     const command = COMMANDS.find((tool) => tool.name === name)!;
     expect(command.inputSchema).toBe(shared.inputSchema);
-    expect(READ_COMMANDS.has(name)).toBe(true);
     expect(guide).toContain(name);
   }
-  expect(READ_COMMANDS.has("note_source")).toBe(false);
+  // Watching, listening and beat detection store what they find on the asset,
+  // so only the pure measurements run as reads.
+  for (const name of ["detect_silence", "measure_level", "read_color_stats", "capture_frame", "compare_to_source"]) {
+    expect(READ_COMMANDS.has(name)).toBe(true);
+  }
+  expect(commandHints("watch_video")).toMatchObject({ readOnlyHint: false, destructiveHint: false });
+  expect(commandHints("listen_audio")).toMatchObject({ readOnlyHint: false, destructiveHint: false });
+  // A stored beat grid and a source note each replace what covered them.
+  expect(commandHints("detect_beats")).toMatchObject({ readOnlyHint: false, destructiveHint: true });
+  expect(commandHints("note_source")).toMatchObject({ readOnlyHint: false, destructiveHint: true });
   expect(guide).toContain("with note_source");
   expect(PROJECT_TOOLS.find((tool) => tool.name === "listen_audio")!.description).toContain("get_state");
   expect(COMMANDS.find((tool) => tool.name === "listen_audio")!.description).toContain("inspect_project");

@@ -58,16 +58,18 @@ export const unknownCommandNames = (names: string[]): string[] => names.filter((
 
 /** What a command does, in the terms of OpenAI's tool annotations. A read
  * changes nothing; a search reaches the public web; session moves only the
- * editor's view (playhead, selection, open timeline, guides); add writes new
+ * editor's view (playhead, selection, open timeline, guides); record keeps
+ * the assistant's own coverage and frame maps on an asset; add writes new
  * things alone; set overwrites a value, the same each time; change deletes,
  * overwrites or moves by an amount; share opens a public link. Undo does not
  * make a write additive. */
-type Effect = "read" | "search" | "session" | "add" | "set" | "change" | "share";
+type Effect = "read" | "search" | "session" | "record" | "add" | "set" | "change" | "share";
 
 const HINTS: Record<Effect, Required<Pick<ToolAnnotations, "readOnlyHint" | "destructiveHint" | "idempotentHint" | "openWorldHint">>> = {
   read: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   search: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   session: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  record: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   add: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   set: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
   change: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
@@ -76,8 +78,8 @@ const HINTS: Record<Effect, Required<Pick<ToolAnnotations, "readOnlyHint" | "des
 
 // Every exposed command's effect; a test holds this map to COMMANDS.
 const EFFECTS: Record<string, Effect> = {
-  get_asset_info: "read", find_media: "read", watch_video: "read", detect_silence: "read",
-  find_filler: "read", measure_level: "read", detect_beats: "read", listen_audio: "read",
+  get_asset_info: "read", find_media: "read", detect_silence: "read",
+  find_filler: "read", measure_level: "read",
   compare_to_source: "read", sample_color: "read", track_element: "read", track_camera: "read",
   suggest_font: "read", find_highlights: "read", read_project: "read", capture_frame: "read",
   read_color_stats: "read", list_voices: "read", credit_prices: "read", stock_search: "read",
@@ -85,14 +87,15 @@ const EFFECTS: Record<string, Effect> = {
   check_facts: "search",
   seek: "session", select: "session", select_items: "session", switch_timeline: "session",
   set_guides: "session", wait_for_uploads: "session",
-  note_source: "add", add_clip: "add", add_overlay_video: "add", add_title: "add",
+  watch_video: "record", listen_audio: "record",
+  add_clip: "add", add_overlay_video: "add", add_title: "add",
   add_text_sequence: "add", freeze_frame: "add", group_items: "add", copy_from_timeline: "add",
   add_shape: "add", add_sticker: "add", create_sticker: "add", add_effect: "add",
   subtitles_add_track: "add", subtitles_translate_track: "add", voiceover_generate: "add",
   generate_music: "add", read_subtitles_aloud: "add", generate_image: "add", stock_add: "add",
   library_add: "add", template_add: "add", save_template: "add", copy_project_media: "add",
   replicate_project: "add",
-  find_picture: "set", detect_cuts: "set", trim_clip: "set", place_clip: "set",
+  note_source: "set", detect_beats: "set", find_picture: "set", detect_cuts: "set", trim_clip: "set", place_clip: "set",
   set_clip_muted: "set", rename_item: "set", set_clip_hidden: "set", set_track_hidden: "set",
   set_track_muted: "set", set_magnet: "set", update_overlay_video: "set", update_overlay: "set",
   set_mask: "set", track_motion: "set", set_clip_keyframes: "set", update_audio: "set",
