@@ -38,6 +38,13 @@ function applyTheme(choice: ThemeChoice) {
   }
 }
 
+/** A host framing the page (the ChatGPT card) sets the theme for as long as
+ * the frame lives; the person's own choice stays saved for the site. */
+export function wearHostTheme(theme: "light" | "dark") {
+  applyTheme(theme);
+  listeners.forEach((l) => l());
+}
+
 export function setTheme(choice: ThemeChoice) {
   try {
     if (isPinned(choice)) {

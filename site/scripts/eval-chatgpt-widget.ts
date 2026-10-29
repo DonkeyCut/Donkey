@@ -36,7 +36,7 @@ const server = Bun.serve({ port: 0, fetch(request) {
   }
   if (url.pathname === "/preview.mp4") return new Response(Bun.file(video));
   if (url.pathname === "/embed" && url.searchParams.get("code") === "signed-out") return new Response('<!doctype html><div id="session"></div><script type="module" src="/session.js"></script>', { headers: { "Content-Type": "text/html" } });
-  if (url.pathname === "/embed") return new Response(`<!doctype html><title>editor</title><p id="editor">Editor for ${url.searchParams.get("project")} via ${url.searchParams.get("code")}</p><p id="inset"></p><p id="mode"></p><button id="full" onclick="parent.postMessage({ type: 'donkeycut:fullscreen' }, '*')">Fullscreen</button><script>addEventListener('message', (e) => { if (e.source === parent && e.data.type === 'donkeycut:host') { document.getElementById('inset').textContent = String(e.data.insetBottom); document.getElementById('mode').textContent = e.data.displayMode; } }); parent.postMessage({ type: 'donkeycut:host?' }, '*'); setTimeout(() => parent.postMessage({ type: 'donkeycut:ready' }, '*'), parent.parent.readyMs);</script><script type="module">import { downloadFromUrl, downloadFile } from '/download.js'; window.downloadFromUrl = downloadFromUrl; window.downloadFile = downloadFile;</script>`, { headers: { "Content-Type": "text/html", "Set-Cookie": "editor-session=fixture; Path=/api/cut-cloud/; HttpOnly; SameSite=Lax" } });
+  if (url.pathname === "/embed") return new Response(`<!doctype html><title>editor</title><p id="editor">Editor for ${url.searchParams.get("project")} via ${url.searchParams.get("code")}</p><p id="inset"></p><p id="mode"></p><p id="theme"></p><button id="full" onclick="parent.postMessage({ type: 'donkeycut:fullscreen' }, '*')">Fullscreen</button><script>addEventListener('message', (e) => { if (e.source === parent && e.data.type === 'donkeycut:host') { document.getElementById('inset').textContent = String(e.data.insetBottom); document.getElementById('mode').textContent = e.data.displayMode; document.getElementById('theme').textContent = e.data.theme; } }); parent.postMessage({ type: 'donkeycut:host?' }, '*'); setTimeout(() => parent.postMessage({ type: 'donkeycut:ready' }, '*'), parent.parent.readyMs);</script><script type="module">import { downloadFromUrl, downloadFile } from '/download.js'; window.downloadFromUrl = downloadFromUrl; window.downloadFile = downloadFile;</script>`, { headers: { "Content-Type": "text/html", "Set-Cookie": "editor-session=fixture; Path=/api/cut-cloud/; HttpOnly; SameSite=Lax" } });
   if (url.pathname.startsWith("/clients/chatgpt/")) return new Response(Bun.file(path.join(root, "public/clients/chatgpt", path.basename(url.pathname))));
   return new Response(hostHtml, { headers: { "Content-Type": "text/html" } });
 } });
@@ -116,6 +116,14 @@ try {
   await app.frameLocator("iframe.editor").locator("#mode").filter({ hasText: /^fullscreen$/ }).waitFor();
   await app.frameLocator("iframe.editor").locator("#inset").filter({ hasText: /^120$/ }).waitFor();
   assert.deepEqual(await page.evaluate(() => (window as unknown as { modes: string[] }).modes), ["fullscreen"], "the editor's button asks for the whole window");
+  // A host in dark with a rail over the card's left edge: the card pads the
+  // rail's band, wears dark, and hands the theme to the editor.
+  await app.frameLocator("iframe.editor").locator("#theme").filter({ hasText: /^light$/ }).waitFor();
+  await page.evaluate(() => document.querySelector("iframe")!.contentWindow!.postMessage({ jsonrpc: "2.0", method: "ui/notifications/host-context-changed", params: { theme: "dark", safeAreaInsets: { top: 0, right: 0, bottom: 120, left: 72 } } }, "*"));
+  await app.frameLocator("iframe.editor").locator("#theme").filter({ hasText: /^dark$/ }).waitFor();
+  assert.equal(await app.locator("main.editing").evaluate((m) => getComputedStyle(m).paddingLeft), "72px", "the card keeps the editor out of the rail's band");
+  assert.equal(await app.locator("main.editing").evaluate((m) => getComputedStyle(m).backgroundColor), "rgb(10, 10, 10)", "the card wears the editor's dark surface");
+  assert.equal(await app.locator("iframe.editor").evaluate((f) => getComputedStyle(f).colorScheme), "dark", "the editor frame first paints in the host's scheme");
   const editorFrame = page.frames().find((f) => f.url().includes("/embed?"))!;
   type Downloads = { downloadFromUrl: (url: string, name: string) => void; downloadFile: (url: string, name: string) => void };
   await editorFrame.waitForFunction(() => "downloadFromUrl" in window);

@@ -2,14 +2,15 @@
 
 import { useEffect, useSyncExternalStore } from "react";
 import { editorHost } from "@/cut/lib/environment";
+import { wearHostTheme } from "@/lib/theme";
 
 /**
  * The ChatGPT card and the editor it frames talk over postMessage. The card
- * tells the frame which display mode the host is in and how tall the host's
- * bottom overlay is; the frame keeps its bottom controls and the timeline's
- * last rows above that band through `--host-inset-bottom`, and asks the card
- * for fullscreen from its own toolbar. Outside the card nothing is sent and
- * the variable stays unset.
+ * tells the frame which display mode and theme the host is in and how tall
+ * the host's bottom overlay is; the frame keeps its bottom controls and the
+ * timeline's last rows above that band through `--host-inset-bottom`, and
+ * asks the card for fullscreen from its own toolbar. Outside the card nothing
+ * is sent and the variable stays unset.
  *
  * The frame also asks the card for the two things a sandboxed frame cannot do
  * itself: open a page in a tab of its own, and save a file. ChatGPT sandboxes
@@ -100,11 +101,15 @@ export function useHostBridge() {
     if (editorHost() !== "chatgpt") return;
     const onMessage = (event: MessageEvent) => {
       if (event.source !== window.parent) return;
-      const data = event.data as { type?: unknown; insetBottom?: unknown; displayMode?: unknown } | null;
+      const data = event.data as { type?: unknown; insetBottom?: unknown; theme?: unknown; displayMode?: unknown } | null;
       if (data?.type !== "donkeycut:host") return;
       if (typeof data.insetBottom === "number") {
         const px = Math.max(0, Math.min(400, Math.round(data.insetBottom)));
         document.documentElement.style.setProperty("--host-inset-bottom", `${px}px`);
+      }
+      // The editor wears ChatGPT's theme, so the card reads as part of it.
+      if (data.theme === "light" || data.theme === "dark") {
+        wearHostTheme(data.theme);
       }
       const mode: HostDisplayMode = data.displayMode === "fullscreen" ? "fullscreen" : "inline";
       if (mode !== displayMode) { displayMode = mode; listeners.forEach((l) => l()); }

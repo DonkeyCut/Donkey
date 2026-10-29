@@ -22,6 +22,15 @@ class CardError extends Error {
   }
 }
 
+/** The host's theme, which the card and the editor it frames both wear. */
+export type HostTheme = "light" | "dark";
+
+/** The bands of the card the host draws over: its rail, its header, its
+ * composer. The card keeps the editor out of the side and top bands and hands
+ * the bottom one to the editor, which keeps its controls above it. */
+export type HostEdges = { top: number; right: number; left: number };
+const NO_EDGES: HostEdges = { top: 0, right: 0, left: 0 };
+
 /** The host carries authentication; the iframe only calls the MCP Apps bridge. */
 export function useProjectApp() {
   const appRef = useRef<App | null>(null);
@@ -32,6 +41,8 @@ export function useProjectApp() {
   const [editor, setEditor] = useState<Editor | null>(null);
   const [fullscreen, setFullscreen] = useState(false);
   const [hostInset, setHostInset] = useState(0);
+  const [edges, setEdges] = useState<HostEdges>(NO_EDGES);
+  const [theme, setTheme] = useState<HostTheme>("light");
   const [editorRequest, setEditorRequest] = useState<string | null>(null);
   const requested = useRef<string | null>(null);
   const reconnecting = useRef(false);
@@ -79,12 +90,17 @@ export function useProjectApp() {
     // the number and keeps its own bottom controls above the band.
     const applyContext = (context: ReturnType<App["getHostContext"]>) => {
       if (!context) return;
-      if (context.theme) document.documentElement.dataset.theme = context.theme;
+      if (context.theme) {
+        document.documentElement.dataset.theme = context.theme;
+        setTheme(context.theme);
+      }
       if (context.locale) setLocale(context.locale);
       const full = context.displayMode === "fullscreen";
       if (context.displayMode) setFullscreen(full);
       // Measured from ChatGPT's desktop fullscreen when the host reports no inset.
       setHostInset(full ? (context.safeAreaInsets?.bottom ?? 120) : 0);
+      const insets = context.safeAreaInsets;
+      setEdges(insets ? { top: insets.top, right: insets.right, left: insets.left } : NO_EDGES);
     };
     app.onhostcontextchanged = (context) => { applyContext({ ...app.getHostContext(), ...context }); };
     void app.connect().then(() => {
@@ -197,5 +213,5 @@ export function useProjectApp() {
       setHostInset(full ? (app.getHostContext()?.safeAreaInsets?.bottom ?? 120) : 0);
     } catch { /* the inline card still works */ }
   }, []);
-  return { ready, view, playback, editor, fullscreen, hostInset, error, busy, visible, run, playbackFailed, openDonkey, openFromFrame, saveFromFrame, requestFullscreen, retryEditor, createProject };
+  return { ready, view, playback, editor, fullscreen, hostInset, edges, theme, error, busy, visible, run, playbackFailed, openDonkey, openFromFrame, saveFromFrame, requestFullscreen, retryEditor, createProject };
 }
