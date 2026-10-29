@@ -7,12 +7,27 @@ await stubModule<typeof import("./mediaRead")>("./mediaRead", import.meta.url, {
 });
 const { prepareImport } = await import("./media");
 
-// A copy onto this machine is the whole transfer, so it waits for the import
-// queue's window; holding it up front would start every file of a drop at once.
-test("an import onto this machine has no hold outside the queue's window", async () => {
-  const backend = { kind: "engine" } as unknown as CutBackend;
-  const file = new File([new Uint8Array(3)], "song.mp3", { type: "audio/mpeg" });
-  const pending = await prepareImport("p", file, backend);
-  expect(pending).not.toBeNull();
-  expect(pending?.hold).toBeUndefined();
+// A copy onto this machine is the whole transfer. Each one starts as the
+// import does, so a reload finds every file of a drop stored, and they run
+// one at a time, so a long drop never swamps the engine socket or the store.
+test("imports onto this machine hold their bytes up front, one copy at a time", async () => {
+  let running = 0;
+  let most = 0;
+  const backend = {
+    kind: "engine",
+    fetch: async () => {
+      running++;
+      most = Math.max(most, running);
+      await new Promise((r) => setTimeout(r, 5));
+      running--;
+      return new Response(JSON.stringify({ fileName: "song.mp3" }), { status: 200 });
+    },
+  } as unknown as CutBackend;
+  const file = () => new File([new Uint8Array(3)], "song.mp3", { type: "audio/mpeg" });
+  const drop = await Promise.all([prepareImport("p", file(), backend), prepareImport("p", file(), backend)]);
+  expect(drop.every((pending) => pending?.hold)).toBe(true);
+
+  await Promise.all(drop.map((pending) => pending!.hold!()));
+  expect(most).toBe(1);
+  expect(await drop[0]!.send()).toBe("song.mp3");
 });
