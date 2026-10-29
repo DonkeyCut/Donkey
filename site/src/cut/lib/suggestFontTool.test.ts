@@ -111,6 +111,19 @@ test("type in a face Donkey does not bundle is reported as that", async () => {
   expect(out.note).toContain("does not bundle");
 });
 
+test("a stand-in named in fonts is scored alone, with the size and place that match the ink", async () => {
+  // The reference's face isn't bundled; the stand-in picked for it still
+  // needs its size from the frame, not a guess.
+  shows = { text: "Travel Destination", css: '400 110px "Great Vibes"' };
+  const out = (await runAiTool("suggest_font", { asset_id: "ref", t: 3, region: REGION, text: "Travel Destination", fonts: ["anton"] })) as Out & {
+    matches: { x: number; y: number }[];
+  };
+  expect(out.matches.map((m) => m.font)).toEqual(["anton"]);
+  expect(out.matches[0].size).toBeGreaterThan(0);
+  expect(Math.abs(out.matches[0].x - 0.5)).toBeLessThan(0.03);
+  expect(await message(runAiTool("suggest_font", { asset_id: "ref", t: 3, region: REGION, text: "Travel", fonts: ["no-such-face"] }))).toContain("no-such-face");
+});
+
 test("a region with no type, a sound, and missing words are refused", async () => {
   expect(await message(runAiTool("suggest_font", { asset_id: "ref", t: 3, region: { x: 0.05, y: 0.05, w: 0.1, h: 0.1 }, text: "TRAVEL" }))).toContain("No type");
   expect(await message(runAiTool("suggest_font", { asset_id: "song", t: 3, region: REGION, text: "TRAVEL" }))).toContain("audio");

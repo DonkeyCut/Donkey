@@ -2635,6 +2635,14 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       if (![r.x, r.y, r.w, r.h].every(isNum) || !((r.w as number) > 0 && (r.h as number) > 0))
         throw new ToolError("Pass region: {x, y, w, h} in frame fractions, x/y its centre, around the type and little else.");
       const t = clamp(isNum(input.t) ? input.t : 0, 0, Math.max(0, asset.duration - 0.001));
+      // A stand-in already picked is scored alone, so its size and place come
+      // from the frame too.
+      const named = Array.isArray(input.fonts) ? input.fonts.filter((f): f is string => typeof f === "string") : [];
+      const faces = named.length > 0 ? bundledFaces().filter((f) => named.includes(f.font)) : bundledFaces();
+      const unknown = named.filter((id) => !faces.some((f) => f.font === id));
+      if (unknown.length > 0) {
+        throw new ToolError(`No face ${unknown.join(", ")} to set a title in. fonts takes ids from the font list (a font's id, as add_title's font).`);
+      }
 
       // The frame, then the region of it at a size the scoring can use.
       let source: CanvasImageSource;
@@ -2700,7 +2708,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         if (upright !== crop) upright.width = 0;
         if (!ref.box) continue;
         // Every face ranked; the size each would need to fill the ink's height.
-        const ranked = await rankFaces(ref, text, bundledFaces(), fontStack).then(
+        const ranked = await rankFaces(ref, text, faces, fontStack).then(
           (r) => r,
           (e) => {
             // A guess at the angle that reads wrong is one of the guesses.
