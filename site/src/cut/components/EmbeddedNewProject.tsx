@@ -18,8 +18,8 @@ import { errorFromBody } from "@/cut/lib/userError";
 import { useDescribeError } from "@/i18n/describeError";
 import { track } from "@/lib/analytics";
 
-/** Make an untitled cloud project and open it in the card: the card rail's
- * New project, and the way forward from a project that can't be shown. */
+/** Make an untitled cloud project and open it in the card: the way forward
+ * from a project that can't be shown. */
 export function useCardCreate() {
   const t = useTranslations("home.embeddedNewProject");
   const describeError = useDescribeError();
