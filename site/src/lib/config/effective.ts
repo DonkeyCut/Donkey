@@ -2,6 +2,7 @@ import type { Prisma } from "@/generated/prisma/client";
 import { isEligible, pickVariant } from "@donkeycut/abexp";
 import { audienceNeeds, audienceSchema, type Audience, type AudienceFact } from "@donkeycut/abexp";
 import { collectFacts } from "@/lib/config/audienceFacts";
+import { countryFromHeaders } from "@/lib/config/country";
 import { variantSchema, type ExperimentVariant } from "@/lib/config/experiment";
 import type { SettingKey, Settings } from "@/lib/config/registry";
 import { resolveSettings } from "@/lib/config/resolve";
@@ -35,13 +36,6 @@ export type EffectiveConfig = {
   assignments: Assignment[];
   invalid: { key: SettingKey; layer: "override" | "variant" }[];
 };
-
-const COUNTRY_HEADER = "x-vercel-ip-country";
-
-export function countryFromHeaders(headers: Headers): string | null {
-  const raw = headers.get(COUNTRY_HEADER)?.trim().toUpperCase();
-  return raw && /^[A-Z]{2}$/.test(raw) ? raw : null;
-}
 
 export function contextFromRequest(request: DonkeyAuthenticatedRequest): Promise<ConfigContext> {
   return contextForUser(request.donkey.userId, countryFromHeaders(request.headers));
