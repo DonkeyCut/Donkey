@@ -9,15 +9,22 @@ import { after } from "next/server";
 import { CUT_HOSTED_ORIGIN } from "@/cut/lib/hosts";
 import type { PlanTermsTable } from "@/lib/billing/plans";
 import { getGlobalSetting } from "@/lib/config/effective";
+import { SETTINGS } from "@/lib/config/registry";
 
 const PLAN_TERMS_TAG = "plan-terms";
 
-/** The terms a page renders into its HTML. */
-export async function cachedPlanTerms(): Promise<PlanTermsTable> {
+async function cachedTerms(): Promise<PlanTermsTable> {
   "use cache";
   cacheTag(PLAN_TERMS_TAG);
   cacheLife("max");
   return getGlobalSetting("planTerms");
+}
+
+/** The terms a page renders into its HTML. They parse again on the way out
+ * of the cache, so an entry kept from before the terms gained a field reads
+ * that field's default. */
+export async function cachedPlanTerms(): Promise<PlanTermsTable> {
+  return SETTINGS.planTerms.schema.parse(await cachedTerms());
 }
 
 /** Drop every page's copy of the terms now and render the landing again
