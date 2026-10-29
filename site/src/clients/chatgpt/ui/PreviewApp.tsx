@@ -44,7 +44,7 @@ export function PreviewApp() {
         : loading && <EditorSkeleton />}
     </main>;
   }
-  return <main aria-busy={busy}>
+  return <main style={pickerPadding(edges, hostInset)} aria-busy={busy}>
     <header><span className="brand">Donkey Cut</span><span>{t("cloudProjects")}</span></header>
     {problem && <p role="alert" className="error">{problem}</p>}
     {!view && <p role="status">{ready ? t("chooseProject") : t("connecting")}</p>}
@@ -78,6 +78,16 @@ export function PreviewApp() {
 
 /** Keeps the editor out of the bands the host draws over. */
 const edgePadding = (edges: HostEdges) => ({ paddingTop: edges.top, paddingRight: edges.right, paddingLeft: edges.left });
+
+/** The picker's own 20px margin inside those bands, with its last rows
+ * scrolling clear of the host's composer. */
+const PICKER_GAP = 20;
+const pickerPadding = (edges: HostEdges, bottom: number) => ({
+  paddingTop: PICKER_GAP + edges.top,
+  paddingRight: PICKER_GAP + edges.right,
+  paddingBottom: PICKER_GAP + bottom,
+  paddingLeft: PICKER_GAP + edges.left,
+});
 
 /** The editor's shape in the host's theme while it loads: the top bar, the tab
  * rail, the preview and the timeline, drawn as the site's skeleton slabs. */
@@ -128,5 +138,5 @@ function EditorFrame({ url, name, inset, theme, fullscreen, onReady, onFullscree
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
   });
-  return <iframe ref={frame} className="editor" src={url} onLoad={tell} title={t("editing", { name })} allow="fullscreen; clipboard-read; clipboard-write" />;
+  return <iframe ref={frame} className="editor" src={url} onLoad={tell} aria-label={t("editing", { name })} allow="fullscreen; clipboard-read; clipboard-write" />;
 }
