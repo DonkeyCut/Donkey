@@ -43,7 +43,14 @@
     "graceToday": "Dein Pro-Abo ist abgelaufen. Deine ältesten Cloud-Projekte werden heute gelöscht, sofern du kein Upgrade durchführst oder {bytes} freigibst.",
     "graceDays": "Dein Pro-Abo ist abgelaufen. Deine ältesten Cloud-Projekte werden in {days, plural, one {# Tag} other {# Tagen}} gelöscht, sofern du kein Upgrade durchführst oder {bytes} freigibst.",
     "proBody": "Gib Speicherplatz frei, indem du nicht mehr benötigte Projekte oder Medien löschst.",
-    "moreTitle": "Hol dir mehr Cloud-Speicher"
+    "moreTitle": "Hol dir mehr Cloud-Speicher",
+    "importTitle": "Diese Dateien passen nicht in deinen Cloud-Speicher",
+    "importNeed": "Sie benötigen {need}, und du hast noch {free} von {quota} frei.",
+    "keepLocal": "Auf diesem Computer weiterbearbeiten",
+    "keepLocalBody": "{to, select, local {Speichere dieses Projekt stattdessen auf deinem Mac, ohne Cloud-Speicherlimits.} other {Speichere dieses Projekt stattdessen in diesem Browser, ohne Cloud-Speicherlimits.}}",
+    "moving": "{done} von {total} werden verschoben …",
+    "moveStarting": "Wird verschoben …",
+    "moveFailed": "Projekt konnte nicht verschoben werden."
   },
   "subscribeBonus": {
     "daysLeft": "{count}d übrig",

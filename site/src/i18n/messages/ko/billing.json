@@ -43,7 +43,14 @@
     "graceToday": "Pro 요금제가 종료되었어요. 업그레이드하거나 {bytes}를 확보하지 않으면 가장 오래된 클라우드 프로젝트가 오늘 삭제돼요.",
     "graceDays": "Pro 요금제가 종료되었어요. 업그레이드하거나 {bytes}를 확보하지 않으면 가장 오래된 클라우드 프로젝트가 {days, plural, other {#일 후에}} 삭제돼요.",
     "proBody": "더 이상 필요 없는 프로젝트나 미디어를 삭제해 공간을 확보하세요.",
-    "moreTitle": "클라우드 저장 공간 추가하기"
+    "moreTitle": "클라우드 저장 공간 추가하기",
+    "importTitle": "이 파일들을 클라우드 저장 공간에 담을 수 없어요",
+    "importNeed": "파일 크기는 {need}이지만, 남은 용량은 {quota} 중 {free}예요.",
+    "keepLocal": "이 컴퓨터에서 계속 편집하기",
+    "keepLocalBody": "{to, select, local {대신 클라우드 스토리지 제한 없이 이 프로젝트를 Mac에 저장하세요.} other {대신 클라우드 스토리지 제한 없이 이 프로젝트를 이 브라우저에 저장하세요.}}",
+    "moving": "이동 중 ({total} 중 {done})…",
+    "moveStarting": "이동 중…",
+    "moveFailed": "프로젝트를 이동하지 못했어요."
   },
   "subscribeBonus": {
     "daysLeft": "{count}일 남음",

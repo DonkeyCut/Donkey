@@ -43,7 +43,14 @@
     "graceToday": "Your Pro plan ended. Your oldest cloud projects will be deleted today unless you upgrade or free {bytes}.",
     "graceDays": "Your Pro plan ended. Your oldest cloud projects will be deleted in {days, plural, one {# day} other {# days}} unless you upgrade or free {bytes}.",
     "proBody": "Free up space by deleting projects or media you no longer need.",
-    "moreTitle": "Get more cloud storage"
+    "moreTitle": "Get more cloud storage",
+    "importTitle": "These files don't fit in your cloud storage",
+    "importNeed": "They take {need}, and you have {free} of {quota} free.",
+    "keepLocal": "Keep editing on this computer",
+    "keepLocalBody": "{to, select, local {Store this project on your Mac instead, with no cloud storage limits.} other {Store this project in this browser instead, with no cloud storage limits.}}",
+    "moving": "Moving {done} of {total}…",
+    "moveStarting": "Moving…",
+    "moveFailed": "Could not move the project."
   },
   "subscribeBonus": {
     "daysLeft": "{count}d left",

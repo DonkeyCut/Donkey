@@ -43,7 +43,14 @@
     "graceToday": "Tu plan Pro terminó. Tus proyectos más antiguos en la nube se eliminarán hoy a menos que mejores tu plan o liberes {bytes}.",
     "graceDays": "Tu plan Pro terminó. Tus proyectos más antiguos en la nube se eliminarán en {days, plural, one {# día} other {# días}} a menos que mejores tu plan o liberes {bytes}.",
     "proBody": "Libera espacio eliminando proyectos o multimedia que ya no necesites.",
-    "moreTitle": "Obtén más almacenamiento en la nube"
+    "moreTitle": "Obtén más almacenamiento en la nube",
+    "importTitle": "Estos archivos no caben en tu almacenamiento en la nube",
+    "importNeed": "Ocupan {need} y tienes {free} de {quota} libres.",
+    "keepLocal": "Sigue editando en esta computadora",
+    "keepLocalBody": "{to, select, local {En su lugar, guarda este proyecto en tu Mac, sin límites de almacenamiento en la nube.} other {En su lugar, guarda este proyecto en este navegador, sin límites de almacenamiento en la nube.}}",
+    "moving": "Moviendo {done} de {total}…",
+    "moveStarting": "Moviendo…",
+    "moveFailed": "No se pudo mover el proyecto."
   },
   "subscribeBonus": {
     "daysLeft": "Quedan {count} d",

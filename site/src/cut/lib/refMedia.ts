@@ -2,6 +2,8 @@
 
 import { isCatalogRef, refFromAsset, refFromTextFile, type AssetRef } from "./assetRef";
 import { tagChatAsset } from "./chatAssets";
+import { getBackend } from "./backend";
+import { checkImportRoom } from "./importRoom";
 import { startUpload } from "./importQueue";
 import {
   enrichAsset,
@@ -318,6 +320,7 @@ export async function refsFromDroppedFiles(
   opts?: { chatId?: string }
 ): Promise<AssetRef[]> {
   const refs: AssetRef[] = [];
+  checkImportRoom(files.filter(isMediaFile));
   for (const file of files) {
     try {
       if (isTextFile(file) && !isMediaFile(file)) {
@@ -325,7 +328,7 @@ export async function refsFromDroppedFiles(
         continue;
       }
       const pending = await prepareImport(projectId, file);
-      const asset = pending?.asset ?? (await importFileToProject(projectId, file));
+      const asset = pending?.asset ?? (await importFileToProject(projectId, file, getBackend(), "caller"));
       if (!asset) continue;
       useEditor.getState().addAsset(asset);
       if (opts?.chatId) tagChatAsset(asset.id, opts.chatId);

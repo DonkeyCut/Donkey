@@ -35,6 +35,7 @@ export function PlansDialog({
   title,
   body,
   notice,
+  aside,
   dismissLabel,
   onClose,
 }: {
@@ -47,6 +48,9 @@ export function PlansDialog({
   body?: React.ReactNode;
   // A warning under the message, such as storage about to be reclaimed.
   notice?: React.ReactNode;
+  // A way forward under the plans that buys nothing, such as moving the
+  // project to this computer.
+  aside?: React.ReactNode;
   // The way out as a text button at the bottom right, in place of the close
   // button. Onboarding ends on the plans, and free is one of its answers.
   dismissLabel?: string;
@@ -140,6 +144,7 @@ export function PlansDialog({
           </div>
         </DialogBody>
         <div className="flex flex-col gap-3 px-6 pt-5 pb-6 sm:px-10">
+          {aside}
           {error ? (
             <p className="text-center text-sm text-destructive">
               {apiErrorText(error, tBilling("billingUnavailable"))}

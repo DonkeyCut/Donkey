@@ -43,7 +43,14 @@
     "graceToday": "Proプランが終了しました。アップグレードするか{bytes}の空き容量を確保しない限り、最も古いクラウドプロジェクトは本日削除されます。",
     "graceDays": "Proプランが終了しました。アップグレードするか{bytes}の空き容量を確保しない限り、最も古いクラウドプロジェクトは{days, plural, other {#日後}}に削除されます。",
     "proBody": "不要になったプロジェクトやメディアを削除して空き容量を増やしてください。",
-    "moreTitle": "クラウドストレージを増量"
+    "moreTitle": "クラウドストレージを増量",
+    "importTitle": "これらのファイルはクラウドストレージに収まりません",
+    "importNeed": "{need}必要ですが、空き容量は{quota}中{free}です。",
+    "keepLocal": "このコンピュータで編集を続ける",
+    "keepLocalBody": "{to, select, local {代わりにこのプロジェクトをMacに保存します。クラウドストレージの制限はありません。} other {代わりにこのプロジェクトをこのブラウザに保存します。クラウドストレージの制限はありません。}}",
+    "moving": "{total}中{done}を移動中…",
+    "moveStarting": "移動中…",
+    "moveFailed": "プロジェクトを移動できませんでした。"
   },
   "subscribeBonus": {
     "daysLeft": "残り{count}日",

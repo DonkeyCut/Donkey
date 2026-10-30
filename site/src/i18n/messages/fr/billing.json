@@ -43,7 +43,14 @@
     "graceToday": "Votre forfait Pro a pris fin. Vos projets cloud les plus anciens seront supprimés aujourd'hui, sauf si vous passez à l'offre supérieure ou libérez {bytes}.",
     "graceDays": "Votre forfait Pro a pris fin. Vos projets cloud les plus anciens seront supprimés dans {days, plural, one {# jour} other {# jours}}, sauf si vous passez à l'offre supérieure ou libérez {bytes}.",
     "proBody": "Libérez de l'espace en supprimant les projets ou médias dont vous n'avez plus besoin.",
-    "moreTitle": "Obtenez plus d'espace de stockage cloud"
+    "moreTitle": "Obtenez plus d'espace de stockage cloud",
+    "importTitle": "Ces fichiers ne rentrent pas dans votre stockage cloud",
+    "importNeed": "Ils nécessitent {need}, et il vous reste {free} libres sur {quota}.",
+    "keepLocal": "Continuer à modifier sur cet ordinateur",
+    "keepLocalBody": "{to, select, local {Stockez plutôt ce projet sur votre Mac, sans limite de stockage dans le cloud.} other {Stockez plutôt ce projet dans ce navigateur, sans limite de stockage dans le cloud.}}",
+    "moving": "Déplacement de {done} sur {total}…",
+    "moveStarting": "Déplacement…",
+    "moveFailed": "Impossible de déplacer le projet."
   },
   "subscribeBonus": {
     "daysLeft": "{count} j restants",

@@ -42,10 +42,17 @@ export function onOperationFailure(listener: (failure: OperationFailure) => void
   return () => { listeners.delete(listener); };
 }
 
-/** Hosts opt into presentation. Reading a response never consumes its body. */
-export async function observeOperationResponse(response: Response): Promise<Response> {
+/** Hosts opt into presentation. Reading a response never consumes its body.
+ * A caller that answers storage refusals itself passes "caller", and its 413
+ * reaches no listener. */
+export async function observeOperationResponse(
+  response: Response,
+  storageFull: "wall" | "caller" = "wall"
+): Promise<Response> {
   if (![401, 402, 413].includes(response.status)) return response;
   const failure = operationFailure(response.status, await response.clone().json().catch(() => null));
-  if (failure) for (const listener of listeners) listener(failure);
+  if (!failure) return response;
+  if (failure.code === "storage_quota_exceeded" && storageFull === "caller") return response;
+  for (const listener of listeners) listener(failure);
   return response;
 }

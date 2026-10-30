@@ -19,3 +19,15 @@ test("size limits are distinct from account storage and generation credits from 
   expect(operationFailure(402, {})?.code).toBe("insufficient_credits");
   expect(operationFailure(401, null)?.code).toBe("authentication_required");
 });
+
+test("a caller that answers storage refusals itself keeps them from the wall", async () => {
+  const failures: unknown[] = [];
+  const stop = onOperationFailure((failure) => failures.push(failure));
+  try {
+    const refused = () => new Response(JSON.stringify({ error: "storage_quota_exceeded" }), { status: 413 });
+    await observeOperationResponse(refused(), "caller");
+    expect(failures).toEqual([]);
+    await observeOperationResponse(new Response("{}", { status: 402 }), "caller");
+    expect(failures).toHaveLength(1);
+  } finally { stop(); }
+});

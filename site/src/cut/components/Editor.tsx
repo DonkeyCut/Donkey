@@ -18,6 +18,7 @@ import { Button } from "@/components/ui/button";
 import {
   apiFetch,
   bindCutMode,
+  getBackend,
   hasLocalCompute,
   releaseCutMode,
   subscribeCutMode,
@@ -35,6 +36,7 @@ import { copyTimelineSelection, pasteCutPayload, payloadFromHtml } from "@/cut/l
 import { useLibrary } from "@/cut/lib/queries";
 import { copyableRefs } from "@/cut/lib/refCopy";
 import { startUpload } from "@/cut/lib/importQueue";
+import { checkImportRoom } from "@/cut/lib/importRoom";
 import { enrichAsset, importFileToProject, isMediaFile, prepareImport } from "@/cut/lib/media";
 import { isLinkedFile, uploadLinkedFile } from "@/cut/lib/linkedLibrary";
 import { copiedFrameFile, hasCopiedFrame } from "@/cut/lib/stageFrame";
@@ -791,6 +793,9 @@ export function Editor({
       // afterwards, so the first Space after an import went to that control.
       // Typing is never interrupted: a focused text field keeps the keyboard.
       focusShell();
+      // A drop that won't fit the account's cloud storage says so once, up
+      // front; the files still land here.
+      checkImportRoom(list);
       setImporting((n) => n + list.length);
       // What landed, by kind, for the one import report after the run.
       const kinds = new Set<MediaAsset["type"]>();
@@ -804,7 +809,7 @@ export function Editor({
           // browser cannot decode goes the plain way: the project converts it
           // first, and the asset is built from what comes back.
           const pending = await prepareImport(projectId, file);
-          const asset = pending?.asset ?? (await importFileToProject(projectId, file));
+          const asset = pending?.asset ?? (await importFileToProject(projectId, file, getBackend(), "caller"));
           if (!asset) {
             opts?.onOutcome?.({ file, failed: true });
             continue;
@@ -1354,7 +1359,7 @@ export function Editor({
           </Button>
         </div>
       )}
-      {!chatgpt && <StorageUpgradeDialog />}
+      {!chatgpt && <StorageUpgradeDialog surface="editor" />}
       {!chatgpt && <UpgradeDialog />}
       <Lightbox />
     </div>

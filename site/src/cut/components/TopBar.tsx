@@ -31,16 +31,12 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { cloudBackend } from "@/cut/lib/backend/cloud";
 import { useDescribeError } from "@/i18n/describeError";
 import { cloudUsageQueryKey, useCutMode } from "@/cut/lib/backend/hooks";
-import { browserBackend } from "@/cut/lib/backend/browser";
-import { localBackend } from "@/cut/lib/backend/local";
-import { clearProjectThreads } from "@/cut/lib/chatThreads";
 import { retryFailedUploads } from "@/cut/lib/importQueue";
 import { backTarget, projectHref, useCutBase } from "@/cut/lib/nav";
 import { useTourHoldsStarter } from "@/cut/lib/tourLock";
-import { copyProjectAcross } from "@/cut/lib/projectCopy";
+import { moveOpenProject } from "@/cut/lib/projectMove";
 import { projectDuration, useEditor } from "@/cut/lib/store";
 import { useEnvironment } from "@/cut/lib/environment";
 import { openThroughHost, projectPageUrl, requestHostFullscreen, useHostDisplayMode } from "@/cut/lib/hostBridge";
@@ -333,25 +329,13 @@ export function TopBar({
   const [moveError, setMoveError] = useState<string | null>(null);
 
   const moveToCloud = async () => {
-    const projectId = useEditor.getState().projectId;
-    if (!projectId) return;
+    if (!useEditor.getState().projectId) return;
     setMoving(true);
     setMoveError(null);
     try {
-      // Let a pending autosave land so the copy reads the current cut.
-      for (let i = 0; i < 40 && useEditor.getState().saveState !== "saved"; i++) {
-        await new Promise((r) => setTimeout(r, 250));
-      }
-      const src = cutMode === "browser" ? browserBackend : localBackend;
-      const newId = await copyProjectAcross(src, cloudBackend, projectId, {
-        onProgress: (done, total) => setMoveProgress(t("movingMedia", { done, total })),
-      });
-      await src
-        .fetch(`/api/cut/projects/${projectId}`, { method: "DELETE" })
-        .catch(() => {});
-      // The chat history moved with the project; the old project's copy goes
-      // with the project itself.
-      clearProjectThreads(projectId);
+      const newId = await moveOpenProject(cutMode === "browser" ? "browser" : "local", "cloud", (done, total) =>
+        setMoveProgress(t("movingMedia", { done, total }))
+      );
       window.location.href = projectHref(base, newId, "projects", null);
     } catch (e) {
       setMoveError(describeError(e, t("moveFailed")));

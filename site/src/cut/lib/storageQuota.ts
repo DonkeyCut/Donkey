@@ -1,9 +1,12 @@
 export type StorageQuotaDetail = {
   bytes?: number;
   quotaBytes?: number;
-  /** What raised the wall: a rejected write, a render refused its space, or
-   * the top bar's pill. */
-  source: "quota-413" | "render" | "pill";
+  /** What a drop of files would add, when the check before its upload found
+   * it won't fit. */
+  needBytes?: number;
+  /** What raised the wall: a rejected write, a drop checked before its
+   * upload, a render refused its space, or the top bar's pill. */
+  source: "quota-413" | "import" | "render" | "pill";
   grace?: { deadline: string; overBytes: number };
 };
 
@@ -22,6 +25,23 @@ export function emitStorageQuota(detail: StorageQuotaDetail): boolean {
   walled = true;
   for (const listener of listeners) listener(detail);
   return true;
+}
+
+// A drop of files meets the wall once. The check before its upload raises it,
+// or failing that the first refusal among its uploads; every later refusal
+// from the same drop (each file's claim, each retry) stays quiet, and the next
+// drop starts over.
+let importAnswered = false;
+
+/** A new drop of files: its first refusal is news again. */
+export function startImportWall(): void {
+  importAnswered = false;
+}
+
+/** Raise the wall for a drop of files, once per drop. */
+export function emitImportWall(detail: StorageQuotaDetail): void {
+  if (importAnswered) return;
+  if (emitStorageQuota(detail) || walled) importAnswered = true;
 }
 
 /** Open the dialog from a deliberate click, past any standing wall. */

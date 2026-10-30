@@ -26,7 +26,11 @@ export type CutCaps = {
 };
 
 /** Observational reads leave the next document save based on the loaded version. */
-export type CutRequestInit = RequestInit & { observe?: boolean };
+/** Who answers a storage refusal (413): the app-wide storage wall, or the
+ * caller, which raises the wall its own way (an import raises one per drop). */
+export type StorageFull = "wall" | "caller";
+
+export type CutRequestInit = RequestInit & { observe?: boolean; storageFull?: StorageFull };
 
 export interface CutBackend {
   kind: CutMode;
@@ -46,3 +50,6 @@ export const DOC_SEQ_HEADER = "x-cut-doc-seq";
 
 /** The status a versioned doc save answers when another writer moved on. */
 export const HTTP_CONFLICT = 409;
+
+/** The status a write answers when the account's storage has no room for it. */
+export const HTTP_PAYLOAD_TOO_LARGE = 413;

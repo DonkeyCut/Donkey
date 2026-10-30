@@ -4,6 +4,7 @@ import { scanBeats, scanLevel, scanSilence, scanSpeech, type BeatScan, type Leve
 import { syncSound, type SyncAnswer } from "./soundSync";
 import { LoudnessMeter, type LoudnessMeasure } from "./loudness";
 import { apiFetch, apiJson, getBackend, type CutBackend } from "./backend";
+import { HTTP_PAYLOAD_TOO_LARGE, type StorageFull } from "./backend/types";
 import { registerBlobFile } from "./backend/browser/registry";
 import { cloudBackend } from "./backend/cloud";
 import { pollCloudJob } from "./cloudJob";
@@ -16,6 +17,7 @@ import { ConnectionLostError } from "./network";
 import { downloadFromUrl } from "./download";
 import { FONT_RE, LUT_RE } from "./libraryFileType";
 import { markUploadStored, startUpload, uploadInFlight } from "./importQueue";
+import { emitImportWall } from "./storageQuota";
 import { convertProjectFile, dropProjectFile, mp4DisplayName } from "./mediaConvert";
 import { awaitsCompat, ensureProxy } from "./mediaProxy";
 import { noteUndecoded } from "./codecSupport";
@@ -223,13 +225,15 @@ export async function presignUpload(
   file: Blob,
   name: string,
   backend: CutBackend = getBackend(),
-  extra: Record<string, unknown> = {}
+  extra: Record<string, unknown> = {},
+  storageFull: StorageFull = "wall"
 ): Promise<{ key: string; url: string; fileName: string }> {
   const mime = file.type || "application/octet-stream";
   const res = await backend.fetch(presignPath, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ fileName: name, mime, bytes: file.size, ...extra }),
+    storageFull,
   });
   const body = await apiJson<{ key?: string; url?: string; fileName?: string }>(res);
   if (!res.ok || !body.key || !body.url) {
@@ -340,7 +344,7 @@ export async function uploadProjectMediaTo(
   projectId: string,
   file: Blob,
   name: string,
-  opts?: { onProgress?: (fraction: number) => void; signal?: AbortSignal }
+  opts?: { onProgress?: (fraction: number) => void; signal?: AbortSignal; storageFull?: StorageFull }
 ): Promise<string> {
   if (backend.kind !== "cloud") {
     const form = new FormData();
@@ -361,7 +365,9 @@ export async function uploadProjectMediaTo(
     `/api/cut/projects/${projectId}/media/presign`,
     file,
     name,
-    backend
+    backend,
+    {},
+    opts?.storageFull
   );
   await putSigned(signed.url, file, file.type || "application/octet-stream", opts);
   const key = signed.key;
@@ -713,10 +719,12 @@ function sendCloudImport(
           file,
           file.name,
           backend,
-          avoid.length > 0 ? { avoid } : {}
+          avoid.length > 0 ? { avoid } : {},
+          "caller"
         );
       } catch (err) {
-        if ((err as { status?: number }).status !== 413) throw err;
+        if ((err as { status?: number }).status !== HTTP_PAYLOAD_TOO_LARGE) throw err;
+        emitImportWall({ source: "quota-413" });
       }
       if (signed) {
         const storedUrl = await stashCloudMedia(projectId, file, signed.fileName);
@@ -785,7 +793,11 @@ export function sendStoredUpload(
         resume: true,
         ...(avoid.length > 0 ? { avoid } : {}),
       }),
+      storageFull: "caller",
     });
+    // A drain the account has no room for: the drop it came from raises the
+    // wall once, and the asset carries the refusal for its retry.
+    if (res.status === HTTP_PAYLOAD_TOO_LARGE) emitImportWall({ source: "quota-413" });
     const body = await apiJson<{ key?: string; url?: string; fileName?: string; done?: boolean }>(
       res
     );
@@ -860,12 +872,21 @@ export async function resumePendingUploads(
 export async function importFileToProject(
   projectId: string,
   file: File,
-  backend: CutBackend = getBackend()
+  backend: CutBackend = getBackend(),
+  storageFull: StorageFull = "wall"
 ): Promise<MediaAsset | null> {
   const type = assetTypeOf(file);
   if (!type) return null;
 
-  let fileName = await uploadProjectMediaTo(backend, projectId, file, file.name);
+  // A file from a drop answers a storage refusal with the drop's one wall.
+  let fileName = await uploadProjectMediaTo(backend, projectId, file, file.name, { storageFull }).catch(
+    (err: unknown) => {
+      if (storageFull === "caller" && (err as { status?: number }).status === HTTP_PAYLOAD_TOO_LARGE) {
+        emitImportWall({ source: "quota-413" });
+      }
+      throw err;
+    }
+  );
   const originalFileName = fileName;
   let name = file.name;
   // Probe the bytes in hand: the same file the upload just wrote, with no

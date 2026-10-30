@@ -6,7 +6,14 @@
 import { throttleWait } from "../network";
 import { observeOperationResponse, operationFailure } from "../operationFailure";
 import { UserError } from "../userError";
-import { DOC_SEQ_HEADER, DOC_WRITER_HEADER, HTTP_CONFLICT, type CutBackend, type CutRequestInit } from "./types";
+import {
+  DOC_SEQ_HEADER,
+  DOC_WRITER_HEADER,
+  HTTP_CONFLICT,
+  type CutBackend,
+  type CutRequestInit,
+  type StorageFull,
+} from "./types";
 
 const cloudPath = (path: string) => path.replace(/^\/api\/cut\//, "/api/cut-cloud/");
 
@@ -23,7 +30,12 @@ export function bindCloudSession(base: string, headers: Record<string, string>) 
  * page, the bound session's origin and headers in a headless process. */
 type CloudSession = { base: string; headers: Record<string, string> } | null;
 
-async function requestWithSession(bound: CloudSession, path: string, init?: RequestInit): Promise<Response> {
+async function requestWithSession(
+  bound: CloudSession,
+  path: string,
+  init?: RequestInit,
+  storageFull: StorageFull = "wall"
+): Promise<Response> {
   const headers = new Headers(bound?.headers);
   new Headers(init?.headers).forEach((value, key) => headers.set(key, value));
 
@@ -35,11 +47,11 @@ async function requestWithSession(bound: CloudSession, path: string, init?: Requ
     const res = await fetch((bound?.base ?? "") + path, { ...init, headers });
     const wait = throttleWait(res);
     if (wait === null || !firewallRefusal(res)) {
-      return observeOperationResponse(res);
+      return observeOperationResponse(res, storageFull);
     }
     holdFirewall(wait);
     if (attempt > FIREWALL_RETRIES || !resendable(init?.body) || init?.signal?.aborted) {
-      return observeOperationResponse(res);
+      return observeOperationResponse(res, storageFull);
     }
     await res.body?.cancel().catch(() => {});
   }
@@ -81,8 +93,25 @@ const firewallRefusal = (res: Response) => !/json/i.test(res.headers.get("conten
  * read, e.g. a piped upload. */
 const resendable = (body: RequestInit["body"]) => !(typeof ReadableStream !== "undefined" && body instanceof ReadableStream);
 
-export function cloudRequest(path: string, init?: RequestInit): Promise<Response> {
-  return requestWithSession(session, path, init);
+export type CloudUsage = {
+  bytes: number;
+  /** null = unlimited. */
+  quotaBytes: number | null;
+  /** Present when the account's Pro ended and it holds more than the free cap:
+   * the sweep reclaims storage after `deadline` unless `overBytes` is freed. */
+  grace?: { deadline: string; overBytes: number };
+};
+
+/** The account's cloud storage usage — cloud-only by construction, so it hits
+ * the hosted route directly on the session cookie. */
+export async function fetchCloudUsage(): Promise<CloudUsage> {
+  const res = await fetch("/api/cut-cloud/usage");
+  if (!res.ok) throw new Error(`usage ${res.status}`);
+  return (await res.json()) as CloudUsage;
+}
+
+export function cloudRequest(path: string, init?: RequestInit, storageFull?: StorageFull): Promise<Response> {
+  return requestWithSession(session, path, init, storageFull);
 }
 
 /** Capture transport credentials for work that outlives the active project. */
@@ -91,7 +120,8 @@ export function captureCloudBackend(): CutBackend {
   const writer = newWriter();
   return {
     ...cloudBackend,
-    fetch: (path, init) => cloudFetch(path, init, (url, options) => requestWithSession(bound, url, options), writer),
+    fetch: (path, init) =>
+      cloudFetch(path, init, (url, options, storageFull) => requestWithSession(bound, url, options, storageFull), writer),
     url: (path) => (bound?.base ?? "") + cloudPath(path),
   };
 }
@@ -158,10 +188,10 @@ async function cloudFetch(
   request = cloudRequest,
   writer = sessionWriter
 ): Promise<Response> {
-  const { observe, ...init } = options ?? {};
+  const { observe, storageFull, ...init } = options ?? {};
   const doc = PROJECT_DOC.exec(path);
   const method = (init?.method ?? "GET").toUpperCase();
-  if (observe || !doc || (method !== "GET" && method !== "PUT")) return request(cloudPath(path), init);
+  if (observe || !doc || (method !== "GET" && method !== "PUT")) return request(cloudPath(path), init, storageFull);
   const projectId = decodeURIComponent(doc[1]);
 
   if (method === "GET") {

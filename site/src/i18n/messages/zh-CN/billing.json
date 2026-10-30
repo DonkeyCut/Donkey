@@ -43,7 +43,14 @@
     "graceToday": "你的 Pro 方案已结束。除非升级或释放 {bytes} 空间，否则你最早的云端项目将于今天被删除。",
     "graceDays": "你的 Pro 方案已结束。除非升级或释放 {bytes} 空间，否则你最早的云端项目将在 {days, plural, other {# 天}}后被删除。",
     "proBody": "删除不再需要的项目或媒体以释放空间。",
-    "moreTitle": "获取更多云存储空间"
+    "moreTitle": "获取更多云存储空间",
+    "importTitle": "这些文件超出了你的云存储空间容量",
+    "importNeed": "它们需要占用 {need}，而你在 {quota} 中仅剩 {free} 可用空间。",
+    "keepLocal": "在此电脑上继续编辑",
+    "keepLocalBody": "{to, select, local {改为将此项目保存在你的 Mac 上，无云存储限制。} other {改为将此项目保存在此浏览器中，无云存储限制。}}",
+    "moving": "正在移动 {done} / {total}…",
+    "moveStarting": "正在移动…",
+    "moveFailed": "无法移动项目。"
   },
   "subscribeBonus": {
     "daysLeft": "还剩 {count} 天",

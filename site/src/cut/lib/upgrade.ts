@@ -15,6 +15,7 @@ export type UpgradeEntry =
   | "project_limit"
   | "storage_pill"
   | "storage_refused"
+  | "storage_import"
   | "render_refused"
   | "onboarding_tour";
 
