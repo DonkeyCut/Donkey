@@ -23,9 +23,10 @@ import { planRank, RECOMMENDED_PLAN, type PaidPlan } from "@/lib/billing/plans";
 import { cn } from "@/lib/utils";
 import { useIntroOffer, useProSubscription, type IntroOffer } from "@/queries/billing";
 
-// A glow of the accent around the card, so it stands off the editor behind it.
+// A glow of the accent around the card, so it stands off the dark editor
+// behind it. The light theme keeps the dialog's own shadow.
 const BACKLIGHT =
-  "shadow-[0_0_18px_4px_rgba(0,90,230,0.41),0_0_85px_22px_rgba(0,60,200,0.35)]";
+  "dark:shadow-[0_0_18px_4px_rgba(0,90,230,0.41),0_0_85px_22px_rgba(0,60,200,0.35)]";
 
 export type PlansSource = "credits" | "projects" | "storage" | "plans" | "onboarding";
 
