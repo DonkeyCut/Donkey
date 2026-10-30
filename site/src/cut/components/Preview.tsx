@@ -108,6 +108,8 @@ const GUIDE_LINGER_MS = 700;
 
 /** How long the zoom control lingers after the last camera move. */
 const HUD_LINGER_MS = 2600;
+/** `PointerEvent.buttons` bit for the primary (left) button. */
+const PRIMARY_BUTTON = 1;
 /** How still the camera has to be before the backing store re-resolves to the
  * size on screen. */
 const SURFACE_SETTLE_MS = 220;
@@ -597,6 +599,13 @@ export function Preview() {
           el.addEventListener("pointerup", up);
           el.addEventListener("pointercancel", up);
         }}
+        // Any drag across the canvas — the camera, a clip, a title — brings
+        // the zoom control up, so Reset is in reach whatever is selected.
+        onPointerMove={(e) => {
+          if (e.buttons & PRIMARY_BUTTON) {
+            pokeHud();
+          }
+        }}
         // A drag on the empty room around the picture pans the camera; a
         // stationary press there clears the selection, and so does one on
         // the picture itself.
@@ -774,8 +783,8 @@ export function Preview() {
 }
 
 /**
- * The camera's zoom control, in the pane's top-right corner. It appears while
- * the camera moves and lingers a moment after, and holds while the picture is
+ * The camera's zoom control, in the pane's top-left corner. It appears while
+ * anything moves on the canvas and lingers a moment after, and holds while the picture is
  * off screen; the round button opens a bubble with the zoom level, a step in
  * each direction, and Reset, which refits the picture to the pane.
  */
@@ -801,7 +810,7 @@ function ZoomHud({
   return (
     <div
       className={cn(
-        "absolute top-3 right-3 z-20 flex origin-[right_center] items-center gap-2 transition-[opacity,transform]",
+        "absolute top-3 left-3 z-20 flex origin-[left_center] items-center gap-2 transition-[opacity,transform]",
         shown
           ? "scale-100 opacity-100 duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)]"
           : "pointer-events-none scale-90 opacity-0 duration-200 ease-in"
@@ -809,15 +818,23 @@ function ZoomHud({
       onPointerEnter={() => onHold(true)}
       onPointerLeave={() => onHold(false)}
     >
-      {/* The bubble unfurls out of the button's left side — it stretches open
+      <button
+        type="button"
+        title={t("zoomLevel", { percent: Math.round(zoom * 100) })}
+        onClick={onToggle}
+        className="grid size-9 shrink-0 place-items-center rounded-full border bg-background/95 text-foreground shadow-md backdrop-blur hover:bg-accent"
+      >
+        <Icon className="size-4" />
+      </button>
+      {/* The bubble unfurls out of the button's right side — it stretches open
           past its resting size and settles through a bounce or two — and
           tucks back in with a quick, smooth ease. */}
       <div
         className={cn(
-          "flex origin-right items-center gap-1 rounded-full border bg-background/95 py-1 pr-1 pl-3 shadow-md backdrop-blur",
+          "flex origin-left items-center gap-1 rounded-full border bg-background/95 py-1 pr-1 pl-3 shadow-md backdrop-blur",
           open
             ? "animate-[cut-hud-unfurl_480ms_both]"
-            : "pointer-events-none translate-x-4 scale-x-50 scale-y-75 opacity-0 transition-[opacity,transform] duration-200 ease-in"
+            : "pointer-events-none -translate-x-4 scale-x-50 scale-y-75 opacity-0 transition-[opacity,transform] duration-200 ease-in"
         )}
       >
         <span className="w-11 text-center text-xs font-medium tabular-nums">
@@ -847,14 +864,6 @@ function ZoomHud({
           {t("reset")}
         </button>
       </div>
-      <button
-        type="button"
-        title={t("zoomLevel", { percent: Math.round(zoom * 100) })}
-        onClick={onToggle}
-        className="grid size-9 shrink-0 place-items-center rounded-full border bg-background/95 text-foreground shadow-md backdrop-blur hover:bg-accent"
-      >
-        <Icon className="size-4" />
-      </button>
     </div>
   );
 }
