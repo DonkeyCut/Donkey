@@ -101,7 +101,9 @@ export function PlansDialog({
   };
 
   return (
-    <Dialog open={ready} onOpenChange={(open) => !open && close()}>
+    // With a dismiss button, it and the plans are the only ways out: a click
+    // outside or Escape leaves the dialog open.
+    <Dialog open={ready} onOpenChange={(open) => !open && !dismissLabel && close()}>
       <DialogContent
         ref={popup}
         initialFocus={popup}
