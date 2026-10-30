@@ -25,7 +25,7 @@ import { useIntroOffer, useProSubscription, type IntroOffer } from "@/queries/bi
 
 // A glow of the accent around the card, so it stands off the editor behind it.
 const BACKLIGHT =
-  "shadow-[0_0_36px_8px_rgba(0,90,230,0.41),0_0_170px_44px_rgba(0,60,200,0.35)]";
+  "shadow-[0_0_18px_4px_rgba(0,90,230,0.41),0_0_85px_22px_rgba(0,60,200,0.35)]";
 
 export type PlansSource = "credits" | "projects" | "storage" | "plans" | "onboarding";
 
