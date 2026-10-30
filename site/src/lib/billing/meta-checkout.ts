@@ -22,10 +22,10 @@ const METADATA_KEYS = {
 // Checkouts open from the editor and its settings; Meta needs a page on the site.
 const CHECKOUT_PAGE = `${DONKEYCUT_CANONICAL}/app/settings`;
 
-// A checkout converts once it is paid, or needs no payment at all (a Pro
-// checkout under a full discount). An async method settles later, through
-// checkout.session.async_payment_succeeded.
-const CONVERTED: ReadonlySet<Stripe.Checkout.Session["payment_status"]> = new Set(["paid", "no_payment_required"]);
+// A checkout converts once it is paid. One that needs no payment ran under a
+// full discount, which is how we test plans, so it is no purchase. An async
+// method settles later, through checkout.session.async_payment_succeeded.
+const CONVERTED: ReadonlySet<Stripe.Checkout.Session["payment_status"]> = new Set(["paid"]);
 
 // The plan a checkout sells, by its display name.
 export type CheckoutProduct = (typeof PLAN_NAMES)[keyof typeof PLAN_NAMES];
