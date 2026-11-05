@@ -24,6 +24,8 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { chromium, type Locator, type Page } from "playwright";
 
+import { ONBOARDING_VERSION } from "../src/lib/onboarding/sequence";
+
 const SITE = path.resolve(import.meta.dir, "..");
 const REPORT = path.resolve(SITE, "..", "evals", "cut-keys.latest-report.json");
 
@@ -151,6 +153,22 @@ async function launch() {
           createdAt: stamp,
           updatedAt: stamp,
         },
+      }),
+    });
+  });
+  // The welcome sequence opens over the editor for an account that has yet to
+  // run it and covers the media panel. Answering the account read as finished
+  // keeps the eval on the editor, whatever the dev account's row says.
+  await context.route("**/api/account/onboarding*", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        version: ONBOARDING_VERSION,
+        completedAt: new Date(0).toISOString(),
+        skipped: false,
+        referralSources: [],
+        referralOther: null,
       }),
     });
   });
