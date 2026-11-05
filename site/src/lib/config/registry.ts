@@ -63,7 +63,10 @@ export const SETTINGS = defineSettings({
       idleTimeoutMs: z.number().int().min(100).max(30000),
       connectionTimeoutMs: z.number().int().min(100).max(30000),
     }).strict(),
-    default: { maxConnections: 3, idleTimeoutMs: 5000, connectionTimeoutMs: 5000 },
+    // attachDatabasePool keeps each invocation running until its idle
+    // connections close, so Vercel bills every database request for the idle
+    // lifetime. 5s here billed ~5s of 2 GB memory per ~50ms request.
+    default: { maxConnections: 3, idleTimeoutMs: 1000, connectionTimeoutMs: 5000 },
     public: false,
     title: "Database connection pool",
     description: "Connections per server instance, idle connection lifetime, and connection wait limit. Instances start with defaults and apply overrides whenever they read settings. Existing connections drain at their idle deadline.",
