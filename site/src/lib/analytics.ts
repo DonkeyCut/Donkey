@@ -92,10 +92,12 @@ export type AnalyticsEvents = {
   // The top bar's credits pill.
   cut_credits_pill_clicked: { credits: number; dollars: number };
   cut_storage_upgrade_shown: { source: "quota-413" | "import" | "render" | "pill" };
-  // The storage wall's move of a cloud project to this computer: started, and
-  // landed (the copy opens next).
+  // The storage wall's move of a cloud project to this computer: started,
+  // landed (the copy opens next), or failed with the error's code, or its
+  // name when it carries none.
   cut_storage_move_started: { to: "local" | "browser" | "cloud" };
   cut_storage_move_done: { to: "local" | "browser" | "cloud" };
+  cut_storage_move_failed: { to: "local" | "browser" | "cloud"; error: string };
   // The plans modal: shown, and closed without a checkout after `seconds` up.
   // entry is the button or limit that raised it; intro is the open discount's
   // percent, 0 for none.

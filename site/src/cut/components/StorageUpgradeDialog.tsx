@@ -35,6 +35,7 @@ import { onOperationFailure } from "@/cut/lib/operationFailure";
 import { moveOpenProject } from "@/cut/lib/projectMove";
 import type { Residency } from "@/cut/lib/residency";
 import { useEditor } from "@/cut/lib/store";
+import { errorFields } from "@/cut/lib/userError";
 import { useDescribeError } from "@/i18n/describeError";
 import { formatBytes } from "@/lib/bytes";
 
@@ -206,6 +207,10 @@ function useMoveOffCloud(surface: WallSurface): MoveOffCloud | null {
         window.location.href = projectHref(base, newId, "projects", null);
       })
       .catch((e: unknown) => {
+        track("cut_storage_move_failed", {
+          to,
+          error: errorFields(e, String(e)).errorCode ?? (e instanceof Error ? e.name : "unknown"),
+        });
         setError(describeError(e, t("storage.moveFailed")));
         setMoving(false);
         setProgress(null);
