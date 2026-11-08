@@ -349,12 +349,12 @@ const geminiTranscribeModelPricing: Record<GeminiTranscribeModel, ProviderCredit
 };
 
 // Unified video generation (Gemini Omni Flash). The provider bills by tokens —
-// $1.50/1M input, $17.50/1M output, and a rendered second of video costs a
+// $1.50/1M input, $12/1M video output, and a rendered second of video costs a
 // fixed number of output tokens per resolution (geminiOmniTokensPerSecond) —
 // but the render is async: the submit response carries no token counts, and
 // charging on the completing poll instead would let one balance launch
 // unbounded concurrent renders. So a clip charges at submit in units of one
-// second of 360p video (1,931 output tokens ≈ $0.034): the adapter counts the
+// second of 360p video (1,931 output tokens ≈ $0.023): the adapter counts the
 // units the requested length and resolution add up to (a 10s 720p clip is 30,
 // a 10s 4k clip 90), the preflight holds the balance to that count, and the
 // same count bills. The token rates stay for the rare interaction that
@@ -365,10 +365,10 @@ const geminiOmniModelPricing: Record<GeminiOmniModel, ProviderCreditPricing> = {
     ...textTokenPricing({
       model: geminiOmniModels.flashVideo,
       input: "1.5",
-      output: "17.5",
+      output: "12",
     }),
-    // One unit is a second of 360p: 1,931 output tokens at $17.50/1M.
-    generationCostMicros: usdWithMargin("0.033793"),
+    // One unit is a second of 360p: 1,931 output tokens at $12/1M.
+    generationCostMicros: usdWithMargin("0.023172"),
   },
 };
 

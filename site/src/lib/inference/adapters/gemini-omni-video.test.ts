@@ -35,9 +35,11 @@ describe("Omni generation units", () => {
     expect(await countFor({ durationSeconds: 4, resolution: "360p" })).toBe(4);
     expect(await countFor({ durationSeconds: 10, resolution: "4k" })).toBe(90);
     expect(await countFor({ durationSeconds: 6, resolution: "1080p" })).toBe(27);
+    expect(await countFor({ durationSeconds: 3, resolution: "360p" })).toBe(3);
+    expect(await countFor({ durationSeconds: 15, resolution: "720p" })).toBe(45);
   });
 
-  test("an unset length bills the model's ceiling at the default size", async () => {
+  test("an unset length bills the model's default length at the default size", async () => {
     expect(await countFor({})).toBe(30);
   });
 
@@ -54,6 +56,7 @@ describe("Omni generation units", () => {
     expect((await failure({ resolution: 1080 })).includes("resolution")).toBe(true);
     expect((await failure({ resolution: "" })).includes("resolution")).toBe(true);
     expect((await failure({ durationSeconds: 2 })).includes("length")).toBe(true);
+    expect((await failure({ durationSeconds: 16 })).includes("length")).toBe(true);
     expect((await failure({ durationSeconds: 5.5 })).includes("length")).toBe(true);
   });
 

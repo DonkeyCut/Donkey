@@ -22,13 +22,13 @@ export const geminiModels = {
 
 export type GeminiModel = (typeof geminiModels)[keyof typeof geminiModels];
 
-// Unified video generation (Gemini Omni 1.1 Flash): one Interactions API call
+// Unified video generation (Gemini Omni 1.2 Flash): one Interactions API call
 // takes text plus optional seed/reference images and renders a clip with audio.
 // The request names the resolution and may name the length; with no length the
-// model picks (up to ~10s). Image output is not enabled for this model. Bump
-// here when adopting a newer Omni.
+// model renders its default length. Image output is not enabled for this model.
+// Bump here when adopting a newer Omni.
 export const geminiOmniModels = {
-  flashVideo: "gemini-omni-1.1-flash-preview",
+  flashVideo: "gemini-omni-1.2-flash",
 } as const;
 
 export type GeminiOmniModel = (typeof geminiOmniModels)[keyof typeof geminiOmniModels];
@@ -46,9 +46,11 @@ export type GeminiOmniResolution = (typeof geminiOmniResolutions)[number];
 
 export const geminiOmniDefaultResolution: GeminiOmniResolution = "720p";
 
-// Clip lengths an Omni render can be asked for, in whole seconds. A request
-// with no length lets the model pick, which lands at the top of this range.
-export const geminiOmniDurationSeconds = { min: 4, max: 10 } as const;
+// Clip lengths an Omni render can be asked for, in whole seconds.
+export const geminiOmniDurationSeconds = { min: 3, max: 15 } as const;
+
+// The length the model renders when a request names none.
+export const geminiOmniDefaultSeconds = 10;
 
 // Output tokens per rendered second of video with audio, by resolution — the
 // unit Omni bills in. A render is charged at submit from the length and
@@ -67,14 +69,14 @@ export const geminiOmniTokensPerSecond: Record<GeminiOmniResolution, number> = {
 export const geminiOmniUnitTokens = geminiOmniTokensPerSecond["360p"];
 
 /** Billing units for a render: seconds of 360p-equivalent output, from the
- * length (the model's ceiling when unset) times the resolution's tokens per
+ * length (the model's default when unset) times the resolution's tokens per
  * second. A 10s 720p clip is 30 units. The submit bills this count and the
  * price on the Generate button reads it. */
 export function geminiOmniRenderUnits(
   resolution: GeminiOmniResolution,
   durationSeconds: number | undefined,
 ): number {
-  const seconds = durationSeconds ?? geminiOmniDurationSeconds.max;
+  const seconds = durationSeconds ?? geminiOmniDefaultSeconds;
   return Math.max(1, Math.ceil((seconds * geminiOmniTokensPerSecond[resolution]) / geminiOmniUnitTokens));
 }
 
