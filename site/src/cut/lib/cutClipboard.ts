@@ -13,7 +13,7 @@
 import { clearCopiedFrame } from "./stageFrame";
 import { isLinkedAssetType } from "./types";
 import { reportSwallowed } from "./report";
-import { refFromAsset, selectionRefTokens } from "./assetRef";
+import { refFromAsset, selectionRefTokens, type AssetRef } from "./assetRef";
 import { trackEditorTool } from "./editorWork";
 import { clipboardItemAcross, clipboardItemAssetIds, type TimelineClipboardItem } from "./itemKinds";
 import type { LibraryData } from "./library";
@@ -31,6 +31,10 @@ export interface CutClipboardPayload {
   /** Every asset the items play — footage, sound, stickers, the fonts titles
    * are set in — or the copied cards themselves. */
   assets: StoredAsset[];
+  /** The copied cards as refs, exactly: a paste reads these ahead of the
+   * mention tokens in the text, which resolve by name and can land on a
+   * timeline clip that shares a Library file's name. */
+  refs?: AssetRef[];
 }
 
 const ATTR = "data-donkeycut";
@@ -70,7 +74,13 @@ export function payloadFromHtml(html: string | null | undefined): CutClipboardPa
   try {
     const p = JSON.parse(fromBase64(m[1])) as Partial<CutClipboardPayload>;
     if (p.v !== 1 || typeof p.projectId !== "string" || !Array.isArray(p.items) || !Array.isArray(p.assets)) return null;
-    return { v: 1, projectId: p.projectId, items: p.items, assets: p.assets };
+    return {
+      v: 1,
+      projectId: p.projectId,
+      items: p.items,
+      assets: p.assets,
+      ...(Array.isArray(p.refs) ? { refs: p.refs } : {}),
+    };
   } catch {
     return null;
   }
@@ -126,6 +136,45 @@ export function copyTimelineSelection(): boolean {
 const remapItems = (items: TimelineClipboardItem[], idMap: Map<string, string>): TimelineClipboardItem[] =>
   items.map((cb) => clipboardItemAcross(cb, (id) => idMap.get(id) ?? id));
 
+/** Bring a payload's assets into the open project from the project they were
+ * copied in. A copy already here is found by where it came from. */
+export async function landPayloadAssets(payload: CutClipboardPayload, projectId: string) {
+  if (payload.assets.length === 0) {
+    return [];
+  }
+  // The editor holds this project open until the copies have landed, the way
+  // it waits for a chat tool; a switch that beats the hold leaves the
+  // landing refused with the project it was for.
+  return trackEditorTool(async () => {
+    const ref = await openReference({ kind: "project", id: payload.projectId });
+    return landReferenceAssets(ref, payload.assets, projectId);
+  });
+}
+
+/** Ref scopes that name something inside one project. */
+const PROJECT_SCOPES: AssetRef["scope"][] = ["project", "clip", "entity"];
+
+/**
+ * The copied cards as refs in `projectId`. A card from another project comes
+ * across first and names its copy here; a timeline item from there names
+ * nothing here and drops out; a shelf or stock card names the same thing in
+ * every project.
+ */
+export async function payloadRefsIn(payload: CutClipboardPayload, projectId: string): Promise<AssetRef[]> {
+  const refs = payload.refs ?? [];
+  if (payload.projectId === projectId) {
+    return refs;
+  }
+  const landed = refs.some((r) => r.scope === "project") ? await landPayloadAssets(payload, projectId) : [];
+  return refs.flatMap((ref) => {
+    if (ref.scope === "project") {
+      const asset = landed.find((l) => l.sourceId === ref.id)?.asset;
+      return asset ? [refFromAsset(asset)] : [];
+    }
+    return PROJECT_SCOPES.includes(ref.scope) ? [] : [ref];
+  });
+}
+
 /**
  * Land a pasted payload in the open project at `at`. Same project: the items
  * go through the timeline clipboard, the way a copy made here pastes; a card
@@ -146,13 +195,7 @@ export async function pasteCutPayload(
     s.setClipboard(payload.items);
     return s.paste(at);
   }
-  // The editor holds this project open until the copies have landed, the way
-  // it waits for a chat tool; a switch that beats the hold leaves the
-  // landing refused with the project it was for.
-  const landed = payload.assets.length === 0 ? [] : await trackEditorTool(async () => {
-    const ref = await openReference({ kind: "project", id: payload.projectId });
-    return landReferenceAssets(ref, payload.assets, projectId);
-  });
+  const landed = await landPayloadAssets(payload, projectId);
   if (useEditor.getState().projectId !== projectId) return false;
   if (payload.items.length === 0) {
     let placed = false;

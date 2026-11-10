@@ -38,10 +38,13 @@ import {
 } from "@/cut/lib/assetDrag";
 import {
   draggingRef,
+  EMPTY_LIBRARY,
   refFromAsset,
   useAssetDrop,
   type AssetRef,
 } from "@/cut/lib/assetRef";
+import { mediaOfRef, mediaTypeOfRef } from "@/cut/lib/refPlace";
+import { reportSwallowed } from "@/cut/lib/report";
 import { RefDropZone } from "./RefDropZone";
 import { deleteExport, downloadProjectExport, exportFileUrl, revealExport } from "@/cut/lib/exportClient";
 import {
@@ -91,7 +94,6 @@ import { retryUpload } from "@/cut/lib/importQueue";
 import {
   forgetLinkedCopies,
   linkedAccept,
-  LUT_FILE_ICON,
 } from "@/cut/lib/linkedLibrary";
 import { downloadMedia, MEDIA_ACCEPT, revealMedia } from "@/cut/lib/media";
 import { useProxyJobs } from "@/cut/lib/mediaProxy";
@@ -108,7 +110,6 @@ import { useGenerate, type GenerateJob } from "@/cut/lib/generate";
 import { CAPTION_LIMIT, normalizeTags } from "@/cut/lib/publish";
 import { assetClipUses, useEditor } from "@/cut/lib/store";
 import { useEnvironment } from "@/cut/lib/environment";
-import { formatTime } from "@/cut/lib/time";
 import { useLocalPref } from "@/cut/lib/uiState";
 import type { MediaAsset, SidePanelTab } from "@/cut/lib/types";
 import { cn } from "@/lib/utils";
@@ -117,7 +118,8 @@ import { useRevealEffect } from "@/cut/lib/refReveal";
 import { reportSideTab } from "@/cut/lib/onboarding";
 import { usePanelRequestEffect } from "@/cut/lib/panelRequest";
 import { CopyNameLabel } from "./AssetRefs";
-import { AudioCardFace, AudioPanel } from "./AudioPanel";
+import { AudioPanel } from "./AudioPanel";
+import { AssetTileFace } from "./AssetTileFace";
 import { childrenOf, folderTrail, folderWithin, parentOf } from "@/cut/lib/folderTree";
 import {
   FolderCrumb,
@@ -254,7 +256,9 @@ export function SidePanel({
   // A project asset dropped on the Media tile — from a card or dragged
   // straight off the timeline — reveals it in the panel (clears its origin tag).
   const dropRefOnTab = (ref: AssetRef) => {
-    if (ref.scope !== "project") return;
+    if (ref.scope !== "project") {
+      return false;
+    }
     useEditor.getState().updateAsset(ref.id, { origin: undefined, chatId: undefined });
   };
   // Generations that finished while their tab was closed: a blue count rides
@@ -909,15 +913,35 @@ function ProjectFilesPanel({
   // The whole panel takes drops: OS files import into this project and stay off
   // the timeline, and a project asset made elsewhere (a generation, a
   // recording) dropped here moves into Media. It lights up for both.
+  const shelf = useLibrary().data ?? EMPTY_LIBRARY;
   const { active: dropActive, attachTarget, targetProps } = useAssetDrop(
     (ref) => {
-      // Filed straight into the open folder, so the drop lands where the eye is.
-      if (ref.scope === "project")
-        useEditor.getState().updateAsset(ref.id, {
-          origin: undefined,
-          chatId: undefined,
-          folderId: openFolder ?? undefined,
-        });
+      // Filed straight into the open folder, so the drop lands where the eye
+      // is. A file already in this folder has nothing to take, so a paste of
+      // it goes on to the timeline.
+      const s = useEditor.getState();
+      const into = { origin: undefined, chatId: undefined, folderId: openFolder ?? undefined };
+      if (ref.scope === "project") {
+        const a = s.assets.find((x) => x.id === ref.id);
+        if (!a || (a.origin == null && (a.folderId ?? null) === openFolder)) {
+          return false;
+        }
+        s.updateAsset(ref.id, into);
+        return;
+      }
+
+      // A pasted Library card or stock item copies into the project and files
+      // here, the way an upload does.
+      if (readOnly || !s.projectId || !mediaTypeOfRef(ref, shelf)) {
+        return false;
+      }
+      void mediaOfRef(ref, { projectId: s.projectId, library: shelf })
+        .then((asset) => {
+          if (asset) {
+            useEditor.getState().updateAsset(asset.id, into);
+          }
+        })
+        .catch((err) => reportSwallowed("[cut] paste into Project Files failed", err, ref.name));
     },
     readOnly
       ? undefined
@@ -1107,7 +1131,9 @@ function ProjectFilesPanel({
               onRefDrop={(ref, fid) => {
                 // Media made elsewhere — a generation, a recording, a timeline
                 // clip's asset — dropped on a folder tile joins Media filed there.
-                if (ref.scope !== "project") return;
+                if (ref.scope !== "project") {
+                  return false;
+                }
                 useEditor.getState().updateAsset(ref.id, {
                   origin: undefined,
                   chatId: undefined,
@@ -1136,7 +1162,10 @@ function ProjectFilesPanel({
                 onRename={(name) => useEditor.getState().renameTemplate(tpl.id, name)}
                 onDelete={() => useEditor.getState().removeTemplate(tpl.id)}
                 onRefDrop={(r) => {
-                  if (r.scope === "project") useEditor.getState().addAssetToTemplate(tpl.id, r.id);
+                  if (r.scope !== "project") {
+                    return false;
+                  }
+                  useEditor.getState().addAssetToTemplate(tpl.id, r.id);
                 }}
                 extraMenu={
                   <DropdownMenuItem onClick={() => void saveTemplate(projectId, tpl)}>
@@ -1541,41 +1570,7 @@ function AssetCard({
               (flash || selected) && PICKED_RING
             )}
           >
-            {asset.type === "video" ? (
-              // Native first frame as the poster — full-resolution, no blurry thumb.
-              seen && (
-                <video crossOrigin={MEDIA_CORS}
-                  ref={videoRef}
-                  src={`${asset.url}#t=0.1`}
-                  poster={asset.thumbs?.[0]}
-                  preload="metadata"
-                  muted
-                  loop
-                  playsInline
-                  className="size-full object-cover"
-                />
-              )
-            ) : asset.type === "image" ? (
-              // eslint-disable-next-line @next/next/no-img-element -- engine/static file, not Next-optimizable
-              <img crossOrigin={MEDIA_CORS} src={asset.url} alt={asset.name} loading="lazy" className="size-full object-cover" />
-            ) : asset.type === "lut" ? (
-              // eslint-disable-next-line @next/next/no-img-element -- static icon
-              <img src={LUT_FILE_ICON} alt={asset.name} className="size-full object-contain p-2" />
-            ) : (
-              <AudioCardFace
-                url={asset.url}
-                duration={asset.duration}
-                peaks={asset.peaks}
-              />
-            )}
-            {asset.type === "video" && (
-              <span
-                data-drag-omit
-                className="absolute right-1 bottom-1 rounded-[5px] bg-black/65 px-1 py-px font-mono text-[9.5px] text-white tabular-nums"
-              >
-                {formatTime(asset.duration)}
-              </span>
-            )}
+            <AssetTileFace asset={asset} videoRef={videoRef} seen={seen} />
             {sizeBytes != null && (
               <span
                 className={cn(
@@ -1836,9 +1831,13 @@ function LibraryPanel({ projectId, onImport }: {
   // the open folder), and project media dropped here is saved to it.
   const { active: dropActive, attachTarget, targetProps } = useAssetDrop(
     (ref) => {
-      if (ref.scope !== "project") return;
+      if (ref.scope !== "project") {
+        return false;
+      }
       const asset = useEditor.getState().assets.find((a) => a.id === ref.id);
-      if (!asset) return;
+      if (!asset) {
+        return false;
+      }
       void saveAssetToLibrary(projectId, asset)
         .then(() => void reload())
         .catch(() => {});
@@ -2028,10 +2027,16 @@ function LibraryPanel({ projectId, onImport }: {
                 // timeline clip): save it to the library, filed in that folder.
                 // The copy lands on the project's own shelf, so a folder on the
                 // other one can't take it.
-                if (ref.scope !== "project") return;
-                if (folders.find((f) => f.id === fid)?.residency !== activeResidency()) return;
+                if (ref.scope !== "project") {
+                  return false;
+                }
+                if (folders.find((f) => f.id === fid)?.residency !== activeResidency()) {
+                  return false;
+                }
                 const asset = useEditor.getState().assets.find((a) => a.id === ref.id);
-                if (!asset) return;
+                if (!asset) {
+                  return false;
+                }
                 void saveAssetToLibrary(projectId, asset)
                   .then((saved) => moveLibraryItem(saved.residency, saved.id, fid))
                   .then(() => void reload())
@@ -2058,9 +2063,13 @@ function LibraryPanel({ projectId, onImport }: {
                     onRename={(name) => void commitTemplateRename(tpl.residency, tpl.id, name)}
                     onDelete={() => void removeTemplate(tpl.residency, tpl.id)}
                     onRefDrop={(r) => {
-                      if (r.scope !== "project") return;
+                      if (r.scope !== "project") {
+                        return false;
+                      }
                       const asset = useEditor.getState().assets.find((a) => a.id === r.id);
-                      if (!asset) return;
+                      if (!asset) {
+                        return false;
+                      }
                       void addAssetToLibraryTemplate(projectId, tpl, asset)
                         .then((updated) =>
                           patch((d) => ({

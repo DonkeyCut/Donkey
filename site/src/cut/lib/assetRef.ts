@@ -363,9 +363,13 @@ export function clearRefDrag() {
 // ---------------------------------------------------------------------------
 // Drop zones — shared by HTML5 drags and pointer drags
 
+/** What a zone does with a ref: it takes it, or returns false when it has no
+ * use for it, so a paste over the zone goes on to the timeline. */
+export type RefTake = (ref: AssetRef) => void | false;
+
 interface RefZone {
   el: HTMLElement;
-  onDrop: (ref: AssetRef) => void;
+  onDrop: RefTake;
   /** Present when the zone also takes OS file drops (composer attachments). */
   onFiles?: (files: File[]) => void;
   setActive: (active: boolean) => void;
@@ -385,16 +389,38 @@ export function fileZoneAt(x: number, y: number): ((files: File[]) => void) | nu
   return null;
 }
 
+/** The drop zone a paste at the pointer lands in: what a drop there would
+ * reach, so ⌘V on a panel does what dropping the copied thing on it does —
+ * the chat attaches it, Project Files takes it in, the Library saves it. */
+export function pasteZoneAt(
+  x: number,
+  y: number
+): { onDrop: RefTake; onFiles?: (files: File[]) => void } | null {
+  const z = zoneAt(x, y);
+  return z ? { onDrop: z.onDrop, ...(z.onFiles ? { onFiles: z.onFiles } : {}) } : null;
+}
+
 function zoneAt(x: number, y: number): RefZone | null {
   const hit = document.elementFromPoint(x, y);
   if (!hit) return null;
-  for (const z of zones) if (z.el.contains(hit)) return z;
-  return null;
+  // The innermost zone takes it: a folder tile inside a panel files the ref
+  // into the folder.
+  let best: RefZone | null = null;
+  for (const z of zones) {
+    if (!z.el.contains(hit)) {
+      continue;
+    }
+    if (!best || best.el.contains(z.el)) {
+      best = z;
+    }
+  }
+  return best;
 }
 
 /** Drive a ref through a pointer drag (timeline clips). Call `move` from the
  * drag's onMove so zones under the pointer light up; call `drop` on release —
- * true means a zone took the ref and the source should cancel its own move. */
+ * true means a zone took the ref and the source should cancel its own move;
+ * a zone that declines it leaves the move to the source. */
 export function startPointerRefDrag(ref: AssetRef) {
   let x = -1;
   let y = -1;
@@ -408,9 +434,10 @@ export function startPointerRefDrag(ref: AssetRef) {
     drop(): boolean {
       for (const q of zones) q.setActive(false);
       const z = zoneAt(x, y);
-      if (!z) return false;
-      z.onDrop(ref);
-      return true;
+      if (!z) {
+        return false;
+      }
+      return z.onDrop(ref) !== false;
     },
   };
 }
@@ -421,7 +448,7 @@ export function startPointerRefDrag(ref: AssetRef) {
  * drag and the editor's window-level drop handler delivers the files here
  * (via `fileZoneAt`) instead of importing them onto the timeline. */
 export function useAssetDrop(
-  onDrop: (ref: AssetRef) => void,
+  onDrop: RefTake,
   onFiles?: (files: File[]) => void
 ): {
   active: boolean;

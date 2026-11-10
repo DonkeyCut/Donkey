@@ -48,10 +48,18 @@ interface Registry {
   x: number;
   y: number;
   installed: boolean;
+  /** Where the last click landed. A card clicked and left keeps answering
+   * ⌘C until the next click; a card dragged away never clicks, so the clip
+   * its drop selects copies as itself. A card re-registers as it re-renders,
+   * so the node is kept and resolved at the keystroke. */
+  pressed: Node | null;
+  /** The ⌘C handler of the module's latest evaluation. The listener installs
+   * once per page and calls through here, so a hot reload's copy code runs. */
+  onCopyKey?: (e: KeyboardEvent) => void;
 }
 
 const registry: Registry = ((globalThis as unknown as { __cutRefCopy?: Registry })
-  .__cutRefCopy ??= { sources: new Set<CopySource>(), x: -1, y: -1, installed: false });
+  .__cutRefCopy ??= { sources: new Set<CopySource>(), x: -1, y: -1, installed: false, pressed: null });
 
 const sources = registry.sources;
 
@@ -137,9 +145,9 @@ function hasTextSelection(): boolean {
  *
  * Text the user has picked out owns the keystroke. Failing that the pointer
  * answers: a card under the cursor is the deliberate pick even while the caret
- * sits in the chat composer. Focus answers last — a tile clicked a moment ago
+ * sits in the chat composer. Focus answers next — a tile clicked a moment ago
  * keeps focus long after the pointer has moved on — and a text field with the
- * caret in it keeps the native copy.
+ * caret in it keeps the native copy. The card clicked last answers last.
  */
 export function copyableRefs(): AssetRef[] {
   // Text the user picked out owns the keystroke, wherever it was picked.
@@ -148,7 +156,22 @@ export function copyableRefs(): AssetRef[] {
   const hovered = refsAt(under);
   if (hovered.length > 0) return hovered.map(withHandle);
   if (inTextField()) return [];
-  return refsAt(document.activeElement).map(withHandle);
+  const focused = refsAt(document.activeElement);
+  if (focused.length > 0) {
+    return focused.map(withHandle);
+  }
+
+  // The card clicked last, while it is still on screen: click a card, move
+  // off it, and ⌘C still copies it. A press anywhere else, the timeline
+  // included, hands ⌘C back.
+  const pressed = registry.pressed;
+  return pressed?.isConnected ? refsAt(pressed).map(withHandle) : [];
+}
+
+/** Where the pointer is, so a paste lands where a ⌘C would copy from; null
+ * before it has moved over the page. */
+export function pointerAt(): { x: number; y: number } | null {
+  return registry.x >= 0 ? { x: registry.x, y: registry.y } : null;
 }
 
 /** The clipboard text for a set of refs: their mention tokens, space-joined. */
@@ -162,11 +185,14 @@ export const refClipboardText = (refs: AssetRef[]) => refs.map(refToken).join(" 
 export function copyRefs(refs: AssetRef[]): boolean {
   if (refs.length === 0) return false;
   // A project asset's card carries the asset itself beside its token, so a
-  // paste in another project brings the media across.
+  // paste in another project brings the media across; every card carries
+  // its ref, so a paste lands on exactly what was copied.
   const s = useEditor.getState();
   const own = new Set(refs.filter((r) => r.scope === "project").map((r) => r.id));
   const assets = storedAssets(s.assets.filter((a) => own.has(a.id)));
-  const payload = s.projectId && assets.length > 0 ? { v: 1 as const, projectId: s.projectId, items: [], assets } : null;
+  const payload = s.projectId
+    ? { v: 1 as const, projectId: s.projectId, items: [], assets, refs: refs.map(withHandle) }
+    : null;
   void writeCutClipboard(refClipboardText(refs.map(withHandle)), payload).catch(() => {});
   // The newer copy owns the clipboard: the timeline's own copy and a copied
   // preview frame step aside, so ⌘V on the timeline lands what was copied.
@@ -190,18 +216,31 @@ function install() {
     },
     { capture: true, passive: true }
   );
+  window.addEventListener(
+    "click",
+    (e) => {
+      registry.pressed = e.target instanceof Node ? e.target : null;
+    },
+    { capture: true, passive: true }
+  );
   // A `copy` event fires only where the browser sees something to copy, so the
   // keystroke is what a bare card under the cursor answers to. Bubbling on the
   // document puts this ahead of the editor's own window-level ⌘C, which reads
   // `copyableRefs` and stands aside when a card answers.
-  document.addEventListener("keydown", (e) => {
-    if (!(e.metaKey || e.ctrlKey) || e.altKey || e.key.toLowerCase() !== "c") return;
-    const refs = copyableRefs();
-    if (refs.length === 0) return;
-    e.preventDefault();
-    copyRefs(refs);
-  });
+  document.addEventListener("keydown", (e) => registry.onCopyKey?.(e));
 }
+
+registry.onCopyKey = (e) => {
+  if (!(e.metaKey || e.ctrlKey) || e.altKey || e.key.toLowerCase() !== "c") {
+    return;
+  }
+  const refs = copyableRefs();
+  if (refs.length === 0) {
+    return;
+  }
+  e.preventDefault();
+  copyRefs(refs);
+};
 
 // The keystroke reaches surfaces that register nothing of their own — a panel
 // of effect tiles resolved off `data-pick-id` — so the listener goes on with

@@ -20,6 +20,8 @@ import {
 import { MEDIA_CORS } from "@/cut/lib/mediaCors";
 import { isCollectionRef, useRefFor, useRefCandidates } from "@/cut/lib/assetRef";
 import { refreshMentionSources } from "@/cut/lib/queries";
+import { payloadFromHtml, payloadRefsIn } from "@/cut/lib/cutClipboard";
+import { reportSwallowed } from "@/cut/lib/report";
 import { useInView } from "@/cut/hooks/useInView";
 import { revealRef } from "@/cut/lib/refReveal";
 import { formatTime } from "@/cut/lib/time";
@@ -1731,7 +1733,24 @@ export function MentionTextarea({
           if (!text) return;
           // A token copied off a tile the picker never lists — a file the
           // chat made — attaches the file it names, and the chip pills it.
-          if (onUpsertRef) {
+          // A copy made in Cut carries its cards exactly; each one pills as a
+          // chip, so its token resolves to that card ahead of any namesake.
+          // A copy from another project brings its files across first.
+          const payload = payloadFromHtml(e.clipboardData.getData("text/html"));
+          const projectId = useEditor.getState().projectId;
+          if (onUpsertRef && payload?.refs?.length && projectId) {
+            const upsert = onUpsertRef;
+            void payloadRefsIn(payload, projectId)
+              .then((refs) => {
+                if (useEditor.getState().projectId !== projectId) {
+                  return;
+                }
+                for (const ref of refs) {
+                  upsert(ref);
+                }
+              })
+              .catch((err) => reportSwallowed("[cut] paste from another project failed", err));
+          } else if (onUpsertRef) {
             const hidden = unlistedRefs(useEditor.getState().assets);
             for (const ref of parseMentions(text, [...pool, ...hidden]).refs) {
               if (!pool.some((c) => sameRef(c, ref))) onUpsertRef(ref);

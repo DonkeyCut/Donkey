@@ -5,11 +5,12 @@ import {
   pasteCutPayload,
   payloadAssets,
   payloadFromHtml,
+  payloadRefsIn,
   writeCutClipboard,
   type CutClipboardPayload,
 } from "./cutClipboard";
 import { richDoc } from "./fixtures/richDoc";
-import { EMPTY_LIBRARY } from "./assetRef";
+import { EMPTY_LIBRARY, refFromAsset, type AssetRef } from "./assetRef";
 import { setPlayhead } from "./playhead";
 import { setHostDocStore } from "./projectReference";
 import { storedAssets, useEditor, type TimelineClipboardItem } from "./store";
@@ -66,6 +67,12 @@ describe("the clipboard flavor", () => {
     expect(payloadFromHtml(null)).toBeNull();
   });
 
+  test("a card copy carries the cards themselves, so a paste lands on exactly what was copied", () => {
+    const refs = [{ scope: "library", id: "lib-1", kind: "video", name: "Intro", url: "/lib/intro.mp4" }] as unknown as AssetRef[];
+    const payload: CutClipboardPayload = { v: 1, projectId: "p1", items: [], assets: [], refs };
+    expect(payloadFromHtml(clipboardHtml("@Intro", payload))?.refs).toEqual(refs);
+  });
+
   test("a copy carries the media its items play: footage, sound, the sticker, the title's font", () => {
     const assets = payloadAssets(itemsOf(["c0", "a0", "s1", "t1", "q0"]), richAssets);
     expect(assets.map((a) => a.id).sort()).toEqual(["f0", "m0", "s0", "v0"]);
@@ -116,6 +123,24 @@ describe("pasting into another project", () => {
       multiSelection: [],
     });
     setPlayhead(2);
+  });
+
+  test("copied cards name their copies here; a shelf card stays, a timeline item drops out", async () => {
+    const footage = richAssets.find((a) => a.id === "v0")!;
+    const shelf: AssetRef = { scope: "library", id: "L1", name: "shelf", kind: "video", url: "" };
+    const clip: AssetRef = { scope: "clip", id: "c0", name: "c0", kind: "video", url: "" };
+    const payload: CutClipboardPayload = {
+      v: 1,
+      projectId: "rich",
+      items: [],
+      assets: [footage],
+      refs: [refFromAsset(footage), shelf, clip],
+    };
+
+    const refs = await payloadRefsIn(payload, "p2");
+    const landed = useEditor.getState().assets.find((a) => a.copiedFrom?.assetId === "v0")!;
+    expect(refs).toEqual([refFromAsset(landed), shelf]);
+    expect(await payloadRefsIn(payload, "rich")).toEqual(payload.refs!);
   });
 
   test("a read-only destination rejects paste before transferring media", async () => {

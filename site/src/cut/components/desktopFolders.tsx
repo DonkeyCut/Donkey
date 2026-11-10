@@ -485,7 +485,7 @@ export function FolderShelf<F extends DeskFolder>({
   onDropFiles?: (files: FileList, folderId: string) => void;
   /** When set, folder tiles also take media drops from cards and timeline
    * clips — filter by `ref.scope` and file the media into the folder. */
-  onRefDrop?: (ref: AssetRef, folderId: string) => void;
+  onRefDrop?: (ref: AssetRef, folderId: string) => void | false;
   creating?: boolean;
   onCreatingChange?: (creating: boolean) => void;
   /** Stacked full-width rows — glyph left, then name over an item-count

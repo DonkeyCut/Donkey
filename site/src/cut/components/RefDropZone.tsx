@@ -1,6 +1,6 @@
 "use client";
 
-import { useAssetDrop, type AssetRef } from "@/cut/lib/assetRef";
+import { useAssetDrop, type RefTake } from "@/cut/lib/assetRef";
 import { cn } from "@/lib/utils";
 
 /** Wrap any element to make it a media drop target for both transports: HTML5
@@ -12,7 +12,7 @@ export function RefDropZone({
   activeClassName,
   children,
 }: {
-  onRef: (ref: AssetRef) => void;
+  onRef: RefTake;
   className?: string;
   activeClassName?: string;
   children: React.ReactNode;

@@ -30,14 +30,22 @@ import { refreshProjectPreviews } from "@/cut/lib/exportClient";
 import { captureRenderSnapshot, renderDoc, type ExportDoc } from "@/cut/lib/renderSnapshot";
 import { projectOperation, type ProjectOperation } from "@/cut/lib/projectOperation";
 import { createPreviewQueue } from "@/cut/lib/previewQueue";
-import { EMPTY_LIBRARY, fileZoneAt, hasRefDrag, parseMentions, refCandidatesOf } from "@/cut/lib/assetRef";
-import { placeRefAtPlayhead } from "@/cut/lib/refPlace";
-import { copyTimelineSelection, pasteCutPayload, payloadFromHtml } from "@/cut/lib/cutClipboard";
+import {
+  EMPTY_LIBRARY,
+  fileZoneAt,
+  hasRefDrag,
+  parseMentions,
+  pasteZoneAt,
+  refCandidatesOf,
+} from "@/cut/lib/assetRef";
+import { copiedMedia, pasteItemOnto, pasteRefs, replaceOrPlace, replaceWithPasted } from "@/cut/lib/replaceFlow";
+import { selectedTarget, targetTakes } from "@/cut/lib/replaceItem";
+import { copyTimelineSelection, landPayloadAssets, pasteCutPayload, payloadFromHtml, payloadRefsIn } from "@/cut/lib/cutClipboard";
 import { useLibrary } from "@/cut/lib/queries";
-import { copyableRefs } from "@/cut/lib/refCopy";
+import { copyableRefs, pointerAt } from "@/cut/lib/refCopy";
 import { startUpload } from "@/cut/lib/importQueue";
 import { checkImportRoom } from "@/cut/lib/importRoom";
-import { enrichAsset, importFileToProject, isMediaFile, prepareImport } from "@/cut/lib/media";
+import { assetTypeOf, enrichAsset, importFileToProject, isMediaFile, prepareImport } from "@/cut/lib/media";
 import { isLinkedFile, uploadLinkedFile } from "@/cut/lib/linkedLibrary";
 import { copiedFrameFile, hasCopiedFrame } from "@/cut/lib/stageFrame";
 // Side-effect import: registers the brief-to-video resume subscription, so a
@@ -81,11 +89,13 @@ import { docFieldsEdited, projectDuration, serializeDoc, storedAssets, timelineH
 import { fileLandingAt } from "@/cut/lib/timelineDrop";
 import { landOnRow } from "@/cut/lib/laneTracks";
 import { playheadAt, previewAt, skimAt, stepFrame } from "@/cut/lib/playhead";
+import type { LibraryData } from "@/cut/lib/library";
 import type { MediaAsset } from "@/cut/lib/types";
 import { AiPanel } from "./AiPanel";
 import type { ChatStatus } from "./ChatStatusBadge";
 import { EmbeddedNewProject } from "./EmbeddedNewProject";
 import { ExportDialog } from "./ExportDialog";
+import { ReplaceDialog } from "./ReplaceDialog";
 import { StarterTour } from "./onboarding/StarterTour";
 import { Inspector, useHasInspector } from "./Inspector";
 import { Lightbox } from "./Lightbox";
@@ -109,6 +119,67 @@ const VIEWER_POLL_MAX_MS = 300_000;
  * cut, so a session spent flipping between tabs must not spend the render pool
  * on it. */
 const PROXY_MIN_GAP_MS = 60_000;
+
+/**
+ * Hand a paste to the panel under the pointer, the way a drop there lands: the
+ * chat attaches what was copied, Project Files takes it in, the Library saves
+ * it. True when the panel took it; false leaves it to the timeline.
+ */
+function pasteToZone(
+  files: File[],
+  data: DataTransfer | null,
+  ctx: { projectId: string | null; library: LibraryData }
+): boolean {
+  const p = pointerAt();
+  const zone = p ? pasteZoneAt(p.x, p.y) : null;
+  if (!zone || !ctx.projectId) {
+    return false;
+  }
+
+  // Files go to the panel's own intake, the one an OS drop on it uses.
+  if (files.length > 0) {
+    if (!zone.onFiles) {
+      return false;
+    }
+    zone.onFiles(files);
+    return true;
+  }
+
+  // Cards from another project carry their files: those come across first,
+  // then go to the panel. Timeline items from there name nothing here, so the
+  // timeline lands them.
+  const payload = payloadFromHtml(data?.getData("text/html"));
+  const projectId = ctx.projectId;
+  if (payload && payload.projectId !== projectId) {
+    if (payload.items.length > 0) {
+      return false;
+    }
+    void payloadRefsIn(payload, projectId)
+      .then((refs) => {
+        if (useEditor.getState().projectId !== projectId) {
+          return;
+        }
+        for (const ref of refs) {
+          zone.onDrop(ref);
+        }
+      })
+      .catch((err) => reportSwallowed("[cut] paste from another project failed", err));
+    return true;
+  }
+
+  // The copied cards themselves, or the mention tokens in the text. The panel
+  // takes the paste when it takes any of them.
+  const refs = payload?.refs?.length
+    ? payload.refs
+    : parseMentions(data?.getData("text/plain") ?? "", refCandidatesOf(useEditor.getState(), ctx.library)).refs;
+  let taken = false;
+  for (const ref of refs) {
+    if (zone.onDrop(ref) !== false) {
+      taken = true;
+    }
+  }
+  return taken;
+}
 
 export function Editor({
   projectId,
@@ -1048,6 +1119,10 @@ export function Editor({
       if (s.exportOpen || dialogOnTop()) return;
       if (isPasteTarget(e.target)) return;
       const at = Math.max(0, previewAt());
+      // One media item selected on the timeline: a single pasted file that
+      // fits takes its place, and the adjuster opens on it (see
+      // replaceWithPasted). Anything else lands under the indicator.
+      const target = selectedTarget(s);
       const pasted = Array.from(e.clipboardData?.files ?? []);
       // A font or a LUT is no media for the timeline: it goes on the shelf
       // and lights up in its menu, the way the Library panel takes a dropped
@@ -1061,6 +1136,13 @@ export function Editor({
           );
         }
       }
+      // The panel under the pointer goes first; the timeline takes the rest.
+      const loose = pasted.filter((f) => !isLinkedFile(f));
+      const zoneCtx = { projectId: s.projectId, library: libraryRef.current };
+      if ((pasted.length === 0 || loose.length > 0) && pasteToZone(loose, e.clipboardData, zoneCtx)) {
+        e.preventDefault();
+        return;
+      }
       const files = pasted.filter((f) => isMediaFile(f) && !isLinkedFile(f));
       if (files.length === 0) {
         if (linked.length > 0) return;
@@ -1070,7 +1152,50 @@ export function Editor({
         // from this same project falls through to its tokens below.
         const payload = payloadFromHtml(e.clipboardData?.getData("text/html"));
         const projectId = s.projectId;
-        if (payload && projectId && (payload.projectId !== projectId || payload.items.length > 0)) {
+        // One file copied in another project — a card, or a clip, sound
+        // clip or sticker off its timeline — onto a selected item that takes
+        // it: the file comes across, then replaces the item.
+        const media =
+          payload?.items.length === 0 && payload.assets.length === 1 && (payload.refs?.length ?? 1) === 1
+            ? { assetId: payload.assets[0].id, from: 0 }
+            : copiedMedia(payload?.items ?? []);
+        const source = media ? payload?.assets.find((a) => a.id === media.assetId) : undefined;
+        if (target && media && source && payload && projectId && payload.projectId !== projectId && targetTakes(target, source.type)) {
+          e.preventDefault();
+          void landPayloadAssets(payload, projectId)
+            .then(async (landed) => {
+              const asset = landed.find((l) => l.sourceId === media.assetId)?.asset;
+              if (!asset || useEditor.getState().projectId !== projectId) {
+                return;
+              }
+              // A card the item cannot take lands as its add action lands it;
+              // a timeline copy lands whole.
+              const ctx = { projectId, at, library: libraryRef.current };
+              if (payload.items.length === 0) {
+                await replaceOrPlace(target, asset, ctx, media.from);
+                return;
+              }
+              if (!replaceWithPasted(target, asset, media.from)) {
+                await pasteCutPayload(payload, ctx);
+              }
+            })
+            .catch((err) => reportSwallowed("[cut] paste from another project failed", err));
+          return;
+        }
+        // A clip, sound clip or sticker copied off this timeline, onto a
+        // selected item that takes its file: the file replaces the item where
+        // it stands. The tab's own copy answers when the system clipboard
+        // lost the Cut flavor.
+        const items = payload?.projectId === projectId ? payload.items : payload ? [] : s.copiedItems();
+        if (target && pasteItemOnto(target, items)) {
+          e.preventDefault();
+          return;
+        }
+        // A copy with items, or with media from another project, lands whole.
+        // Cards from the Library or stock carry no media of their own and
+        // land through their refs below.
+        const landsWhole = !!payload && (payload.items.length > 0 || payload.assets.length > 0);
+        if (payload && projectId && landsWhole && (payload.projectId !== projectId || payload.items.length > 0)) {
           e.preventDefault();
           void pasteCutPayload(payload, { projectId, at, library: libraryRef.current }).catch((err) =>
             reportSwallowed("[cut] paste from another project failed", err)
@@ -1087,21 +1212,40 @@ export function Editor({
         // lands it. Imports run behind the editor; a run lands in copy order.
         const library = libraryRef.current;
         const candidates = refCandidatesOf(s, library);
-        const refs = parseMentions(e.clipboardData?.getData("text/plain") ?? "", candidates).refs;
+        // The copied cards themselves when the copy came from Cut; the mention
+        // tokens in the text, resolved by name, when it came from anywhere else.
+        const refs = payload?.refs?.length
+          ? payload.refs
+          : parseMentions(e.clipboardData?.getData("text/plain") ?? "", candidates).refs;
         if (refs.length === 0 || !projectId) return;
         e.preventDefault();
-        void (async () => {
-          for (const ref of refs) {
-            try {
-              await placeRefAtPlayhead(ref, { projectId, library, at });
-            } catch (err) {
-              reportSwallowed("[cut] paste failed", err, ref.name);
-            }
-          }
-        })();
+        void pasteRefs(refs, { projectId, library, at }).catch((err) =>
+          reportSwallowed("[cut] paste failed", err)
+        );
         return;
       }
       e.preventDefault();
+      // One file onto a selected item: it imports into Project Files, then
+      // replaces the item.
+      if (target && files.length === 1 && targetTakes(target, assetTypeOf(files[0]))) {
+        void importFiles(files, {
+          mediaOnly: true,
+          onOutcome: (result) => {
+            const projectId = useEditor.getState().projectId;
+            if ("failed" in result || !projectId) {
+              return;
+            }
+            const asset = useEditor.getState().assets.find((a) => a.id === result.assetId);
+            if (!asset) {
+              return;
+            }
+            void replaceOrPlace(target, asset, { projectId, at, library: libraryRef.current }).catch((err) =>
+              reportSwallowed("[cut] paste failed", err, asset.name)
+            );
+          },
+        });
+        return;
+      }
       // The frame the preview copied went out to the system clipboard as a
       // PNG, so it comes back here as a file like any other. It is told apart
       // by its bytes and keeps its freeze origin and its name; any other file
@@ -1340,6 +1484,7 @@ export function Editor({
       )}
       {!viewer && !chatgpt && <StarterTour projectId={projectId} />}
       {exportOpen && <ExportDialog />}
+      {!viewer && <ReplaceDialog onImport={importFiles} />}
       {shareGone && (
         <div className="fixed top-14 left-1/2 z-50 max-w-[calc(100%-2rem)] -translate-x-1/2 rounded-full bg-foreground/90 px-3.5 py-1.5 text-center text-xs font-medium text-background shadow-lg">
           {t("shareGone")}
