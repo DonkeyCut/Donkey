@@ -11,7 +11,7 @@ RUN . /tmp/ffmpeg-release \
   && apt-get update \
   && apt-get install -y --no-install-recommends build-essential pkg-config nasm curl ca-certificates xz-utils \
        libx264-dev libx265-dev libvpx-dev libmp3lame-dev libopus-dev libdav1d-dev libass-dev libgnutls28-dev zlib1g-dev \
-  && curl -fsSL -o /tmp/ffmpeg.tar.xz "https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz" \
+  && curl -fsSL --retry 5 --retry-all-errors -o /tmp/ffmpeg.tar.xz "https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz" \
   && echo "${FFMPEG_SHA256}  /tmp/ffmpeg.tar.xz" | sha256sum -c - \
   && mkdir /tmp/ffmpeg && tar -xJf /tmp/ffmpeg.tar.xz -C /tmp/ffmpeg --strip-components=1 \
   && cd /tmp/ffmpeg \
