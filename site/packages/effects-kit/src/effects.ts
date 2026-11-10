@@ -2004,7 +2004,9 @@ function lightbarsFilterLines(
   });
   return [
     `[${inLabel}]split=3[lbo${tag}][lbg${tag}][lbs${tag}]`,
-    `[lbs${tag}]crop=iw:1:0:0,split=${runs.length}${runs.map((_, i) => `[lbs${i}${tag}]`).join("")}`,
+    // RGB before the one-row cut: crop rounds a 4:2:0 picture's rows to its
+    // chroma grid, and one row rounds to none.
+    `[lbs${tag}]format=${rgb},crop=iw:1:0:0,split=${runs.length}${runs.map((_, i) => `[lbs${i}${tag}]`).join("")}`,
     ...rows,
     ...adds,
     `[${sum}]scale=${width}:${height}:flags=neighbor[lbl${tag}]`,

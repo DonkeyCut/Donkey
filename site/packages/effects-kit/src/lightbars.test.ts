@@ -123,4 +123,16 @@ describe("the light bars in ffmpeg", () => {
       expect(diff / (W * 3)).toBeLessThan(6);
     }
   });
+
+  // A preview render failed with "Invalid too big or non positive size for
+  // width '640' or height '0'": crop rounds a one-row cut of a 4:2:0 picture
+  // down to the chroma grid, to no rows at all.
+  test("the bars render on a 4:2:0 chain", () => {
+    const chroma = { pixFmt: "yuv420p", overlay: ":format=yuv420" };
+    const lines = effectFilterLines("in", "out", "lightbars", 1, 0, DUR, W, H, "t", undefined, undefined, chroma)!;
+    const graph = `color=c=black:s=${W}x${H}:r=${FPS}:d=${DUR},format=yuv420p[in];${lines.join(";")}`;
+    const run = spawnSync(TEST_FFMPEG, ["-v", "error", "-filter_complex", graph, "-map", "[out]", "-f", "null", "-"]);
+    expect(run.stderr.toString()).toBe("");
+    expect(run.status).toBe(0);
+  });
 });
