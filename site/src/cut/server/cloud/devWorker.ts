@@ -1,13 +1,14 @@
 // Local dev has no container to wake, so the dev server runs the render worker
-// itself: the same bundle the container runs, under node (the R2 client's
-// streams break under bun), with the dev server's env. The worker exits after
-// a minute of empty queue, exactly as in the container, and the next wake
-// starts a fresh build of it — so a worker edit lands on the next job.
+// itself: the container's bundle built for development, so its calls back to
+// the hosted API reach this dev server, under node (the R2 client's streams
+// break under bun), with the dev server's env. The worker exits after a minute
+// of empty queue, exactly as in the container, and the next wake starts a
+// fresh build of it — so a worker edit lands on the next job.
 import { spawn, type ChildProcess } from "node:child_process";
 
 // Bundle first so the run picks up current source; `exec` hands the shell's
 // pid to node, so stopping the child stops the worker.
-const DEV_WORKER_COMMAND = "npm run --silent worker:build && exec node dist/cut-worker/main.js";
+const DEV_WORKER_COMMAND = "npm run --silent worker:build:dev && exec node dist/cut-worker-dev/main.js";
 
 // Next reloads server modules on edit; the handle lives on globalThis so a
 // reload doesn't start a second worker beside the running one.
