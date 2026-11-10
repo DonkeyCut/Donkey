@@ -383,7 +383,7 @@ function JobRow({ job, handle }: { job: GenerateJob; handle?: string }) {
             )}
             <button
               title={t("dismiss")}
-              className={cn(cardIconButton, "opacity-0 group-hover:opacity-100")}
+              className={cn(cardIconButton, "opacity-0 group-hover:opacity-100 pointer-coarse:opacity-100")}
               onClick={() => useGenerate.getState().dismiss(job.id)}
             >
               <X className="size-3.5" />
@@ -429,20 +429,20 @@ function JobRow({ job, handle }: { job: GenerateJob; handle?: string }) {
         />
       </button>
       <CopyHandlePill handle={handle} name={asset.name} />
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent px-2 py-1.5 opacity-0 transition-opacity group-hover:opacity-100">
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent px-2 py-1.5 opacity-0 transition-opacity group-hover:opacity-100 pointer-coarse:opacity-100">
         <span className="block truncate text-[11px] font-medium text-white">{job.prompt}</span>
       </div>
       <div className="absolute top-1 right-1 flex gap-1">
         <button
           title={t("addToTimeline")}
-          className="grid size-5 place-items-center rounded-full bg-primary text-primary-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:brightness-110"
+          className="grid size-5 place-items-center rounded-full bg-primary text-primary-foreground opacity-0 transition-opacity group-hover:opacity-100 pointer-coarse:opacity-100 hover:brightness-110"
           onClick={() => useEditor.getState().addAssetAtPlayhead(asset.id)}
         >
           <Plus className="size-3" />
         </button>
         <button
           title={t("expand")}
-          className="grid size-5 place-items-center rounded-full bg-black/45 text-white opacity-0 transition-opacity group-hover:opacity-100 hover:bg-black/65"
+          className="grid size-5 place-items-center rounded-full bg-black/45 text-white opacity-0 transition-opacity group-hover:opacity-100 pointer-coarse:opacity-100 hover:bg-black/65"
           onClick={() =>
             useLightbox.getState().open({
               kind: "video",
@@ -462,7 +462,7 @@ function JobRow({ job, handle }: { job: GenerateJob; handle?: string }) {
         <GeneratedAssetMenu
           asset={asset}
           projectId={job.projectId}
-          triggerClassName="grid size-5 place-items-center rounded-full bg-black/45 text-white opacity-0 transition-opacity group-hover:opacity-100 data-popup-open:opacity-100 hover:bg-black/65"
+          triggerClassName="grid size-5 place-items-center rounded-full bg-black/45 text-white opacity-0 transition-opacity group-hover:opacity-100 pointer-coarse:opacity-100 data-popup-open:opacity-100 hover:bg-black/65"
           before={
             <>
               <DropdownMenuItem onClick={() => useVideoGen.getState().openWith(job.prompt)}>

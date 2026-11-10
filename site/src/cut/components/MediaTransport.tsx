@@ -58,7 +58,7 @@ export function MediaTransport({
         variant === "overlay"
           ? [
               "absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/75 via-black/45 to-transparent px-4 pt-10 pb-3.5",
-              "opacity-0 transition-opacity duration-150 group-hover:opacity-100 focus-within:opacity-100",
+              "opacity-0 transition-opacity duration-150 group-hover:opacity-100 pointer-coarse:opacity-100 focus-within:opacity-100",
               (scrubbing || !playing) && "opacity-100",
             ]
           : "px-0.5",

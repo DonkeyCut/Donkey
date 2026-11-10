@@ -191,7 +191,7 @@ export function CopyHandlePill({
       title={t("copyReference")}
       aria-label={t("copyReferenceToken", { token })}
       className={cn(
-        "absolute top-1 left-1 max-w-[calc(100%-0.5rem)] rounded-[5px] opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100",
+        "absolute top-1 left-1 max-w-[calc(100%-0.5rem)] rounded-[5px] opacity-0 transition-opacity group-hover:opacity-100 pointer-coarse:opacity-100 focus-visible:opacity-100",
         className
       )}
       onClick={(e) => {

@@ -265,9 +265,9 @@ function StockTile({ item }: { item: StockVideo }) {
       </span>
       <RefHandlePill
         token={`@${item.id}`}
-        className="absolute bottom-1 left-1 opacity-0 transition-opacity group-hover:opacity-100"
+        className="absolute bottom-1 left-1 opacity-0 transition-opacity group-hover:opacity-100 pointer-coarse:opacity-100"
       />
-      <div className="absolute top-1 right-1 flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+      <div className="absolute top-1 right-1 flex gap-1 opacity-0 transition-opacity group-hover:opacity-100 pointer-coarse:opacity-100">
         <button
           title={t("expand")}
           className="grid size-5 place-items-center rounded-full bg-black/45 text-white hover:bg-black/65"

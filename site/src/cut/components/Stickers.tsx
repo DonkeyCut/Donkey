@@ -56,7 +56,7 @@ export function useProjectStickers(): {
 /** A hover button in the tile's top-right corner, as the generated-image tiles
  * wear them. */
 const ROUND_ACTION =
-  "grid size-5 place-items-center rounded-full bg-black/45 text-white opacity-0 transition-opacity group-hover:opacity-100 hover:bg-black/65";
+  "grid size-5 place-items-center rounded-full bg-black/45 text-white opacity-0 transition-opacity group-hover:opacity-100 pointer-coarse:opacity-100 hover:bg-black/65";
 
 /** One sticker: click picks it, the hover buttons act on it, and it drags into
  * any composer as a reference. The picking, the @tag and the drag are the same

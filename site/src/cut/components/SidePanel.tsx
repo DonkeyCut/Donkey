@@ -1288,7 +1288,7 @@ function ProjectFilesPanel({
                     </span>
                   </button>
                   )}
-                  <div className="flex shrink-0 items-center gap-0.5 pr-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+                  <div className="flex shrink-0 items-center gap-0.5 pr-0.5 opacity-0 transition-opacity group-hover:opacity-100 pointer-coarse:opacity-100">
                     {caps.revealInFinder ? (
                       <Button
                         variant="ghost"
@@ -1574,7 +1574,7 @@ function AssetCard({
             {sizeBytes != null && (
               <span
                 className={cn(
-                  "absolute font-mono tabular-nums opacity-0 transition-opacity group-hover:opacity-100",
+                  "absolute font-mono tabular-nums opacity-0 transition-opacity group-hover:opacity-100 pointer-coarse:opacity-100",
                   asset.type === "audio"
                     ? // Clear of the play circle, matching the face's duration pill.
                       "bottom-3 left-12 rounded-md bg-[#2b4e42] px-1.5 py-0.5 text-[10px] text-[#d6eddf]"

@@ -235,7 +235,7 @@ export function LibraryImportCard({
                     className={cn(
                       "absolute top-1.5 right-1.5 grid size-6 place-items-center rounded-full text-white transition-opacity",
                       font ? "bg-white/10" : "bg-black/40",
-                      use && "group-hover:opacity-0",
+                      use && "group-hover:opacity-0 pointer-coarse:opacity-0",
                     )}
                   />
                 }

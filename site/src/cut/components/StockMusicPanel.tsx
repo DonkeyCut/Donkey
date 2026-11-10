@@ -161,7 +161,7 @@ function SampleCard({
             e.stopPropagation();
             onAdd();
           }}
-          className="absolute top-1.5 right-1.5 grid size-6 place-items-center rounded-full bg-foreground text-background opacity-0 shadow-sm transition-opacity group-hover:opacity-100 hover:brightness-110"
+          className="absolute top-1.5 right-1.5 grid size-6 place-items-center rounded-full bg-foreground text-background opacity-0 shadow-sm transition-opacity group-hover:opacity-100 pointer-coarse:opacity-100 hover:brightness-110"
         >
           <Plus className="size-3" />
         </button>

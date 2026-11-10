@@ -55,7 +55,7 @@ export function CardActionsMenu({
       <DropdownMenuTrigger
         aria-label={label ?? t("moreActions")}
         className={cn(
-          "grid size-6 place-items-center rounded-full text-white opacity-0 transition-opacity group-hover:opacity-100 data-[state=open]:opacity-100",
+          "grid size-6 place-items-center rounded-full text-white opacity-0 transition-opacity group-hover:opacity-100 pointer-coarse:opacity-100 data-[state=open]:opacity-100",
           sheet ? "bg-white/10 hover:bg-white/20" : "bg-black/40 hover:bg-black/60",
           className,
         )}

@@ -260,6 +260,10 @@ const sliderToZoom = (pos: number, min: number) => min * (ZOOM_MAX / min) ** (po
 const SELECTED_SHADOW =
   "z-10 shadow-[0_0_0_2px_#0a84ff,0_2px_11px_rgba(10,132,255,0.6)]";
 
+// A touch screen never hovers, so a bar's hover controls show on the selected
+// bar there: tap a clip and its menu, hide and mute chips come up.
+const TOUCH_SHOWN = "pointer-coarse:group-data-selected:opacity-100";
+
 /**
  * Element bars carry their family's color: text purple, elements (shapes and
  * stickers) magenta, effects teal — the three places they come from, so a row
@@ -335,7 +339,7 @@ const FAMILY_STYLE: Record<
 const TRIM_W = 10;
 
 const trimBase =
-  "tl-trim absolute z-3 w-[10px] cursor-ew-resize after:absolute after:left-[3px] after:w-1 after:rounded-full after:bg-white after:opacity-0 after:shadow-[0_0_0_1px_rgba(0,0,0,0.35)] after:transition-opacity group-hover:after:opacity-90 hover:after:opacity-100";
+  "tl-trim absolute z-3 w-[10px] cursor-ew-resize after:absolute after:left-[3px] after:w-1 after:rounded-full after:bg-white after:opacity-0 after:shadow-[0_0_0_1px_rgba(0,0,0,0.35)] after:transition-opacity group-hover:after:opacity-90 hover:after:opacity-100 pointer-coarse:group-data-selected:after:opacity-90";
 
 const trimHandle = cn(
   trimBase,
@@ -2641,6 +2645,7 @@ export function Timeline() {
                       height: TEXT_H - 6,
                     }}
                     data-tl-sel={`transition:${x.t.id}`}
+                    data-selected={selKeys.has(`transition:${x.t.id}`) || undefined}
                     onPointerDown={(e) => moveTransition(e, x)}
                     onContextMenu={(e) => {
                       e.preventDefault();
@@ -3974,6 +3979,7 @@ function ClipView({
       }}
       ref={boxRef}
       data-tl-sel={`clip:${clip.id}`}
+      data-selected={selected || undefined}
       onPointerDown={(e) => {
         // The grid sits on the source, so a muted clip takes a beat the same
         // as a playing one — the same test the Beats row and the snapping use.
@@ -4379,7 +4385,7 @@ function ClipMenu({
         render={
           <button
             aria-label={tr("options")}
-            className="tl-clip-menu absolute top-1 right-2 z-4 grid size-[18px] place-items-center rounded-[5px] bg-black/55 text-white opacity-0 transition-opacity group-hover:opacity-100 hover:bg-black/75"
+            className={cn("tl-clip-menu absolute top-1 right-2 z-4 grid size-[18px] place-items-center rounded-[5px] bg-black/55 text-white opacity-0 transition-opacity group-hover:opacity-100 hover:bg-black/75", TOUCH_SHOWN)}
             onPointerDown={(e) => e.stopPropagation()}
           />
         }
@@ -5090,7 +5096,7 @@ function HideChip({
       className={cn(
         "tl-hide-chip absolute z-4 grid place-items-center rounded-[5px] bg-black/55 text-white transition-opacity hover:bg-black/75",
         small ? "size-[13px]" : "size-[18px]",
-        hidden ? "opacity-100" : "opacity-0 group-hover:opacity-100",
+        hidden ? "opacity-100" : cn("opacity-0 group-hover:opacity-100", TOUCH_SHOWN),
         className
       )}
       onPointerDown={(e) => e.stopPropagation()}
@@ -5149,7 +5155,7 @@ function MuteChip({
       aria-label={muted ? tr("unmute") : tr("mute")}
       className={cn(
         "tl-mute-chip absolute z-4 grid size-[18px] place-items-center rounded-[5px] bg-black/55 text-white transition-opacity hover:bg-black/75",
-        muted ? "opacity-100 bg-black/70" : "opacity-0 group-hover:opacity-100",
+        muted ? "opacity-100 bg-black/70" : cn("opacity-0 group-hover:opacity-100", TOUCH_SHOWN),
         className
       )}
       onPointerDown={(e) => e.stopPropagation()}
@@ -5526,6 +5532,7 @@ function AudioView({
         zIndex: drag || rowMove === "lift" ? 20 : undefined,
       }}
       data-tl-sel={`audio:${clip.id}`}
+      data-selected={selected || undefined}
       onPointerDown={(e) => {
         if (e.altKey && !assetIsSilent(asset)) {
           addBeatAt(e, asset, clip, pps);
@@ -5707,7 +5714,7 @@ function FadeGrip({
           className={cn(
             "absolute top-px left-1/2 size-[7px] -translate-x-1/2 rounded-full bg-white shadow-[0_0_0_1px_rgba(0,0,0,0.45)] transition-opacity",
             // A set fade keeps its grip in view; an unset one only hints on hover.
-            fade > 0 ? "opacity-90" : "opacity-0 group-hover:opacity-70",
+            fade > 0 ? "opacity-90" : "opacity-0 group-hover:opacity-70 pointer-coarse:group-data-selected:opacity-70",
             live && "opacity-100"
           )}
         />
@@ -5958,6 +5965,7 @@ function TextBar({
         zIndex: drag || rowMove === "lift" ? 20 : undefined,
       }}
       data-tl-sel={`overlay:${o.id}`}
+      data-selected={selected || undefined}
       onPointerDown={(e) => startLaneMove(e, "overlay", o.id, ui)}
       onContextMenu={(e) => {
         e.preventDefault();
@@ -6051,6 +6059,7 @@ function SubBar({
       }}
       title={cue.text}
       data-tl-sel={`cue:${cue.id}`}
+      data-selected={selected || undefined}
       onPointerDown={(e) => startLaneMove(e, "cue", cue.id, ui)}
     >
       <span className="pointer-events-none truncate px-1.5 text-[9.5px] font-medium text-amber-950/90">

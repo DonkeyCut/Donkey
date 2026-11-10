@@ -377,7 +377,7 @@ function ShotTile({
             }}
             className={cn(
               scrimIconButton,
-              "absolute top-1 right-1 opacity-0 transition-opacity group-hover/tile:opacity-100"
+              "absolute top-1 right-1 opacity-0 transition-opacity group-hover/tile:opacity-100 pointer-coarse:opacity-100"
             )}
           >
             <RotateCw className="size-3" />
@@ -503,7 +503,7 @@ function FeedEntry({
             title={t("expand")}
             className={cn(
               scrimIconButton,
-              "absolute top-1 right-1 opacity-0 transition-opacity group-hover/tile:opacity-100"
+              "absolute top-1 right-1 opacity-0 transition-opacity group-hover/tile:opacity-100 pointer-coarse:opacity-100"
             )}
             onClick={(e) => {
               e.stopPropagation();

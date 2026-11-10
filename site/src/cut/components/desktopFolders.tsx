@@ -667,7 +667,7 @@ export function FolderShelf<F extends DeskFolder>({
                   size="icon-sm"
                   aria-label={t("options")}
                   className={cn(
-                    "size-6 opacity-0 group-hover/f:opacity-100 data-[state=open]:opacity-100",
+                    "size-6 opacity-0 group-hover/f:opacity-100 pointer-coarse:opacity-100 data-[state=open]:opacity-100",
                     rows
                       ? "shrink-0 text-muted-foreground hover:text-foreground"
                       : "absolute top-1 right-1 bg-black/25 text-white hover:bg-black/40 hover:text-white"

@@ -448,14 +448,14 @@ function LabelPicker({
                 />
               </button>
               <button
-                className="hidden shrink-0 cursor-pointer rounded p-1 text-muted-foreground group-hover:block hover:text-foreground"
+                className="hidden shrink-0 cursor-pointer rounded p-1 text-muted-foreground group-hover:block pointer-coarse:block hover:text-foreground"
                 aria-label={t("renameLabel", { name: l.name })}
                 onClick={() => setRenaming({ id: l.id, name: l.name })}
               >
                 <Pencil className="size-3.5" />
               </button>
               <button
-                className="hidden shrink-0 cursor-pointer rounded p-1 pr-2 text-muted-foreground group-hover:block hover:text-destructive"
+                className="hidden shrink-0 cursor-pointer rounded p-1 pr-2 text-muted-foreground group-hover:block pointer-coarse:block hover:text-destructive"
                 aria-label={t("deleteLabel", { name: l.name })}
                 onClick={() => onDelete(l.id)}
               >

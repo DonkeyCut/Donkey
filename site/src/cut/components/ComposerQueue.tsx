@@ -287,7 +287,7 @@ export function ComposerQueue({
                     )}
                   </div>
                   {!isEditing && !locked && !gone && (
-                    <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100 motion-reduce:transition-none">
+                    <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100 pointer-coarse:opacity-100 motion-reduce:transition-none">
                       {shown === "spawned" ? (
                         <button
                           type="button"

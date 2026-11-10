@@ -289,13 +289,13 @@ function GeneratedTile({
         />
       </button>
       <CopyHandlePill handle={handle} name={asset.name} />
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent px-2 py-1.5 opacity-0 transition-opacity group-hover:opacity-100">
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent px-2 py-1.5 opacity-0 transition-opacity group-hover:opacity-100 pointer-coarse:opacity-100">
         <span className="block truncate text-[11px] font-medium text-white">{asset.name}</span>
       </div>
       <div className="absolute top-1 right-1 flex gap-1">
         <button
           title={t("expand")}
-          className="grid size-5 place-items-center rounded-full bg-black/45 text-white opacity-0 transition-opacity group-hover:opacity-100 hover:bg-black/65"
+          className="grid size-5 place-items-center rounded-full bg-black/45 text-white opacity-0 transition-opacity group-hover:opacity-100 pointer-coarse:opacity-100 hover:bg-black/65"
           onClick={() =>
             useLightbox.getState().open({
               kind: "image",
@@ -311,7 +311,7 @@ function GeneratedTile({
         <GeneratedAssetMenu
           asset={asset}
           projectId={projectId}
-          triggerClassName="grid size-5 place-items-center rounded-full bg-black/45 text-white opacity-0 transition-opacity group-hover:opacity-100 data-popup-open:opacity-100 hover:bg-black/65"
+          triggerClassName="grid size-5 place-items-center rounded-full bg-black/45 text-white opacity-0 transition-opacity group-hover:opacity-100 pointer-coarse:opacity-100 data-popup-open:opacity-100 hover:bg-black/65"
           before={
             <>
               <DropdownMenuItem onClick={() => useImageGen.getState().openWith(asset.name)}>
@@ -374,7 +374,7 @@ function ImageJobRow({ job }: { job: GenerateJob }) {
       {job.status === "error" && (
         <button
           title={t("dismiss")}
-          className={cn(cardIconButton, "opacity-0 group-hover:opacity-100")}
+          className={cn(cardIconButton, "opacity-0 group-hover:opacity-100 pointer-coarse:opacity-100")}
           onClick={() => useGenerate.getState().dismiss(job.id)}
         >
           <X className="size-3.5" />

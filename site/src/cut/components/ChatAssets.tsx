@@ -307,10 +307,10 @@ function MediaCard({ item, asset }: ChatCardProps) {
           {formatTime(ref.duration)}
         </span>
       )}
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent px-2 pt-4 pb-1.5 opacity-0 transition-opacity group-hover/card:opacity-100">
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent px-2 pt-4 pb-1.5 opacity-0 transition-opacity group-hover/card:opacity-100 pointer-coarse:opacity-100">
         <span className="block truncate text-[10.5px] font-medium text-white">{ref.name}</span>
       </div>
-      <div className="absolute top-1 right-1 flex gap-1 opacity-0 transition-opacity group-hover/card:opacity-100 has-data-popup-open:opacity-100">
+      <div className="absolute top-1 right-1 flex gap-1 opacity-0 transition-opacity group-hover/card:opacity-100 pointer-coarse:opacity-100 has-data-popup-open:opacity-100">
         <button title={t("expand")} className={scrimButton} onClick={() => expandRef(item, asset)}>
           <Maximize2 className="size-3" />
         </button>
@@ -389,7 +389,7 @@ function DocCard({ item, asset }: ChatCardProps) {
         <span className="min-w-0 flex-1 truncate text-[11px] font-medium">{item.name}</span>
         <button
           title={t("expand")}
-          className={cn(scrimButton, "opacity-0 transition-opacity group-hover/card:opacity-100")}
+          className={cn(scrimButton, "opacity-0 transition-opacity group-hover/card:opacity-100 pointer-coarse:opacity-100")}
           onClick={() => expandRef(item, asset)}
         >
           <Maximize2 className="size-3" />

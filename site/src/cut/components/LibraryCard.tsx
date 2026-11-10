@@ -495,7 +495,7 @@ export function LibraryCard({
                   "absolute top-2 right-2 transition-opacity",
                   offline ? "text-muted-foreground" : "text-white/85",
                   // The actions menu takes this corner on hover.
-                  "group-hover:opacity-0",
+                  "group-hover:opacity-0 pointer-coarse:opacity-0",
                 )}
               />
             )}

@@ -763,7 +763,7 @@ function PresetTile({
           <button
             type="button"
             aria-label={t("deleteNamed", { name: label })}
-            className="absolute top-2 right-2 grid size-6 place-items-center rounded-full bg-black/55 text-white opacity-0 transition-opacity group-hover:opacity-100 hover:bg-black/75"
+            className="absolute top-2 right-2 grid size-6 place-items-center rounded-full bg-black/55 text-white opacity-0 transition-opacity group-hover:opacity-100 pointer-coarse:opacity-100 hover:bg-black/75"
             onClick={onRemove}
           >
             <Trash2 className="size-3" />

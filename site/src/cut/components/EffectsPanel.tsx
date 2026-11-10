@@ -430,7 +430,7 @@ function SoundCard({
           onClick={onTogglePlay}
           className={cn(
             "absolute top-1.5 left-1.5 grid size-6 place-items-center rounded-full bg-background text-foreground shadow-sm ring-1 ring-border transition-opacity hover:scale-105 focus-visible:opacity-100",
-            playing ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+            playing ? "opacity-100" : "opacity-0 group-hover:opacity-100 pointer-coarse:opacity-100"
           )}
         >
           {playing ? <Pause className="size-3" /> : <Play className="size-3 translate-x-px" />}
@@ -676,7 +676,7 @@ function SfxCard({ sound, fullName = false }: { sound: StockSfx; fullName?: bool
       onTogglePlay={() => usePreviewAudio.getState().toggle(sound.file)}
       trailing={
         // The add button lands on the length while the card is hovered.
-        <span className="shrink-0 font-mono text-[9px] text-muted-foreground tabular-nums transition-opacity group-hover:opacity-0">
+        <span className="shrink-0 font-mono text-[9px] text-muted-foreground tabular-nums transition-opacity group-hover:opacity-0 pointer-coarse:opacity-0">
           {sound.duration.toFixed(1)}s
         </span>
       }
@@ -686,7 +686,7 @@ function SfxCard({ sound, fullName = false }: { sound: StockSfx; fullName?: bool
             type="button"
             aria-label={t("addAtPlayhead", { name: label })}
             onClick={add}
-            className="absolute right-1.5 bottom-1.5 grid size-6 place-items-center rounded-full bg-background text-foreground opacity-0 shadow-sm ring-1 ring-border transition-opacity group-hover:opacity-100 hover:scale-105"
+            className="absolute right-1.5 bottom-1.5 grid size-6 place-items-center rounded-full bg-background text-foreground opacity-0 shadow-sm ring-1 ring-border transition-opacity group-hover:opacity-100 pointer-coarse:opacity-100 hover:scale-105"
           >
             <Plus className="size-3" />
           </button>
@@ -699,7 +699,7 @@ function SfxCard({ sound, fullName = false }: { sound: StockSfx; fullName?: bool
             onClick={() => useSoundFavorites.getState().toggle(sound.id)}
             className={cn(
               "absolute top-1.5 right-1.5 grid size-6 place-items-center rounded-full bg-background text-foreground shadow-sm ring-1 ring-border transition-opacity hover:scale-105",
-              starred ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+              starred ? "opacity-100" : "opacity-0 group-hover:opacity-100 pointer-coarse:opacity-100"
             )}
           >
             <Star className={cn("size-3", starred && "fill-yellow-400 text-yellow-400")} />
