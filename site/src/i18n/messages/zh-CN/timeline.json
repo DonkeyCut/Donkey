@@ -14,7 +14,8 @@
     "show": "显示",
     "hide": "隐藏",
     "captureFrame": "截取帧",
-    "copyFrame": "复制帧"
+    "copyFrame": "复制帧",
+    "replace": "替换…"
   },
   "toolbar": {
     "text": "文本",
@@ -65,7 +66,9 @@
     "fadeIn": "拖动以设置淡入",
     "fadeOut": "拖动以设置淡出",
     "key": "拖动以变速，按 Delete 删除",
-    "sticker": "贴纸"
+    "sticker": "贴纸",
+    "replace": "替换…",
+    "adjust": "调整…"
   },
   "picker": {
     "label": "时间线",
@@ -203,5 +206,18 @@
         "hint": "加速与慢动作交替"
       }
     }
+  },
+  "replace": {
+    "title": "替换",
+    "adjustTitle": "调整",
+    "apply": "应用",
+    "upload": "上传",
+    "uploadMedia": "上传媒体",
+    "empty": "项目文件中暂无适合此处的内容。",
+    "libraryEmpty": "你的素材库中暂无适合此处的内容。",
+    "window": "播放部分",
+    "seconds": "{n}s",
+    "back": "返回",
+    "confirm": "替换"
   }
 }

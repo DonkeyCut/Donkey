@@ -8,13 +8,16 @@ export function SubTabs<T extends string>({
   tabs,
   value,
   onChange,
+  className,
 }: {
   tabs: readonly { id: T; label: string }[];
   value: T;
   onChange: (v: T) => void;
+  /** Size and placement where the toggle sits outside a side panel. */
+  className?: string;
 }) {
   return (
-    <div className="flex w-full rounded-lg bg-muted p-0.5 text-[11.5px]">
+    <div className={cn("flex w-full rounded-lg bg-muted p-0.5 text-[11.5px]", className)}>
       {tabs.map((t) => (
         <button
           key={t.id}

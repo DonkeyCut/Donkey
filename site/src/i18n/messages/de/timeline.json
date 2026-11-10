@@ -14,7 +14,8 @@
     "show": "Einblenden",
     "hide": "Ausblenden",
     "captureFrame": "Frame aufnehmen",
-    "copyFrame": "Frame kopieren"
+    "copyFrame": "Frame kopieren",
+    "replace": "Ersetzen…"
   },
   "toolbar": {
     "text": "Text",
@@ -65,7 +66,9 @@
     "fadeIn": "Ziehen, um Einblendung einzustellen",
     "fadeOut": "Ziehen, um Ausblendung einzustellen",
     "key": "Ziehen zum Ändern des Timings, Delete zum Entfernen",
-    "sticker": "Sticker"
+    "sticker": "Sticker",
+    "replace": "Ersetzen…",
+    "adjust": "Anpassen…"
   },
   "picker": {
     "label": "Timeline",
@@ -203,5 +206,18 @@
         "hint": "abwechselnd schnelle und langsame Phasen"
       }
     }
+  },
+  "replace": {
+    "title": "Ersetzen",
+    "adjustTitle": "Anpassen",
+    "apply": "Anwenden",
+    "upload": "Hochladen",
+    "uploadMedia": "Medien hochladen",
+    "empty": "In den Projektdateien passt noch nichts hierher.",
+    "libraryEmpty": "In deiner Mediathek passt noch nichts hierher.",
+    "window": "Abzuspielender Teil",
+    "seconds": "{n}s",
+    "back": "Zurück",
+    "confirm": "Ersetzen"
   }
 }

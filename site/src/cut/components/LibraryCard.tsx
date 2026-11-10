@@ -65,7 +65,7 @@ export function libraryTileBox(
       // it goes dark. The frame is the page's border, clear of the tile's fill.
       "light relative max-w-full overflow-hidden rounded-xl border bg-clip-padding shadow-sm",
       type === "lut" ? "bg-background" : "bg-muted",
-      !area && (font ? "aspect-[16/7]" : "aspect-square"),
+      !area && "aspect-square",
       // The sheet is the card, so nothing is drawn around it; the type
       // scales with the tile, which runs from a panel column to a full row.
       font && "@container flex flex-col",
@@ -119,14 +119,16 @@ export function LibraryFontFace({
       <div className="grid min-h-0 flex-1 place-items-center px-3 pt-3 @[220px]:px-5 @[220px]:pt-5">
         {specimen}
       </div>
-      <div className="mx-3 flex items-center justify-between gap-2 border-t border-white/10 py-2 @[220px]:mx-5 @[220px]:py-3">
+      {/* A narrow sheet stacks the name over the file facts, so the name
+          keeps the full width; a wide one sets them side by side. */}
+      <div className="mx-3 flex flex-col items-start gap-0.5 border-t border-white/10 py-2 @[220px]:mx-5 @[220px]:flex-row @[220px]:items-center @[220px]:justify-between @[220px]:gap-2 @[220px]:py-3">
         {nameEdit ?? (
           <CopyNameLabel
             name={name}
             label={label}
             dark
             mention={false}
-            className="min-w-0 text-[11px] font-medium @[220px]:text-[13px]"
+            className="max-w-full min-w-0 text-[11px] font-medium @[220px]:text-[13px]"
           />
         )}
         {meta && !nameEdit && (

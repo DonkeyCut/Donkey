@@ -14,7 +14,8 @@
     "show": "Mostrar",
     "hide": "Ocultar",
     "captureFrame": "Capturar quadro",
-    "copyFrame": "Copiar quadro"
+    "copyFrame": "Copiar quadro",
+    "replace": "Substituir…"
   },
   "toolbar": {
     "text": "Texto",
@@ -65,7 +66,9 @@
     "fadeIn": "Arraste para definir o fade in",
     "fadeOut": "Arraste para definir o fade out",
     "key": "Arraste para ajustar o tempo, Delete para remover",
-    "sticker": "Figurinha"
+    "sticker": "Figurinha",
+    "replace": "Substituir…",
+    "adjust": "Ajustar…"
   },
   "picker": {
     "label": "Linha do tempo",
@@ -203,5 +206,18 @@
         "hint": "alternância entre picos rápidos e momentos lentos"
       }
     }
+  },
+  "replace": {
+    "title": "Substituir",
+    "adjustTitle": "Ajustar",
+    "apply": "Aplicar",
+    "upload": "Fazer upload",
+    "uploadMedia": "Fazer upload de mídia",
+    "empty": "Nada nos Arquivos do projeto cabe aqui ainda.",
+    "libraryEmpty": "Nada na sua Biblioteca cabe aqui ainda.",
+    "window": "Trecho a reproduzir",
+    "seconds": "{n}s",
+    "back": "Voltar",
+    "confirm": "Substituir"
   }
 }

@@ -20,7 +20,7 @@ import { isLottieAsset } from "./lottieAssets";
 import { importImage, importStockAudio, importStockVideo } from "./media";
 import { useEditor } from "./store";
 import { landTransitionAt } from "./timelineDrop";
-import type { MediaAsset, ShapeKind, TransitionStyle } from "./types";
+import type { AssetType, MediaAsset, ShapeKind, TransitionStyle } from "./types";
 import type { EffectId } from "@donkeycut/effects-kit";
 
 /** A project asset lands as the tile's + button lands it: a sticker as a
@@ -34,6 +34,63 @@ function placeAsset(asset: MediaAsset, at: number): void {
     return;
   }
   s.addAssetAtPlayhead(asset.id, at);
+}
+
+/** The kind of media a ref stands for, read off the ref and the shelf
+ * listing without importing anything. Null for what is no file: a timeline
+ * entity, a catalog pick, a font or a LUT. */
+export function mediaTypeOfRef(ref: AssetRef, library: LibraryData): AssetType | null {
+  switch (ref.scope) {
+    case "project": {
+      const type = useEditor.getState().assets.find((a) => a.id === ref.id)?.type;
+      return type && !isLinkedAssetType(type) ? type : null;
+    }
+    case "library": {
+      const type = library.assets.find((a) => a.id === ref.id)?.type;
+      return type && !isLinkedAssetType(type) ? type : null;
+    }
+    case "stock":
+      return ref.kind === "audio" || ref.kind === "video" || ref.kind === "image" ? ref.kind : null;
+    default:
+      return null;
+  }
+}
+
+/** The project file a media ref stands for: a project asset as it is, a
+ * library or stock file copied into the project first. Null when the ref
+ * names no file. */
+export async function mediaOfRef(
+  ref: AssetRef,
+  ctx: { projectId: string; library: LibraryData }
+): Promise<MediaAsset | null> {
+  const { projectId, library } = ctx;
+  switch (ref.scope) {
+    case "project":
+      return useEditor.getState().assets.find((a) => a.id === ref.id) ?? null;
+    case "library": {
+      const lib = library.assets.find((a) => a.id === ref.id);
+      if (!lib || isLinkedAssetType(lib.type)) {
+        return null;
+      }
+      return importLibraryAsset(projectId, lib);
+    }
+    case "stock":
+      return ref.kind === "audio"
+        ? importStockAudio(projectId, { url: ref.url, name: ref.name, duration: ref.duration })
+        : ref.kind === "video"
+          ? importStockVideo(projectId, {
+              url: ref.url,
+              name: ref.name,
+              duration: ref.duration,
+              width: ref.width,
+              height: ref.height,
+            })
+          : ref.kind === "image"
+            ? importImage(projectId, { url: ref.url, name: ref.name })
+            : null;
+    default:
+      return null;
+  }
 }
 
 /**
@@ -60,27 +117,9 @@ export async function placeRefAtPlayhead(
       placeAsset(asset, at);
       return true;
     }
-    case "library": {
-      const lib = library.assets.find((a) => a.id === ref.id);
-      if (!lib || isLinkedAssetType(lib.type)) return false;
-      placeWhenReady(await importLibraryAsset(projectId, lib));
-      return true;
-    }
+    case "library":
     case "stock": {
-      const asset =
-        ref.kind === "audio"
-          ? await importStockAudio(projectId, { url: ref.url, name: ref.name, duration: ref.duration })
-          : ref.kind === "video"
-            ? await importStockVideo(projectId, {
-                url: ref.url,
-                name: ref.name,
-                duration: ref.duration,
-                width: ref.width,
-                height: ref.height,
-              })
-            : ref.kind === "image"
-              ? await importImage(projectId, { url: ref.url, name: ref.name })
-              : null;
+      const asset = await mediaOfRef(ref, { projectId, library });
       if (!asset) return false;
       placeWhenReady(asset);
       return true;

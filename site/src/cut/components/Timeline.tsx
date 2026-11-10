@@ -4,7 +4,7 @@ import { TimelineGroupActions } from "@/cut/components/TimelineGroupActions";
 
 import { useTranslations } from "next-intl";
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
-import { ArrowDownToLine, AudioLines, Check, Clapperboard, Copy, Diamond, Download, EllipsisVertical, Eye, EyeOff, FolderOpen, FolderPlus, Fullscreen, Loader2, Magnet, MoreHorizontal, PanelBottomClose, Pause, Play, Scissors, SkipBack, Sticker, Trash2, Type, Volume2, VolumeX } from "lucide-react";
+import { ArrowDownToLine, AudioLines, Check, Clapperboard, Copy, Diamond, Download, EllipsisVertical, Eye, EyeOff, FolderOpen, FolderPlus, Fullscreen, Loader2, Magnet, MoreHorizontal, MoveHorizontal, PanelBottomClose, Pause, Play, Replace, Scissors, SkipBack, Sticker, Trash2, Type, Volume2, VolumeX } from "lucide-react";
 import { EFFECT_CHIP_ICONS, effectIconKind, SHAPE_CHIP_ICONS, TRANSITION_ICONS } from "@/cut/components/entityIcons";
 import { Button } from "@/components/ui/button";
 import { GuidesMenu } from "@/cut/components/GuidesMenu";
@@ -76,6 +76,8 @@ import { isLottieAsset } from "@/cut/lib/lottieAssets";
 import { gradeCssApprox, normalizeGrade } from "@donkeycut/effects-kit";
 import { useLabels } from "@/i18n/labels";
 import { ExportsDock } from "@/cut/components/ExportsDock";
+import { openAdjust, openReplace } from "@/cut/lib/replaceFlow";
+import { canAdjust, overlayTakesMedia } from "@/cut/lib/replaceItem";
 import { cn } from "@/lib/utils";
 
 /**
@@ -3159,6 +3161,16 @@ export function Timeline() {
                 sideOffset={0}
                 anchor={{ getBoundingClientRect: () => new DOMRect(barMenu.x, barMenu.y, 0, 0) }}
               >
+                {!barMenu.transition && !readOnly && overlayTakesMedia(o as Overlay) && (
+                  <DropdownMenuItem
+                    onClick={() => {
+                      openReplace({ kind: "overlay", id: barMenu.id });
+                      setBarMenu(null);
+                    }}
+                  >
+                    <Replace className="size-3.5 text-muted-foreground" /> {tr("replace")}
+                  </DropdownMenuItem>
+                )}
                 {barMenu.key !== undefined && (
                   <DropdownMenuItem
                     onClick={() => {
@@ -4342,6 +4354,7 @@ function ClipMenu({
 }) {
   const tr = useTranslations("timeline.clip");
   const caps = useCutCaps();
+  const readOnly = useEditor((s) => s.readOnly);
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
@@ -4356,8 +4369,30 @@ function ClipMenu({
         <EllipsisVertical className="size-3" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-44">
+        {!readOnly && (
+          <DropdownMenuItem
+            onClick={() => {
+              // The same menu sits on video and soundtrack clips; the store
+              // says which row this one is on.
+              const video = useEditor.getState().clips.some((c) => c.id === clip.id);
+              openReplace({ kind: video ? "clip" : "audio", id: clip.id });
+            }}
+          >
+            <Replace /> {tr("replace")}
+          </DropdownMenuItem>
+        )}
+        {!readOnly && canAdjust(asset, clip) && (
+          <DropdownMenuItem
+            onClick={() => {
+              const video = useEditor.getState().clips.some((c) => c.id === clip.id);
+              openAdjust({ kind: video ? "clip" : "audio", id: clip.id });
+            }}
+          >
+            <MoveHorizontal /> {tr("adjust")}
+          </DropdownMenuItem>
+        )}
         {children}
-        {children != null && <DropdownMenuSeparator />}
+        {(children != null || !readOnly) && <DropdownMenuSeparator />}
         <DropdownMenuItem
           onClick={() =>
             // Clearing the origin files it into Media; a chat-owned asset also

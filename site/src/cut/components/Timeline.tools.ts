@@ -152,7 +152,7 @@ export const TIMELINE_TOOLS = [
   {
     name: "trim_clip",
     description:
-      "Set a video clip's source trim points in seconds. Growth pushes overlapping neighbors on its own video track; shrinking leaves a gap. Other rows keep their timing.",
+      "Set a video clip's source trim points in seconds. Growth pushes overlapping neighbors on its own video track; shrinking leaves a gap. Other rows keep their timing. Moving in and out by the same amount plays another part of the same file for the same length, where the clip stands (the clip menu's Adjust; update_audio does it for a soundtrack clip).",
     inputSchema: obj({ clipId: str("Video clip id"), in: num("New in point (optional)"), out: num("New out point (optional)") }, ["clipId"]),
   },
   {
@@ -374,11 +374,12 @@ export const TIMELINE_TOOLS = [
   {
     name: "replace_item",
     description:
-      "Replace what an item plays, keeping the item: a video clip (including a blocked-out shot) keeps its place and its length and plays the asset you name instead, trimmed from that source's head; a soundtrack clip keeps its slot; a sticker shows the new image. This is how a block becomes the person's own footage (\"put the kitchen clip in shot 3\"), and how any clip swaps its source without moving what comes after. The clip keeps its framing and rotation; its mask goes with the old picture unless keep_mask names it the layer's own region. A block left playing nothing goes with it.",
+      "Replace what an item plays, keeping the item: a video clip (including a blocked-out shot) keeps its place and its length and plays the asset you name instead, from that source's head or from `from`; a soundtrack clip keeps its slot and plays the new sound, or a video's sound; a sticker shows the new image. A box shape (rect, ellipse, triangle, diamond, star, heart, hexagon), or a sticker given a video, becomes a clip on a new top track over the element's span, framed to its box with its outline as the mask and its pose and keys carried over; the element goes and the result names the new clip id. This is how a block becomes the person's own footage (\"put the kitchen clip in shot 3\"), how a placeholder shape becomes a photo, and how any clip swaps its source without moving what comes after. The clip keeps its framing and rotation; its mask goes with the old picture unless keep_mask names it the layer's own region. A block left playing nothing goes with it.",
     inputSchema: obj(
       {
-        id: str("The item to refill — a video clip, a soundtrack clip, or a sticker"),
+        id: str("The item to refill — a video clip, a soundtrack clip, a sticker, or a box shape"),
         asset_id: str("Project asset that plays there instead"),
+        from: num("Source second the new media starts at, so the stretch that fills the slot is the one you want; default its head"),
         keep_mask: {
           type: "boolean",
           description: "Video clips: keep the clip's mask when it cuts the layer to a region of the frame, such as a screen or a window",

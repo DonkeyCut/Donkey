@@ -14,7 +14,8 @@
     "show": "Mostrar",
     "hide": "Ocultar",
     "captureFrame": "Capturar fotograma",
-    "copyFrame": "Copiar fotograma"
+    "copyFrame": "Copiar fotograma",
+    "replace": "Reemplazar…"
   },
   "toolbar": {
     "text": "Texto",
@@ -65,7 +66,9 @@
     "fadeIn": "Arrastra para ajustar el fundido de entrada",
     "fadeOut": "Arrastra para ajustar el fundido de salida",
     "key": "Arrastra para ajustar tiempo, Delete para eliminar",
-    "sticker": "Sticker"
+    "sticker": "Sticker",
+    "replace": "Reemplazar…",
+    "adjust": "Ajustar…"
   },
   "picker": {
     "label": "Línea de tiempo",
@@ -203,5 +206,18 @@
         "hint": "aceleraciones y momentos lentos alternados"
       }
     }
+  },
+  "replace": {
+    "title": "Reemplazar",
+    "adjustTitle": "Ajustar",
+    "apply": "Aplicar",
+    "upload": "Subir",
+    "uploadMedia": "Subir multimedia",
+    "empty": "Nada en Archivos del proyecto encaja aquí todavía.",
+    "libraryEmpty": "Nada en tu Biblioteca encaja aquí todavía.",
+    "window": "Parte que se reproduce",
+    "seconds": "{n}s",
+    "back": "Atrás",
+    "confirm": "Reemplazar"
   }
 }

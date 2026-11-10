@@ -14,7 +14,8 @@
     "show": "表示",
     "hide": "非表示",
     "captureFrame": "フレームをキャプチャ",
-    "copyFrame": "フレームをコピー"
+    "copyFrame": "フレームをコピー",
+    "replace": "置き換え…"
   },
   "toolbar": {
     "text": "テキスト",
@@ -65,7 +66,9 @@
     "fadeIn": "ドラッグしてフェードインを設定",
     "fadeOut": "ドラッグしてフェードアウトを設定",
     "key": "ドラッグしてリタイム、Deleteで削除",
-    "sticker": "ステッカー"
+    "sticker": "ステッカー",
+    "replace": "置き換え…",
+    "adjust": "調整…"
   },
   "picker": {
     "label": "タイムライン",
@@ -203,5 +206,18 @@
         "hint": "加速とスローを交互に反復"
       }
     }
+  },
+  "replace": {
+    "title": "置き換え",
+    "adjustTitle": "調整",
+    "apply": "適用",
+    "upload": "アップロード",
+    "uploadMedia": "メディアをアップロード",
+    "empty": "プロジェクトファイルにここに合うものがまだありません。",
+    "libraryEmpty": "ライブラリにここに合うものがまだありません。",
+    "window": "再生範囲",
+    "seconds": "{n}秒",
+    "back": "戻る",
+    "confirm": "置き換え"
   }
 }

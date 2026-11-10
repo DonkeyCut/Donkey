@@ -189,6 +189,19 @@ export const MEDIA_ACCEPT = [
   ...[...VIDEO_EXTENSIONS, ...AUDIO_EXTENSIONS, ...IMAGE_EXTENSIONS].map((ext) => `.${ext}`),
 ].join(",");
 
+/** The file families each media type opens from the OS picker. */
+const ACCEPT_OF: Record<"video" | "audio" | "image", string[]> = {
+  video: ["video/*", ...VIDEO_EXTENSIONS.map((ext) => `.${ext}`)],
+  audio: ["audio/*", ...AUDIO_EXTENSIONS.map((ext) => `.${ext}`)],
+  image: ["image/*", ...IMAGE_EXTENSIONS.map((ext) => `.${ext}`)],
+};
+
+/** A file input's `accept` narrowed to some media types: a picker that
+ * swaps a picture in offers pictures. */
+export function mediaAccept(types: AssetType[]): string {
+  return types.flatMap((t) => (t === "video" || t === "audio" || t === "image" ? ACCEPT_OF[t] : [])).join(",");
+}
+
 export function isTextFile(file: File) {
   return file.type.startsWith("text/") || /\.(txt|md|markdown|srt|vtt|csv|json)$/i.test(file.name);
 }

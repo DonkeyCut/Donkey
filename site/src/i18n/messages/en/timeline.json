@@ -14,7 +14,8 @@
     "show": "Show",
     "hide": "Hide",
     "captureFrame": "Capture frame",
-    "copyFrame": "Copy frame"
+    "copyFrame": "Copy frame",
+    "replace": "Replace…"
   },
   "toolbar": {
     "text": "Text",
@@ -65,7 +66,9 @@
     "fadeIn": "Drag to set the fade in",
     "fadeOut": "Drag to set the fade out",
     "key": "Drag to retime, Delete to remove",
-    "sticker": "Sticker"
+    "sticker": "Sticker",
+    "replace": "Replace…",
+    "adjust": "Adjust…"
   },
   "picker": {
     "label": "Timeline",
@@ -203,5 +206,18 @@
         "hint": "alternating rushes and slow beats"
       }
     }
+  },
+  "replace": {
+    "title": "Replace",
+    "adjustTitle": "Adjust",
+    "apply": "Apply",
+    "upload": "Upload",
+    "uploadMedia": "Upload media",
+    "empty": "Nothing in Project Files fits here yet.",
+    "libraryEmpty": "Nothing in your Library fits here yet.",
+    "window": "Part that plays",
+    "seconds": "{n}s",
+    "back": "Back",
+    "confirm": "Replace"
   }
 }

@@ -14,7 +14,8 @@
     "show": "Afficher",
     "hide": "Masquer",
     "captureFrame": "Capturer l'image",
-    "copyFrame": "Copier l'image"
+    "copyFrame": "Copier l'image",
+    "replace": "Remplacer…"
   },
   "toolbar": {
     "text": "Texte",
@@ -65,7 +66,9 @@
     "fadeIn": "Faites glisser pour régler le fondu en entrée",
     "fadeOut": "Faites glisser pour régler le fondu en sortie",
     "key": "Glissez pour modifier la durée, Delete pour supprimer",
-    "sticker": "Sticker"
+    "sticker": "Sticker",
+    "replace": "Remplacer…",
+    "adjust": "Ajuster…"
   },
   "picker": {
     "label": "Timeline",
@@ -203,5 +206,18 @@
         "hint": "alternance d'accélérations et de temps lents"
       }
     }
+  },
+  "replace": {
+    "title": "Remplacer",
+    "adjustTitle": "Ajuster",
+    "apply": "Appliquer",
+    "upload": "Importer",
+    "uploadMedia": "Téléverser des médias",
+    "empty": "Rien dans les fichiers du projet ne convient ici pour l'instant.",
+    "libraryEmpty": "Rien dans votre Bibliothèque ne convient ici pour l'instant.",
+    "window": "Partie à lire",
+    "seconds": "{n}s",
+    "back": "Retour",
+    "confirm": "Remplacer"
   }
 }

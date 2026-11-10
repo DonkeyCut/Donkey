@@ -109,6 +109,8 @@ import { readTextStyle } from "./textStyle";
 import { isDragActive, subscribeDragActive } from "./drag";
 import { loadUiState, saveUiState, type ProjectUiState } from "./uiState";
 import { captureTimelineFrames } from "./visualFrames";
+import { isLottieAsset } from "./lottieAssets";
+import { overlayClipBox, replaceInPoint } from "./replaceItem";
 
 const uid = () => crypto.randomUUID().slice(0, 8);
 
@@ -651,8 +653,16 @@ export interface EditorState {
    * slot a block holds becomes the person's own footage,
    * trimmed from the source's head to the block's length (a shorter source
    * makes the clip its own length). The block it replaced is dropped with it
-   * when nothing else plays it. */
-  replaceClipAsset: (clipId: string, assetId: string, opts?: { keepMask?: boolean }) => void;
+   * when nothing else plays it. `opts.from` starts the new source at that
+   * second instead, held so the slot's length still fits inside it. */
+  replaceClipAsset: (clipId: string, assetId: string, opts?: { keepMask?: boolean; from?: number }) => void;
+  /** Put footage where an element sits: a box shape, or a sticker given a
+   * video, becomes a clip on a new top track over the element's span, framed
+   * to its box with its outline as the mask, and the element goes. One undo
+   * step. Returns the new clip's id, null when the element has no box. */
+  overlayToClip: (overlayId: string, assetId: string, from?: number) => string | null;
+  /** Show another still on a sticker, in place. */
+  replaceSticker: (overlayId: string, assetId: string) => void;
   /** Add a soundtrack clip from an audio asset at `start` (default: the
    * playhead). `opts.duck` marks it a voiceover that lowers everything else
    * to that gain while it plays; `opts.lane` picks the audio track it lands
@@ -660,8 +670,8 @@ export interface EditorState {
   addAudioFromAsset: (assetId: string, start?: number, opts?: { duck?: number; lane?: number }) => void;
   /** Swap a soundtrack clip's source, keeping its slot: the clip stays where
    * it starts and plays the new sound from its head, up to the slot's length
-   * or all the source has. */
-  replaceAudioAsset: (clipId: string, assetId: string) => void;
+   * or all the source has. `from` starts the new sound at that second. */
+  replaceAudioAsset: (clipId: string, assetId: string, from?: number) => void;
   /** The panel “+” add, and every paste: the asset lands at `at` — by default
    * the preview time (the skimmer while one is live, the playhead otherwise) —
    * on the lowest video track or audio lane with room for its whole length
@@ -3193,8 +3203,9 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       const slot = clipLen(clip);
       // Never past the end of what now plays there: a source shorter than the
       // slot plays all it has.
-      const out =
+      const len =
         asset.type === "image" ? Math.max(MIN_LEN, slot) : Math.min(asset.duration, Math.max(MIN_LEN, slot));
+      const from = asset.type === "image" ? 0 : replaceInPoint(asset.duration, len, opts?.from);
       get().beginHistoryBatch();
       set((s) => ({
         clips: s.clips.map((c) =>
@@ -3202,8 +3213,8 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
             ? {
                 ...c,
                 assetId,
-                in: 0,
-                out,
+                in: from,
+                out: from + len,
                 speed: undefined,
                 speedCurve: undefined,
                 reverse: undefined,
@@ -3227,19 +3238,84 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       get().endHistoryBatch();
     },
 
-    replaceAudioAsset: (clipId, assetId) => {
+    replaceAudioAsset: (clipId, assetId, from) => {
       const clip = get().audioClips.find((a) => a.id === clipId);
       const asset = get().assets.find((a) => a.id === assetId);
-      if (!clip || !asset || asset.type !== "audio" || clip.assetId === assetId) return;
+      // A video gives its sound, as a detached clip plays it.
+      if (!clip || !asset || (asset.type !== "audio" && asset.type !== "video") || clip.assetId === assetId) {
+        return;
+      }
       const slot = clip.out - clip.in;
+      const len = Math.max(MIN_LEN, Math.min(asset.duration, slot));
+      const at = replaceInPoint(asset.duration, len, from);
       push();
       set((s) => ({
-        audioClips: s.audioClips.map((a) =>
-          a.id === clipId
-            ? { ...a, assetId, in: 0, out: Math.max(MIN_LEN, Math.min(asset.duration, slot)) }
-            : a
-        ),
+        audioClips: s.audioClips.map((a) => (a.id === clipId ? { ...a, assetId, in: at, out: at + len } : a)),
       }));
+    },
+
+    overlayToClip: (overlayId, assetId, from) => {
+      const s0 = get();
+      const o = s0.overlays.find((x) => x.id === overlayId);
+      const asset = s0.assets.find((a) => a.id === assetId);
+      if (!o || !asset || (asset.type !== "video" && asset.type !== "image")) {
+        return null;
+      }
+      const sticker = isStickerOverlay(o) ? s0.assets.find((a) => a.id === o.assetId) : undefined;
+      const box = overlayClipBox(o, sticker, frameOf(s0.aspect));
+      if (!box) {
+        return null;
+      }
+
+      // The element's span is the slot: a still holds it, footage fills it
+      // from the in-point or runs out early when it is shorter.
+      const slot = Math.max(MIN_LEN, o.end - o.start);
+      const len = asset.type === "image" ? slot : Math.min(asset.duration, slot);
+      const at = asset.type === "image" ? 0 : replaceInPoint(asset.duration, len, from);
+
+      // A new row above every track, so the picture sits in front the way the
+      // element did. An empty timeline takes it on track 0.
+      const level = s0.clips.length === 0 ? 0 : Math.max(...s0.clips.map((c) => c.track)) + 1;
+      const place: VideoTrackPlacement = { kind: "insert", level };
+
+      // The clip wears the element's pose: rotation, opacity, its key track
+      // (both use the same keys, centered on the box), group and visibility.
+      const clip: VideoClip = {
+        id: uid(),
+        assetId,
+        track: level,
+        start: Math.max(0, o.start),
+        in: at,
+        out: at + len,
+        muted: false,
+        fit: "fill",
+        frame: box.frame,
+        ...(box.mask ? { mask: box.mask } : {}),
+        ...(o.name ? { name: o.name } : {}),
+        ...(o.rotation ? { rotation: o.rotation } : {}),
+        ...(o.opacity !== undefined ? { opacity: o.opacity } : {}),
+        ...(o.kf?.length ? { kf: o.kf } : {}),
+        ...(o.motionBlur ? { motionBlur: o.motionBlur } : {}),
+        ...(o.groupId ? { groupId: o.groupId } : {}),
+        ...(o.hidden ? { hidden: true } : {}),
+      };
+      get().beginHistoryBatch();
+      push();
+      set((s) => placedState(s, [...shiftTracksUp(s.clips, place), clip], clip.id));
+      get().removeOverlay(o.id);
+      get().endHistoryBatch();
+      return clip.id;
+    },
+
+    replaceSticker: (overlayId, assetId) => {
+      const o = get().overlays.find((x) => x.id === overlayId);
+      const asset = get().assets.find((a) => a.id === assetId);
+      if (!o || !isStickerOverlay(o) || !asset || asset.type !== "image" || o.assetId === assetId) {
+        return;
+      }
+      // A Lottie document animates and a still does not; the flag is read off
+      // the source, so it moves with it or the export plays the wrong one.
+      get().updateOverlay(o.id, { assetId, lottie: isLottieAsset(asset) || undefined });
     },
 
     addAudioFromAsset: (assetId, start, opts) => {

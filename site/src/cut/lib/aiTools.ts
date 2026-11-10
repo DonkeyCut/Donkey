@@ -216,6 +216,7 @@ import {
 import { convertModeIn } from "./convertMode";
 import { convertAssetToMp4 } from "./mediaConvert";
 import { isLottieAsset } from "./lottieAssets";
+import { overlayTakesMedia } from "./replaceItem";
 import { AIR, MIN_AIR, placeEdge, REACH, settleJoint, type Pace, type PlacedEdge } from "./cutRefine";
 import { requestSidePanel } from "./panelRequest";
 import {
@@ -893,6 +894,9 @@ const DESIGN_SHORT_SIDE = 1080;
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 const isNum = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
+
+/** replace_item's source in-point: the second the new media starts at. */
+const fromOf = (input: Record<string, unknown>): number | undefined => (isNum(input.from) ? input.from : undefined);
 const isTextWeight = (v: unknown): v is TextWeight => (TEXT_WEIGHTS as readonly unknown[]).includes(v);
 
 /** A flash fade's ease from a tool call: linear, the even ramp, stores as absence. */
@@ -4584,12 +4588,20 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
   replace_item: (s, input) => {
     const id = typeof input.id === "string" ? input.id : "";
     const asset = requireItem(s.assets, input.asset_id, "project asset");
+    // An animated sticker plays only on a sticker element.
+    const animated = isLottieAsset(asset)
+      ? `"${asset.name}" is an animated sticker — it goes on a sticker element (add_sticker, or replace_item on a sticker).`
+      : null;
     const clip = s.clips.find((c) => c.id === id);
     if (clip) {
-      if (asset.type !== "video" && asset.type !== "image")
+      if (asset.type !== "video" && asset.type !== "image") {
         throw new ToolError(`"${asset.name}" is ${asset.type} — a video clip plays video or a still.`);
+      }
+      if (animated) {
+        throw new ToolError(animated);
+      }
       const before = clipLen(clip);
-      s.replaceClipAsset(clip.id, asset.id, { keepMask: input.keep_mask === true });
+      s.replaceClipAsset(clip.id, asset.id, { keepMask: input.keep_mask === true, from: fromOf(input) });
       const next = useEditor.getState().clips.find((c) => c.id === clip.id);
       if (!next || next.assetId !== asset.id) throw new ToolError("That clip could not take this source.");
       return {
@@ -4605,10 +4617,11 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
     }
     const audio = s.audioClips.find((a) => a.id === id);
     if (audio) {
-      if (asset.type !== "audio")
-        throw new ToolError(`"${asset.name}" is ${asset.type} — a soundtrack clip plays audio.`);
+      if (asset.type !== "audio" && asset.type !== "video") {
+        throw new ToolError(`"${asset.name}" is ${asset.type} — a soundtrack clip plays audio or a video's sound.`);
+      }
       const before = audio.out - audio.in;
-      s.replaceAudioAsset(audio.id, asset.id);
+      s.replaceAudioAsset(audio.id, asset.id, fromOf(input));
       const next = useEditor.getState().audioClips.find((a) => a.id === id);
       if (!next || next.assetId !== asset.id) throw new ToolError("That clip could not take this source.");
       return {
@@ -4622,16 +4635,39 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       };
     }
     const overlay = s.overlays.find((o) => o.id === id);
-    if (overlay && overlay.kind === "sticker") {
-      if (asset.type !== "image")
-        throw new ToolError(`"${asset.name}" is ${asset.type} — a sticker shows a still.`);
-      // A Lottie document animates and a still does not; the flag is read off
-      // the source, so it moves with it or the export plays the wrong one.
-      s.updateOverlay(overlay.id, { assetId: asset.id, lottie: isLottieAsset(asset) || undefined });
-      return { id: overlay.id, kind: "sticker", sourceId: asset.id, name: asset.name };
+    if (overlay && overlayTakesMedia(overlay)) {
+      // A sticker shows another still in place.
+      if (overlay.kind === "sticker" && asset.type === "image") {
+        s.replaceSticker(overlay.id, asset.id);
+        return { id: overlay.id, kind: "sticker", sourceId: asset.id, name: asset.name };
+      }
+
+      // Footage, or anything on a shape, becomes a clip framed to the box.
+      if (asset.type !== "video" && asset.type !== "image") {
+        throw new ToolError(`"${asset.name}" is ${asset.type} — an element's box takes a video or a still.`);
+      }
+      if (animated) {
+        throw new ToolError(animated);
+      }
+      const clipId = s.overlayToClip(overlay.id, asset.id, fromOf(input));
+      const next = clipId ? useEditor.getState().clips.find((c) => c.id === clipId) : undefined;
+      if (!next) {
+        throw new ToolError("That element could not take this source.");
+      }
+      return {
+        id: next.id,
+        kind: "clip",
+        replaced: overlay.id,
+        sourceId: asset.id,
+        name: asset.name,
+        start: roundT(next.start),
+        lenAfter: roundT(clipLen(next)),
+        track: next.track,
+        ...tracksAfter(),
+      };
     }
     throw new ToolError(
-      `Nothing with id "${id}" carries a source. Clips, soundtrack clips and stickers do; text and shapes are edited with update_overlay.`
+      `Nothing with id "${id}" takes a source. Clips, soundtrack clips, stickers and box shapes do; text and line, arrow or doodle shapes are edited with update_overlay.`
     );
   },
 

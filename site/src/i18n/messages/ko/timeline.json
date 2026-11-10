@@ -14,7 +14,8 @@
     "show": "표시",
     "hide": "숨기기",
     "captureFrame": "프레임 캡처",
-    "copyFrame": "프레임 복사"
+    "copyFrame": "프레임 복사",
+    "replace": "교체…"
   },
   "toolbar": {
     "text": "텍스트",
@@ -65,7 +66,9 @@
     "fadeIn": "드래그하여 페이드 인 설정",
     "fadeOut": "드래그하여 페이드 아웃 설정",
     "key": "드래그하여 시간 조절, Delete로 삭제",
-    "sticker": "스티커"
+    "sticker": "스티커",
+    "replace": "교체…",
+    "adjust": "조정…"
   },
   "picker": {
     "label": "타임라인",
@@ -203,5 +206,18 @@
         "hint": "빠른 구간과 느린 구간이 번갈아 반복"
       }
     }
+  },
+  "replace": {
+    "title": "교체",
+    "adjustTitle": "조정",
+    "apply": "적용",
+    "upload": "업로드",
+    "uploadMedia": "미디어 업로드",
+    "empty": "프로젝트 파일에 여기에 맞는 항목이 아직 없어요.",
+    "libraryEmpty": "라이브러리에 여기에 맞는 항목이 아직 없어요.",
+    "window": "재생할 구간",
+    "seconds": "{n}초",
+    "back": "뒤로",
+    "confirm": "교체"
   }
 }
