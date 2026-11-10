@@ -109,4 +109,20 @@ describe("synced Library notes", () => {
     expect(db.cutNote.updateMany.mock.calls.length).toBe(0);
     expect(db.cutFolder.deleteMany.mock.calls.length).toBe(0);
   });
+  test("placement files only loose notes, into owned folders, and keeps every stamp", async () => {
+    const { api, db } = harness();
+    db.cutFolder.findMany.mockResolvedValue([{ id: "notes", parentId: null }]);
+    const place = (placements: unknown) =>
+      api.place("owner", new Request("https://donkeycut.com/api/cut-cloud/notes/placements", { method: "POST", body: JSON.stringify({ placements }) }));
+    const res = await place([
+      { id: "n1", libraryLocation: { residency: "cloud", folderId: "notes" } },
+      { id: "n2", libraryLocation: { residency: "cloud", folderId: "someone-elses" } },
+    ]);
+    expect(await res.json()).toEqual({ placed: ["n1"] });
+    expect(db.cutNote.updateMany.mock.calls.length).toBe(1);
+    const call = db.cutNote.updateMany.mock.calls[0][0] as { where: Record<string, unknown>; data: Record<string, unknown> };
+    expect(call.where).toEqual({ id: "n1", userId: "owner", deletedAt: null, libraryLocation: { equals: Prisma.DbNull } });
+    expect(call.data).toEqual({ libraryLocation: { residency: "cloud", folderId: "notes" } });
+    expect((await place([{ id: "bad id!", libraryLocation: { residency: "cloud", folderId: null } }])).status).toBe(400);
+  });
 });

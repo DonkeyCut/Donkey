@@ -22,10 +22,12 @@ export interface DefaultNames {
   frame: (time: string) => string;
   /** A duplicate's name, e.g. "Trip copy". */
   copy: (name: string) => string;
+  /** The Library folder notes file into when nothing else holds them. */
+  notes: string;
 }
 
 type DefaultsTranslator = (
-  key: "untitled" | "text" | "frame" | "copy",
+  key: "untitled" | "text" | "frame" | "copy" | "notes",
   values?: { time: string } | { name: string },
 ) => string;
 
@@ -34,6 +36,7 @@ const namesFrom = (t: DefaultsTranslator): DefaultNames => ({
   text: t("text"),
   frame: (time) => t("frame", { time }),
   copy: (name) => t("copy", { name }),
+  notes: t("notes"),
 });
 
 // English ships in every bundle, so the sync read always has names.

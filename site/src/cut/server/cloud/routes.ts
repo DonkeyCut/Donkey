@@ -127,6 +127,7 @@ const CUT_CLOUD_ROUTES: CloudRoute[] = [
 
   { method: "POST", path: "/api/cut-cloud/notes/library-folders/delete", handler: (r, u) => notesCloud.deleteInLibraryFolders(u, r) },
   { method: "GET", path: "/api/cut-cloud/notes", handler: (_r, u) => notesCloud.list(u) },
+  { method: "POST", path: "/api/cut-cloud/notes/placements", handler: (r, u) => notesCloud.place(u, r) },
   { method: "PUT", path: "/api/cut-cloud/notes/folders/:id", handler: (r, u, p) => notesCloud.putFolder(u, p.id, r) },
   { method: "DELETE", path: "/api/cut-cloud/notes/folders/:id", handler: (_r, u, p) => notesCloud.removeFolder(u, p.id) },
   { method: "PUT", path: "/api/cut-cloud/notes/labels/:id", handler: (r, u, p) => notesCloud.putLabel(u, p.id, r) },

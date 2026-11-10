@@ -1,5 +1,5 @@
 // Synced notes: one CutNote row per note, written by the iOS app and the
-// desktop Notes tab. Both sides merge by last-writer-wins on the client's
+// desktop Library. Both sides merge by last-writer-wins on the client's
 // `updatedAt` stamp, and deletes keep tombstone rows so a removal made
 // offline on one device still lands on the other.
 //
@@ -8,7 +8,7 @@
 // client-generated like note ids, so a phone can make one offline and push it
 // under the id it already filed notes against. Folders file into folders the
 // same way, through `parentId`; the top level is null.
-import { noteLibraryFoldersSchema, noteLocationSchema } from "@/cut/lib/noteReference";
+import { noteLibraryFoldersSchema, noteLocationSchema, notePlacementsSchema } from "@/cut/lib/noteReference";
 import { Prisma } from "@/generated/prisma/client";
 import { resolveParent, subtreeOf } from "@/cut/lib/folderTree";
 import { NOTE_LABELS_MAX } from "@/cut/lib/types";
@@ -154,6 +154,42 @@ export function createNotesCloud(db: typeof prisma = prisma) {
   }
   return {
   deleteLibraryFolderNotes,
+  /** File notes into the Library without touching anything else on them:
+   * no new stamp, no title or body, so a phone edit made before the filing
+   * still wins its own merge. Only a note with no placement yet takes one,
+   * and only into a folder this account owns. */
+  async place(userId: string, req: Request) {
+    try {
+      const parsed = notePlacementsSchema.safeParse(await req.json());
+      if (!parsed.success) {
+        return err("Invalid placements.", 400);
+      }
+      const { placements } = parsed.data;
+      const folderIds = [...new Set(placements.flatMap((p) => (p.libraryLocation.folderId ? [p.libraryLocation.folderId] : [])))];
+      const owned = new Set(
+        (await db.cutFolder.findMany({ where: { id: { in: folderIds }, userId, scope: "library" }, select: { id: true } })).map((f) => f.id)
+      );
+      const fits = placements.filter(
+        (p) => p.libraryLocation.residency !== "cloud" || p.libraryLocation.folderId === null || owned.has(p.libraryLocation.folderId)
+      );
+      const placed = await db.$transaction(async (tx) => {
+        const out: string[] = [];
+        for (const p of fits) {
+          const { count } = await tx.cutNote.updateMany({
+            where: { id: p.id, userId, deletedAt: null, libraryLocation: { equals: Prisma.DbNull } },
+            data: { libraryLocation: p.libraryLocation },
+          });
+          if (count > 0) {
+            out.push(p.id);
+          }
+        }
+        return out;
+      });
+      return Response.json({ placed });
+    } catch (e) {
+      return caught(e, new UserError("note_place_failed", "Could not file the notes."));
+    }
+  },
   async deleteInLibraryFolders(userId: string, req: Request) {
     const parsed = noteLibraryFoldersSchema.safeParse(await req.json());
     if (!parsed.success) return err("Invalid Library folders.", 400);

@@ -2,24 +2,25 @@
 
 /**
  * Synced notes, the desktop half. Notes live in the cloud (/api/cut-cloud/notes)
- * and are written from two places — the iOS app and the Notes tab — so every
+ * and are written from two places — the iOS app and the Library — so every
  * write carries its own `updatedAt` stamp and the server keeps whichever
  * version is newer (last writer wins). Deletes leave tombstones; the list is
  * filtered here so the UI only ever sees live notes.
  *
- * Notes file into folders, the same way the library's do, and folders file
- * into folders. Folder ids are client-generated so the phone can make one
- * offline, and the one PUT creates, renames and moves.
+ * On the desktop every note sits in a Library folder (`libraryLocation`). The
+ * phone files notes into its own folders (`folderId`); a note that reaches the
+ * desktop with no Library placement files into the Library's Notes folder,
+ * under the path of its phone folder.
  */
 
-import { noteReadSchema, noteSaveSchema, parseNoteLink, type NoteLocation } from "@/cut/lib/noteReference";
+import { NOTE_PLACEMENTS_MAX, noteReadSchema, noteSaveSchema, parseNoteLink, type NoteLocation } from "@/cut/lib/noteReference";
 import { creatorNames } from "./defaultNames";
-import { settleParents } from "./folderTree";
+import { folderTrail, settleParents } from "./folderTree";
 import { dropPendingNote, flushNote, sendNoteNow, stageNote, withPendingNotes, type NoteWrite } from "./noteOutbox";
 import { backendFor } from "./residency";
+import { reportSwallowed } from "./report";
 import { UserError } from "./userError";
-
-export { folderTrail, folderWithin, subtreeOf } from "./folderTree";
+import type { LibraryFolder } from "./library";
 
 export interface CutNote {
   libraryLocation?: NoteLocation | null;
@@ -109,9 +110,193 @@ export async function writeNoteFromTool(raw: unknown): Promise<CutNote> {
   const { id, ...changes } = input;
   const prior = id ? await readNote({ id }) : null;
   if (!prior && !input.title?.trim() && !input.body?.trim()) throw new Error("A new note needs a title or body.");
-  return saveNote({ id: prior?.id ?? crypto.randomUUID(), title: prior?.title ?? creatorNames().untitled, body: prior?.body ?? "",
-    colorIndex: prior?.colorIndex ?? 0, folderId: prior?.folderId ?? null, labelIds: prior?.labelIds ?? [],
-    ...(prior ? {} : { libraryLocation: null }), ...changes });
+  const base = { id: prior?.id ?? crypto.randomUUID(), title: prior?.title ?? creatorNames().untitled, body: prior?.body ?? "",
+    colorIndex: prior?.colorIndex ?? 0, folderId: prior?.folderId ?? null, labelIds: prior?.labelIds ?? [] };
+
+  // An edit that says nothing about placement leaves the note where it is.
+  if (prior && changes.libraryLocation === undefined) {
+    return saveNote({ ...base, ...changes });
+  }
+
+  // A new note, or one taken out of its Library folder, files into the
+  // Library's Notes folder in this same write, so the chat answers with
+  // where it landed.
+  const libraryLocation = changes.libraryLocation ?? (await notesFolderFor(base.folderId));
+  return saveNote({ ...base, ...changes, libraryLocation });
+}
+
+/** The Library folder a loose note in phone folder `folderId` files into,
+ * made if it is not there yet. */
+async function notesFolderFor(folderId: string | null): Promise<NoteLocation> {
+  const listing = await fetchNotes();
+  const { cloudLibraryFolders } = await import("./library");
+  const plan = planNotePlacement({
+    notes: [{ id: "", folderId, libraryLocation: null }],
+    noteFolders: listing.folders,
+    libraryFolders: await cloudLibraryFolders(),
+    rootName: creatorNames().notes,
+  });
+  const idOf = await makePlannedFolders(plan);
+  return { residency: "cloud", folderId: idOf(plan.moves[0].folderId) };
+}
+
+/** Make a plan's folders, parents first. The answer resolves a folder the
+ * plan named — an existing id, or a key it minted — to the id on the shelf. */
+async function makePlannedFolders(plan: NotePlacementPlan): Promise<(ref: string | null) => string | null> {
+  const { createLibraryFolder } = await import("./library");
+  const made = new Map<string, string>();
+  const idOf = (ref: string | null) => (ref === null ? null : (made.get(ref) ?? ref));
+  for (const f of plan.create) {
+    const folder = await createLibraryFolder(f.name, "cloud", idOf(f.parentId));
+    made.set(f.key, folder.id);
+  }
+  return idOf;
+}
+
+/** Where loose notes go: the Library folders to make, parents first, and the
+ * folder each note files into. A folder is named by an existing folder's id
+ * or by the `key` of one this plan makes ("new:0"). */
+export interface NotePlacementPlan {
+  create: { key: string; name: string; parentId: string | null }[];
+  moves: { noteId: string; folderId: string }[];
+}
+
+type PlacementInput = {
+  notes: Pick<CutNote, "id" | "folderId" | "libraryLocation">[];
+  noteFolders: Pick<CutNoteFolder, "id" | "name" | "parentId">[];
+  libraryFolders: Pick<LibraryFolder, "id" | "name" | "parentId" | "residency">[];
+  /** The Notes folder's name at the cloud Library root. */
+  rootName: string;
+};
+
+/** Plan where every note with no Library placement goes: the Notes folder at
+ * the cloud Library root, under the path of the phone folder it sits in, e.g.
+ * a note in Scripts › Hooks lands in Notes › Scripts › Hooks. Folders match by
+ * name, so an existing one is reused and a run after this one plans nothing.
+ * Placed notes stay where they are. */
+export function planNotePlacement(input: PlacementInput): NotePlacementPlan {
+  const { notes, noteFolders, libraryFolders, rootName } = input;
+  const plan: NotePlacementPlan = { create: [], moves: [] };
+  const loose = notes.filter((n) => !n.libraryLocation);
+  if (loose.length === 0) {
+    return plan;
+  }
+
+  // The cloud shelf's folders and the ones this plan makes, looked up by
+  // parent and name, so the second note in Scripts finds the folder the first
+  // one made.
+  const pathKey = (parentId: string | null, name: string) => JSON.stringify([parentId, name]);
+  const byPath = new Map<string, string>();
+  for (const f of libraryFolders) {
+    const key = pathKey(f.parentId ?? null, f.name);
+    if (f.residency !== "cloud" || byPath.has(key)) {
+      continue;
+    }
+    byPath.set(key, f.id);
+  }
+  const folderAt = (parentId: string | null, name: string): string => {
+    const key = pathKey(parentId, name);
+    const found = byPath.get(key);
+    if (found) {
+      return found;
+    }
+    const made = `new:${plan.create.length}`;
+    plan.create.push({ key: made, name, parentId });
+    byPath.set(key, made);
+    return made;
+  };
+
+  // Each loose note walks down from Notes along its phone folder's path. A
+  // phone folder that is gone leaves the note in Notes itself.
+  for (const n of loose) {
+    let at = folderAt(null, rootName);
+    for (const f of folderTrail(noteFolders, n.folderId)) {
+      at = folderAt(at, f.name);
+    }
+    plan.moves.push({ noteId: n.id, folderId: at });
+  }
+  return plan;
+}
+
+/** A listing with its loose notes filed: how many landed, and how many
+ * Library folders were made for them. */
+export interface PlacedNotes {
+  data: NotesData;
+  landed: number;
+  madeFolders: number;
+}
+
+type PlacementRun = { landed: Map<string, CutNote>; madeFolders: number };
+
+// One placement at a time. A run waiting behind another reads the notes and
+// the folders fresh, so it finds what the first one filed and made.
+let placementQueue: Promise<unknown> = Promise.resolve();
+
+/** File every note with no Library placement into the Library's Notes
+ * folder, and answer with `data` showing where they landed. A listing with
+ * nothing loose costs nothing; a failed run is reported and leaves the notes
+ * where they were, for the next load to file. */
+export async function placeLooseNotes(data: NotesData): Promise<PlacedNotes> {
+  if (data.notes.every((n) => !!n.libraryLocation)) {
+    return { data, landed: 0, madeFolders: 0 };
+  }
+  const run = placementQueue.then(runPlacement);
+  placementQueue = run.catch(() => null);
+  try {
+    const { landed, madeFolders } = await run;
+    const notes = data.notes.map((n) => {
+      const at = landed.get(n.id)?.libraryLocation;
+      return at && !n.libraryLocation ? { ...n, libraryLocation: at } : n;
+    });
+    return { data: { ...data, notes }, landed: landed.size, madeFolders };
+  } catch (e) {
+    reportSwallowed("Could not file notes into the Library", e);
+    return { data, landed: 0, madeFolders: 0 };
+  }
+}
+
+async function runPlacement(): Promise<PlacementRun> {
+  const listing = await fetchNotes();
+  if (listing.notes.every((n) => !!n.libraryLocation)) {
+    return { landed: new Map(), madeFolders: 0 };
+  }
+  const { cloudLibraryFolders } = await import("./library");
+  const plan = planNotePlacement({
+    notes: listing.notes,
+    noteFolders: listing.folders,
+    libraryFolders: await cloudLibraryFolders(),
+    rootName: creatorNames().notes,
+  });
+  const idOf = await makePlannedFolders(plan);
+
+  // File the notes a batch at a time through the placement route, which
+  // sets the Library location alone: the notes keep their stamps, so a
+  // phone edit waiting to sync is never overwritten by the filing.
+  const byId = new Map(listing.notes.map((n) => [n.id, n]));
+  const landed = new Map<string, CutNote>();
+  for (let i = 0; i < plan.moves.length; i += NOTE_PLACEMENTS_MAX) {
+    const placements = plan.moves.slice(i, i + NOTE_PLACEMENTS_MAX).map((m) => ({
+      id: m.noteId,
+      libraryLocation: { residency: "cloud" as const, folderId: idOf(m.folderId) },
+    }));
+    const res = await notesFetch("/api/cut/notes/placements", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ placements }),
+    });
+    if (!res.ok) {
+      throw new UserError("note_place_failed", "Could not file the notes.");
+    }
+    const { placed } = (await res.json()) as { placed: string[] };
+    const at = new Map(placements.map((p) => [p.id, p.libraryLocation]));
+    for (const id of placed) {
+      const n = byId.get(id);
+      if (n) {
+        landed.set(id, { ...n, libraryLocation: at.get(id) ?? null });
+      }
+    }
+  }
+  return { landed, madeFolders: plan.create.length };
 }
 
 /** Write one note: saved in this browser at once, then sent. The answer is
@@ -135,22 +320,6 @@ export async function deleteNote(id: string): Promise<void> {
   if (!res.ok) throw new UserError("note_delete_failed", "Could not delete the note.");
 }
 
-/** Create, rename or move a folder under `id`. A create mints the id here so
- * the new folder is on screen before the write returns. The server answers
- * with the folder as stored: a parent it could not honor reads back as the
- * top level. */
-export async function saveNoteFolder(
-  id: string,
-  folder: { name: string; parentId: string | null },
-): Promise<CutNoteFolder> {
-  const res = await notesFetch(
-    `/api/cut/notes/folders/${encodeURIComponent(id)}`,
-    json(folder),
-  );
-  if (!res.ok) throw new UserError("note_folder_save_failed", "Could not save the folder.");
-  return (await res.json()) as CutNoteFolder;
-}
-
 /** Delete the notes filed in Library folders on a shelf that keeps no notes
  * of its own — what deleting those folders takes. */
 export async function deleteLibraryFolderNotes(residency: "browser" | "local", folderIds: string[]): Promise<void> {
@@ -159,14 +328,6 @@ export async function deleteLibraryFolderNotes(residency: "browser" | "local", f
     method: "POST",
   });
   if (!res.ok) throw new UserError("note_folder_notes_delete_failed", "Could not delete the folder’s notes.");
-}
-
-/** Delete a folder and everything under it: its folders and their notes. */
-export async function deleteNoteFolder(id: string): Promise<void> {
-  const res = await notesFetch(`/api/cut/notes/folders/${encodeURIComponent(id)}`, {
-    method: "DELETE",
-  });
-  if (!res.ok) throw new UserError("note_folder_delete_failed", "Could not delete the folder.");
 }
 
 /** Create or rename a label under `id`. A create mints the id here so the

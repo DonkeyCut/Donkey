@@ -95,7 +95,7 @@ export const SIDE_PANEL_TOOLS = [
   {
     name: "set_project_notes",
     description:
-      "Write this project's own notes — the Details tab's date, links and text, saved with the project for anyone who opens it. Put a cut's sources here: the original video a template copies, the post it was published as, a reference. note_save writes the account's Notes instead, which travel with no project. add_links appends (skipping links already there); links replaces the whole list.",
+      "Write this project's own notes — the Details tab's date, links and text, saved with the project for anyone who opens it. Put a cut's sources here: the original video a template copies, the post it was published as, a reference. note_save writes the account's synced notes, kept in the Library, which travel with no project. add_links appends (skipping links already there); links replaces the whole list.",
     inputSchema: obj({
       add_links: { type: "array", items: { type: "string" }, description: "Links to append, kept in order, duplicates skipped" },
       links: { type: "array", items: { type: "string" }, description: "The whole link list, replacing what is there ([] clears it)" },

@@ -1,6 +1,6 @@
 import { describe, expect, spyOn, test } from "bun:test";
 import { collectRefs, normalizeRef, refToken } from "@/cut/lib/assetRef";
-import { noteInLibraryFolder, noteInNotesFolder, noteRef, parseNoteLink } from "@/cut/lib/noteReference";
+import { noteInLibraryFolder, noteRef, parseNoteLink } from "@/cut/lib/noteReference";
 import { readNote, writeNoteFromTool, type CutNote } from "@/cut/lib/notes";
 import * as notes from "@/cut/lib/notes";
 import { backendFor } from "@/cut/lib/residency";
@@ -9,7 +9,7 @@ import { attachedAssetsBlock, AI_TOOLS } from "@/cut/server/ai/catalog";
 import { READ_COMMANDS, COMMAND_NAMES } from "@/clients/chatgpt/server/catalog";
 const note: CutNote = { id: "script", title: 'Brand "Voice"', body: "First draft", colorIndex: 2, folderId: "phone-folder", labelIds: ["brand"], createdAt: 1, updatedAt: 1, deletedAt: null, libraryLocation: { folderId: "assets", residency: "browser" } };
 describe("note references", () => {
-  test("Library root notes retain explicit placement; existing Notes stay in Notes", () => {
+  test("Library root notes retain explicit placement", () => {
     expect(noteInLibraryFolder({ libraryLocation: null }, null)).toBe(false);
     expect(noteInLibraryFolder({}, null)).toBe(false);
     for (const residency of ["browser", "local", "cloud"] as const) {
@@ -22,13 +22,6 @@ describe("note references", () => {
       expect(noteInLibraryFolder(filed, "assets", residency)).toBe(true);
       expect(noteInLibraryFolder(filed, "assets", residency === "cloud" ? "browser" : "cloud")).toBe(false);
     }
-  });
-  test("Library notes stay out of Notes", () => {
-    expect(noteInNotesFolder({ folderId: null, libraryLocation: null }, null)).toBe(true);
-    expect(noteInNotesFolder({ folderId: "plans" }, "plans")).toBe(true);
-    expect(noteInNotesFolder({ folderId: "plans" }, null)).toBe(false);
-    expect(noteInNotesFolder({ folderId: null, libraryLocation: { folderId: null, residency: "cloud" } }, null)).toBe(false);
-    expect(noteInNotesFolder({ folderId: "plans", libraryLocation: { folderId: "assets", residency: "browser" } }, "plans")).toBe(false);
   });
   test("saved mentions retain identity through renaming and duplicate titles", () => {
     const ref = noteRef(note);
@@ -59,17 +52,25 @@ describe("note references", () => {
     } finally { fetch.mockRestore(); }
   });
   test("tool edits preserve phone folders, labels, colors, and placement", async () => {
-    let saved: unknown;
-    const fetch = spyOn(backendFor("cloud"), "fetch").mockImplementation(async (_path, init) => {
-      if (init?.method === "PUT") { saved = JSON.parse(String(init.body)); return Response.json(saved); }
-      return Response.json(note);
+    let saved: Record<string, unknown> | undefined;
+    const stored = new Map<string, unknown>([[note.id, note]]);
+    const made: unknown[] = [];
+    const fetch = spyOn(backendFor("cloud"), "fetch").mockImplementation(async (path, init) => {
+      if (init?.method === "PUT") { saved = JSON.parse(String(init.body)); const merged = { libraryLocation: null, ...(stored.get(String(saved!.id)) as object), ...saved, deletedAt: null }; stored.set(String(saved!.id), merged); return Response.json(merged); }
+      if (init?.method === "POST") { const folder = { id: `lib-${made.length}`, createdAt: 1, ...JSON.parse(String(init.body)) }; made.push(folder); return Response.json(folder); }
+      if (path === "/api/cut/notes") return Response.json({ notes: [...stored.values()], folders: [], labels: [] });
+      if (path === "/api/cut/library") return Response.json({ folders: made, assets: [], templates: [] });
+      return Response.json(stored.get(String(path).split("/").pop()!));
     });
     try {
       await writeNoteFromTool({ id: note.id, body: "New words" });
       expect(saved).toMatchObject({ id: note.id, title: note.title, body: "New words", folderId: note.folderId, labelIds: note.labelIds, colorIndex: 2 });
       expect(Object.prototype.hasOwnProperty.call(saved, "libraryLocation")).toBe(false);
-      await writeNoteFromTool({ title: "New script", body: "Hello", libraryLocation: null });
-      expect(saved).toMatchObject({ title: "New script", body: "Hello", folderId: null, libraryLocation: null });
+      // A new note with no placement files into the Library's Notes folder.
+      const created = await writeNoteFromTool({ title: "New script", body: "Hello", libraryLocation: null });
+      expect(made).toEqual([{ id: "lib-0", createdAt: 1, name: "Notes", parentId: null }]);
+      expect(saved).toMatchObject({ title: "New script", body: "Hello", folderId: null, libraryLocation: { folderId: "lib-0", residency: "cloud" } });
+      expect(created.libraryLocation).toEqual({ folderId: "lib-0", residency: "cloud" });
       await expect(writeNoteFromTool({})).rejects.toThrow("title or body");
     } finally { fetch.mockRestore(); }
   });

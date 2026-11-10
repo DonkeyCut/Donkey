@@ -11,18 +11,16 @@ export const noteLocationSchema = z.object({
   residency: z.enum(["browser", "local", "cloud"]),
 });
 export type NoteLocation = z.infer<typeof noteLocationSchema>;
-export const NOTE_LIBRARY_LOCATION_DESCRIPTION = "Library placement requires a residency and folderId; folderId:null selects that shelf's Library root. libraryLocation:null keeps the note in Notes without Library placement.";
+export const NOTE_LIBRARY_LOCATION_DESCRIPTION = "Library placement requires a residency and folderId; folderId:null selects that shelf's Library root. A note with no placement (libraryLocation:null on create) files into the Library's Notes folder.";
 export function noteInLibraryFolder(note: Pick<CutNote, "libraryLocation">, folderId: string | null, residency?: NoteLocation["residency"]): boolean {
   const location = note.libraryLocation;
   return !!location && location.folderId === folderId && (!residency || location.residency === residency);
 }
-// A note placed in the Library lives there alone; Notes shows only the rest.
-export function noteInNotesFolder(note: Pick<CutNote, "folderId" | "libraryLocation">, folderId: string | null): boolean {
-  if (note.libraryLocation) {
-    return false;
-  }
-  return (note.folderId ?? null) === folderId;
-}
+/** Most notes one placement call files. */
+export const NOTE_PLACEMENTS_MAX = 500;
+export const notePlacementsSchema = z.object({
+  placements: z.array(z.object({ id: noteIdSchema, libraryLocation: noteLocationSchema })).max(NOTE_PLACEMENTS_MAX),
+});
 export const noteLibraryFoldersSchema = z.object({ residency: z.enum(["browser", "local", "cloud"]), folderIds: z.array(z.string().min(1).max(128)).max(10000) });
 export const noteReadSchema = z.object({ id: noteIdSchema.optional(), link: z.string().optional() });
 export const noteSaveSchema = z.object({

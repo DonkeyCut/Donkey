@@ -258,6 +258,16 @@ async function fetchLibraryFrom(r: Residency): Promise<LibraryData> {
   return shelf;
 }
 
+/** The cloud shelf's folders, read fresh: what notes file under. */
+export async function cloudLibraryFolders(): Promise<LibraryFolder[]> {
+  const res = await backendFor("cloud").fetch("/api/cut/library");
+  if (!res.ok) {
+    throw new UserError("library_load_failed", "Could not load the library.");
+  }
+  const data = (await res.json()) as Partial<LibraryData>;
+  return (data.folders ?? []).map((f) => ({ ...f, residency: "cloud" }));
+}
+
 /** One shelf as this browser last saw it, for a residency it can't ask right
  * now. Those files are still on that Mac; only the way to reach them is gone. */
 async function rememberedLibraryFrom(

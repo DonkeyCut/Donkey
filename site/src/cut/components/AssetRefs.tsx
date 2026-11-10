@@ -52,7 +52,7 @@ import { cn } from "@/lib/utils";
 function CollectionLink({ item, children, className }: { item: AssetRef; children: ReactNode; className?: string }) {
   // A note or another project opens in its own tab; a folder reveals in place.
   const href = item.scope === "note"
-    ? `${homeHref(CUT_APP_BASE, "notes")}?note=${encodeURIComponent(item.id)}`
+    ? `${homeHref(CUT_APP_BASE, "library")}?note=${encodeURIComponent(item.id)}`
     : item.scope === "projectDoc" ? projectHref(CUT_APP_BASE, item.id, "projects") : null;
   return href
     ? <Link href={href} target="_blank" title={item.name} className={className}>{children}</Link>
