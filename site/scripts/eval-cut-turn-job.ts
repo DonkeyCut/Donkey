@@ -5,9 +5,8 @@
  * job, runs the headless turn, pushes the doc, and records the thread. The
  * script asserts the stored document and thread both carry the result.
  *
- * Run with the site dev server up and a local worker running:
+ * Run with the site dev server up (it starts the worker):
  *   bun run scripts/eval-cut-turn-job.ts [--base http://localhost:3000]
- * (worker: `bun src/cut/worker/main.ts` from site/, .env supplies DATABASE_URL)
  */
 
 const arg = (name: string): string | undefined => {

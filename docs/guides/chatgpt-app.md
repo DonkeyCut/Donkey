@@ -107,7 +107,7 @@ imports as a new draft: the listing, review cases and guides as skills.
 
 Run the client tests with `bun test src/clients/chatgpt`. The browser fixture
 `bun run scripts/eval-chatgpt-widget.ts` checks the widget against a mock
-host. With the dev server and a local worker up,
+host. With the dev server up,
 `bun run scripts/eval-chatgpt-workflow.ts` drives the editing workflow through
 the MCP tools in process.
 

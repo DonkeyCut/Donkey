@@ -10,10 +10,8 @@
  * uses, claims batches through the card's routes, runs them through the
  * headless executors, saves through the versioned PUT and reports back.
  *
- * Run with the site dev server up and a local worker running:
+ * Run with the site dev server up (it starts the worker):
  *   bun run scripts/eval-chatgpt-workflow.ts [--base http://localhost:3000] [--keep]
- * (worker: `npm run worker:build && node dist/cut-worker/main.js` from site/;
- * .env supplies DATABASE_URL and the R2 credentials for both)
  */
 
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";

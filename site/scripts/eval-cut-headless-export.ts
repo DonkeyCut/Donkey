@@ -5,7 +5,7 @@
  * real video, places a clip and a title, rasterizes the title PNG on the
  * skia server canvas, queues the export, and waits for the worker to render.
  *
- * Run with the site dev server up and a local worker running:
+ * Run with the site dev server up (it starts the worker):
  *   bun run scripts/eval-cut-headless-export.ts [--base http://localhost:3000]
  */
 

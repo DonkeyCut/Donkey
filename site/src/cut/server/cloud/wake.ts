@@ -2,10 +2,11 @@
 // because the client keeps polling its queued job, and every such poll wakes
 // again. The address is a hostname, so it lives in code (lib/hosts.ts) with the
 // route that serves it; the shared secret is the only environment input, and
-// holding it is the single switch that turns waking on. Unset (local dev), the
-// dev worker is run by hand and polls on its own.
+// holding it is the single switch that turns waking on. Unset in local dev, a
+// wake starts the worker as a child of the dev server (devWorker.ts).
 import { prisma } from "@/lib/prisma";
 import { CUT_WORKER_WAKE_URL } from "@/cut/lib/hosts";
+import { startDevWorker } from "./devWorker";
 
 const wakeSecret = () => process.env.CUT_RENDER_WAKE_SECRET;
 
@@ -22,7 +23,15 @@ let lastWakeAt = 0;
 // show up; swallowing it is what let a dead wake go unnoticed for two days.
 export function wakeRenderWorker(): void {
   const secret = wakeSecret();
-  if (!secret) return;
+
+  // Local dev has no container to wake: run the worker beside the dev server.
+  if (!secret && process.env.NODE_ENV === "development") {
+    startDevWorker();
+    return;
+  }
+  if (!secret) {
+    return;
+  }
   const now = Date.now();
   if (now - lastWakeAt < WAKE_WINDOW_MS) return;
   lastWakeAt = now;
