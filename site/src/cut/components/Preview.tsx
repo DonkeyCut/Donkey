@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type RefObject } from "react";
 import { Check, Copy, Loader2, ZoomIn, ZoomOut } from "lucide-react";
 import { useTranslations } from "next-intl";
+import { usePinch } from "@/cut/hooks/usePinch";
 import { usePlayback } from "@/cut/hooks/usePlayback";
 import { startDrag } from "@/cut/lib/drag";
 import { isPreviewSelectionModifier, startSelectionDrag, togglePreviewSelection } from "@/cut/components/previewSelectionDrag";
@@ -472,6 +473,9 @@ export function Preview() {
     return () => ro.disconnect();
   }, [aspect, applyPan]);
 
+  // A two-finger pinch on a touch screen zooms about its center.
+  usePinch(wrapRef, (factor, x, y) => zoomAt(x, y, factor));
+
   // Pinch and ⌘/ctrl-wheel zoom about the cursor; a plain scroll pans. The
   // listener is native so preventDefault beats the page's own pinch zoom.
   useEffect(() => {
@@ -556,7 +560,7 @@ export function Preview() {
     <section className="preview-pane relative flex min-h-0 min-w-0 flex-col bg-muted/40 select-none">
       <div
         ref={wrapRef}
-        className="relative flex min-h-0 flex-1 flex-col items-center justify-center gap-3 overflow-hidden p-3"
+        className="relative flex min-h-0 flex-1 touch-none flex-col items-center justify-center gap-3 overflow-hidden p-3"
         // A middle-button drag pans the camera from anywhere in the pane, ahead
         // of whatever gizmo or clip sits under the pointer.
         onPointerDownCapture={(e) => {

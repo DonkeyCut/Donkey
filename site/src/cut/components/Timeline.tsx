@@ -78,6 +78,7 @@ import { useLabels } from "@/i18n/labels";
 import { ExportsDock } from "@/cut/components/ExportsDock";
 import { openAdjust, openReplace } from "@/cut/lib/replaceFlow";
 import { canAdjust, overlayTakesMedia } from "@/cut/lib/replaceItem";
+import { usePinch } from "@/cut/hooks/usePinch";
 import { cn } from "@/lib/utils";
 
 /**
@@ -1606,6 +1607,23 @@ export function Timeline() {
   const addText = useCallback(() => useEditor.getState().addOverlay(), []);
   const deleteSelection = useCallback(() => useEditor.getState().deleteSelection(), []);
 
+  // Two fingers on a touch screen zoom and pan: the moment that was under
+  // them stays under them as they spread and slide. A slide with no spread
+  // only scrolls.
+  usePinch(scrollRef, (factor, x, _y, dx, dy) => {
+    const el = scrollRef.current;
+    if (!el) {
+      return;
+    }
+    const px = x - el.getBoundingClientRect().left;
+    const cur = useEditor.getState().pxPerSec;
+    zoomTo(cur * factor, (el.scrollLeft + px - dx - PAD_SIDE) / cur, px);
+    if (useEditor.getState().pxPerSec === cur) {
+      el.scrollLeft -= dx;
+    }
+    el.scrollTop -= dy;
+  });
+
   // Trackpad pinch / cmd+wheel zooms at the cursor; vertical wheel pans.
   useEffect(() => {
     const el = scrollRef.current;
@@ -2219,7 +2237,7 @@ export function Timeline() {
       }}
     >
       <div
-        className="tl-resize absolute inset-x-0 top-0 z-30 h-1.5 cursor-row-resize"
+        className="tl-resize absolute inset-x-0 top-0 z-30 h-1.5 cursor-row-resize touch-none"
         title={tr("resize")}
         onPointerDown={resize}
       />
@@ -2607,7 +2625,7 @@ export function Timeline() {
                     tabIndex={0}
                     title={tr("transitionTitle", { name: label, seconds: x.t.seconds.toFixed(1) })}
                     className={cn(
-                      "tl-xfade-bar group absolute flex cursor-grab items-center gap-1 overflow-hidden rounded-[3px] px-1.5 text-[10.5px] font-medium text-white shadow-[inset_0_0_0_1px_rgba(0,0,0,0.1)]",
+                      "tl-xfade-bar group absolute flex cursor-grab touch-none items-center gap-1 overflow-hidden rounded-[3px] px-1.5 text-[10.5px] font-medium text-white shadow-[inset_0_0_0_1px_rgba(0,0,0,0.1)]",
                       // A parked bar reads muted: it is on the row but playing
                       // nothing until a boundary lines up with it.
                       playing ? "bg-[#2B6FD4]" : "bg-muted-foreground/50",
@@ -3677,7 +3695,7 @@ function Ruler({
   const count = Math.ceil(width / (step * pps));
   const ticks = Array.from({ length: count }, (_, i) => i * step);
   return (
-    <div className="relative cursor-ew-resize" style={{ height: RULER_H }} onPointerDown={onScrub}>
+    <div className="relative cursor-ew-resize touch-none" style={{ height: RULER_H }} onPointerDown={onScrub}>
       {ticks.map((t) => (
         <div
           key={t}
@@ -3813,7 +3831,7 @@ function PlayheadCap({
   return (
     <div
       ref={ref}
-      className="tl-playhead-cap absolute top-0 left-[-7px] h-5 w-4 cursor-ew-resize will-change-transform"
+      className="tl-playhead-cap absolute top-0 left-[-7px] h-5 w-4 cursor-ew-resize touch-none will-change-transform"
       onPointerDown={onScrub}
     >
       <div className="mx-auto h-3 w-2.5 rounded-t-[3px] bg-[#0a84ff] [clip-path:polygon(0_0,100%_0,100%_58%,50%_100%,0_58%)]" />
@@ -3938,7 +3956,7 @@ function ClipView({
     <>
     <div
       className={cn(
-        "tl-clip group absolute top-0.5 cursor-grab overflow-hidden rounded-[2.5px] bg-black shadow-[inset_0_0_0_1px_rgba(0,0,0,0.12)]",
+        "tl-clip group absolute top-0.5 cursor-grab touch-none overflow-hidden rounded-[2.5px] bg-black shadow-[inset_0_0_0_1px_rgba(0,0,0,0.12)]",
         selected && SELECTED_SHADOW,
         lutTarget && "tl-clip-lut-target z-10 shadow-[inset_0_0_0_2px_#0a84ff]",
         clip.hidden && "opacity-40 grayscale",
@@ -4229,7 +4247,7 @@ function ClipStrokeMarks({
       {times.map((t) => (
         <span
           key={`s${t}`}
-          className="tl-stroke-mark pointer-events-auto absolute top-0 z-5 flex h-3 w-3.5 cursor-pointer justify-center"
+          className="tl-stroke-mark pointer-events-auto absolute top-0 z-5 flex h-3 w-3.5 cursor-pointer touch-none justify-center"
           style={{
             left: Math.min(barW - 4, Math.max(4, retime.tAt(t) * pps)),
             transform: "translateX(-50%)",
@@ -4964,7 +4982,7 @@ function RowGrip({
   return (
     <div
       title={tr("reorderRow")}
-      className="group pointer-events-auto absolute inset-x-0 cursor-grab"
+      className="group pointer-events-auto absolute inset-x-0 cursor-grab touch-none"
       style={{ top, height }}
       onPointerDown={onGrab}
     >
@@ -5335,7 +5353,7 @@ function BeatDot({
 }) {
   return (
     <span
-      className="tl-beat absolute bottom-0 z-5 grid h-3.5 w-3 cursor-ew-resize place-items-end justify-center pb-[3px]"
+      className="tl-beat absolute bottom-0 z-5 grid h-3.5 w-3 cursor-ew-resize touch-none place-items-end justify-center pb-[3px]"
       style={{
         left: Math.min(w - 4, Math.max(4, retime.tAt(t) * pps)),
         transform: "translateX(-50%)",
@@ -5489,7 +5507,7 @@ function AudioView({
   return (
     <div
       className={cn(
-        "tl-audio-clip group absolute cursor-grab overflow-hidden rounded-[2.5px] bg-gradient-to-b from-emerald-500 to-emerald-600 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.1)]",
+        "tl-audio-clip group absolute cursor-grab touch-none overflow-hidden rounded-[2.5px] bg-gradient-to-b from-emerald-500 to-emerald-600 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.1)]",
         selected && SELECTED_SHADOW,
         clip.hidden && "opacity-40 grayscale",
         drag
@@ -5920,7 +5938,7 @@ function TextBar({
   return (
     <div
       className={cn(
-        "tl-text-bar group absolute flex cursor-grab items-center overflow-hidden rounded-[3px] shadow-[inset_0_0_0_1px_rgba(0,0,0,0.1)]",
+        "tl-text-bar group absolute flex cursor-grab touch-none items-center overflow-hidden rounded-[3px] shadow-[inset_0_0_0_1px_rgba(0,0,0,0.1)]",
         FAMILY_STYLE[overlayFamily(o)].bar,
         o.hidden && "opacity-40 grayscale",
         selected && SELECTED_SHADOW,
@@ -6016,7 +6034,7 @@ function SubBar({
   return (
     <div
       className={cn(
-        "tl-sub-bar group absolute flex cursor-grab items-center overflow-hidden rounded-[2.5px] bg-gradient-to-b from-amber-300 to-amber-400 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.12)]",
+        "tl-sub-bar group absolute flex cursor-grab touch-none items-center overflow-hidden rounded-[2.5px] bg-gradient-to-b from-amber-300 to-amber-400 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.12)]",
         dimmed && "opacity-40 grayscale",
         selected && SELECTED_SHADOW,
         drag

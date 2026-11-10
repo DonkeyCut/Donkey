@@ -32,6 +32,10 @@ export function startDrag(e: React.PointerEvent, opts: DragOpts) {
   // Primary button only: a right-click opens the context menu, which swallows
   // the pointerup and would leave the drag armed after the menu closes.
   if (e.button !== 0) return;
+
+  // One finger drives a drag. A second finger on a touch screen is a pinch,
+  // which the surface zooms on its own.
+  if (!e.isPrimary) return;
   e.preventDefault();
   e.stopPropagation();
   // preventDefault also suppresses the browser's default focus move, so end
@@ -79,7 +83,17 @@ export function startDrag(e: React.PointerEvent, opts: DragOpts) {
     opts.onMove(ev.clientX - startX, ev.clientY - startY, ev);
     holdCursor();
   };
+  // The listeners sit on the window, so they hear every finger; only the one
+  // that started the drag moves or ends it.
+  const pointerId = e.pointerId;
+  let lastX = startX;
+  let lastY = startY;
   const move = (ev: PointerEvent) => {
+    if (ev.pointerId !== pointerId) {
+      return;
+    }
+    lastX = ev.clientX;
+    lastY = ev.clientY;
     const dx = ev.clientX - startX;
     const dy = ev.clientY - startY;
     if (Math.abs(dx) > 3 || Math.abs(dy) > 3) moved = true;
@@ -104,11 +118,15 @@ export function startDrag(e: React.PointerEvent, opts: DragOpts) {
     window.removeEventListener("pointerdown", disarm, true);
     window.removeEventListener("keydown", disarm, true);
   };
-  const up = (ev: PointerEvent) => {
+  // How the gesture ended: the finger lifted, the browser took the pointer, or
+  // a second finger landed and made it a pinch.
+  type Ending = "release" | "cancel" | "pinch";
+  const finish = (ending: Ending) => {
     window.removeEventListener("pointermove", move);
     window.removeEventListener("pointerup", up);
     window.removeEventListener("pointercancel", up);
-    if (ev.type === "pointerup") {
+    window.removeEventListener("pointerdown", pinch, true);
+    if (ending === "release") {
       window.addEventListener("click", swallowClick, true);
       window.addEventListener("pointerdown", disarm, true);
       window.addEventListener("keydown", disarm, true);
@@ -122,13 +140,31 @@ export function startDrag(e: React.PointerEvent, opts: DragOpts) {
     // The drag ends after its release lands, so a listener settling on the
     // drag's end (the store's magnet) sees the gesture's last write.
     try {
-      opts.onUp?.(ev.clientX - startX, ev.clientY - startY, moved);
+      opts.onUp?.(lastX - startX, lastY - startY, moved);
     } finally {
       activeDrags--;
       dragListeners.forEach((fn) => fn());
     }
   };
+  const up = (ev: PointerEvent) => {
+    if (ev.pointerId !== pointerId) {
+      return;
+    }
+    lastX = ev.clientX;
+    lastY = ev.clientY;
+    finish(ev.type === "pointerup" ? "release" : "cancel");
+  };
+
+  // A second finger turns the press into a pinch, which zooms: the drag ends
+  // where the first finger is, so the pinch never carries a clip along.
+  const pinch = (ev: PointerEvent) => {
+    if (ev.pointerType !== "touch" || ev.pointerId === pointerId) {
+      return;
+    }
+    finish("pinch");
+  };
   window.addEventListener("pointermove", move);
   window.addEventListener("pointerup", up);
   window.addEventListener("pointercancel", up);
+  window.addEventListener("pointerdown", pinch, true);
 }

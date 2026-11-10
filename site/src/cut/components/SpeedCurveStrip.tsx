@@ -574,7 +574,7 @@ function Strip({ clip }: { clip: VideoClip }) {
       </div>
       <div
         ref={boxRef}
-        className="relative select-none overflow-hidden"
+        className="relative touch-none select-none overflow-hidden"
         style={{ height: GRAPH_H }}
       >
         <svg
@@ -666,7 +666,7 @@ function Strip({ clip }: { clip: VideoClip }) {
         >
           {/* The timeline playhead's grab cap: drag it to scrub. */}
           <div
-            className="pointer-events-auto absolute top-0 left-[-4.5px] h-3 w-2.5 cursor-ew-resize rounded-t-[3px] bg-[#0a84ff] [clip-path:polygon(0_0,100%_0,100%_58%,50%_100%,0_58%)]"
+            className="pointer-events-auto absolute top-0 left-[-4.5px] h-3 w-2.5 cursor-ew-resize touch-none rounded-t-[3px] bg-[#0a84ff] [clip-path:polygon(0_0,100%_0,100%_58%,50%_100%,0_58%)]"
             onPointerDown={onCapPointerDown}
           />
         </div>

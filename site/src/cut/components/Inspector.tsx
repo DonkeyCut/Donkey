@@ -5657,7 +5657,7 @@ function ZoomTarget({ overlay: o }: { overlay: EffectOverlay }) {
   return (
     <div className="flex flex-col items-center gap-2 pt-1">
       <div
-        className="relative cursor-grab overflow-hidden rounded-lg bg-black select-none active:cursor-grabbing"
+        className="relative cursor-grab touch-none overflow-hidden rounded-lg bg-black select-none active:cursor-grabbing"
         style={{
           aspectRatio: `${frame.w} / ${frame.h}`,
           height: portrait ? 168 : undefined,

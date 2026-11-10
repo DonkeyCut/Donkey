@@ -155,11 +155,11 @@ describe("the magnet in the editor", () => {
       useEditor.setState({ clips: [vclip("A", 0, 0, 5), vclip("C", 0, 5, 6)], magnet: true });
 
       // The gesture parts C away from A; the slot stays open under the pointer.
-      const down = { button: 0, clientX: 0, clientY: 0, currentTarget: {}, preventDefault() {}, stopPropagation() {} } as unknown as React.PointerEvent;
+      const down = { button: 0, isPrimary: true, pointerId: 1, clientX: 0, clientY: 0, currentTarget: {}, preventDefault() {}, stopPropagation() {} } as unknown as React.PointerEvent;
       startDrag(down, { onMove: () => s().updateClipTransient("C", { start: 8 }) });
-      events.dispatchEvent(Object.assign(new Event("pointermove"), { clientX: 30, clientY: 0 }));
+      events.dispatchEvent(Object.assign(new Event("pointermove"), { pointerId: 1, clientX: 30, clientY: 0 }));
       const held = startOf("C");
-      events.dispatchEvent(Object.assign(new Event("pointerup"), { clientX: 30, clientY: 0 }));
+      events.dispatchEvent(Object.assign(new Event("pointerup"), { pointerId: 1, clientX: 30, clientY: 0 }));
       expect(held).toBe(8);
       expect(startOf("C")).toBe(5);
     } finally {

@@ -180,6 +180,10 @@ export function Marquee({
       let moved = false;
 
       const onMove = (ev: PointerEvent) => {
+        // A finger moving over the grid scrolls it; only a mouse or pen sweeps.
+        if (e.pointerType === "touch") {
+          return;
+        }
         if (!moved && Math.hypot(ev.clientX - startX, ev.clientY - startY) < 4) return;
         moved = true;
         const r = {
@@ -201,6 +205,7 @@ export function Marquee({
       const done = () => {
         window.removeEventListener("pointermove", onMove);
         window.removeEventListener("pointerup", onUp);
+        window.removeEventListener("pointercancel", done);
         window.removeEventListener("dragstart", onDrag, true);
         setRect(null);
       };
@@ -213,6 +218,8 @@ export function Marquee({
       const onDrag = () => done();
       window.addEventListener("pointermove", onMove);
       window.addEventListener("pointerup", onUp);
+      // A press the browser takes over for a scroll ends without a release.
+      window.addEventListener("pointercancel", done);
       window.addEventListener("dragstart", onDrag, true);
     };
     arena.addEventListener("pointerdown", onPointerDown);

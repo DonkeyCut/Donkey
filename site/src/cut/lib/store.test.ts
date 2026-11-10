@@ -2449,11 +2449,11 @@ describe("explicit timeline groups", () => {
         const members = grouped();
         s().select(null);
         const target = { getBoundingClientRect: () => ({ left: 0 }), closest: () => null };
-        const down = { button: 0, clientX: 0, clientY: 0, metaKey: false, ctrlKey: false, shiftKey: false, currentTarget: target, preventDefault() {}, stopPropagation() {} } as unknown as React.PointerEvent;
+        const down = { button: 0, isPrimary: true, pointerId: 1, clientX: 0, clientY: 0, metaKey: false, ctrlKey: false, shiftKey: false, currentTarget: target, preventDefault() {}, stopPropagation() {} } as unknown as React.PointerEvent;
         const ui = { pps: 10, homeRow: 0, rows: () => [], onSnap: () => {}, onDrag: () => {} };
         startLaneMove(down, kind, kind === "transition" ? "bar" : "v", ui);
         for (const type of ["pointermove", "pointerup"]) {
-          events.dispatchEvent(Object.assign(new Event(type), { clientX: 100, clientY: 0, metaKey: true, ctrlKey: true }));
+          events.dispatchEvent(Object.assign(new Event(type), { pointerId: 1, clientX: 100, clientY: 0, metaKey: true, ctrlKey: true }));
         }
         expect(members.map((sel) => timelineItem(s(), sel)?.start)).toEqual([12, 13, 14, 14, 15, 19]);
         expect(s().subtitles.cues[0].words).toEqual([{ w: "hi", t0: 15, t1: 16 }]);
