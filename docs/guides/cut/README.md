@@ -58,7 +58,7 @@ Best uses original resolution, cadence, supported H.264/HEVC codec and audio set
 
 ## Sharing
 
-A cloud project can be shared read-only by link, with the owner choosing which surfaces a viewer can open. The server filters the doc and its media to that set before anything leaves; the rail still shows every tab, and a withheld one sits locked with a hover note saying the view is read-only. A viewer can copy the shared project into their own account.
+Cloud projects share read-only by link, filtered to the surfaces the owner picks; a viewer can copy one into their account. Gallery templates are Donkey's projects in R2, public and copied quota-exempt; a person's own templates are marked projects.
 
 Folders and assets use the project Share dialog for read-only public links or verified-email access; local items first become independent cloud copies. Folder access follows current contents; revocation blocks new requests immediately, while issued media URLs expire within two hours.
 

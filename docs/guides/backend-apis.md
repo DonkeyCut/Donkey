@@ -6,10 +6,9 @@ the site's own client views, signed in with a session cookie.
 **The one rule:** every route handler is wrapped in `withDonkeyAuth`. A public
 endpoint is a deliberate exception with a product reason — today Better Auth's
 routes, the signature-verified Stripe webhook, the HMAC-token email unsubscribe
-and promotion redirect, the token-authorized share viewers, the ChatGPT MCP
+and promotion redirect, the token-authorized share viewers, the template gallery, the ChatGPT MCP
 endpoint and its OAuth endpoints, the Meta page view beacon, authenticated cron
-jobs, and a health check. Ship a handler without the wrapper and the endpoint
-is open to anyone.
+jobs, and a health check.
 
 ## Authentication
 
