@@ -9,6 +9,7 @@ import { CutOnboarding } from "@/cut/components/onboarding/CutOnboarding";
 import { OnboardingHost } from "@/cut/components/onboarding/OnboardingHost";
 import { PhoneGate } from "@/cut/components/PhoneGate";
 import { RequireSession } from "@/cut/components/RequireSession";
+import { TouchContextMenu } from "@/cut/components/TouchContextMenu";
 import { AppLoading, AppLoadingOverlay, SessionGate } from "@/cut/components/SessionGate";
 import { LocaleSync } from "@/cut/components/LocaleSync";
 import { IntlScope } from "@/i18n/IntlScope";
@@ -31,6 +32,9 @@ import { APP_NAMESPACES } from "@/i18n/namespaces";
 // account id, so the shell has nothing true to show before the session lands:
 // a cold load is one centered spinner, and the sidebar and content arrive
 // together behind it.
+//
+// On a touch screen a long press opens the app's context menus
+// (TouchContextMenu), so the system's own callout is turned off here.
 
 export default function CutAppLayout({ children }: { children: ReactNode }) {
   // translate="no" covers the whole app subtree. A browser's built-in
@@ -43,10 +47,11 @@ export default function CutAppLayout({ children }: { children: ReactNode }) {
     <IntlScope namespaces={APP_NAMESPACES}>
       <div
         translate="no"
-        className="app-surface min-h-screen bg-background font-system text-foreground antialiased"
+        className="app-surface min-h-screen bg-background font-system text-foreground antialiased [-webkit-touch-callout:none]"
       >
         <NoSessionReplay />
         <NoTranslate />
+        <TouchContextMenu />
         {/* A route whose address carries data — the editor's project id — can't be
             in the prerendered shell, and the framework resolves that above the
             client shell below. The boundary is here so it has somewhere to land. */}
