@@ -15,6 +15,15 @@ import { LIBRARY_PAGE_DEFAULT, LIBRARY_PAGE_MAX } from "@/cut/lib/libraryList";
 import { bool, num, obj, str, type AiToolDef } from "@/cut/lib/aiToolDef";
 
 import { LIBRARY_SHARE_ACTIONS, LIBRARY_SHARE_KINDS, SHARE_ACCESS } from "@/cut/lib/librarySharing";
+import {
+  TEMPLATE_ASPECTS,
+  TEMPLATE_CATEGORIES,
+  TEMPLATE_LENGTHS,
+  TEMPLATE_PAGE_DEFAULT,
+  TEMPLATE_PAGE_MAX,
+  TEMPLATE_STYLES,
+  TEMPLATE_TARGETS,
+} from "@/cut/lib/templateGallery";
 
 export const LIBRARY_TOOLS = [
   { name: "note_save", description: "Create or update a synced note when the user asks to write or edit one. Omit id to create; supply id to edit. Omitted fields stay unchanged. " + NOTE_LIBRARY_LOCATION_DESCRIPTION, inputSchema: z.toJSONSchema(noteSaveSchema, { io: "input" }) },
@@ -51,7 +60,7 @@ export const LIBRARY_TOOLS = [
   {
     name: "notes_list",
     description:
-      "List the user's synced notes — short scripts and ideas written in the Donkey Cut iOS app or the desktop Notes tab — with the folders they are filed in and the labels they carry. Read them when the user points at \"my note(s)\" for a script, caption, or voiceover text; when they name a folder (\"the scripts folder\") match it against `folders` and read the notes carrying that folder; when they name a label (\"my hook ideas\") match it against `labels` and read the notes wearing it. Quote a note's body verbatim when they ask for its words.",
+      "List the user's synced notes — short scripts and ideas written in the Donkey Cut iOS app or the Library — with each note's Library folder (`libraryLocation`), the phone folders they are filed in (`folders`), and the labels they carry. Read them when the user points at \"my note(s)\" for a script, caption, or voiceover text; when they name a folder (\"the scripts folder\") match it against `folders` and Library folders (library_list) and read the notes filed there; when they name a label (\"my hook ideas\") match it against `labels` and read the notes wearing it. Quote a note's body verbatim when they ask for its words.",
     inputSchema: obj({}),
   },
   {
@@ -77,6 +86,35 @@ export const LIBRARY_TOOLS = [
       { id: str("Template id — from library_list, or the id carried by a template the user referenced") },
       ["id"],
     ),
+  },
+  {
+    name: "template_gallery",
+    description:
+      "List Donkey's template gallery — ready-made edits every account can start from, each with sample footage in its clips, styled titles and effects, and no music. Each entry gives its id, name, what it is for, frame shape, length, how many footage slots and texts it has, and its link. Filter by category, aspect, length or style; all filters are optional. Results come a page at a time with the total; `next` is the offset of the following page.",
+    inputSchema: obj({
+      category: { type: "string", enum: [...TEMPLATE_CATEGORIES] },
+      aspect: { type: "string", enum: [...TEMPLATE_ASPECTS] },
+      length: { type: "string", enum: [...TEMPLATE_LENGTHS], description: "short ≤15 s, medium ≤30 s, long beyond" },
+      style: { type: "string", enum: [...TEMPLATE_STYLES] },
+      offset: num("Where the page starts; pass the previous page's next"),
+      limit: num(`Templates per page, 1..${TEMPLATE_PAGE_MAX} (default ${TEMPLATE_PAGE_DEFAULT})`),
+    }),
+  },
+  {
+    name: "template_use",
+    description:
+      "Use a gallery template or one of the user's own templates. target \"new_project\" makes a new project from it and answers its link; give the link to the user. target \"timeline\" puts it into this project at the playhead with its frame shape and caption look; pass media to have the user's own assets play its footage sources in the order they first play (a sample two clips share counts once), and the rest keep their samples. Only when the user asked for a template.",
+    inputSchema: obj({
+      id: str("Gallery template id from template_gallery, or the project id of the user's own template (list_projects marks those template)"),
+      target: { type: "string", enum: [...TEMPLATE_TARGETS] },
+      media: { type: "array", items: { type: "string" }, description: "timeline only: this project's asset ids, one per footage source in play order" },
+    }, ["id", "target"]),
+  },
+  {
+    name: "make_template",
+    description:
+      "Make one of the user's projects a template: a copy, marked template, joins their own templates on the Templates page, where they open, edit and share it like any project and start new projects from it. The project itself is unchanged. Only when the user asked.",
+    inputSchema: obj({ project_id: str("The project's id (list_projects)") }, ["project_id"]),
   },
   {
     name: "save_template",

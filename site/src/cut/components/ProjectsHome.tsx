@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type RefObject } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useLocale, useTranslations } from "next-intl";
@@ -11,6 +12,7 @@ import {
   FolderPlus,
   Laptop,
   LayoutGrid,
+  LayoutTemplate,
   List,
   Loader2,
   MoreHorizontal,
@@ -52,7 +54,7 @@ import {
   useListedResidencies,
   useLocalCompute,
 } from "@/cut/lib/backend/hooks";
-import { dropCachedDoc, seedNewProjectDoc } from "@/cut/lib/docCache";
+import { seedNewProjectDoc } from "@/cut/lib/docCache";
 import { lastChosenAspect } from "@/cut/lib/store";
 import {
   backendFor,
@@ -71,16 +73,16 @@ import { NewProjectButton } from "@/cut/components/NewProjectButton";
 import { track } from "@/lib/analytics";
 import { useStartCheckout } from "@/queries/billing";
 import { clearProjectThreads } from "@/cut/lib/chatThreads";
-import { useGenerate } from "@/cut/lib/generate";
-import { useGenScene } from "@/cut/lib/genScene";
 import { createProjectFromFile, isMediaFile } from "@/cut/lib/media";
 import { creatorLocale, creatorNames } from "@/cut/lib/defaultNames";
 import { dropLocalProjectCopy, localMediaUrl } from "@/cut/lib/mediaSync";
 import { copyProjectAcross } from "@/cut/lib/projectCopy";
+import { forgetProject } from "@/cut/lib/projectPurge";
 import { newProjectAllowed } from "@/cut/lib/projectLimit";
 import { useStarterGone } from "@/cut/lib/tourLock";
 import { checkoutErrorCode } from "@/cut/lib/proUpgrade";
 import { homeHref, projectHref, useCutBase } from "@/cut/lib/nav";
+import { copyAsKind } from "@/cut/lib/templateUse";
 import { daysUntil, formatDate, formatTime } from "@/cut/lib/time";
 import {
   parseRatio,
@@ -295,8 +297,9 @@ export function ProjectsHome() {
     list: residencies.includes("browser"),
     live: residencies.includes("browser"),
   });
+  // A project made into a template lives under Templates › My templates.
   const asSection = (q: typeof localSection): SectionData => ({
-    projects: q.data?.projects ?? null,
+    projects: q.data ? q.data.projects.filter((p) => p.kind !== "template") : null,
     folders: q.data?.folders ?? [],
     // A cached listing on screen outranks a failed revalidation: the cards
     // stay, and only a section with nothing to show says it couldn't load.
@@ -354,6 +357,9 @@ export function ProjectsHome() {
   const [busy, setBusy] = useState(false);
   // One line of feedback when a cross-residency duplicate fails.
   const [dupError, setDupError] = useState<string | null>(null);
+  // The name of the project just made into a template, for the note that says
+  // where it went.
+  const [templateMade, setTemplateMade] = useState<string | null>(null);
   // A count of desktop files still uploading into fresh projects, plus whether an
   // OS-file drag is hovering the surface (a depth counter tames enter/leave noise
   // as the cursor crosses child tiles).
@@ -628,6 +634,24 @@ export function ProjectsHome() {
     }
   };
 
+  // Make a template from a project: a copy on the same shelf, marked as one and
+  // keeping the project's name, listed under Templates › My templates.
+  const makeTemplate = async (r: Residency, p: ProjectSummary) => {
+    if (!live(r)) return;
+    if (!(await newProjectAllowed(client))) return;
+    setBusy(true);
+    setDupError(null);
+    try {
+      await copyAsKind(r, p.id, "template", p.name);
+      await refresh(r);
+      setTemplateMade(p.name);
+    } catch (e) {
+      setDupError(describeError(e, t("projects.makeTemplateFailed")));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   // Move a project to another residency: copy it across (projectCopy.ts does
   // the doc + media transfer and cleans up a half-made copy itself), then drop
   // the original. The copy landing first is what makes deleting it safe.
@@ -660,11 +684,7 @@ export function ProjectsHome() {
   // landing), and the cached copy of its document.
   const purgeProject = (id: string, residency: Residency) => {
     starterGone(id);
-    useGenScene.getState().killProject(id);
-    useGenerate.getState().cancelForOwner({ projectId: id });
-    clearProjectThreads(id);
-    dropCachedDoc(id, residency);
-    if (residency === "cloud") void dropLocalProjectCopy(id);
+    forgetProject(id, residency);
   };
 
   const removeOne = async (id: string, residency: Residency) => {
@@ -934,6 +954,7 @@ export function ProjectsHome() {
                   setRenaming({ project: p, residency: r });
                 }}
                 onDuplicate={() => void duplicate(r, p)}
+                onMakeTemplate={() => void makeTemplate(r, p)}
                 moveTo={moveDests(r)
                   .map((d) => ({ target: d, run: () => void moveAcross(r, d, p) }))}
                 onDelete={() => setDeleting(setOf(p, r))}
@@ -1010,6 +1031,7 @@ export function ProjectsHome() {
                 setRenaming({ project: p, residency: r });
               }}
               onDuplicate={() => void duplicate(r, p)}
+              onMakeTemplate={() => void makeTemplate(r, p)}
               moveTo={moveDests(r)
                 .map((d) => ({ target: d, run: () => void moveAcross(r, d, p) }))}
               onDelete={() => setDeleting(setOf(p, r))}
@@ -1150,6 +1172,18 @@ export function ProjectsHome() {
       <GraceBanner enabled={residencies.includes("cloud")} />
 
       {dupError && <p className="mb-4 text-sm text-destructive">{dupError}</p>}
+      {templateMade && (
+        <p className="mb-4 text-sm text-muted-foreground">
+          {t.rich("projects.templateMade", {
+            name: templateMade,
+            link: (chunks) => (
+              <Link href={homeHref(base, "templates")} className="font-medium text-foreground underline underline-offset-2">
+                {chunks}
+              </Link>
+            ),
+          })}
+        </p>
+      )}
 
       {homeView === "loading" ? (
         <div className="grid place-items-center py-24 text-muted-foreground">
@@ -1263,6 +1297,11 @@ export function ProjectsHome() {
                 ? () => void duplicate(ctxSet[0].r, ctxSet[0].p)
                 : undefined
             }
+            onMakeTemplate={
+              ctxSet.length === 1 && ctxFolders.length === 0
+                ? () => void makeTemplate(ctxSet[0].r, ctxSet[0].p)
+                : undefined
+            }
             moveTo={ctxMoveTo}
             onDelete={() =>
               setDeleting({
@@ -1311,7 +1350,7 @@ export function ProjectsHome() {
  * a connection per card on arrival and pull every file's metadata across the
  * network before the first row settled. A shelf that isn't answering has no
  * media to reach at all, so those cards stop at the frame they cached. */
-function CardPreview({
+export function CardPreview({
   project: p,
   residency,
   offline = false,
@@ -1476,11 +1515,13 @@ const MOVE_DEST = {
 function ProjectMenuItems({
   onRename,
   onDuplicate,
+  onMakeTemplate,
   moveTo,
   onDelete,
 }: {
   onRename?: () => void;
   onDuplicate?: () => void;
+  onMakeTemplate?: () => void;
   /** The other live residencies this project can move to. */
   moveTo?: { target: Residency; run: () => void }[];
   onDelete: () => void;
@@ -1498,6 +1539,11 @@ function ProjectMenuItems({
           <Copy /> {t("duplicate")}
         </DropdownMenuItem>
       )}
+      {onMakeTemplate && (
+        <DropdownMenuItem onClick={onMakeTemplate}>
+          <LayoutTemplate /> {t("makeTemplate")}
+        </DropdownMenuItem>
+      )}
       {moveTo?.map(({ target, run }) => {
         const { Icon, label } = MOVE_DEST[target];
         return (
@@ -1506,7 +1552,7 @@ function ProjectMenuItems({
           </DropdownMenuItem>
         );
       })}
-      {(onRename || onDuplicate || (moveTo?.length ?? 0) > 0) && <DropdownMenuSeparator />}
+      {(onRename || onDuplicate || onMakeTemplate || (moveTo?.length ?? 0) > 0) && <DropdownMenuSeparator />}
       <DropdownMenuItem variant="destructive" onClick={onDelete}>
         <Trash2 /> {t("delete")}
       </DropdownMenuItem>
@@ -1518,12 +1564,14 @@ function ProjectMenu({
   className,
   onRename,
   onDuplicate,
+  onMakeTemplate,
   moveTo,
   onDelete,
 }: {
   className?: string;
   onRename: () => void;
   onDuplicate: () => void;
+  onMakeTemplate: () => void;
   /** The other live residencies this project can move to. */
   moveTo?: { target: Residency; run: () => void }[];
   onDelete: () => void;
@@ -1548,6 +1596,7 @@ function ProjectMenu({
         <ProjectMenuItems
           onRename={onRename}
           onDuplicate={onDuplicate}
+          onMakeTemplate={onMakeTemplate}
           moveTo={moveTo}
           onDelete={onDelete}
         />

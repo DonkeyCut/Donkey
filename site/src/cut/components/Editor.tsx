@@ -107,6 +107,10 @@ import { StorageUpgradeDialog } from "./StorageUpgradeDialog";
 import { UpgradeDialog } from "./UpgradeDialog";
 import { TopBar } from "./TopBar";
 import { ViewerTopBar } from "./ViewerTopBar";
+import { TemplateInfo, TemplateTopBar } from "./TemplateInfo";
+import { TemplateFillSheet } from "./TemplateFillSheet";
+import { clearFillMark, hasFillMark } from "@/cut/lib/templateUse";
+import type { GalleryTemplate } from "@/cut/lib/templateGallery";
 
 /** Bounds on the viewer's change poll. The server picks the interval inside
  * this range from how long the owner has been idle; the floor keeps a live
@@ -186,6 +190,7 @@ export function Editor({
   from,
   folder,
   viewer = false,
+  template,
 }: {
   projectId: string;
   from?: string | null;
@@ -193,6 +198,9 @@ export function Editor({
   /** Read-only share view: the share page bound the shared backend and put
    * the store in read-only mode before mounting. */
   viewer?: boolean;
+  /** A gallery template's page: the viewer with the template's own top bar
+   * and side panel. */
+  template?: GalleryTemplate;
 }) {
   const t = useTranslations("editor.editor");
   const describeError = useDescribeError();
@@ -297,6 +305,12 @@ export function Editor({
   useEffect(() => void syncLinkedLibrary(), []);
   const [conflictReloaded, setConflictReloaded] = useState(false);
   const [shareGone, setShareGone] = useState(false);
+  // A project just made from a gallery template opens asking for clips.
+  const [fillOpen, setFillOpen] = useState(() => !viewer && hasFillMark(projectId));
+  const closeFill = useCallback(() => {
+    clearFillMark();
+    setFillOpen(false);
+  }, []);
   // This project lives on this Mac and the Donkey app isn't answering. Nothing
   // to load, and nothing to guess at either: say where it is and wait.
   const [needsApp, setNeedsApp] = useState(false);
@@ -1443,7 +1457,9 @@ export function Editor({
       {/* The tab wears whatever is still running here. */}
       <TabStatus />
       <div className="grid min-w-0 flex-1 grid-rows-[46px_minmax(0,1fr)_auto]">
-        {viewer ? (
+        {template ? (
+          <TemplateTopBar template={template} />
+        ) : viewer ? (
           <ViewerTopBar chatStatus={chatStatus} />
         ) : (
           <TopBar
@@ -1473,7 +1489,12 @@ export function Editor({
           </div>
         )}
       </div>
-      {(!viewer || sharedFeatures?.chat) && !chatgpt && (
+      {template && (
+        <aside className="w-80 shrink-0 overflow-y-auto border-l border-border bg-card">
+          <TemplateInfo template={template} />
+        </aside>
+      )}
+      {!template && (!viewer || sharedFeatures?.chat) && !chatgpt && (
         <AiPanel
           key={projectId}
           projectId={projectId}
@@ -1485,6 +1506,7 @@ export function Editor({
       {!viewer && !chatgpt && <StarterTour projectId={projectId} />}
       {exportOpen && <ExportDialog />}
       {!viewer && <ReplaceDialog onImport={importFiles} />}
+      {fillOpen && <TemplateFillSheet onImport={importFiles} onClose={closeFill} />}
       {shareGone && (
         <div className="fixed top-14 left-1/2 z-50 max-w-[calc(100%-2rem)] -translate-x-1/2 rounded-full bg-foreground/90 px-3.5 py-1.5 text-center text-xs font-medium text-background shadow-lg">
           {t("shareGone")}

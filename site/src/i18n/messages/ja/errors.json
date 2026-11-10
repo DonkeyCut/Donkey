@@ -424,6 +424,14 @@
     "untitled": "無題",
     "text": "テキスト",
     "frame": "フレーム {time}",
-    "copy": "{name}のコピー"
-  }
+    "copy": "{name}のコピー",
+    "notes": "ノート"
+  },
+  "template_missing": "このテンプレートは利用できなくなりました。",
+  "template_sign_in_required": "このテンプレートを使用するにはサインインしてください。",
+  "template_use_failed": "プロジェクトを作成できませんでした。",
+  "templates_read_failed": "テンプレートを読み込めませんでした。",
+  "project_limit": "このアカウントは無料プロジェクトの上限に達しています。さらにプロジェクトを作成するにはProにアップグレードしてください。",
+  "note_place_failed": "ノートを配置できませんでした。",
+  "template_needs_update": "このMacでテンプレートを作成するには、Donkeyアプリをアップデートしてください。"
 }

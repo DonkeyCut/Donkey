@@ -26,7 +26,8 @@ import { readSnapshot, snapshotKey, writeSnapshot } from "./cache";
 import { fetchLibrary, type LibraryAsset, type LibraryData } from "./library";
 import { freeItemName } from "./itemName";
 import { renameLibraryFile } from "./libraryRename";
-import { fetchNotes, type NotesData } from "./notes";
+import { fetchNotes, placeLooseNotes, type NotesData } from "./notes";
+import { fetchTemplateIndex } from "./templateUse";
 import {
   availableResidencies,
   backendFor,
@@ -150,6 +151,39 @@ export function useOwnProjects(enabled: boolean): ProjectSummary[] {
       retry: false,
     })),
     combine: allProjects,
+  });
+}
+
+/** The person's own templates on every shelf this browser can read now,
+ * with the shelf each lives on. The same cache entries as the home's sections,
+ * so making one there lists it here. */
+export function useOwnTemplates(): { project: ProjectSummary; residency: Residency }[] {
+  const live = availableResidencies();
+  return useQueries({
+    queries: live.map((r) => ({
+      queryKey: projectsKey(r),
+      queryFn: () => loadProjectsSection(r),
+      staleTime: PROJECT_REFS_STALE_MS,
+      retry: false,
+    })),
+    combine: (results) =>
+      results.flatMap((q, i) =>
+        (q.data?.projects ?? []).filter((p) => p.kind === "template").map((project) => ({ project, residency: live[i] }))
+      ),
+  });
+}
+
+export const templateIndexKey = ["cut", "template-index"] as const;
+
+/** How long the gallery trusts its read of the published templates. */
+const TEMPLATE_INDEX_STALE_MS = 5 * 60_000;
+
+/** Donkey's published template gallery. */
+export function useTemplateIndex() {
+  return useQuery({
+    queryKey: templateIndexKey,
+    queryFn: fetchTemplateIndex,
+    staleTime: TEMPLATE_INDEX_STALE_MS,
   });
 }
 
@@ -372,6 +406,16 @@ export function useNotes(enabled = true) {
     queryFn: async () => {
       const data = await fetchNotes();
       writeSnapshot(NOTES_SNAPSHOT, data);
+      // Notes with no Library placement file into the Library's Notes folder
+      // behind the listing; the Library reads again once they land.
+      void placeLooseNotes(data).then(({ landed, madeFolders }) => {
+        if (madeFolders > 0) {
+          void refetchLibrary(client);
+        }
+        if (landed > 0) {
+          void client.invalidateQueries({ queryKey: notesKey });
+        }
+      });
       return data;
     },
     staleTime: 0,

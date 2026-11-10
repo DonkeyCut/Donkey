@@ -5,7 +5,7 @@ import { resolveParent, subtreeOf } from "@/cut/lib/folderTree";
 import { timelineEnd } from "@/cut/lib/timelineEnd";
 import { DOC_SEQ_HEADER, DOC_WRITER_HEADER, HTTP_CONFLICT } from "@/cut/lib/backend/types";
 import { OUTPUT_SPACES } from "@donkeycut/effects-kit";
-import { isTimelineId, normalizeAspect, sanitizeTimelines, type ProjectDoc, type ProjectFolder, type ProjectSummary } from "@/cut/lib/types";
+import { isProjectKind, isTimelineId, normalizeAspect, sanitizeTimelines, type ProjectDoc, type ProjectFolder, type ProjectSummary } from "@/cut/lib/types";
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { defaultNames } from "@/cut/lib/defaultNames";
@@ -121,6 +121,7 @@ function mergeDoc(existing: ProjectDoc, body: Partial<ProjectDoc>): ProjectDoc {
     timelines: sanitizeTimelines(body.timelines, existing) ?? existing.timelines,
     templates: Array.isArray(body.templates) ? body.templates : existing.templates,
     mediaFolders: Array.isArray(body.mediaFolders) ? body.mediaFolders : existing.mediaFolders,
+    kind: isProjectKind(body.kind) ? body.kind : existing.kind,
     aspect: normalizeAspect(body.aspect) ?? existing.aspect,
     guides: Array.isArray(body.guides) ? sanitizeGuides(body.guides) : existing.guides,
     guideLines: body.guideLines !== undefined ? sanitizeGuideLines(body.guideLines) : existing.guideLines,
@@ -172,6 +173,7 @@ function summarize(row: ProjectRow, sizeBytes: number): ProjectSummary {
     hasPreview: row.previewKey != null,
     aspect: normalizeAspect(doc.aspect) ?? undefined,
     folderId: row.folderId ?? null,
+    kind: doc.kind,
     sizeBytes,
   };
 }

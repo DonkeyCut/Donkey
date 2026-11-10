@@ -7,7 +7,7 @@ import { useTranslations } from "next-intl";
 import { creatorNames } from "@/cut/lib/defaultNames";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Camera, Clapperboard, FolderOpen, Loader2, StickyNote } from "lucide-react";
+import { Camera, Clapperboard, FolderOpen, LayoutTemplate, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -19,6 +19,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { seedNewProjectDoc } from "@/cut/lib/docCache";
 import { patchProjects, usePhoneLink } from "@/cut/lib/queries";
+import { useAccount } from "@/queries/credits";
 import { backendFor, type Residency } from "@/cut/lib/residency";
 import { track } from "@/lib/analytics";
 import { NavStorage } from "@/cut/components/NavStorage";
@@ -30,15 +31,20 @@ import { newProjectAllowed } from "@/cut/lib/projectLimit";
 import { cn } from "@/lib/utils";
 
 // Each tab's name is its key in the home catalog's tab names.
-type NavEntry = { tab: CutTab; label: "projects" | "library" | "notes" | "cameraRoll"; icon: typeof Clapperboard };
+type NavEntry = {
+  tab: CutTab;
+  label: "projects" | "library" | "templates" | "cameraRoll";
+  icon: typeof Clapperboard;
+};
 
+// The person's own work, then a separator, then what Donkey offers to start from.
 const NAV: NavEntry[] = [
   { tab: "projects", label: "projects", icon: Clapperboard },
   { tab: "library", label: "library", icon: FolderOpen },
-  { tab: "notes", label: "notes", icon: StickyNote },
 ];
+const START_NAV: NavEntry[] = [{ tab: "templates", label: "templates", icon: LayoutTemplate }];
 
-// Surfaces fed by the iOS app, listed only for accounts that use it.
+// Fed by the iOS app, listed only for super users whose account uses it.
 const PHONE_NAV: NavEntry[] = [
   { tab: "camera-roll", label: "cameraRoll", icon: Camera },
 ];
@@ -50,6 +56,7 @@ export function AppSidebar() {
   const base = useCutBase();
   const client = useQueryClient();
   const phoneLinked = usePhoneLink();
+  const superUser = useAccount().data?.superUser === true;
   // The residency the pending creation was launched for; null when the naming
   // dialog is closed.
   const [createIn, setCreateIn] = useState<Residency | null>(null);
@@ -90,6 +97,25 @@ export function AppSidebar() {
     }
   };
 
+  // One sidebar row, lit while its page is open.
+  const navLink = ({ tab, label, icon: Icon }: NavEntry) => {
+    const href = homeHref(base, tab);
+    const active = pathname === href;
+    return (
+      <Link
+        key={tab}
+        href={href}
+        className={cn(
+          "flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
+          active && "bg-muted text-foreground"
+        )}
+      >
+        <Icon className="size-4" />
+        <span className="truncate">{t(`tabs.${label}`)}</span>
+      </Link>
+    );
+  };
+
   return (
     <aside className="flex w-60 shrink-0 flex-col border-r border-border bg-card px-3 py-4">
       <div className="mb-5 flex items-center gap-2.5 px-2">
@@ -110,23 +136,10 @@ export function AppSidebar() {
       />
 
       <nav className="flex flex-col gap-0.5">
-        {[...NAV, ...(phoneLinked ? PHONE_NAV : [])].map(({ tab, label, icon: Icon }) => {
-          const href = homeHref(base, tab);
-          const active = pathname === href;
-          return (
-            <Link
-              key={tab}
-              href={href}
-              className={cn(
-                "flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
-                active && "bg-muted text-foreground"
-              )}
-            >
-              <Icon className="size-4" />
-              <span className="truncate">{t(`tabs.${label}`)}</span>
-            </Link>
-          );
-        })}
+        {NAV.map(navLink)}
+        <div role="separator" className="mx-2.5 my-2 h-px bg-border" />
+        {START_NAV.map(navLink)}
+        {superUser && phoneLinked && PHONE_NAV.map(navLink)}
       </nav>
       <div className="mt-auto flex flex-col">
         <NavStorage />

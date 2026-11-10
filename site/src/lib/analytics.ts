@@ -85,7 +85,7 @@ export type AnalyticsEvents = {
   export_started: ExportShape;
   export_finished: ExportShape & { result: "done" | "queued" | "cancelled" | "failed"; error?: string };
   // Cut projects home.
-  project_created: { source: "projects_home" | "sidebar" | "file_import" | "chatgpt_card" };
+  project_created: { source: "projects_home" | "sidebar" | "file_import" | "chatgpt_card" | "template" };
   folder_created: void;
   // Cut cloud storage limits.
   cut_storage_pill_clicked: void;

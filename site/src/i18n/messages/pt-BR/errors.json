@@ -424,6 +424,14 @@
     "untitled": "Sem título",
     "text": "Seu texto",
     "frame": "Quadro {time}",
-    "copy": "{name} (cópia)"
-  }
+    "copy": "{name} (cópia)",
+    "notes": "Notas"
+  },
+  "template_missing": "Este modelo não está mais disponível.",
+  "template_sign_in_required": "Inicie sessão para usar este modelo.",
+  "template_use_failed": "Não foi possível criar o projeto.",
+  "templates_read_failed": "Não foi possível carregar os modelos.",
+  "project_limit": "Esta conta atingiu o limite de projetos gratuitos. Assine o Pro para criar mais projetos.",
+  "note_place_failed": "Não foi possível salvar as Notas.",
+  "template_needs_update": "Atualize o app Donkey para criar modelos neste Mac."
 }

@@ -2,8 +2,8 @@
   "tabs": {
     "projects": "プロジェクト",
     "library": "ライブラリ",
-    "notes": "ノート",
-    "cameraRoll": "カメラロール"
+    "cameraRoll": "カメラロール",
+    "templates": "テンプレート"
   },
   "newProject": {
     "button": "新規プロジェクト",
@@ -55,7 +55,10 @@
     "duplicate": "複製",
     "moveToLocal": "ローカルに移動",
     "moveToCloud": "クラウドに移動",
-    "actions": "プロジェクト操作"
+    "actions": "プロジェクト操作",
+    "makeTemplate": "テンプレートを作成",
+    "makeTemplateFailed": "テンプレートを作成できませんでした。",
+    "templateMade": "「{name}」が<link>テンプレート</link>に追加されました。"
   },
   "pick": {
     "project": "{count, plural, other {#件のプロジェクト}}",
@@ -170,19 +173,12 @@
   "notes": {
     "untitled": "無題",
     "untitledNote": "無題のノート",
-    "allNotes": "すべてのノート",
     "saveFailed": "ノートを保存できませんでした。",
     "reopen": "再度開いて再試行",
-    "newFolder": "新規フォルダー",
-    "newNote": "新規ノート",
     "loadFailed": "ノートを読み込めませんでした。",
     "retry": "再試行",
-    "emptyTitle": "ノートはまだありません。",
-    "emptyHint": "ノートはDonkey Cut iOSアプリと同期されます。ここで作成した原稿はスマートフォンのテレプロンプターですぐに使えます。",
     "delete": "削除",
     "deleteTitle": "{what}を削除しますか？",
-    "deleteFolderTitle": "「{name}」を削除しますか？",
-    "folderFallback": "フォルダー",
     "removedFromPhone": "{count, plural, other {スマートフォンからも削除されます。}}"
   },
   "composer": {
@@ -264,5 +260,88 @@
     "upgradeTip": "より多くのストレージとAIクレジットを利用できるプランを見る",
     "grace": "プランの有効期限が切れました。最も古いプロジェクトが削除される前に、アップグレードするか{size}の空き容量を確保してください。"
   },
-  "justNow": "たった今"
+  "justNow": "たった今",
+  "templates": {
+    "title": "テンプレート",
+    "all": "すべて",
+    "filters": {
+      "source": "ソース",
+      "category": "カテゴリー",
+      "aspect": "アスペクト比",
+      "length": "長さ",
+      "style": "スタイル"
+    },
+    "sources": {
+      "all": "すべてのテンプレート",
+      "mine": "マイテンプレート",
+      "donkey": "Donkeyテンプレート"
+    },
+    "aspects": {
+      "9:16": "縦型 9:16",
+      "1:1": "正方形 1:1",
+      "4:5": "ポートレート 4:5",
+      "16:9": "横型 16:9"
+    },
+    "lengths": {
+      "short": "15秒以内",
+      "medium": "15〜30秒",
+      "long": "30秒以上"
+    },
+    "categories": {
+      "opener": "オープナー＆イントロ",
+      "promo": "プロモーション＆広告",
+      "slideshow": "スライドショー",
+      "announcement": "お知らせ・告知",
+      "countdown": "カウントダウン＆リスト",
+      "lifestyle": "ライフスタイル＆Vlog",
+      "travel": "旅行",
+      "food": "料理＆レシピ",
+      "fitness": "フィットネス",
+      "quote": "引用＆歌詞",
+      "talkingHead": "トーキングヘッド",
+      "event": "イベント＆ダイジェスト",
+      "celebration": "お祝い・記念日",
+      "product": "プロダクト・商品",
+      "explainer": "解説動画",
+      "titles": "タイトル＆ロワーサード",
+      "logo": "ロゴリビール",
+      "trailer": "予告編",
+      "realEstate": "不動産"
+    },
+    "styles": {
+      "bold": "ボールド",
+      "minimal": "ミニマル",
+      "cinematic": "シネマティック",
+      "playful": "プレイフル",
+      "retro": "レトロ",
+      "elegant": "エレガント"
+    },
+    "empty": "条件に一致するテンプレートはありません。",
+    "clearFilters": "フィルターをクリア",
+    "detail": {
+      "close": "テンプレート一覧に戻る",
+      "use": "新規プロジェクトとして使用",
+      "using": "プロジェクトを作成中…",
+      "progress": "メディアをコピー中 ({done}/{total})…",
+      "copyLink": "リンクをコピー",
+      "linkCopied": "リンクをコピーしました",
+      "size": "{width} × {height} px",
+      "seconds": "{seconds, plural, other {#秒}}",
+      "fps": "{fps} fps",
+      "slots": "{count, plural, other {#個のクリップ枠}}",
+      "texts": "{count, plural, other {#個のテキスト}}",
+      "noMusic": "音楽は含まれていません。独自のサウンドトラックを追加してください。",
+      "similar": "類似のテンプレート",
+      "failed": "プロジェクトを作成できませんでした。",
+      "missing": "このテンプレートは利用できなくなりました。"
+    },
+    "fill": {
+      "title": "クリップを追加",
+      "body": "テンプレートの枠に配置するクリップを選択してください。順番に配置され、スキップした枠はサンプルのまま維持されます。",
+      "slot": "クリップ {n} · {seconds}",
+      "pick": "クリップを選択",
+      "skip": "サンプルを保持",
+      "replaceSlot": "このスロットのクリップを選択"
+    }
+  }
 }

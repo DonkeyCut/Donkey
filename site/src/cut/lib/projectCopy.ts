@@ -48,6 +48,9 @@ export async function copyProjectAcross(
     rename?: (docName: string) => string;
     /** Called per media file as its bytes land on the target. */
     onProgress?: (done: number, total: number) => void;
+    /** "skip" for a source that publishes no conversations, such as a
+     * gallery template's share. */
+    chats?: "carry" | "skip";
   } = {}
 ): Promise<string> {
   let created: string | null = null;
@@ -123,7 +126,9 @@ export async function copyProjectAcross(
       body: JSON.stringify(copied),
     });
     if (!putRes.ok) throw new UserError("project_doc_save_failed", "Could not save the project.");
-    await copyChatThreads(src, dst, projectId, summary.id);
+    if (opts.chats !== "skip") {
+      await copyChatThreads(src, dst, projectId, summary.id);
+    }
     if (!carryProxies) {
       // The worker builds the proxies the copy left behind; the editor writes
       // each onto its asset when the project is next opened.

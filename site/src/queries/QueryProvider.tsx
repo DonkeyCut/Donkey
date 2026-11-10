@@ -1,7 +1,8 @@
 "use client";
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
+import { bindAppQueryClient } from "./appClient";
 
 export function QueryProvider({ children }: { children: ReactNode }) {
   const [client] = useState(
@@ -23,6 +24,12 @@ export function QueryProvider({ children }: { children: ReactNode }) {
         },
       }),
   );
+
+  // Chat tools reach the account reads through it. Bound in an effect so a
+  // server render never shares one client across requests.
+  useEffect(() => {
+    bindAppQueryClient(client);
+  }, [client]);
 
   return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
 }

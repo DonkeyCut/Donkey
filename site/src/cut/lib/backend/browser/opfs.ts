@@ -249,6 +249,7 @@ export async function summarize(id: string, doc: ProjectDoc): Promise<ProjectSum
     hasPreview: preview !== null,
     aspect: doc.aspect,
     folderId: doc.folderId ?? null,
+    kind: doc.kind,
     sizeBytes: await dirBytes(await projectDir(id)),
   };
 }

@@ -6948,14 +6948,15 @@ export function liftClipLooks(
     });
   }
   if (lifted.length === 0) return null;
-  // The grades take the top rows, the same place a new effect opens on; the
-  // elements that were already there keep their order below them.
-  const rows = Math.max(...lifted.map((o) => o.lane ?? 0)) + 1;
+  // The grades take the bottom rows, under every element, so they grade the
+  // picture alone as the clip's look did: a title over a noir clip keeps its
+  // color. The elements keep their rows.
+  const base = overlays.length ? Math.max(...overlays.map((o) => o.lane ?? 0)) + 1 : 0;
   return {
     clips: clips.map((c) =>
       done.has(c.id) ? { ...c, look: undefined, lookAmount: undefined } : c
     ),
-    overlays: [...overlays.map((o) => ({ ...o, lane: (o.lane ?? 0) + rows })), ...lifted],
+    overlays: [...overlays, ...lifted.map((o) => ({ ...o, lane: (o.lane ?? 0) + base }))],
   };
 }
 

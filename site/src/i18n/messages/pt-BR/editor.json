@@ -333,7 +333,7 @@
     "fullscreen": "Tela cheia",
     "chat": "Chat",
     "chatShortcut": "Chat ({key})",
-    "backTo": "{tab, select, library {Voltar para a biblioteca} other {Voltar para os projetos}}",
+    "backTo": "{tab, select, library {Voltar para a biblioteca} templates {Voltar para os modelos} other {Voltar para os projetos}}",
     "rename": "Renomear projeto",
     "importsFailed": "{count, plural, one {# importação falhou} other {# importações falharam}}",
     "retry": "Tentar novamente",
@@ -353,7 +353,7 @@
     "moving": "Movendo…"
   },
   "editor": {
-    "backTo": "{tab, select, library {Voltar para a biblioteca} other {Voltar para os projetos}}",
+    "backTo": "{tab, select, library {Voltar para a biblioteca} templates {Voltar para os modelos} other {Voltar para os projetos}}",
     "needsApp": "Este é um projeto local — ele fica neste Mac. Abra o app Donkey e ele abrirá aqui.",
     "shareGone": "Este compartilhamento não está mais disponível.",
     "conflictReloaded": "Uma versão mais recente salva em outro local foi recarregada.",

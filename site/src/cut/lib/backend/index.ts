@@ -100,7 +100,17 @@ export function hasLocalCompute(): boolean {
  * this signal.
  */
 export function announceLocalCompute() {
+  computeSettled = true;
   listeners.forEach((l) => l());
+}
+
+let computeSettled = false;
+
+/** Whether the gate has answered, either way, whether this Mac has an engine.
+ * Until then a choice that depends on it, such as where a new project lands,
+ * would be a guess. */
+export function localComputeSettled(): boolean {
+  return computeSettled;
 }
 
 /** fetch() against the active backend. */

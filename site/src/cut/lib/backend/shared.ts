@@ -6,14 +6,26 @@
 // viewer never PUTs, so there is no write-conflict version map here; the
 // version kept is the one the last doc actually delivered, which is what
 // tells the change poll whether a reload landed.
+//
+// A gallery template opens the same way, read-only under its own prefix of
+// the template API.
+import { TEMPLATES_API } from "../templateGallery";
 import { cloudRequest } from "./cloud";
 import type { CutBackend } from "./types";
 
-let boundToken = "";
+const sharePrefix = (token: string) => `/api/cut-shared/${encodeURIComponent(token)}`;
+const templatePrefix = (id: string) => `${TEMPLATES_API}/${encodeURIComponent(id)}`;
+
+let boundPrefix = "";
 
 /** Bind the share link token before bindCutMode("shared"). */
 export function bindSharedBackend(next: string) {
-  boundToken = next;
+  boundPrefix = sharePrefix(next);
+}
+
+/** Bind a gallery template before bindCutMode("shared"). */
+export function bindTemplateBackend(id: string) {
+  boundPrefix = templatePrefix(id);
 }
 
 // /projects/:id only — /projects/folders is the folder collection, not a doc.
@@ -35,7 +47,15 @@ export function loadedDocVersion(projectId: string): string | null {
  * rides the cloud transport, so a headless process bound to a hosted origin
  * reaches the share the same way it reaches its own projects. */
 export function sharedBackendFor(token: string): CutBackend {
-  const prefix = `/api/cut-shared/${encodeURIComponent(token)}`;
+  return readOnlyBackend(sharePrefix(token));
+}
+
+/** A backend reading one gallery template. */
+export function templateBackendFor(id: string): CutBackend {
+  return readOnlyBackend(templatePrefix(id));
+}
+
+function readOnlyBackend(prefix: string): CutBackend {
   const sharedPath = (path: string) => {
     const rest = path.replace(/^\/api\/cut\/?/, "");
     return rest ? `${prefix}/${rest}` : prefix;
@@ -75,6 +95,6 @@ export const sharedBackend: CutBackend = {
     revealInFinder: false,
     watch: false,
   },
-  fetch: (path, init) => sharedBackendFor(boundToken).fetch(path, init),
-  url: (path) => sharedBackendFor(boundToken).url(path),
+  fetch: (path, init) => readOnlyBackend(boundPrefix).fetch(path, init),
+  url: (path) => readOnlyBackend(boundPrefix).url(path),
 };

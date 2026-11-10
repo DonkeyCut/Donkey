@@ -2,7 +2,7 @@ import { sanitizeGuideLines, sanitizeGuides } from "@/cut/lib/guides";
 import { execFile } from "node:child_process";
 import { compatCoverIn, compatProxyNameFor } from "@/cut/lib/proxyNames";
 import { OUTPUT_SPACES } from "@donkeycut/effects-kit";
-import { isTimelineId, normalizeAspect, sanitizeTimelines, type ProjectDoc } from "@/cut/lib/types";
+import { isProjectKind, isTimelineId, normalizeAspect, sanitizeTimelines, type ProjectDoc } from "@/cut/lib/types";
 import { detectSilence, extractAudio, makeFreezeFrame, probeDims, probeDuration } from "../frames";
 import {
   createProject,
@@ -146,6 +146,7 @@ export const projectsApi = {
         timelines: sanitizeTimelines(body.timelines, existing) ?? existing.timelines,
         templates: Array.isArray(body.templates) ? body.templates : existing.templates,
         mediaFolders: Array.isArray(body.mediaFolders) ? body.mediaFolders : existing.mediaFolders,
+        kind: isProjectKind(body.kind) ? body.kind : existing.kind,
         aspect: normalizeAspect(body.aspect) ?? existing.aspect,
         guides: Array.isArray(body.guides) ? sanitizeGuides(body.guides) : existing.guides,
         guideLines: body.guideLines !== undefined ? sanitizeGuideLines(body.guideLines) : existing.guideLines,

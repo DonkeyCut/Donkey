@@ -10,7 +10,7 @@
 
 import { getBackend, type CutBackend } from "./backend";
 import { isLinkedAssetType } from "./types";
-import { sharedBackendFor } from "./backend/shared";
+import { sharedBackendFor, templateBackendFor } from "./backend/shared";
 import { apiJson } from "./api";
 import { tagChatAsset } from "./chatAssets";
 import { registerFontAsset } from "./fontAssets";
@@ -19,7 +19,7 @@ import { localMediaFile, storedMediaUrl } from "./mediaSync";
 import type { ProjectLink } from "./projectLink";
 import { availableResidencies, backendFor, projectBackend, type Residency } from "./residency";
 import { useEditor } from "./store";
-import type { MediaAsset, ProjectDoc, ProjectSummary, ShareFeatures, StoredAsset } from "./types";
+import type { MediaAsset, ProjectDoc, ProjectKind, ProjectSummary, ShareFeatures, StoredAsset } from "./types";
 
 /** What a headless host does for itself: list and read the projects it
  * stores, copy a media file between two of them. */
@@ -59,6 +59,7 @@ export interface ListedProject {
   name: string;
   residency: Residency;
   updatedAt: number;
+  kind?: ProjectKind;
 }
 
 /** Every project the user owns on the shelves this process can read, newest
@@ -95,10 +96,12 @@ const listed = (p: ProjectSummary, residency: Residency): ListedProject => ({
   name: p.name,
   residency,
   updatedAt: p.updatedAt,
+  kind: p.kind,
 });
 
 export async function openReference(link: ProjectLink): Promise<ReferenceProject> {
   if (link.kind === "share") return openShare(link.token, link);
+  if (link.kind === "template") return openTemplate(link.id, link);
   const id = link.id;
   if (host) {
     const doc = await host.readDoc(id);
@@ -124,8 +127,21 @@ async function openShare(token: string, link: ProjectLink): Promise<ReferencePro
     throw new Error(
       "Reading a shared project needs the editor page's sign-in; open the chat in the editor to read it."
     );
-  const backend = sharedBackendFor(token);
+  return openReadOnly(sharedBackendFor(token), link);
+}
+
+/** A gallery template reads like a public share, through its own surface. */
+async function openTemplate(id: string, link: ProjectLink): Promise<ReferenceProject> {
+  const backend = templateBackendFor(id);
   const meta = await backend.fetch("/api/cut/");
+  if (meta.status === 404) {
+    throw new Error(`No gallery template with id ${id}. template_gallery lists them.`);
+  }
+  return openReadOnly(backend, link, meta);
+}
+
+async function openReadOnly(backend: CutBackend, link: ProjectLink, answered?: Response): Promise<ReferenceProject> {
+  const meta = answered ?? (await backend.fetch("/api/cut/"));
   if (meta.status === 401) throw new Error("Sign in to open that share.");
   if (meta.status === 403) throw new Error("This account was not invited to that share.");
   if (meta.status === 404) throw new Error("That share link does not exist.");
@@ -174,7 +190,8 @@ export async function copyReferenceMedia(
 ): Promise<{ source: StoredAsset; fileName: string }[]> {
   const out: { source: StoredAsset; fileName: string }[] = [];
   for (const source of assets) {
-    const fileName = host
+    // The host copies on its own disk only what it read from there.
+    const fileName = host && !ref.backend
       ? await host.copyMedia(ref.projectId, source.fileName, dstProjectId)
       : await uploadProjectMediaTo(dstBackend, dstProjectId, await referenceMediaBlob(ref, source), source.fileName);
     out.push({ source, fileName });

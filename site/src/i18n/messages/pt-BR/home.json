@@ -2,8 +2,8 @@
   "tabs": {
     "projects": "Projetos",
     "library": "Biblioteca",
-    "notes": "Notas",
-    "cameraRoll": "Rolo da Câmera"
+    "cameraRoll": "Rolo da Câmera",
+    "templates": "Modelos"
   },
   "newProject": {
     "button": "Novo projeto",
@@ -55,7 +55,10 @@
     "duplicate": "Duplicar",
     "moveToLocal": "Mover para Local",
     "moveToCloud": "Mover para Nuvem",
-    "actions": "Ações do projeto"
+    "actions": "Ações do projeto",
+    "makeTemplate": "Criar modelo",
+    "makeTemplateFailed": "Não foi possível criar o modelo.",
+    "templateMade": "“{name}” agora é um modelo em <link>Modelos</link>."
   },
   "pick": {
     "project": "{count, plural, one {# projeto} other {# projetos}}",
@@ -170,19 +173,12 @@
   "notes": {
     "untitled": "Sem título",
     "untitledNote": "Nota sem título",
-    "allNotes": "Todas as notas",
     "saveFailed": "Não foi possível salvar a nota.",
     "reopen": "Reabrir e tentar novamente",
-    "newFolder": "Nova pasta",
-    "newNote": "Nova nota",
     "loadFailed": "Não foi possível carregar as notas.",
     "retry": "Tentar novamente",
-    "emptyTitle": "Nenhuma nota ainda.",
-    "emptyHint": "As notas sincronizam com o app do Donkey Cut para iOS — um roteiro escrito aqui fica pronto no teleprompter do celular.",
     "delete": "Excluir",
     "deleteTitle": "Excluir {what}?",
-    "deleteFolderTitle": "Excluir “{name}”?",
-    "folderFallback": "pasta",
     "removedFromPhone": "{count, plural, =1 {Também será removido do seu celular.} other {Também serão removidos do seu celular.}}"
   },
   "composer": {
@@ -264,5 +260,88 @@
     "upgradeTip": "Veja planos com mais armazenamento e créditos de IA",
     "grace": "Seu plano expirou. Faça upgrade ou libere {size} antes que seus projetos mais antigos sejam excluídos."
   },
-  "justNow": "agora mesmo"
+  "justNow": "agora mesmo",
+  "templates": {
+    "title": "Modelos",
+    "all": "Todos",
+    "filters": {
+      "source": "Origem",
+      "category": "Categoria",
+      "aspect": "Formato",
+      "length": "Duração",
+      "style": "Estilo"
+    },
+    "sources": {
+      "all": "Todos os modelos",
+      "mine": "Meus modelos",
+      "donkey": "Modelos do Donkey"
+    },
+    "aspects": {
+      "9:16": "Vertical 9:16",
+      "1:1": "Quadrado 1:1",
+      "4:5": "Retrato 4:5",
+      "16:9": "Horizontal 16:9"
+    },
+    "lengths": {
+      "short": "Até 15 s",
+      "medium": "15–30 s",
+      "long": "Mais de 30 s"
+    },
+    "categories": {
+      "opener": "Aberturas e intros",
+      "promo": "Promos e anúncios",
+      "slideshow": "Slideshows",
+      "announcement": "Comunicados",
+      "countdown": "Contagens regressivas e listas",
+      "lifestyle": "Estilo de vida e vlog",
+      "travel": "Viagem",
+      "food": "Comida e receitas",
+      "fitness": "Fitness",
+      "quote": "Citações e letras",
+      "talkingHead": "Talking head",
+      "event": "Eventos e retrospectivas",
+      "celebration": "Celebrações",
+      "product": "Produto",
+      "explainer": "Explicativos",
+      "titles": "Títulos e terços inferiores",
+      "logo": "Revelações de logo",
+      "trailer": "Trailers",
+      "realEstate": "Imóveis"
+    },
+    "styles": {
+      "bold": "Marcante",
+      "minimal": "Minimalista",
+      "cinematic": "Cinematográfico",
+      "playful": "Divertido",
+      "retro": "Retrô",
+      "elegant": "Elegante"
+    },
+    "empty": "Nenhum modelo corresponde a estes filtros.",
+    "clearFilters": "Limpar filtros",
+    "detail": {
+      "close": "Voltar aos modelos",
+      "use": "Usar como novo projeto",
+      "using": "Criando projeto…",
+      "progress": "Copiando mídia {done} de {total}…",
+      "copyLink": "Copiar link",
+      "linkCopied": "Link copiado",
+      "size": "{width} × {height} px",
+      "seconds": "{seconds, plural, one {# segundo} other {# segundos}}",
+      "fps": "{fps} fps",
+      "slots": "{count, plural, one {# clipe para preencher} other {# clipes para preencher}}",
+      "texts": "{count, plural, one {# texto} other {# textos}}",
+      "noMusic": "Nenhuma música inclusa. Adicione sua própria trilha sonora.",
+      "similar": "Modelos semelhantes",
+      "failed": "Não foi possível criar o projeto.",
+      "missing": "Este modelo não está mais disponível."
+    },
+    "fill": {
+      "title": "Adicione seus clipes",
+      "body": "Escolha os clipes para os espaços do modelo. Eles são preenchidos em ordem, e o espaço que você pular manterá o exemplo.",
+      "slot": "Clipe {n} · {seconds}",
+      "pick": "Escolher clipes",
+      "skip": "Manter amostras",
+      "replaceSlot": "Escolha um clipe para este espaço"
+    }
+  }
 }

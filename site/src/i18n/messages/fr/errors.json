@@ -424,6 +424,14 @@
     "untitled": "Sans titre",
     "text": "Votre texte",
     "frame": "Image {time}",
-    "copy": "{name} (copie)"
-  }
+    "copy": "{name} (copie)",
+    "notes": "Notes"
+  },
+  "template_missing": "Ce modèle n'est plus disponible.",
+  "template_sign_in_required": "Connectez-vous pour utiliser ce modèle.",
+  "template_use_failed": "Impossible de créer le projet.",
+  "templates_read_failed": "Impossible de lire les modèles.",
+  "project_limit": "Ce compte a atteint sa limite de projets gratuits. Passez à Pro pour créer plus de projets.",
+  "note_place_failed": "Impossible de classer les notes.",
+  "template_needs_update": "Mettez à jour l'application Donkey pour créer des modèles sur ce Mac."
 }

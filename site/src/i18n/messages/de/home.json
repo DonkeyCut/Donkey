@@ -2,8 +2,8 @@
   "tabs": {
     "projects": "Projekte",
     "library": "Mediathek",
-    "notes": "Notizen",
-    "cameraRoll": "Aufnahmen"
+    "cameraRoll": "Aufnahmen",
+    "templates": "Vorlagen"
   },
   "newProject": {
     "button": "Neues Projekt",
@@ -55,7 +55,10 @@
     "duplicate": "Duplizieren",
     "moveToLocal": "Nach Lokal verschieben",
     "moveToCloud": "In die Cloud verschieben",
-    "actions": "Projektaktionen"
+    "actions": "Projektaktionen",
+    "makeTemplate": "Vorlage erstellen",
+    "makeTemplateFailed": "Vorlage konnte nicht erstellt werden.",
+    "templateMade": "„{name}“ ist jetzt eine Vorlage unter <link>Vorlagen</link>."
   },
   "pick": {
     "project": "{count, plural, one {# Projekt} other {# Projekte}}",
@@ -170,19 +173,12 @@
   "notes": {
     "untitled": "Ohne Titel",
     "untitledNote": "Unbenannte Notiz",
-    "allNotes": "Alle Notizen",
     "saveFailed": "Notiz konnte nicht gespeichert werden.",
     "reopen": "Erneut öffnen und wiederholen",
-    "newFolder": "Neuer Ordner",
-    "newNote": "Neue Notiz",
     "loadFailed": "Notizen konnten nicht geladen werden.",
     "retry": "Wiederholen",
-    "emptyTitle": "Noch keine Notizen.",
-    "emptyHint": "Notizen synchronisieren mit der Donkey Cut iOS-App – ein hier geschriebenes Skript steht direkt im Teleprompter deines Smartphones bereit.",
     "delete": "Löschen",
     "deleteTitle": "{what} löschen?",
-    "deleteFolderTitle": "„{name}“ löschen?",
-    "folderFallback": "Ordner",
     "removedFromPhone": "{count, plural, =1 {Wird auch von deinem Smartphone entfernt.} other {Werden auch von deinem Smartphone entfernt.}}"
   },
   "composer": {
@@ -264,5 +260,88 @@
     "upgradeTip": "Sieh dir Pläne mit mehr Speicherplatz und KI-Credits an",
     "grace": "Dein Abo ist abgelaufen. Mach ein Upgrade oder gib {size} frei, bevor deine ältesten Projekte gelöscht werden."
   },
-  "justNow": "gerade eben"
+  "justNow": "gerade eben",
+  "templates": {
+    "title": "Vorlagen",
+    "all": "Alle",
+    "filters": {
+      "source": "Quelle",
+      "category": "Kategorie",
+      "aspect": "Format",
+      "length": "Länge",
+      "style": "Stil"
+    },
+    "sources": {
+      "all": "Alle Vorlagen",
+      "mine": "Meine Vorlagen",
+      "donkey": "Donkey-Vorlagen"
+    },
+    "aspects": {
+      "9:16": "Vertikal 9:16",
+      "1:1": "Quadratisch 1:1",
+      "4:5": "Hochformat 4:5",
+      "16:9": "Breitbild 16:9"
+    },
+    "lengths": {
+      "short": "Bis zu 15 s",
+      "medium": "15–30 s",
+      "long": "Über 30 s"
+    },
+    "categories": {
+      "opener": "Opener & Intros",
+      "promo": "Promos & Werbung",
+      "slideshow": "Diashows",
+      "announcement": "Ankündigungen",
+      "countdown": "Countdowns & Listen",
+      "lifestyle": "Lifestyle & Vlogs",
+      "travel": "Reisen",
+      "food": "Essen & Rezepte",
+      "fitness": "Fitness",
+      "quote": "Zitate & Songtexte",
+      "talkingHead": "Talking Head",
+      "event": "Events & Rückblicke",
+      "celebration": "Feiern & Anlässe",
+      "product": "Produkt",
+      "explainer": "Erklärvideos",
+      "titles": "Titel & Bauchbinden",
+      "logo": "Logo-Reveals",
+      "trailer": "Trailer",
+      "realEstate": "Immobilien"
+    },
+    "styles": {
+      "bold": "Markant",
+      "minimal": "Minimalistisch",
+      "cinematic": "Cinematisch",
+      "playful": "Verspielt",
+      "retro": "Retro",
+      "elegant": "Elegant"
+    },
+    "empty": "Keine Vorlagen entsprechen diesen Filtern.",
+    "clearFilters": "Filter zurücksetzen",
+    "detail": {
+      "close": "Zurück zu Vorlagen",
+      "use": "Als neues Projekt verwenden",
+      "using": "Projekt wird erstellt…",
+      "progress": "Medien werden kopiert: {done} von {total}…",
+      "copyLink": "Link kopieren",
+      "linkCopied": "Link kopiert",
+      "size": "{width} × {height} px",
+      "seconds": "{seconds, plural, one {# Sekunde} other {# Sekunden}}",
+      "fps": "{fps} fps",
+      "slots": "{count, plural, one {# Clip zum Ausfüllen} other {# Clips zum Ausfüllen}}",
+      "texts": "{count, plural, one {# Text} other {# Texte}}",
+      "noMusic": "Keine Musik enthalten. Füge deinen eigenen Soundtrack hinzu.",
+      "similar": "Ähnliche Vorlagen",
+      "failed": "Das Projekt konnte nicht erstellt werden.",
+      "missing": "Diese Vorlage ist nicht mehr verfügbar."
+    },
+    "fill": {
+      "title": "Füge deine Clips hinzu",
+      "body": "Wähle Clips für die Plätze der Vorlage. Sie werden der Reihe nach belegt. Übersprungene Plätze behalten ihr Beispiel.",
+      "slot": "Clip {n} · {seconds}",
+      "pick": "Clips auswählen",
+      "skip": "Beispiele behalten",
+      "replaceSlot": "Wähle einen Clip für diesen Slot"
+    }
+  }
 }

@@ -2,8 +2,8 @@
   "tabs": {
     "projects": "Projects",
     "library": "Library",
-    "notes": "Notes",
-    "cameraRoll": "Camera Roll"
+    "cameraRoll": "Camera Roll",
+    "templates": "Templates"
   },
   "newProject": {
     "button": "New project",
@@ -55,7 +55,10 @@
     "duplicate": "Duplicate",
     "moveToLocal": "Move to Local",
     "moveToCloud": "Move to Cloud",
-    "actions": "Project actions"
+    "actions": "Project actions",
+    "makeTemplate": "Make template",
+    "makeTemplateFailed": "Could not make the template.",
+    "templateMade": "“{name}” is now a template in <link>Templates</link>."
   },
   "pick": {
     "project": "{count, plural, one {# project} other {# projects}}",
@@ -170,19 +173,12 @@
   "notes": {
     "untitled": "Untitled",
     "untitledNote": "Untitled note",
-    "allNotes": "All notes",
     "saveFailed": "Could not save the note.",
     "reopen": "Reopen and retry",
-    "newFolder": "New folder",
-    "newNote": "New note",
     "loadFailed": "Could not load notes.",
     "retry": "Retry",
-    "emptyTitle": "No notes yet.",
-    "emptyHint": "Notes sync with the Donkey Cut iOS app — a script written here is ready on the phone's teleprompter.",
     "delete": "Delete",
     "deleteTitle": "Delete {what}?",
-    "deleteFolderTitle": "Delete “{name}”?",
-    "folderFallback": "folder",
     "removedFromPhone": "{count, plural, =1 {It is removed from your phone too.} other {They are removed from your phone too.}}"
   },
   "composer": {
@@ -264,5 +260,88 @@
     "upgradeTip": "See plans with more storage and AI credits",
     "grace": "Your plan ended. Upgrade or free {size} before your oldest projects are deleted."
   },
-  "justNow": "just now"
+  "justNow": "just now",
+  "templates": {
+    "title": "Templates",
+    "all": "All",
+    "filters": {
+      "source": "Source",
+      "category": "Category",
+      "aspect": "Shape",
+      "length": "Length",
+      "style": "Style"
+    },
+    "sources": {
+      "all": "All templates",
+      "mine": "My templates",
+      "donkey": "Donkey templates"
+    },
+    "aspects": {
+      "9:16": "Vertical 9:16",
+      "1:1": "Square 1:1",
+      "4:5": "Portrait 4:5",
+      "16:9": "Wide 16:9"
+    },
+    "lengths": {
+      "short": "Up to 15 s",
+      "medium": "15–30 s",
+      "long": "Over 30 s"
+    },
+    "categories": {
+      "opener": "Openers & intros",
+      "promo": "Promos & ads",
+      "slideshow": "Slideshows",
+      "announcement": "Announcements",
+      "countdown": "Countdowns & lists",
+      "lifestyle": "Lifestyle & vlog",
+      "travel": "Travel",
+      "food": "Food & recipes",
+      "fitness": "Fitness",
+      "quote": "Quotes & lyrics",
+      "talkingHead": "Talking head",
+      "event": "Events & recaps",
+      "celebration": "Celebrations",
+      "product": "Product",
+      "explainer": "Explainers",
+      "titles": "Titles & lower thirds",
+      "logo": "Logo reveals",
+      "trailer": "Trailers",
+      "realEstate": "Real estate"
+    },
+    "styles": {
+      "bold": "Bold",
+      "minimal": "Minimal",
+      "cinematic": "Cinematic",
+      "playful": "Playful",
+      "retro": "Retro",
+      "elegant": "Elegant"
+    },
+    "empty": "No templates match these filters.",
+    "clearFilters": "Clear filters",
+    "detail": {
+      "close": "Back to templates",
+      "use": "Use as new project",
+      "using": "Creating project…",
+      "progress": "Copying media {done} of {total}…",
+      "copyLink": "Copy link",
+      "linkCopied": "Link copied",
+      "size": "{width} × {height} px",
+      "seconds": "{seconds, plural, one {# second} other {# seconds}}",
+      "fps": "{fps} fps",
+      "slots": "{count, plural, one {# clip to fill} other {# clips to fill}}",
+      "texts": "{count, plural, one {# text} other {# texts}}",
+      "noMusic": "No music included. Add your own soundtrack.",
+      "similar": "Similar templates",
+      "failed": "Could not create the project.",
+      "missing": "This template isn't available anymore."
+    },
+    "fill": {
+      "title": "Add your clips",
+      "body": "Pick clips for the template's slots. They fill in order, and a slot you skip keeps its sample.",
+      "slot": "Clip {n} · {seconds}",
+      "pick": "Choose clips",
+      "skip": "Keep samples",
+      "replaceSlot": "Choose a clip for this slot"
+    }
+  }
 }

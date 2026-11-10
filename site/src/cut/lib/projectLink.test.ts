@@ -15,6 +15,11 @@ describe("parseProjectLink", () => {
     expect(parseProjectLink("donkeycut.com/cut/s/tok")).toEqual({ kind: "share", token: "tok" });
   });
 
+  test("a template page names the template", () => {
+    expect(parseProjectLink("https://donkeycut.com/templates/launch-teaser")).toEqual({ kind: "template", id: "launch-teaser" });
+    expect(parseProjectLink("donkeycut.com/app/templates/launch-teaser?run=x")).toEqual({ kind: "template", id: "launch-teaser" });
+  });
+
   test("a bare id is a project", () => {
     expect(parseProjectLink("cmf1abc2")).toEqual({ kind: "project", id: "cmf1abc2" });
   });

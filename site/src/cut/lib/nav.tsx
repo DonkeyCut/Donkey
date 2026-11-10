@@ -14,13 +14,13 @@ export function useCutBase(): string {
 // project was opened from — Projects, Library, or a folder within one. The
 // home pages read ?folder=… as the open folder, which also lets the browser's
 // own back button step folder → root.
-export type CutTab = "projects" | "library" | "camera-roll" | "notes";
+export type CutTab = "projects" | "library" | "templates" | "camera-roll";
 
 /** Which home tab a pathname is on (base-agnostic). */
 export function tabForPath(pathname: string): CutTab {
   if (pathname.endsWith("/library")) return "library";
+  if (pathname.endsWith("/templates")) return "templates";
   if (pathname.endsWith("/camera-roll")) return "camera-roll";
-  if (pathname.endsWith("/notes")) return "notes";
   return "projects";
 }
 
@@ -35,6 +35,10 @@ export function homeHref(base: string, tab: CutTab, folder?: string | null): str
  * opened from. The default origin carries no query so the common URL stays
  * clean. Residency never rides the URL — the editor resolves where the id
  * lives (lib/residency.ts). */
+// The tabs an editor's back button returns to; any other origin goes back to
+// Projects.
+const BACK_TABS: readonly CutTab[] = ["library", "templates"];
+
 export function projectHref(
   base: string,
   id: string,
@@ -42,7 +46,9 @@ export function projectHref(
   folder?: string | null
 ): string {
   const params = new URLSearchParams();
-  if (from === "library") params.set("from", "library");
+  if (BACK_TABS.includes(from)) {
+    params.set("from", from);
+  }
   if (folder) params.set("folder", folder);
   const qs = params.toString();
   return `${base}/p/${id}${qs ? `?${qs}` : ""}`;
@@ -55,6 +61,6 @@ export function backTarget(
   from: string | null | undefined,
   folder?: string | null
 ): { href: string; tab: CutTab } {
-  const tab: CutTab = from === "library" ? "library" : "projects";
+  const tab = BACK_TABS.find((b) => b === from) ?? "projects";
   return { href: homeHref(base, tab, folder), tab };
 }

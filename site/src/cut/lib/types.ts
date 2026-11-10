@@ -1827,8 +1827,16 @@ export function sanitizeTimelines(
   return out;
 }
 
+/** What a project is to its owner: an edit, or a template they start new
+ * edits from (their own templates, listed under My templates). */
+export const PROJECT_KINDS = ["project", "template"] as const;
+export type ProjectKind = (typeof PROJECT_KINDS)[number];
+export const isProjectKind = (v: unknown): v is ProjectKind => PROJECT_KINDS.includes(v as ProjectKind);
+
 export interface ProjectDoc {
   version: 1;
+  /** Absent on an ordinary project. */
+  kind?: ProjectKind;
   /** The project's stable API id. On the local engine the folder is named
    * after the project and follows renames, so the id lives in the doc; the
    * server stamps it on every write. */
@@ -1971,6 +1979,8 @@ export interface ProjectSummary {
   aspect?: Aspect;
   /** Folder this project is filed under (null = ungrouped). */
   folderId?: string | null;
+  /** "template" for one of the owner's own templates. */
+  kind?: ProjectKind;
   /** Total bytes on disk (media + exports + proxy), for cleanup decisions. */
   sizeBytes?: number;
 }

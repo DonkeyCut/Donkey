@@ -424,6 +424,14 @@
     "untitled": "Ohne Titel",
     "text": "Dein Text",
     "frame": "Frame {time}",
-    "copy": "{name} Kopie"
-  }
+    "copy": "{name} Kopie",
+    "notes": "Notizen"
+  },
+  "template_missing": "Diese Vorlage ist nicht mehr verfügbar.",
+  "template_sign_in_required": "Melde dich an, um diese Vorlage zu verwenden.",
+  "template_use_failed": "Das Projekt konnte nicht erstellt werden.",
+  "templates_read_failed": "Die Vorlagen konnten nicht gelesen werden.",
+  "project_limit": "Dieses Konto hat das Limit für kostenlose Projekte erreicht. Upgrade auf Pro, um mehr Projekte zu erstellen.",
+  "note_place_failed": "Die Notizen konnten nicht abgelegt werden.",
+  "template_needs_update": "Aktualisiere die Donkey-App, um Vorlagen auf diesem Mac zu erstellen."
 }

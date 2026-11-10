@@ -2,8 +2,8 @@
   "tabs": {
     "projects": "Projets",
     "library": "Bibliothèque",
-    "notes": "Notes",
-    "cameraRoll": "Pellicule"
+    "cameraRoll": "Pellicule",
+    "templates": "Modèles"
   },
   "newProject": {
     "button": "Nouveau projet",
@@ -55,7 +55,10 @@
     "duplicate": "Dupliquer",
     "moveToLocal": "Déplacer vers Local",
     "moveToCloud": "Déplacer vers Cloud",
-    "actions": "Actions du projet"
+    "actions": "Actions du projet",
+    "makeTemplate": "Créer un modèle",
+    "makeTemplateFailed": "Impossible de créer le modèle.",
+    "templateMade": "« {name} » est désormais un modèle dans <link>Modèles</link>."
   },
   "pick": {
     "project": "{count, plural, one {# projet} other {# projets}}",
@@ -170,19 +173,12 @@
   "notes": {
     "untitled": "Sans titre",
     "untitledNote": "Note sans titre",
-    "allNotes": "Toutes les notes",
     "saveFailed": "Impossible d'enregistrer la note.",
     "reopen": "Rouvrir et réessayer",
-    "newFolder": "Nouveau dossier",
-    "newNote": "Nouvelle note",
     "loadFailed": "Impossible de charger les notes.",
     "retry": "Réessayer",
-    "emptyTitle": "Aucune note pour le moment.",
-    "emptyHint": "Les notes se synchronisent avec l'application Donkey Cut pour iOS — un script rédigé ici est aussitôt prêt sur le téléprompteur de votre téléphone.",
     "delete": "Supprimer",
     "deleteTitle": "Supprimer {what} ?",
-    "deleteFolderTitle": "Supprimer « {name} » ?",
-    "folderFallback": "dossier",
     "removedFromPhone": "{count, plural, one {L'élément sera aussi supprimé de votre téléphone.} other {Ils seront aussi supprimés de votre téléphone.}}"
   },
   "composer": {
@@ -264,5 +260,88 @@
     "upgradeTip": "Voir les forfaits avec plus de stockage et de crédits IA",
     "grace": "Votre forfait a pris fin. Mettez à niveau ou libérez {size} avant que vos plus anciens projets ne soient supprimés."
   },
-  "justNow": "à l'instant"
+  "justNow": "à l'instant",
+  "templates": {
+    "title": "Modèles",
+    "all": "Tous",
+    "filters": {
+      "source": "Source",
+      "category": "Catégorie",
+      "aspect": "Format",
+      "length": "Durée",
+      "style": "Style"
+    },
+    "sources": {
+      "all": "Tous les modèles",
+      "mine": "Mes modèles",
+      "donkey": "Modèles Donkey"
+    },
+    "aspects": {
+      "9:16": "Vertical 9:16",
+      "1:1": "Carré 1:1",
+      "4:5": "Portrait 4:5",
+      "16:9": "Panoramique 16:9"
+    },
+    "lengths": {
+      "short": "Jusqu'à 15 s",
+      "medium": "15–30 s",
+      "long": "Plus de 30 s"
+    },
+    "categories": {
+      "opener": "Intros & génériques",
+      "promo": "Promos & publicités",
+      "slideshow": "Diaporamas",
+      "announcement": "Annonces",
+      "countdown": "Comptes à rebours & classements",
+      "lifestyle": "Lifestyle & vlog",
+      "travel": "Voyage",
+      "food": "Cuisine & recettes",
+      "fitness": "Fitness",
+      "quote": "Citations & paroles",
+      "talkingHead": "Face caméra",
+      "event": "Événements & récaps",
+      "celebration": "Célébrations",
+      "product": "Produits",
+      "explainer": "Explications",
+      "titles": "Titres & bandeaux",
+      "logo": "Animations de logo",
+      "trailer": "Bandes-annonces",
+      "realEstate": "Immobilier"
+    },
+    "styles": {
+      "bold": "Audacieux",
+      "minimal": "Minimaliste",
+      "cinematic": "Cinématographique",
+      "playful": "Ludique",
+      "retro": "Rétro",
+      "elegant": "Élégant"
+    },
+    "empty": "Aucun modèle ne correspond à ces filtres.",
+    "clearFilters": "Effacer les filtres",
+    "detail": {
+      "close": "Retour aux modèles",
+      "use": "Utiliser comme nouveau projet",
+      "using": "Création du projet…",
+      "progress": "Copie des médias {done} sur {total}…",
+      "copyLink": "Copier le lien",
+      "linkCopied": "Lien copié",
+      "size": "{width} × {height} px",
+      "seconds": "{seconds, plural, one {# seconde} other {# secondes}}",
+      "fps": "{fps} fps",
+      "slots": "{count, plural, one {# clip à remplir} other {# clips à remplir}}",
+      "texts": "{count, plural, one {# texte} other {# textes}}",
+      "noMusic": "Musique non incluse. Ajoutez votre propre bande-son.",
+      "similar": "Modèles similaires",
+      "failed": "Impossible de créer le projet.",
+      "missing": "Ce modèle n'est plus disponible."
+    },
+    "fill": {
+      "title": "Ajoutez vos clips",
+      "body": "Choisissez des clips pour les emplacements du modèle. Ils se remplissent dans l'ordre, et un emplacement ignoré conserve son extrait.",
+      "slot": "Clip {n} · {seconds}",
+      "pick": "Choisir des clips",
+      "skip": "Conserver les échantillons",
+      "replaceSlot": "Choisissez un clip pour cet emplacement"
+    }
+  }
 }

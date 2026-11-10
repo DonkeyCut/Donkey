@@ -424,6 +424,14 @@
     "untitled": "Untitled",
     "text": "Your text",
     "frame": "Frame {time}",
-    "copy": "{name} copy"
-  }
+    "copy": "{name} copy",
+    "notes": "Notes"
+  },
+  "template_missing": "This template isn't available anymore.",
+  "template_sign_in_required": "Sign in to use this template.",
+  "template_use_failed": "Could not create the project.",
+  "templates_read_failed": "Could not read the templates.",
+  "project_limit": "This account is at its free project limit. Upgrade to Pro to make more projects.",
+  "note_place_failed": "Could not file the notes.",
+  "template_needs_update": "Update the Donkey app to make templates on this Mac."
 }

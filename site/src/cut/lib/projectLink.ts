@@ -1,5 +1,6 @@
 // A Donkey Cut link as the assistant's tools take it: the project page
-// (/app/p/<id>), a share link (/s/<token>), or a bare project id. The model
+// (/app/p/<id>), a share link (/s/<token>), a gallery template's page
+// (/templates/<id>), or a bare project id. The model
 // hands the link over in a typed argument; this only reads its shape. What
 // the link opens — the project's home, the share's grant — is the reader's
 // to resolve.
@@ -11,7 +12,10 @@ import { normalizeLink } from "./link";
 export const PROJECT_PAGE_DEFAULT = 100;
 export const PROJECT_PAGE_MAX = 500;
 
-export type ProjectLink = { kind: "project"; id: string } | { kind: "share"; token: string };
+export type ProjectLink =
+  | { kind: "project"; id: string }
+  | { kind: "share"; token: string }
+  | { kind: "template"; id: string };
 
 const ID_RE = /^[A-Za-z0-9_-]+$/;
 
@@ -19,6 +23,8 @@ const ID_RE = /^[A-Za-z0-9_-]+$/;
  * prefix the host rewrite hides. */
 const PROJECT_PATH = /^\/(?:cut\/)?app\/p\/([^/]+)\/?$/;
 const SHARE_PATH = /^\/(?:cut\/)?s\/([^/]+)\/?$/;
+// The template's public page, or the app's page that uses it.
+const TEMPLATE_PATH = /^\/(?:cut\/)?(?:app\/)?templates\/([^/]+)\/?$/;
 
 export function parseProjectLink(value: string): ProjectLink | null {
   const v = value.trim();
@@ -36,6 +42,8 @@ export function parseProjectLink(value: string): ProjectLink | null {
   if (project && ID_RE.test(project[1])) return { kind: "project", id: project[1] };
   const share = SHARE_PATH.exec(path);
   if (share && ID_RE.test(share[1])) return { kind: "share", token: share[1] };
+  const template = TEMPLATE_PATH.exec(path);
+  if (template && ID_RE.test(template[1])) return { kind: "template", id: template[1] };
   return null;
 }
 

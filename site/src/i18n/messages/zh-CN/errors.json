@@ -424,6 +424,14 @@
     "untitled": "未命名",
     "text": "你的文本",
     "frame": "帧 {time}",
-    "copy": "{name} 副本"
-  }
+    "copy": "{name} 副本",
+    "notes": "笔记"
+  },
+  "template_missing": "此模板已不可用。",
+  "template_sign_in_required": "登录以使用此模板。",
+  "template_use_failed": "无法创建项目。",
+  "templates_read_failed": "无法读取模板。",
+  "project_limit": "此账号已达免费项目上限。升级至 Pro 可创建更多项目。",
+  "note_place_failed": "无法归档笔记。",
+  "template_needs_update": "更新 Donkey 应用以在此 Mac 上创建模板。"
 }

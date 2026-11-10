@@ -2,8 +2,8 @@
   "tabs": {
     "projects": "Proyectos",
     "library": "Biblioteca",
-    "notes": "Notas",
-    "cameraRoll": "Carrete"
+    "cameraRoll": "Carrete",
+    "templates": "Plantillas"
   },
   "newProject": {
     "button": "Nuevo proyecto",
@@ -55,7 +55,10 @@
     "duplicate": "Duplicar",
     "moveToLocal": "Mover a Local",
     "moveToCloud": "Mover a la nube",
-    "actions": "Acciones del proyecto"
+    "actions": "Acciones del proyecto",
+    "makeTemplate": "Crear plantilla",
+    "makeTemplateFailed": "No se pudo crear la plantilla.",
+    "templateMade": "“{name}” ahora es una plantilla en <link>Plantillas</link>."
   },
   "pick": {
     "project": "{count, plural, one {# proyecto} other {# proyectos}}",
@@ -170,19 +173,12 @@
   "notes": {
     "untitled": "Sin título",
     "untitledNote": "Nota sin título",
-    "allNotes": "Todas las notas",
     "saveFailed": "No se pudo guardar la nota.",
     "reopen": "Reabrir y reintentar",
-    "newFolder": "Nueva carpeta",
-    "newNote": "Nueva nota",
     "loadFailed": "No se pudieron cargar las notas.",
     "retry": "Reintentar",
-    "emptyTitle": "Aún no hay notas.",
-    "emptyHint": "Las notas se sincronizan con la app de Donkey Cut para iOS: un guion escrito aquí estará listo en el teleprompter del teléfono.",
     "delete": "Eliminar",
     "deleteTitle": "¿Eliminar {what}?",
-    "deleteFolderTitle": "¿Eliminar “{name}”?",
-    "folderFallback": "carpeta",
     "removedFromPhone": "{count, plural, =1 {También se elimina de tu teléfono.} other {También se eliminan de tu teléfono.}}"
   },
   "composer": {
@@ -264,5 +260,88 @@
     "upgradeTip": "Mira los planes con más almacenamiento y créditos de IA",
     "grace": "Tu plan terminó. Mejora tu plan o libera {size} antes de que se eliminen tus proyectos más antiguos."
   },
-  "justNow": "ahora mismo"
+  "justNow": "ahora mismo",
+  "templates": {
+    "title": "Plantillas",
+    "all": "Todas",
+    "filters": {
+      "source": "Origen",
+      "category": "Categoría",
+      "aspect": "Formato",
+      "length": "Duración",
+      "style": "Estilo"
+    },
+    "sources": {
+      "all": "Todas las plantillas",
+      "mine": "Mis plantillas",
+      "donkey": "Plantillas de Donkey"
+    },
+    "aspects": {
+      "9:16": "Vertical 9:16",
+      "1:1": "Cuadrado 1:1",
+      "4:5": "Vertical 4:5",
+      "16:9": "Horizontal 16:9"
+    },
+    "lengths": {
+      "short": "Hasta 15 s",
+      "medium": "15–30 s",
+      "long": "Más de 30 s"
+    },
+    "categories": {
+      "opener": "Aperturas e intros",
+      "promo": "Promos y anuncios",
+      "slideshow": "Presentaciones",
+      "announcement": "Anuncios",
+      "countdown": "Cuentas regresivas y listas",
+      "lifestyle": "Estilo de vida y vlogs",
+      "travel": "Viajes",
+      "food": "Comida y recetas",
+      "fitness": "Fitness",
+      "quote": "Frases y letras",
+      "talkingHead": "Primer plano",
+      "event": "Eventos y resúmenes",
+      "celebration": "Celebraciones",
+      "product": "Producto",
+      "explainer": "Explicativos",
+      "titles": "Títulos y tercios inferiores",
+      "logo": "Revelaciones de logo",
+      "trailer": "Tráileres",
+      "realEstate": "Bienes raíces"
+    },
+    "styles": {
+      "bold": "Audaz",
+      "minimal": "Minimalista",
+      "cinematic": "Cinematográfico",
+      "playful": "Divertido",
+      "retro": "Retro",
+      "elegant": "Elegante"
+    },
+    "empty": "Ninguna plantilla coincide con estos filtros.",
+    "clearFilters": "Borrar filtros",
+    "detail": {
+      "close": "Volver a plantillas",
+      "use": "Usar como nuevo proyecto",
+      "using": "Creando proyecto…",
+      "progress": "Copiando multimedia {done} de {total}…",
+      "copyLink": "Copiar enlace",
+      "linkCopied": "Enlace copiado",
+      "size": "{width} × {height} px",
+      "seconds": "{seconds, plural, one {# segundo} other {# segundos}}",
+      "fps": "{fps} fps",
+      "slots": "{count, plural, one {# clip por llenar} other {# clips por llenar}}",
+      "texts": "{count, plural, one {# texto} other {# textos}}",
+      "noMusic": "No incluye música. Agrega tu propia banda sonora.",
+      "similar": "Plantillas similares",
+      "failed": "No se pudo crear el proyecto.",
+      "missing": "Esta plantilla ya no está disponible."
+    },
+    "fill": {
+      "title": "Agrega tus clips",
+      "body": "Elige clips para los espacios de la plantilla. Se llenan en orden, y los espacios que omitas conservarán su muestra.",
+      "slot": "Clip {n} · {seconds}",
+      "pick": "Elegir clips",
+      "skip": "Conservar muestras",
+      "replaceSlot": "Elige un clip para este espacio"
+    }
+  }
 }

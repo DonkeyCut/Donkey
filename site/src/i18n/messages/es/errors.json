@@ -424,6 +424,14 @@
     "untitled": "Sin título",
     "text": "Tu texto",
     "frame": "Fotograma {time}",
-    "copy": "Copia de {name}"
-  }
+    "copy": "Copia de {name}",
+    "notes": "Notas"
+  },
+  "template_missing": "Esta plantilla ya no está disponible.",
+  "template_sign_in_required": "Inicia sesión para usar esta plantilla.",
+  "template_use_failed": "No se pudo crear el proyecto.",
+  "templates_read_failed": "No se pudieron leer las plantillas.",
+  "project_limit": "Esta cuenta alcanzó el límite de proyectos gratuitos. Pásate a Pro para crear más proyectos.",
+  "note_place_failed": "No se pudieron archivar las notas.",
+  "template_needs_update": "Actualiza la app de Donkey para crear plantillas en esta Mac."
 }

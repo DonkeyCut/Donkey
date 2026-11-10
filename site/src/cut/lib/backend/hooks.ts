@@ -6,7 +6,7 @@ import { useSyncExternalStore } from "react";
 import { currentEngineUser, subscribeEngineUser } from "../api";
 import { listedResidencies, type Residency } from "../residency";
 import { fetchCloudUsage, type CloudUsage } from "./cloud";
-import { cutMode, getBackend, hasLocalCompute, subscribeCutMode } from "./index";
+import { cutMode, getBackend, hasLocalCompute, localComputeSettled, subscribeCutMode } from "./index";
 import type { CutCaps, CutMode } from "./types";
 
 export function useCutMode(): CutMode {
@@ -24,6 +24,11 @@ export function useEngineUser(): string | null {
  * when the answer lands. */
 export function useLocalCompute(): boolean {
   return useSyncExternalStore(subscribeCutMode, hasLocalCompute, () => false);
+}
+
+/** Whether the gate has settled the engine question, as a subscription. */
+export function useComputeSettled(): boolean {
+  return useSyncExternalStore(subscribeCutMode, localComputeSettled, () => false);
 }
 
 // The shelves the home lists, as a subscription. The array is held between

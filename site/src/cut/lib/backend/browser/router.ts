@@ -10,7 +10,7 @@ import { creatorNames } from "../../defaultNames";
 import { resolveParent, settleParents, subtreeOf } from "../../folderTree";
 import { sanitizeGuideLines, sanitizeGuides } from "../../guides";
 import { OUTPUT_SPACES } from "@donkeycut/effects-kit";
-import { isTimelineId, normalizeAspect, sanitizeTimelines, type ProjectDoc, type ProjectFolder } from "../../types";
+import { isProjectKind, isTimelineId, normalizeAspect, sanitizeTimelines, type ProjectDoc, type ProjectFolder } from "../../types";
 import {
   getBrowserExportJob,
   listBrowserExportJobs,
@@ -106,6 +106,7 @@ async function putProject(req: Request, id: string): Promise<Response> {
       timelines: sanitizeTimelines(body.timelines, existing) ?? existing.timelines,
       templates: Array.isArray(body.templates) ? body.templates : existing.templates,
       mediaFolders: Array.isArray(body.mediaFolders) ? body.mediaFolders : existing.mediaFolders,
+      kind: isProjectKind(body.kind) ? body.kind : existing.kind,
       aspect: normalizeAspect(body.aspect) ?? existing.aspect,
       guides: Array.isArray(body.guides) ? sanitizeGuides(body.guides) : existing.guides,
       guideLines: body.guideLines !== undefined ? sanitizeGuideLines(body.guideLines) : existing.guideLines,

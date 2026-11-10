@@ -22,7 +22,21 @@ import { movePreviewSelection, previewSelectionSnapshot } from "@/cut/lib/previe
 import { libraryShareTargetSchema, shareSettingsSchema, librarySharePath } from "@/cut/lib/librarySharing";
 import { requestSharing } from "@/cut/lib/sharingClient";
 import { copyLibraryForSharing } from "@/cut/lib/libraryShareCopy";
-import { DONKEYCUT_CANONICAL } from "@/cut/lib/hosts";
+import { CUT_HOSTED_ORIGIN, DONKEYCUT_CANONICAL } from "@/cut/lib/hosts";
+import {
+  filterTemplates,
+  TEMPLATE_ASPECTS,
+  TEMPLATE_CATEGORIES,
+  TEMPLATE_LENGTHS,
+  TEMPLATE_PAGE_DEFAULT,
+  TEMPLATE_PAGE_MAX,
+  TEMPLATE_STYLES,
+  templatePage,
+} from "@/cut/lib/templateGallery";
+import { footageSlots } from "@/cut/lib/templateFill";
+import { copyAsKind, copyTemplate, fetchTemplateIndex } from "@/cut/lib/templateUse";
+import { CUT_APP_BASE, homeHref, projectHref } from "@/cut/lib/nav";
+import { appQueryClient } from "@/queries/appClient";
 
 import { GUIDE_IDS, guideFits, guidePreset, isGuideId, safeAreaOf, sanitizeGuideLines, type GuideId } from "./guides";
 import { textSpots } from "./textPlace";
@@ -5386,6 +5400,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
           name: p.name,
           residency: p.residency,
           edited: new Date(p.updatedAt).toISOString(),
+          ...(p.kind === "template" ? { template: true } : {}),
           ...(p.id === s.projectId ? { open: true } : {}),
         })),
         total: projects.length,
@@ -5623,6 +5638,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
   read_note: async (_s, input) => (await import("@/cut/lib/notes")).readNote(input),
 
   notes_list: async () => {
+      // A read only: loose notes are filed when the Library loads.
       const { notes, folders, labels } = await fetchNotes();
       const folderName = new Map(folders.map((f) => [f.id, f.name]));
       const labelName = new Map(labels.map((l) => [l.id, l.name]));
@@ -5725,6 +5741,99 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
           : { addedToTimeline: false }),
         fromRef: { scope: "library", id: lib.id },
       };
+  },
+
+  template_gallery: async (_s, input) => {
+      const pick = <T extends string>(value: unknown, allowed: readonly T[]): T | undefined =>
+        allowed.includes(value as T) ? (value as T) : undefined;
+      const { templates } = await fetchTemplateIndex();
+      const found = filterTemplates(templates, {
+        category: pick(input.category, TEMPLATE_CATEGORIES),
+        aspect: pick(input.aspect, TEMPLATE_ASPECTS),
+        length: pick(input.length, TEMPLATE_LENGTHS),
+        style: pick(input.style, TEMPLATE_STYLES),
+      });
+      // One page at a time, so a growing gallery never floods the turn.
+      const offset = typeof input.offset === "number" && Number.isSafeInteger(input.offset) && input.offset > 0 ? input.offset : 0;
+      const limit = typeof input.limit === "number" && input.limit >= 1 ? Math.min(Math.floor(input.limit), TEMPLATE_PAGE_MAX) : TEMPLATE_PAGE_DEFAULT;
+      const page = found.slice(offset, offset + limit);
+      // Names and descriptions in English; the assistant answers in the
+      // user's language from there.
+      return {
+        total: found.length,
+        ...(offset + page.length < found.length ? { next: offset + page.length } : {}),
+        templates: page.map((t) => ({
+          id: t.id,
+          name: t.name.en,
+          description: t.description.en,
+          category: t.category,
+          aspect: t.aspect,
+          style: t.style,
+          seconds: t.seconds,
+          footage_slots: t.slots,
+          texts: t.texts,
+          link: `${CUT_HOSTED_ORIGIN}${templatePage(t.id)}`,
+        })),
+      };
+  },
+
+  template_use: async (s, input) => {
+      const id = String(input.id ?? "");
+      const target = String(input.target ?? "");
+      if (target !== "new_project" && target !== "timeline") {
+        throw new ToolError(`target is "new_project" or "timeline".`);
+      }
+      const gallery = (await fetchTemplateIndex()).templates.find((t) => t.id === id);
+      const own = gallery ? undefined : (await listOwnProjects()).projects.find((p) => p.id === id && p.kind === "template");
+      if (!gallery && !own) {
+        throw new ToolError(`No template with id ${id}. template_gallery lists the gallery; list_projects marks the user's own templates.`);
+      }
+
+      // A new project from the user's own template lands beside the
+      // template; one from the gallery lands where this project lives.
+      const projectLink = (projectId: string) => ({
+        project_id: projectId,
+        link: `${CUT_HOSTED_ORIGIN}${projectHref(CUT_APP_BASE, projectId, "projects")}`,
+      });
+      if (target === "new_project" && own) {
+        await requireProjectRoom();
+        return projectLink(await copyAsKind(own.residency, own.id, "project", own.name));
+      }
+      if (target === "new_project" && gallery) {
+        const here = getBackend().kind;
+        if (here === "shared") {
+          throw new ToolError("A shared view cannot make projects.");
+        }
+        await requireProjectRoom();
+        return projectLink(await copyTemplate(gallery, here, gallery.name.en));
+      }
+
+      // The user's assets take the template's footage sources in the order
+      // they first play: a source two slots share takes one asset, so it
+      // counts once.
+      const link = gallery ? `${CUT_HOSTED_ORIGIN}${templatePage(gallery.id)}` : own!.id;
+      const given = Array.isArray(input.media) ? input.media.map(String) : [];
+      const ref = await openReferenceLink(link);
+      const sources = [...new Set(footageSlots(ref.doc.clips ?? [], ref.doc.assets ?? []).map((c) => c.assetId))];
+      if (given.length > sources.length) {
+        throw new ToolError(`The template has ${sources.length} footage sources; ${given.length} assets were given.`);
+      }
+      const media = given.map((assetId, i) => ({ source_asset_id: sources[i], asset_id: assetId }));
+      return toolRuns.replicate_project(s, { link, media, frame: true, caption_look: true, captions: true });
+  },
+
+  make_template: async (_s, input) => {
+      const id = String(input.project_id ?? "");
+      const project = (await listOwnProjects()).projects.find((p) => p.id === id);
+      if (!project) {
+        throw new ToolError(`No project of the user's with id ${id}. list_projects lists them.`);
+      }
+      if (project.kind === "template") {
+        throw new ToolError(`"${project.name}" is already a template.`);
+      }
+      await requireProjectRoom();
+      const templateId = await copyAsKind(project.residency, project.id, "template", project.name);
+      return { template_id: templateId, link: `${CUT_HOSTED_ORIGIN}${homeHref(CUT_APP_BASE, "templates")}` };
   },
 
   template_add: async (s, input) => {
@@ -7552,6 +7661,22 @@ function sourceSpeech(
       }))
     : [];
   return speechOver(cues, asset.speech?.segments ?? [], from, to);
+}
+
+/** Refuse a tool that would make a project past the free limit. In the page
+ * the limit gate counts every shelf and puts up the upgrade offer; a headless
+ * run has no page, and the cloud copy checks on the server. */
+async function requireProjectRoom() {
+  const client = appQueryClient();
+  if (!client) {
+    return;
+  }
+  // Loaded here: the gate opens the upgrade wall, page code a headless run
+  // never bundles.
+  const { newProjectAllowed } = await import("./projectLimit");
+  if (!(await newProjectAllowed(client))) {
+    throw new ToolError("This account is at its free project limit; the upgrade offer is open in the editor.");
+  }
 }
 
 /** A reference link the model typed into a tool argument, opened. Every

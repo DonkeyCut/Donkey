@@ -2,8 +2,8 @@
   "tabs": {
     "projects": "项目",
     "library": "素材库",
-    "notes": "笔记",
-    "cameraRoll": "相机胶卷"
+    "cameraRoll": "相机胶卷",
+    "templates": "模板"
   },
   "newProject": {
     "button": "新建项目",
@@ -55,7 +55,10 @@
     "duplicate": "创建副本",
     "moveToLocal": "移至本地",
     "moveToCloud": "移至云端",
-    "actions": "项目操作"
+    "actions": "项目操作",
+    "makeTemplate": "制作模板",
+    "makeTemplateFailed": "无法制作模板。",
+    "templateMade": "“{name}”已作为模板存入<link>模板</link>。"
   },
   "pick": {
     "project": "{count, plural, other {# 个项目}}",
@@ -170,19 +173,12 @@
   "notes": {
     "untitled": "未命名",
     "untitledNote": "未命名笔记",
-    "allNotes": "所有笔记",
     "saveFailed": "无法保存笔记。",
     "reopen": "重新打开并重试",
-    "newFolder": "新建文件夹",
-    "newNote": "新建笔记",
     "loadFailed": "无法加载笔记。",
     "retry": "重试",
-    "emptyTitle": "暂无笔记。",
-    "emptyHint": "笔记会与 Donkey Cut iOS 应用同步——在此编写的台本即可在手机提词器上直接使用。",
     "delete": "删除",
     "deleteTitle": "删除{what}？",
-    "deleteFolderTitle": "删除“{name}”？",
-    "folderFallback": "文件夹",
     "removedFromPhone": "{count, plural, other {也会从你的手机中移除。}}"
   },
   "composer": {
@@ -264,5 +260,88 @@
     "upgradeTip": "查看包含更多存储空间和 AI 积分的方案",
     "grace": "你的方案已到期。请在最早的项目被删除前升级或释放 {size} 空间。"
   },
-  "justNow": "刚刚"
+  "justNow": "刚刚",
+  "templates": {
+    "title": "模板",
+    "all": "全部",
+    "filters": {
+      "source": "来源",
+      "category": "分类",
+      "aspect": "画幅",
+      "length": "时长",
+      "style": "风格"
+    },
+    "sources": {
+      "all": "全部模板",
+      "mine": "我的模板",
+      "donkey": "Donkey 模板"
+    },
+    "aspects": {
+      "9:16": "竖屏 9:16",
+      "1:1": "正方形 1:1",
+      "4:5": "竖向 4:5",
+      "16:9": "横屏 16:9"
+    },
+    "lengths": {
+      "short": "15 秒以内",
+      "medium": "15–30 秒",
+      "long": "30 秒以上"
+    },
+    "categories": {
+      "opener": "片头与开场",
+      "promo": "宣传与广告",
+      "slideshow": "幻灯片",
+      "announcement": "公告与通知",
+      "countdown": "倒计时与榜单",
+      "lifestyle": "生活与 Vlog",
+      "travel": "旅行",
+      "food": "美食与食谱",
+      "fitness": "健身",
+      "quote": "语录与歌词",
+      "talkingHead": "口播",
+      "event": "活动与回顾",
+      "celebration": "庆祝",
+      "product": "产品",
+      "explainer": "讲解说明",
+      "titles": "标题与字幕条",
+      "logo": "Logo展示",
+      "trailer": "预告片",
+      "realEstate": "房地产"
+    },
+    "styles": {
+      "bold": "醒目",
+      "minimal": "极简",
+      "cinematic": "电影感",
+      "playful": "趣味",
+      "retro": "复古",
+      "elegant": "优雅"
+    },
+    "empty": "没有符合这些筛选条件的模板。",
+    "clearFilters": "清除筛选",
+    "detail": {
+      "close": "返回模板",
+      "use": "以此创建新项目",
+      "using": "正在创建项目…",
+      "progress": "正在复制媒体（{done}/{total}）…",
+      "copyLink": "复制链接",
+      "linkCopied": "链接已复制",
+      "size": "{width} × {height} px",
+      "seconds": "{seconds, plural, other {# 秒}}",
+      "fps": "{fps} fps",
+      "slots": "{count, plural, other {# 个待填充片段}}",
+      "texts": "{count, plural, other {# 处文本}}",
+      "noMusic": "不含音乐。请添加你自己的配乐。",
+      "similar": "相似模板",
+      "failed": "无法创建项目。",
+      "missing": "此模板已失效。"
+    },
+    "fill": {
+      "title": "添加你的片段",
+      "body": "为模板的空位选择片段。系统将按顺序填充，跳过的空位将保留示例内容。",
+      "slot": "片段 {n} · {seconds}",
+      "pick": "选择片段",
+      "skip": "保留示例",
+      "replaceSlot": "为此槽位选择片段"
+    }
+  }
 }

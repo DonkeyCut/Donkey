@@ -456,6 +456,7 @@ async function summarize(id: string, doc: ProjectDoc): Promise<ProjectSummary> {
     hasPreview,
     aspect: doc.aspect,
     folderId: doc.folderId ?? null,
+    kind: doc.kind,
     sizeBytes,
   };
 }

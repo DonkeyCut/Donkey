@@ -2070,14 +2070,29 @@ describe("overlay row order", () => {
       { clip: c2, start: 4, len: 4 },
     ];
     const out = liftClipLooks([c1, c2], [title({ lane: 0 })], spans)!;
-    // The grade covers exactly the clip it graded, on the row above the title.
+    // The grade covers exactly the clip it graded, on the row under the title.
     const fx = out.overlays.find((o) => o.kind === "effect")!;
-    expect([fx.effect, fx.start, fx.end, fx.lane]).toEqual(["noir", 0, 4, 0]);
-    expect(out.overlays.find((o) => (o.kind ?? "text") === "text")!.lane).toBe(1);
+    expect([fx.effect, fx.start, fx.end, fx.lane]).toEqual(["noir", 0, 4, 1]);
+    expect(out.overlays.find((o) => (o.kind ?? "text") === "text")!.lane).toBe(0);
     // …and the clip no longer carries it, so nothing grades twice.
     expect(out.clips[0].look).toBeUndefined();
     // A doc with no looks is left alone.
     expect(liftClipLooks([c2], [], spans)).toBe(null);
+  });
+
+  test("a loaded clip look grades the picture and leaves the elements above it", () => {
+    // A noir clip under two orange titles: the load lifts the look into an
+    // effect, and every renderer grades only the lanes under an effect, so
+    // the grade has to sit under both titles.
+    const a = asset(4);
+    const c = vclip({ start: 0, out: 4, assetId: a.id, look: "noir" });
+    const overlays = [title({ lane: 0, color: "#ff8800" }), title({ lane: 1, end: 4, color: "#ff8800" })];
+    const loaded = normalizeDocState({ clips: [c], overlays }, [a]);
+    const fx = loaded.overlays.find((o) => o.kind === "effect")!;
+    expect(fx.effect).toBe("noir");
+    for (const o of loaded.overlays.filter((x) => x.kind !== "effect")) {
+      expect(fx.lane!).toBeGreaterThan(o.lane ?? 0);
+    }
   });
 
   test("a look saved at full strength lifts at full strength", () => {

@@ -424,6 +424,14 @@
     "untitled": "제목 없음",
     "text": "텍스트 입력",
     "frame": "프레임 {time}",
-    "copy": "{name} 사본"
-  }
+    "copy": "{name} 사본",
+    "notes": "메모"
+  },
+  "template_missing": "이 템플릿은 더 이상 사용할 수 없어요.",
+  "template_sign_in_required": "이 템플릿을 사용하려면 로그인하세요.",
+  "template_use_failed": "프로젝트를 만들 수 없어요.",
+  "templates_read_failed": "템플릿을 불러올 수 없어요.",
+  "project_limit": "이 계정의 무료 프로젝트 한도에 도달했어요. 프로젝트를 더 만들려면 Pro로 업그레이드하세요.",
+  "note_place_failed": "메모를 정리하지 못했어요.",
+  "template_needs_update": "이 Mac에서 템플릿을 만들려면 Donkey 앱을 업데이트하세요."
 }

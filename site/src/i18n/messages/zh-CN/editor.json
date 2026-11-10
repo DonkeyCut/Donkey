@@ -333,7 +333,7 @@
     "fullscreen": "全屏",
     "chat": "聊天",
     "chatShortcut": "聊天 ({key})",
-    "backTo": "{tab, select, library {返回素材库} other {返回项目列表}}",
+    "backTo": "{tab, select, library {返回素材库} templates {返回模板} other {返回项目}}",
     "rename": "重命名项目",
     "importsFailed": "{count, plural, other {# 项导入失败}}",
     "retry": "重试",
@@ -353,7 +353,7 @@
     "moving": "正在移动…"
   },
   "editor": {
-    "backTo": "{tab, select, library {返回素材库} other {返回项目}}",
+    "backTo": "{tab, select, library {返回素材库} templates {返回模板} other {返回项目}}",
     "needsApp": "这是一个本地项目 — 存放在此 Mac 上。打开 Donkey 应用即可在此打开。",
     "shareGone": "此分享已不再可用。",
     "conflictReloaded": "已重新加载在其他地方保存的较新版本。",

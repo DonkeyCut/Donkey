@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { sharedBackendFor } from "./shared";
+import { sharedBackendFor, templateBackendFor } from "./shared";
 
 describe("sharedBackendFor", () => {
   test("rewrites the engine's route shapes under its own share", () => {
@@ -16,5 +16,15 @@ describe("sharedBackendFor", () => {
   test("the bare prefix is the share's own meta route", () => {
     expect(sharedBackendFor("tok").url("/api/cut/")).toBe("/api/cut-shared/tok");
     expect(sharedBackendFor("tok").url("/api/cut")).toBe("/api/cut-shared/tok");
+  });
+});
+
+describe("templateBackendFor", () => {
+  test("rewrites the engine's route shapes under the template's prefix", () => {
+    const t = templateBackendFor("launch-teaser");
+    expect(t.url("/api/cut")).toBe("/api/templates/launch-teaser");
+    expect(t.url("/api/cut/projects/launch-teaser/media/a.mp4")).toBe(
+      "/api/templates/launch-teaser/projects/launch-teaser/media/a.mp4"
+    );
   });
 });
