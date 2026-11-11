@@ -264,9 +264,8 @@
       "style": "Estilo"
     },
     "sources": {
-      "all": "Todas las plantillas",
-      "mine": "Mis plantillas",
-      "donkey": "Plantillas de Donkey"
+      "default": "Predeterminado",
+      "mine": "Mis plantillas"
     },
     "aspects": {
       "9:16": "Vertical 9:16",

@@ -264,9 +264,8 @@
       "style": "Style"
     },
     "sources": {
-      "all": "Tous les modèles",
-      "mine": "Mes modèles",
-      "donkey": "Modèles Donkey"
+      "default": "Par défaut",
+      "mine": "Mes modèles"
     },
     "aspects": {
       "9:16": "Vertical 9:16",

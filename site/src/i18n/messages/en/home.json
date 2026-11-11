@@ -264,9 +264,8 @@
       "style": "Style"
     },
     "sources": {
-      "all": "All templates",
-      "mine": "My templates",
-      "donkey": "Donkey templates"
+      "default": "Default",
+      "mine": "My templates"
     },
     "aspects": {
       "9:16": "Vertical 9:16",

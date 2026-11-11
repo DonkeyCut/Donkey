@@ -264,9 +264,8 @@
       "style": "风格"
     },
     "sources": {
-      "all": "全部模板",
-      "mine": "我的模板",
-      "donkey": "Donkey 模板"
+      "default": "默认",
+      "mine": "我的模板"
     },
     "aspects": {
       "9:16": "竖屏 9:16",

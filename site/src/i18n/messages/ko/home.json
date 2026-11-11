@@ -264,9 +264,8 @@
       "style": "스타일"
     },
     "sources": {
-      "all": "모든 템플릿",
-      "mine": "내 템플릿",
-      "donkey": "Donkey 템플릿"
+      "default": "기본",
+      "mine": "내 템플릿"
     },
     "aspects": {
       "9:16": "세로 9:16",

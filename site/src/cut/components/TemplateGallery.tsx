@@ -64,11 +64,11 @@ import { CardPreview } from "./ProjectsHome";
 import { DeleteConfirm } from "./selectionMenu";
 
 // The gallery's filters, each a URL param so Back and reload keep the view.
-// Source picks the person's own templates or Donkey's.
+// Source shows Donkey's templates by default, or the person's own.
 const FILTER_KEYS = ["source", "category", "aspect", "length", "style"] as const;
 type FilterKey = (typeof FILTER_KEYS)[number];
 
-const TEMPLATE_SOURCES = ["mine", "donkey"] as const;
+const TEMPLATE_SOURCES = ["mine"] as const;
 type TemplateSource = (typeof TEMPLATE_SOURCES)[number];
 type Filter = TemplateFilter & { source?: TemplateSource };
 
@@ -120,10 +120,10 @@ function filterFrom(params: URLSearchParams): Filter {
   };
 }
 
-/** The person's own templates the filter keeps. They carry no category or
- * style, so filtering by either leaves them out. */
+/** The person's own templates the filter keeps: only under My templates.
+ * They carry no category or style, so filtering by either leaves them out. */
 function filterOwn(all: OwnTemplate[], f: Filter): OwnTemplate[] {
-  if (f.source === "donkey" || f.category || f.style) {
+  if (f.source !== "mine" || f.category || f.style) {
     return [];
   }
   return all.filter(
@@ -138,8 +138,8 @@ function cardWidth(frame: { w: number; h: number }, area: number): number {
   return Math.round(Math.sqrt((area * frame.w) / frame.h));
 }
 
-/** One grid of templates, the person's own first, under one row of filter
- * chips. */
+/** One grid of templates, Donkey's or the person's own, under one row of
+ * filter chips. */
 export function TemplateGallery() {
   const t = useTranslations("home.templates");
   const tp = useTranslations("home.projects");
@@ -160,7 +160,7 @@ export function TemplateGallery() {
   const gallery = filter.source === "mine" ? [] : filterTemplates(index.data?.templates ?? [], filter);
   const loading = filter.source !== "mine" && index.isPending;
 
-  // One page of the grid: the person's own templates first, then Donkey's.
+  // One page of the grid: the source's templates.
   // A page past the end, after a filter narrows the list, shows the last one.
   const cards: Card[] = [
     ...own.map((o): Card => ({ kind: "own", template: o })),
@@ -267,7 +267,7 @@ export function TemplateGallery() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value={ANY} className="text-[13px]">
-                {key === "source" ? t("sources.all") : `${t(`filters.${key}`)}: ${t("all")}`}
+                {key === "source" ? t("sources.default") : `${t(`filters.${key}`)}: ${t("all")}`}
               </SelectItem>
               {OPTIONS[key].map((v) => (
                 <SelectItem key={v} value={v} className="text-[13px]">

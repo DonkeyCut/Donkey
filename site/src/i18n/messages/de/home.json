@@ -264,9 +264,8 @@
       "style": "Stil"
     },
     "sources": {
-      "all": "Alle Vorlagen",
-      "mine": "Meine Vorlagen",
-      "donkey": "Donkey-Vorlagen"
+      "default": "Standard",
+      "mine": "Meine Vorlagen"
     },
     "aspects": {
       "9:16": "Vertikal 9:16",
