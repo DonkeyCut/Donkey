@@ -1810,13 +1810,12 @@ export function effectFilterLines(
     case "vignette":
       return [`[${inLabel}]vignette=angle=${fmt((k * Math.PI) / 3.5)}:${en}[${outLabel}]`];
     case "lightleak": {
-      // The bloom: a warm tint, then a backward vignette whose center drifts
-      // around the bottom-right, so the far corner — the top-left — glows and
-      // wanders the way the preview's leak does. The streak bands land last,
-      // drawn straight into the frame by geq with the preview's own tilt,
-      // sweep and pulse: luma screened toward white, chroma pushed toward
-      // orange. Every term is a ratio of the plane's W and H, so the
-      // subsampled chroma planes stay in register with luma.
+      // A warm tint, then the bloom and the streak bands drawn straight into
+      // the frame by geq: the bloom is the preview's radial ramp around its
+      // drifting top-left center, the bands keep the preview's own tilt,
+      // sweep and pulse, and together they screen luma toward white and push
+      // chroma toward orange. Every term is a ratio of the plane's W and H,
+      // so the subsampled chroma planes stay in register with luma.
       const tl = `(T-${fmt(start)})`;
       const bandSum = STREAK_BANDS.slice(0, streakCount(k))
         .map((b) => {
@@ -1829,12 +1828,19 @@ export function effectFilterLines(
           return `${a}*exp(-0.5*pow((${q}-${p})/${fmt(b.w)},2))`;
         })
         .join("+");
-      const G = `min(${bandSum},1)`;
+
+      // The bloom's ramp: 0.9 at its center, 0.5 at 0.38 of its radius
+      // (0.7 of the long side), gone by 0.72 — the preview's gradient stops.
+      const big = Math.max(width, height);
+      const bx = `(0.16+0.14*sin(${tl}*0.9))`;
+      const by = `(0.2+0.11*cos(${tl}*0.6))`;
+      const d = `hypot((X/W-${bx})*${fmt(width / big)},(Y/H-${by})*${fmt(height / big)})/0.7`;
+      const ramp = `if(lt(${d},0.38),0.9-0.4*${d}/0.38,max(0,0.5*(0.72-${d})/0.34))`;
+      const bloom = `${fmt(k)}*(0.55+0.12*sin(${tl}*1.3))*${ramp}`;
+      const G = `min(${bandSum}+${bloom},1)`;
       return [
         `[${inLabel}]hue=s=${fmt(1 + 0.06 * k)}:${en},` +
           `colortemperature=temperature=${Math.round(6500 - 500 * k)}:${en},` +
-          `vignette=angle=${fmt((k * Math.PI) / 5)}:mode=backward:` +
-          `x0='w*(0.84-0.14*sin(t*0.9))':y0='h*(0.8-0.11*cos(t*0.6))':eval=frame:${en},` +
           `geq=lum='lum(X,Y)+(${code(235, chroma.depth)}-lum(X,Y))*${G}':cb='cb(X,Y)-${code(40, chroma.depth)}*${G}':cr='cr(X,Y)+${code(26, chroma.depth)}*${G}':${en}[${outLabel}]`,
       ];
     }
