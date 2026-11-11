@@ -90,7 +90,7 @@ export const LIBRARY_TOOLS = [
   {
     name: "template_gallery",
     description:
-      "List Donkey's template gallery — ready-made edits every account can start from, each with sample footage in its clips, styled titles and effects, and no music. Each entry gives its id, name, what it is for, frame shape, length, how many footage slots and texts it has, and its link. Filter by category, aspect, length or style; all filters are optional. Results come a page at a time with the total; `next` is the offset of the following page.",
+      "List Donkey's template gallery — ready-made edits every account can start from, each with sample footage in its clips, styled titles and effects, and often a soundtrack timed to its cuts. Each entry gives its id, name, what it is for, frame shape, length, how many footage slots and texts it has, whether it carries music, and its link. Filter by category, aspect, length or style; all filters are optional. Results come a page at a time with the total; `next` is the offset of the following page.",
     inputSchema: obj({
       category: { type: "string", enum: [...TEMPLATE_CATEGORIES] },
       aspect: { type: "string", enum: [...TEMPLATE_ASPECTS] },

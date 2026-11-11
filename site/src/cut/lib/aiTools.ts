@@ -5772,6 +5772,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
           seconds: t.seconds,
           footage_slots: t.slots,
           texts: t.texts,
+          music: t.music ?? false,
           link: `${CUT_HOSTED_ORIGIN}${templatePage(t.id)}`,
         })),
       };
