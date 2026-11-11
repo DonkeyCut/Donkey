@@ -1076,6 +1076,31 @@ describe("the project background in the filtergraph", () => {
     expect(v.join(";")).toMatch(/,vflip,setsar=1,[^;]*format=yuv420p,pad=/);
   });
 
+  test("a boxed clip fades in over the background, never through black", async () => {
+    const boxed = {
+      fit: "fill" as const,
+      frame: { x: 0.585, y: 0.27, w: 0.19, h: 0.56 },
+      mask: { file: "mask_c0.png" },
+      border: "border_c0.png",
+      animIn: { style: "fade", seconds: 0.35 },
+    };
+    const lines = await graphFor({ clips: [clip("a.mp4", boxed)], background: "#F5EBDC" });
+    const joined = lines.join(";");
+    // The fade ramps the clip's alpha, so the box blends into the cream
+    // frame color the way the preview draws it.
+    expect(joined).toContain("fade=t=in:st=0:d=0.350:alpha=1");
+    expect(joined).not.toMatch(/(?<!a)fade=t=in:st=0:d=0\.350(?!:alpha)/);
+    expect(joined).toContain("color=c=0xF5EBDC:s=1080x1920");
+
+    // An unmasked boxed clip takes the same alpha fade.
+    const bare = await graphFor({ clips: [clip("a.mp4", { ...boxed, mask: undefined })], background: "#F5EBDC" });
+    expect(bare.join(";")).toContain("fade=t=in:st=0:d=0.350:alpha=1");
+
+    // Over black, the plain fade to black is the same picture.
+    const dark = await graphFor({ clips: [clip("a.mp4", { ...boxed, mask: undefined })] });
+    expect(dark.join(";")).toContain("fade=t=in:st=0:d=0.350[");
+  });
+
   test("no background named keeps the black frame every cut had before", async () => {
     const g = await graphFor({ clips: [clip("", { out: 4, hidden: true, muted: true })] });
     expect(g.join(";")).toContain("color=c=black:");

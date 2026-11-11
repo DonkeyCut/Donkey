@@ -2722,8 +2722,15 @@ async function renderPass(
       // A removal segment carries alpha, so its fades must ramp the alpha
       // plane too — a color-only fade darkens the still-opaque silhouette to
       // black where the preview dissolves it.
-      const fadeAlpha = rmIn ? ":alpha=1" : "";
+      // A fade dissolves the clip into the frame color, as the preview draws
+      // it over the background. Over black, a fade to black is that picture.
+      // Over any other color the fade ramps the clip's alpha and the clip
+      // lands on the color below, so a boxed clip's box never goes dark.
+      const fadesOnColor = padColor !== "black" && (hf > 0.01 || tf > 0.01);
+      const fadeAlpha = rmIn || fadesOnColor ? ":alpha=1" : "";
+      const toAlpha = fadesOnColor && !rmIn ? `,${hdr ? videoToAlpha : `format=${alphaFmt}`}` : "";
       const fades =
+        toAlpha +
         (hf > 0.01 ? `,fade=t=in:st=0:d=${num(hf)}${fadeAlpha}` : "") +
         (tf > 0.01 ? `,fade=t=out:st=${num(Math.max(0, dur - tf))}:d=${num(tf)}${fadeAlpha}` : "");
       // A neighbor's backdrop animation freezes a frame of this segment —
@@ -2739,7 +2746,7 @@ async function renderPass(
       const mkIdx = clipMaskInput.get(j);
       const subjMask = subjectActive && matteConsumers > 0 ? c.mask?.subject : undefined;
       const keyed = !!c.kf?.length;
-      if (mkIdx !== undefined || subjMask || keyed || rmIn) {
+      if (mkIdx !== undefined || subjMask || keyed || rmIn || fadesOnColor) {
         // Masked or keyframed track-0 clip, composed in the preview's order:
         // the painted coverage multiplies first (it rides the clip), the
         // pose transforms and positions the result over a transparent base,
