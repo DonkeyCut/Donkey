@@ -572,7 +572,14 @@ function carriedMedia(e: React.DragEvent): CarriedMedia[] {
   return [];
 }
 
-export function Timeline() {
+/** Whether the timeline can be folded away: `foldable` in the editor, whose
+ * rail brings it back; `fixed` on a page with nothing to bring it back, as a
+ * template's page. */
+type TimelineFold = "foldable" | "fixed";
+
+/** `openSpan` is the seconds the timeline fits as a project opens; a shorter
+ * project fills the width. */
+export function Timeline({ fold = "foldable", openSpan = 0 }: { fold?: TimelineFold; openSpan?: number }) {
   const tr = useTranslations("timeline.main");
   const transitionLabel = useLabels("transition");
   const shapeLabel = useLabels("shape");
@@ -616,6 +623,28 @@ export function Timeline() {
       }),
     []
   );
+  // A project opens with its rows scrolled to the bottom, where track 0 and
+  // the sound sit; the lanes stack above them, e.g. a template's titles.
+  const openProjectId = useEditor((s) => (s.loaded ? s.projectId : null));
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (!el || !openProjectId) {
+      return;
+    }
+    el.scrollTop = el.scrollHeight;
+  }, [openProjectId]);
+
+  // A timeline with an open span shows that much from the start as a project
+  // opens: a 45 s cut opens on its first 30 s, a 15 s one fills the width.
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    const dur = projectDuration(useEditor.getState());
+    if (!el || !openProjectId || openSpan <= 0 || dur <= 0) {
+      return;
+    }
+    useEditor.getState().setPxPerSec(fitZoom(el.clientWidth, Math.min(dur, openSpan)));
+    el.scrollLeft = 0;
+  }, [openProjectId, openSpan]);
   // The rail copies behind the scroller follow vertical scroll so they stay
   // glued under the live rails; overscroll can't move them, so the surface
   // runs unbroken through the bounce. (Horizontal position is moot — every
@@ -2308,11 +2337,12 @@ export function Timeline() {
             <Button variant="ghost" size="sm" title={tr("fitTitle")} onClick={fit}>
               {tr("fit")}
             </Button>
-            <HideTimelineButton />
+            {fold === "foldable" && <HideTimelineButton />}
           </div>
           {barTight && <GuidesMenu />}
           {barTight && (
             <TimelineToolsMenu
+              fold={fold}
               pps={pps}
               zoomMin={zoomMin}
               zoomTo={zoomTo}
@@ -3479,6 +3509,7 @@ function TimelineTools({
  * a row rather than an item — it is a control to work, not a command to pick,
  * so it keeps the slider and the menu stays open around it. */
 function TimelineToolsMenu({
+  fold,
   pps,
   zoomMin,
   zoomTo,
@@ -3488,6 +3519,7 @@ function TimelineToolsMenu({
   deleteSelection,
   selectionCount,
 }: {
+  fold: TimelineFold;
   pps: number;
   zoomMin: number;
   zoomTo: (next: number, anchorT?: number, anchorPx?: number) => void;
@@ -3568,10 +3600,12 @@ function TimelineToolsMenu({
             {tr("fit")}
           </Button>
         </div>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem onClick={() => useEditor.getState().setTimelineOpen(false)}>
-          <PanelBottomClose /> {tr("hideTimeline")}
-        </DropdownMenuItem>
+        {fold === "foldable" && <DropdownMenuSeparator />}
+        {fold === "foldable" && (
+          <DropdownMenuItem onClick={() => useEditor.getState().setTimelineOpen(false)}>
+            <PanelBottomClose /> {tr("hideTimeline")}
+          </DropdownMenuItem>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   );
