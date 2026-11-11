@@ -83,7 +83,7 @@ export function TemplateInfo({ template, panel }: { template: GalleryTemplate; p
   };
 
   const spec = (Icon: typeof Clock, line: string) => (
-    <div className="flex items-center gap-2 text-[13px] text-foreground/90">
+    <div className="flex items-center gap-1.5 text-[13px] whitespace-nowrap text-foreground/90">
       <Icon className="size-4 shrink-0 text-muted-foreground" />
       {line}
     </div>
@@ -117,7 +117,8 @@ export function TemplateInfo({ template, panel }: { template: GalleryTemplate; p
         </Button>
       </div>
 
-      <div className="grid grid-cols-2 gap-x-3 gap-y-2.5">
+      {/* One row; a longer translation wraps the last spec under it. */}
+      <div className="flex flex-wrap gap-x-4 gap-y-2.5">
         {spec(ASPECT_ICON[template.aspect], t(`aspects.${template.aspect}`))}
         {spec(Clock, t("detail.seconds", { seconds: Math.round(template.seconds) }))}
         {spec(Gauge, t("detail.fps", { fps: template.fps }))}
