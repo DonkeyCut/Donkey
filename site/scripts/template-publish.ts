@@ -555,22 +555,26 @@ async function publish(dir: string, metaPath: string) {
 
   // The footage as it ships, and the card's still rendered from it.
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "template-"));
-  const sources = lightFootage(dir, doc, tmp);
-  await bakeFrames(meta.id, doc, sources, tmp);
-  await bakePeaks(meta.id, doc, sources);
-  const poster = path.join(tmp, TEMPLATE_POSTER);
-  await renderPoster(doc, sources, tmp, poster);
+  // The temp folder goes whether the publish lands or fails.
+  try {
+    const sources = lightFootage(dir, doc, tmp);
+    await bakeFrames(meta.id, doc, sources, tmp);
+    await bakePeaks(meta.id, doc, sources);
+    const poster = path.join(tmp, TEMPLATE_POSTER);
+    await renderPoster(doc, sources, tmp, poster);
 
-  // Media first, the index last, so the gallery never lists a template whose
-  // bytes are still landing.
-  for (const fileName of files) {
-    const bytes = await fs.readFile(sources.get(fileName)!);
-    await putObject(templateMediaKey(meta.id, fileName), bytes, contentTypeFor(fileName));
-    console.log(`media  ${fileName}`);
+    // Media first, the index last, so the gallery never lists a template whose
+    // bytes are still landing.
+    for (const fileName of files) {
+      const bytes = await fs.readFile(sources.get(fileName)!);
+      await putObject(templateMediaKey(meta.id, fileName), bytes, contentTypeFor(fileName));
+      console.log(`media  ${fileName}`);
+    }
+    await putObject(templateKey(meta.id, "project.json"), Buffer.from(JSON.stringify(doc)), "application/json");
+    await putObject(templateKey(meta.id, TEMPLATE_POSTER), await fs.readFile(poster), "image/jpeg");
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
   }
-  await putObject(templateKey(meta.id, "project.json"), Buffer.from(JSON.stringify(doc)), "application/json");
-  await putObject(templateKey(meta.id, TEMPLATE_POSTER), await fs.readFile(poster), "image/jpeg");
-  await fs.rm(tmp, { recursive: true, force: true });
 
   const entry: GalleryTemplate = {
     ...meta,
