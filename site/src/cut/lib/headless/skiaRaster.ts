@@ -25,6 +25,14 @@ export async function installSkiaRaster(): Promise<boolean> {
     const skia = await import("skia-canvas");
 
     class ServerCanvas extends skia.Canvas {
+      // A render draws thousands of overlay stills; on the GPU each canvas
+      // held its textures as wired memory until collection, enough to swap
+      // the machine. The CPU raster keeps them in the process's own heap.
+      constructor(width?: number, height?: number) {
+        super(width, height);
+        this.gpu = false;
+      }
+
       async convertToBlob(opts?: { type?: string; quality?: number }): Promise<Blob> {
         const type = opts?.type ?? "image/png";
         const buf = await this.toBuffer(skiaFormat(type), {
