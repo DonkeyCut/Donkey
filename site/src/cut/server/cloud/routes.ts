@@ -16,11 +16,9 @@ import { commandsCloud } from "./commands";
 import { copyJobs } from "./copyQueue";
 import { runGc } from "./gc";
 import { jobsCloud } from "./jobs";
-import { clipTitleCloud } from "./clipTitle";
 import { libraryCloud } from "./library";
 import { mediaCloud } from "./media";
 import { notesCloud } from "./notes";
-import { notePhoneClient, phoneApi } from "./phone";
 import { projectsCloud } from "./projects";
 import { turnsCloud } from "./turns";
 import { cloudSceneLease } from "./sceneLease";
@@ -84,7 +82,6 @@ const CUT_CLOUD_ROUTES: CloudRoute[] = [
   { method: "POST", path: "/api/cut-cloud/library/complete", handler: (r, u) => libraryCloud.complete(u, r) },
   { method: "POST", path: "/api/cut-cloud/library/presign-get", handler: (r, u) => libraryCloud.presignGetBatch(u, r) },
   { method: "POST", path: "/api/cut-cloud/library/use", handler: (r, u) => libraryCloud.use(u, r) },
-  { method: "POST", path: "/api/cut-cloud/library/title", handler: (r, u) => clipTitleCloud.title(u, r) },
   { method: "POST", path: "/api/cut-cloud/library/save", handler: (r, u) => libraryCloud.save(u, r) },
   { method: "POST", path: "/api/cut-cloud/library/move", handler: (r, u) => libraryCloud.move(u, r) },
   { method: "POST", path: "/api/cut-cloud/library/templates", handler: (r, u) => libraryCloud.saveTemplate(u, r) },
@@ -135,7 +132,6 @@ const CUT_CLOUD_ROUTES: CloudRoute[] = [
   { method: "GET", path: "/api/cut-cloud/notes/:id", handler: (_r, u, p) => notesCloud.get(u, p.id) },
   { method: "PUT", path: "/api/cut-cloud/notes/:id", handler: (r, u, p) => notesCloud.put(u, p.id, r) },
   { method: "DELETE", path: "/api/cut-cloud/notes/:id", handler: (_r, u, p) => notesCloud.remove(u, p.id) },
-  { method: "GET", path: "/api/cut-cloud/phone", handler: (_r, u) => phoneApi.get(u) },
   { method: "PUT", path: "/api/cut-cloud/account/locale", handler: (r, u) => accountCloud.setLocale(u, r) },
 
   { method: "POST", path: "/api/cut-cloud/transcribe", handler: (r, u) => transcribeCloud.transcribe(u, r) },
@@ -177,7 +173,6 @@ export async function cutCloudCatchAll(req: DonkeyAuthenticatedRequest): Promise
       headers: { Allow: match.methodNotAllowed.join(", ") },
     });
   }
-  notePhoneClient(req, req.donkey.userId);
   const res = await match.route.handler(req, req.donkey.userId, match.params);
   // A HEAD reply carries the GET headers but no body.
   if (match.head && res.body) {

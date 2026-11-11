@@ -99,7 +99,6 @@
   },
   "library": {
     "root": "素材库",
-    "cameraRoll": "相机胶卷",
     "addToProject": "添加到此项目",
     "emptyFolder": "空文件夹",
     "empty": "将视频、音频、图像和字体文件拖至此处。素材库资源在所有项目中共享。",

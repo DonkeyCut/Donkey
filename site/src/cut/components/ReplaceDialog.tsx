@@ -364,8 +364,6 @@ const PICK_GRID =
 /** No drag carries this type, so the read-only crumb and folder rows take no
  * drops. */
 const NO_DROP_MIME = "application/x-donkey-replace-none";
-/** The Library's derived folder of phone recordings, as the panel shows it. */
-const CAMERA_ROLL = "camera-roll";
 const noop = () => {};
 
 /** The pick step's file browser, so an empty shelf can offer it too. */
@@ -550,20 +548,10 @@ function LibraryShelf({
     reachable(f.residency),
   );
 
-  // Where a file shows: phone recordings gather in Camera Roll whatever
-  // folder the server files them in, as in the panel.
-  const folderOf = (a: LibraryAsset) =>
-    a.origin === "camera" ? CAMERA_ROLL : (a.folderId ?? null);
-  const cameraRoll = { id: CAMERA_ROLL, name: tl("cameraRoll") };
-  const hasCamera = files.some((a) => a.origin === "camera");
-  const level =
-    open === null
-      ? [...(hasCamera ? [cameraRoll] : []), ...childrenOf(folders, null)]
-      : open === CAMERA_ROLL
-        ? []
-        : childrenOf(folders, open);
-  const trail =
-    open === CAMERA_ROLL ? [cameraRoll] : folderTrail(folders, open);
+  // Where a file shows: the folder it is filed in, or the root.
+  const folderOf = (a: LibraryAsset) => a.folderId ?? null;
+  const level = childrenOf(folders, open);
+  const trail = folderTrail(folders, open);
 
   const take = async (lib: LibraryAsset) => {
     if (busy || !projectId) {

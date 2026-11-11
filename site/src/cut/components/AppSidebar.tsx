@@ -7,7 +7,7 @@ import { useTranslations } from "next-intl";
 import { creatorNames } from "@/cut/lib/defaultNames";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Camera, Clapperboard, FolderOpen, LayoutTemplate, Loader2 } from "lucide-react";
+import { Clapperboard, FolderOpen, LayoutTemplate, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -18,8 +18,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { seedNewProjectDoc } from "@/cut/lib/docCache";
-import { patchProjects, usePhoneLink } from "@/cut/lib/queries";
-import { useAccount } from "@/queries/credits";
+import { patchProjects } from "@/cut/lib/queries";
 import { backendFor, type Residency } from "@/cut/lib/residency";
 import { track } from "@/lib/analytics";
 import { NavStorage } from "@/cut/components/NavStorage";
@@ -33,7 +32,7 @@ import { cn } from "@/lib/utils";
 // Each tab's name is its key in the home catalog's tab names.
 type NavEntry = {
   tab: CutTab;
-  label: "projects" | "library" | "templates" | "cameraRoll";
+  label: "projects" | "library" | "templates";
   icon: typeof Clapperboard;
 };
 
@@ -44,19 +43,12 @@ const NAV: NavEntry[] = [
 ];
 const START_NAV: NavEntry[] = [{ tab: "templates", label: "templates", icon: LayoutTemplate }];
 
-// Fed by the iOS app, listed only for super users whose account uses it.
-const PHONE_NAV: NavEntry[] = [
-  { tab: "camera-roll", label: "cameraRoll", icon: Camera },
-];
-
 export function AppSidebar() {
   const t = useTranslations("home");
   const pathname = usePathname();
   const router = useRouter();
   const base = useCutBase();
   const client = useQueryClient();
-  const phoneLinked = usePhoneLink();
-  const superUser = useAccount().data?.superUser === true;
   // The residency the pending creation was launched for; null when the naming
   // dialog is closed.
   const [createIn, setCreateIn] = useState<Residency | null>(null);
@@ -139,7 +131,6 @@ export function AppSidebar() {
         {NAV.map(navLink)}
         <div role="separator" className="mx-2.5 my-2 h-px bg-border" />
         {START_NAV.map(navLink)}
-        {superUser && phoneLinked && PHONE_NAV.map(navLink)}
       </nav>
       <div className="mt-auto flex flex-col">
         <NavStorage />

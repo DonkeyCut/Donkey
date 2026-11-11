@@ -143,9 +143,7 @@ export function LibraryView() {
   // is this browser putting things on — so they read the one choice the user
   // already made, rather than the backend the app happens to be bound to.
   const { target } = useNewProjectTarget();
-  // Phone camera recordings have their own home tab (Camera Roll); the
-  // Library grid lists everything else.
-  const all = (library.data?.assets ?? []).filter((a) => a.origin !== "camera");
+  const all = library.data?.assets ?? [];
   const folderList = library.data?.folders;
   const folders = useMemo(() => folderList ?? [], [folderList]);
   const templates = library.data?.templates ?? [];
@@ -282,7 +280,7 @@ export function LibraryView() {
   // Delete a set. A folder takes everything under it — the folders filed
   // there, however deep, and every item and note they hold — the way the
   // shelf deletes it; an item filed in one of those needs no delete of its
-  // own. A camera clip filed there stays in Camera Roll, unfiled.
+  // own.
   const remove = async (set: DeleteSet) => {
     setDeleting(null);
     // A shelf that isn't answering keeps its items.
@@ -296,9 +294,7 @@ export function LibraryView() {
     patch((d) => ({
       ...d,
       folders: d.folders.filter((f) => !takes.tree.has(f.id)),
-      assets: d.assets
-        .filter((a) => !gone.has(a.id))
-        .map((a) => (inTree(a) ? { ...a, folderId: null } : a)),
+      assets: d.assets.filter((a) => !gone.has(a.id)),
       templates: d.templates.filter((t) => !gone.has(t.id)),
     }));
     const goneNotes = new Set(notesIn(takes.tree).map((n) => n.id));

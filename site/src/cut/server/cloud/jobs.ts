@@ -967,7 +967,7 @@ export const jobsCloud = {
             target: "library",
             ...(audio === true ? { audio: true } : {}),
             // An inspiration link's downloads land in the Inspiration folder,
-            // carrying the origin the Camera Roll and Library filters read.
+            // carrying their origin.
             ...(origin === "inspiration" ? { origin } : {}),
             ...(key ? { key } : {}),
           } as unknown as Prisma.InputJsonValue,

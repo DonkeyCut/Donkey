@@ -99,7 +99,6 @@
   },
   "library": {
     "root": "Bibliothèque",
-    "cameraRoll": "Pellicule",
     "addToProject": "Ajouter à ce projet",
     "emptyFolder": "Dossier vide",
     "empty": "Glissez vos vidéos, fichiers audio, images et polices ici. Les éléments de la bibliothèque sont partagés entre tous les projets.",

@@ -14,13 +14,12 @@ export function useCutBase(): string {
 // project was opened from — Projects, Library, or a folder within one. The
 // home pages read ?folder=… as the open folder, which also lets the browser's
 // own back button step folder → root.
-export type CutTab = "projects" | "library" | "templates" | "camera-roll";
+export type CutTab = "projects" | "library" | "templates";
 
 /** Which home tab a pathname is on (base-agnostic). */
 export function tabForPath(pathname: string): CutTab {
   if (pathname.endsWith("/library")) return "library";
   if (pathname.endsWith("/templates")) return "templates";
-  if (pathname.endsWith("/camera-roll")) return "camera-roll";
   return "projects";
 }
 

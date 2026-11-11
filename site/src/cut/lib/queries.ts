@@ -249,9 +249,9 @@ const LIBRARY_LIVE_MS = 6000;
  * one this browser can only remember.
  *
  * `live` keeps the listing current while the page is open: the surfaces fed
- * from another device — the Camera Roll, filled by the iOS app — poll on a
- * timer and re-read the moment the window comes back to the front, so a
- * recording made on the phone shows up here without a reload. The timer only
+ * from another device — inspiration saved in the iOS app — poll on a
+ * timer and re-read the moment the window comes back to the front, so an
+ * item saved on the phone shows up here without a reload. The timer only
  * runs while this tab is the focused one. */
 export function useLibrary({ live = false, enabled = true }: { live?: boolean; enabled?: boolean } = {}) {
   // Not read for the query itself — the backend binding decides which
@@ -354,41 +354,7 @@ export function refetchLibrary(client: QueryClient) {
   return client.invalidateQueries({ queryKey: libraryKey(libraryScope()) });
 }
 
-// --- Phone surfaces: the iOS link flag and synced notes ---
-
-const PHONE_KEY = ["cut", "phone"] as const;
-// Scoped to the account: two people signing in on one Mac must not read each
-// other's answer.
-const phoneSnapshot = () => snapshotKey("cloud", "phone");
-
-/** Whether this account has been seen from the iOS app. Gates the mobile
- * surfaces (Camera Roll, Notes) in the home sidebar; an account that never
- * signed in on a phone keeps the desktop exactly as it was.
- *
- * Asked once per tab: the flag only ever turns on, and the sidebar unmounts
- * every time a project opens, so a second read would only cost the two rows a
- * blink on the way back. The snapshot carries the last answer across reloads,
- * so a cold load draws the same sidebar it drew last time. */
-export function usePhoneLink() {
-  const client = useQueryClient();
-  useEffect(
-    () => seedFromSnapshot<boolean>(client, PHONE_KEY, phoneSnapshot()),
-    [client]
-  );
-  const query = useQuery<boolean>({
-    queryKey: PHONE_KEY,
-    queryFn: async () => {
-      const res = await backendFor("cloud").fetch("/api/cut/phone");
-      if (!res.ok) throw new Error(String(res.status));
-      const linked = ((await res.json()) as { linked?: boolean }).linked === true;
-      writeSnapshot(phoneSnapshot(), linked);
-      return linked;
-    },
-    staleTime: Infinity,
-    retry: false,
-  });
-  return query.data === true;
-}
+// --- Synced notes ---
 
 export const notesKey = ["cut", "notes"] as const;
 // The snapshot carries the notes with their folders and labels; the key moves

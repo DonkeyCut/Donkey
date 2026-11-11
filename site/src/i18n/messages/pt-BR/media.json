@@ -99,7 +99,6 @@
   },
   "library": {
     "root": "Biblioteca",
-    "cameraRoll": "Rolo da Câmera",
     "addToProject": "Adicionar a este projeto",
     "emptyFolder": "Pasta vazia",
     "empty": "Arraste arquivos de vídeo, áudio, imagem e fontes aqui. Os itens da biblioteca são compartilhados entre todos os projetos.",

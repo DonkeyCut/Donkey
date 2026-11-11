@@ -2,7 +2,6 @@
   "tabs": {
     "projects": "项目",
     "library": "素材库",
-    "cameraRoll": "相机胶卷",
     "templates": "模板"
   },
   "newProject": {
@@ -241,13 +240,6 @@
   "docText": {
     "empty": "空文件。",
     "moreRows": "还有 {count} 行"
-  },
-  "cameraRoll": {
-    "emptyTitle": "暂无手机中的内容。",
-    "emptyHint": "你在 Donkey Cut iOS 应用中录制的片段会自动同步到此处。",
-    "delete": "删除",
-    "deleteTitle": "删除{what}？",
-    "deleteBody": "{count, plural, =1 {该片段将从你的云端相机胶卷及拍摄它的手机中移除。已使用它的项目仍将保留各自的副本。} other {这些片段将从你的云端相机胶卷及拍摄它们的手机中移除。已使用它们的项目仍将保留各自的副本。}}"
   },
   "navUser": {
     "billing": "账单",

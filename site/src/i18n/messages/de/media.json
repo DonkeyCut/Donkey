@@ -99,7 +99,6 @@
   },
   "library": {
     "root": "Mediathek",
-    "cameraRoll": "Aufnahmen",
     "addToProject": "Zu diesem Projekt hinzufügen",
     "emptyFolder": "Leerer Ordner",
     "empty": "Ziehe Video-, Audio-, Bild- und Schriftdateien hierher. Mediathek-Assets werden in allen Projekten geteilt.",

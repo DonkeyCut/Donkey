@@ -2,7 +2,6 @@
   "tabs": {
     "projects": "Proyectos",
     "library": "Biblioteca",
-    "cameraRoll": "Carrete",
     "templates": "Plantillas"
   },
   "newProject": {
@@ -241,13 +240,6 @@
   "docText": {
     "empty": "Archivo vacío.",
     "moreRows": "+{count} filas más"
-  },
-  "cameraRoll": {
-    "emptyTitle": "Todavía no hay nada de tu teléfono.",
-    "emptyHint": "Los clips que grabes en la app de Donkey Cut para iOS se sincronizan aquí automáticamente.",
-    "delete": "Eliminar",
-    "deleteTitle": "¿Eliminar {what}?",
-    "deleteBody": "{count, plural, =1 {El clip se eliminará de tu Carrete en la nube y del teléfono donde se grabó. Los proyectos que ya lo usan conservarán su propia copia.} other {Los clips se eliminarán de tu Carrete en la nube y del teléfono donde se grabaron. Los proyectos que ya los usan conservarán su propia copia.}}"
   },
   "navUser": {
     "billing": "Facturación",

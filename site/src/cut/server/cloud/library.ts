@@ -49,9 +49,8 @@ interface AssetMeta {
   /** File name of the playable copy of an undecodable master, a quota-exempt
    * object (kind "proxy") under this account's library prefix. */
   proxyFile?: string;
-  /** The short name the titling model read off the clip itself, standing in
-   * for the file's own name wherever the asset is shown. Written once, by
-   * cloud/clipTitle.ts. */
+  /** A short name for the clip, standing in for the file's own name wherever
+   * the asset is shown. */
   title?: string;
   type?: AssetType;
   duration?: number;
@@ -66,9 +65,8 @@ interface AssetMeta {
   contentKey?: string;
   /** What kind of table a LUT holds. */
   lut?: { kind: "1d" | "3d" | "shaper+3d"; size: number };
-  /** How the asset entered the account from the iOS app: a phone camera
-   * recording (the desktop's Camera Roll) or an inspiration item. */
-  origin?: "camera" | "inspiration";
+  /** An inspiration item, saved from the iOS app. */
+  origin?: "inspiration";
 }
 
 interface TemplateDoc {
@@ -128,7 +126,7 @@ export function assetView(
     ...(meta.source ? { source: meta.source } : {}),
     ...(meta.posterFile ? { posterFile: meta.posterFile } : {}),
     ...(meta.title ? { title: meta.title } : {}),
-    ...(meta.origin ? { origin: meta.origin } : {}),
+    ...(meta.origin === "inspiration" ? { origin: meta.origin } : {}),
     ...(meta.contentKey ? { contentKey: meta.contentKey } : {}),
     ...(meta.lut ? { lut: meta.lut } : {}),
   };
@@ -223,10 +221,9 @@ async function copyIntoLibrary(
  * route and the storage-reclamation sweep (gc.ts).
  *
  * `tombstone` keeps the asset row behind with `deletedAt` set. That row is how
- * a delete made here reaches the iOS app, which mirrors the Camera Roll on the
- * phone: the listing names it, and the phone takes the same clip off. The
- * reclamation sweep passes nothing, so an asset it collects simply stops being
- * listed and the phone keeps the copy it shot. */
+ * a delete made here reaches the iOS app: the listing names it, and the phone
+ * takes the same inspiration item off. The reclamation sweep passes nothing,
+ * so an asset it collects simply stops being listed. */
 export async function deleteLibraryAssetCascade(
   userId: string,
   id: string,
@@ -338,7 +335,7 @@ const libraryFolderView = (row: {
 
 export const libraryCloud = {
   /** The shelf. `?deleted=1` adds the tombstoned ids — the phone asks for
-   * them to mirror a delete made here onto its Camera Roll, and it is the
+   * them to mirror a delete made here onto its inspiration, and it is the
    * only client that does. Every other listing skips the query and the rows
    * it would carry: an account that has pruned its shelf for a season has
    * thousands of them, and the editor reads none. */
@@ -533,9 +530,7 @@ export const libraryCloud = {
               ...((posterFile ?? meta?.posterFile)
                 ? { posterFile: posterFile ?? meta?.posterFile }
                 : {}),
-              ...(meta?.origin === "camera" || meta?.origin === "inspiration"
-                ? { origin: meta.origin }
-                : {}),
+              ...(meta?.origin === "inspiration" ? { origin: meta.origin } : {}),
               ...(typeof meta?.contentKey === "string" ? { contentKey: meta.contentKey } : {}),
               ...(meta?.lut ? { lut: meta.lut } : {}),
             } as unknown as Prisma.InputJsonValue,
@@ -875,8 +870,7 @@ export const libraryCloud = {
   /** Delete a folder and everything in it: the folders filed under it,
    * however deep, and every asset and template they hold, each through the
    * cascade its own delete runs — an asset leaves a tombstone for the phone
-   * like any other delete. A camera clip lives in Camera Roll whatever folder
-   * it is filed under, so it stays, unfiled. The items go first and the
+   * like any other delete. The items go first and the
    * folders last, so a run that stops partway leaves the rest where a retry
    * finds it. */
   async deleteFolder(userId: string, id: string) {
@@ -889,15 +883,11 @@ export const libraryCloud = {
       const tree = subtreeOf(folders, id);
       const assets = await prisma.cutLibraryAsset.findMany({
         where: { userId, folderId: { in: tree }, deletedAt: null },
-        select: { id: true, meta: true },
+        select: { id: true },
       });
-      const isCamera = (a: { meta: unknown }) => ((a.meta ?? {}) as AssetMeta).origin === "camera";
-      for (const a of assets)
-        if (!isCamera(a)) await deleteLibraryAssetCascade(userId, a.id, { tombstone: true });
-      await prisma.cutLibraryAsset.updateMany({
-        where: { userId, id: { in: assets.filter(isCamera).map((a) => a.id) } },
-        data: { folderId: null },
-      });
+      for (const a of assets) {
+        await deleteLibraryAssetCascade(userId, a.id, { tombstone: true });
+      }
       const templates = await prisma.cutTemplate.findMany({ where: { userId } });
       for (const t of templates) {
         const folderId = (t.doc as unknown as TemplateDoc).folderId;

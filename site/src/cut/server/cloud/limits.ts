@@ -16,8 +16,6 @@ export type CutLimits = {
   liveJobs: number | null;
   /** Chat turns in flight across the account's projects. */
   liveTurns: number | null;
-  /** Clip titles a day — they are on the house. */
-  titlesPerDay: number | null;
 };
 
 /** The kinds the daily cap counts: renders the user asked for. Hover proxies,
@@ -52,17 +50,16 @@ const FREE: CutLimits = {
   renderJobsPerDay: 10,
   liveJobs: 8,
   liveTurns: 4,
-  titlesPerDay: 300,
 };
 const GB = 1024 ** 3;
 
 // Each plan's storage and render cap come from its terms (the planTerms
 // setting); the live caps are engineering bounds.
-const PLAN_CAPS: Record<PaidPlan, Pick<CutLimits, "liveJobs" | "liveTurns" | "titlesPerDay">> = {
+const PLAN_CAPS: Record<PaidPlan, Pick<CutLimits, "liveJobs" | "liveTurns">> = {
   // Plus buys credits and storage; its other caps are the free ones.
-  plus: { liveJobs: FREE.liveJobs, liveTurns: FREE.liveTurns, titlesPerDay: FREE.titlesPerDay },
-  pro: { liveJobs: 32, liveTurns: 8, titlesPerDay: 2000 },
-  max: { liveJobs: 48, liveTurns: 12, titlesPerDay: 5000 },
+  plus: { liveJobs: FREE.liveJobs, liveTurns: FREE.liveTurns },
+  pro: { liveJobs: 32, liveTurns: 8 },
+  max: { liveJobs: 48, liveTurns: 12 },
 };
 
 function planLimits(plan: PaidPlan, terms: PlanTermsTable): CutLimits {
@@ -78,7 +75,6 @@ const UNLIMITED: CutLimits = {
   renderJobsPerDay: null,
   liveJobs: null,
   liveTurns: null,
-  titlesPerDay: null,
 };
 
 /** The limits an account's tier earns: its plan's, or free's without one.

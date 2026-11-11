@@ -57,10 +57,8 @@ export interface LibraryAsset extends LinkedMeta {
    * same media route — what a card and the viewer show while the video loads.
    * Only an import from a site that publishes one has it. */
   posterFile?: string;
-  /** How the asset entered the account from the iOS app: a phone camera
-   * recording (the desktop's Camera Roll) or an inspiration item. Cloud shelf
-   * only. */
-  origin?: "camera" | "inspiration";
+  /** An inspiration item, saved from the iOS app. Cloud shelf only. */
+  origin?: "inspiration";
 }
 
 export interface LibraryFolder {
@@ -538,21 +536,14 @@ export async function updateFolder(
 }
 
 /** Delete a folder and everything in it: the folders filed under it, however
- * deep, and every asset and template they hold, in one write of the index.
- * A camera clip lives in Camera Roll whatever folder it is filed under, so
- * it stays, unfiled. */
+ * deep, and every asset and template they hold, in one write of the index. */
 export async function deleteFolder(id: string) {
   const files = await mutateIndex((idx) => {
     const folders = idx.folders ?? [];
     if (!folders.some((f) => f.id === id)) return [];
     const tree = new Set(subtreeOf(folders, id));
     const filed = (x: { folderId?: string | null }) => !!x.folderId && tree.has(x.folderId);
-    const assets = new Set<string>();
-    for (const a of idx.assets) {
-      if (!filed(a)) continue;
-      if (a.origin === "camera") a.folderId = null;
-      else assets.add(a.id);
-    }
+    const assets = new Set(idx.assets.filter(filed).map((a) => a.id));
     const templates = new Set((idx.templates ?? []).filter(filed).map((t) => t.id));
     idx.folders = folders.filter((f) => !tree.has(f.id));
     return [...takeAssets(idx, assets), ...takeTemplates(idx, templates)];

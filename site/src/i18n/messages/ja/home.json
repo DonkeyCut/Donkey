@@ -2,7 +2,6 @@
   "tabs": {
     "projects": "プロジェクト",
     "library": "ライブラリ",
-    "cameraRoll": "カメラロール",
     "templates": "テンプレート"
   },
   "newProject": {
@@ -241,13 +240,6 @@
   "docText": {
     "empty": "空のファイルです。",
     "moreRows": "+他{count}行"
-  },
-  "cameraRoll": {
-    "emptyTitle": "スマートフォンからのデータはまだありません。",
-    "emptyHint": "Donkey Cut iOSアプリで録画したクリップはここに自動同期されます。",
-    "delete": "削除",
-    "deleteTitle": "{what}を削除しますか？",
-    "deleteBody": "{count, plural, other {クラウドのカメラロールおよび撮影元のスマートフォンからクリップが削除されます。すでに使用中のプロジェクトにはコピーが残ります。}}"
   },
   "navUser": {
     "billing": "請求とお支払い",

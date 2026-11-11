@@ -153,7 +153,6 @@ export function LibraryCard({
   offline = false,
   area,
   mention = false,
-  caption,
   dragGroup,
   onClick,
   onDelete,
@@ -176,8 +175,6 @@ export function LibraryCard({
   /** The card sits beside a prompt (the editor's Library panel), so its name
    * doubles as a mention token to copy. */
   mention?: boolean;
-  /** A line under the tile — where the Camera Roll puts a recording's date. */
-  caption?: ReactNode;
   /** Everything picked on this shelf right now. Dragging a card that is one of
    * them carries the whole set, so a drop lands the lot. */
   dragGroup?: LibraryAsset[];
@@ -201,9 +198,7 @@ export function LibraryCard({
       .filter((x) => !isLinkedAssetType(x.type))
       .map(refFromLibrary);
   // With one shelf listed, every card is on it — the badge would say nothing.
-  // Phone recordings all come up from the cloud, so they carry none either.
-  const bothShelves =
-    !sharedMedia && a.origin !== "camera" && (availableResidencies().length > 1 || offline);
+  const bothShelves = !sharedMedia && (availableResidencies().length > 1 || offline);
   // Each card is a real media element, so the source waits until the tile has
   // been scrolled near: a large library would otherwise pull every file's
   // metadata across the network the moment the page opened.
@@ -540,11 +535,6 @@ export function LibraryCard({
               />
             )}
           </div>
-          {caption && (
-            <div data-drag-omit className="mt-2 px-0.5 text-xs text-muted-foreground">
-              {caption}
-            </div>
-          )}
         </>
       )}
     </MediaCardShell>

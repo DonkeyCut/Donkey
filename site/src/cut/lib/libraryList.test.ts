@@ -6,13 +6,13 @@ const folder = (id: string, name: string, parentId?: string): LibraryFolder => (
 const asset = (id: string, name: string, extra: Partial<LibraryAsset> = {}): LibraryAsset =>
   ({ id, name, fileName: `${name}.mp4`, type: "video", duration: 12.345, addedAt: 0, residency: "cloud", ...extra });
 
-const folders = [folder("tv", "Template videos"), folder("desk", "Desk", "tv"), folder("phone", "Camera Roll")];
+const folders = [folder("tv", "Template videos"), folder("desk", "Desk", "tv"), folder("phone", "Phone")];
 const assets = [
   asset("a1", "computer-desk-raw", { folderId: "desk" }),
   asset("a2", "Computer Desk Edit", { folderId: "tv" }),
-  asset("a3", "IMG_2041", { folderId: "phone", title: "Laptop on a desk", origin: "camera" }),
+  asset("a3", "IMG_2041", { folderId: "phone", title: "Laptop on a desk", origin: "inspiration" }),
   asset("a4", "beat", { type: "audio", fileName: "beat.mp3" }),
-  ...Array.from({ length: 100 }, (_, i) => asset(`p${i}`, `phone clip ${i}`, { folderId: "phone", origin: "camera" })),
+  ...Array.from({ length: 100 }, (_, i) => asset(`p${i}`, `phone clip ${i}`, { folderId: "phone", origin: "inspiration" })),
 ];
 const lib = { folders, assets, templates: [{ id: "t1", name: "Laptop intro", duration: 3, parts: 4, folderId: "tv" }] };
 

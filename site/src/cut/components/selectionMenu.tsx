@@ -23,7 +23,7 @@ const OWN_MENU = "button,a,input,textarea,[role='button'],[role='menuitem'],[dat
 
 /**
  * The mechanics every tile grid shares — the projects home, the Library page,
- * Camera Roll, and the editor's Media panel and Library shelf. Every grid of
+ * and the editor's Media panel and Library shelf. Every grid of
  * tiles picks and deletes the same way, a new tab included: `useTilePicks`
  * and `Marquee` pick, `useDeleteKey` and this menu act, `DeleteConfirm` asks
  * first. A right-click over a tile

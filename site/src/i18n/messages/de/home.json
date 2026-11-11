@@ -2,7 +2,6 @@
   "tabs": {
     "projects": "Projekte",
     "library": "Mediathek",
-    "cameraRoll": "Aufnahmen",
     "templates": "Vorlagen"
   },
   "newProject": {
@@ -241,13 +240,6 @@
   "docText": {
     "empty": "Leere Datei.",
     "moreRows": "+{count} weitere Zeilen"
-  },
-  "cameraRoll": {
-    "emptyTitle": "Noch nichts von deinem Smartphone da.",
-    "emptyHint": "Clips, die du in der Donkey Cut iOS-App aufnimmst, werden hier automatisch synchronisiert.",
-    "delete": "Löschen",
-    "deleteTitle": "{what} löschen?",
-    "deleteBody": "{count, plural, =1 {Der Clip wird aus deinen Cloud-Aufnahmen und von dem Smartphone entfernt, mit dem er aufgenommen wurde. Projekte, die ihn bereits verwenden, behalten ihre eigene Kopie.} other {Die Clips werden aus deinen Cloud-Aufnahmen und von dem Smartphone entfernt, mit dem sie aufgenommen wurden. Projekte, die sie bereits verwenden, behalten ihre eigene Kopie.}}"
   },
   "navUser": {
     "billing": "Abrechnung",

@@ -99,7 +99,6 @@
   },
   "library": {
     "root": "Library",
-    "cameraRoll": "Camera Roll",
     "addToProject": "Add to this project",
     "emptyFolder": "Empty folder",
     "empty": "Drag video, audio, image and font files here. Library assets are shared across all projects.",

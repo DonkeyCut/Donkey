@@ -80,7 +80,6 @@ import {
   type LibraryData,
   type LibraryFolder,
 } from "@/cut/lib/library";
-import { useClipTitles } from "@/cut/lib/clipTitle";
 import { patchLibrary, refetchLibrary, renameInLibrary, useLibrary } from "@/cut/lib/queries";
 import {
   activeResidency,
@@ -1657,14 +1656,6 @@ function AssetCard({
   );
 }
 
-// The derived folder holding phone recordings in the editor's Library panel.
-// Not a server folder: assets tagged origin "camera" file here by themselves,
-// so phone footage is one click from any project.
-const CAMERA_ROLL_FOLDER = "camera-roll";
-/** A stable empty list, so the titling hook sees no work rather than a new
- * array on every render. */
-const EMPTY_CLIPS: LibraryAsset[] = [];
-
 function LibraryPanel({ projectId, onImport }: {
   projectId: string;
   onImport: (files: FileList | File[], opts?: { mediaOnly?: boolean; folderId?: string }) => void;
@@ -1674,7 +1665,7 @@ function LibraryPanel({ projectId, onImport }: {
   const client = useQueryClient();
   // One cached listing serves every library surface (lib/queries.ts), and it
   // stays live while this panel is open: the shelf re-reads on a timer and
-  // whenever the window comes back to the front, so a clip recorded on the
+  // whenever the window comes back to the front, so an item saved on the
   // phone takes its place in the grid with nothing to reload.
   const library = useLibrary({ live: true });
   const engineUp = useLocalCompute();
@@ -1711,21 +1702,11 @@ function LibraryPanel({ projectId, onImport }: {
   const arrivals = useLibraryImports((state) => state.items);
   const pending = arrivals.filter((item) => item.folderId === openFolder);
 
-  // Where an asset shows: phone recordings gather in the derived Camera Roll
-  // folder whatever their server folderId says.
-  const folderOf = (a: LibraryAsset) =>
-    a.origin === "camera" ? CAMERA_ROLL_FOLDER : (a.folderId ?? null);
-  const cameraClips = assets.filter((a) => a.origin === "camera");
-  const cameraCount = cameraClips.length;
-  // Phone recordings name themselves off what is said in them. Only while the
-  // Camera Roll folder is open — a panel showing anything else has no reason
-  // to read those files.
-  useClipTitles(openFolder === CAMERA_ROLL_FOLDER ? cameraClips : EMPTY_CLIPS, patch);
+  // Where an asset shows: the folder it is filed in, or the root.
+  const folderOf = (a: LibraryAsset) => a.folderId ?? null;
 
   // A remembered folder can vanish between sessions; drop back to the root.
-  const knownFolder =
-    folders.some((f) => f.id === openFolder) ||
-    (openFolder === CAMERA_ROLL_FOLDER && cameraCount > 0);
+  const knownFolder = folders.some((f) => f.id === openFolder);
   useEffect(() => {
     if (loaded && openFolder !== null && !knownFolder) setOpenFolder(null);
   }, [loaded, knownFolder, openFolder, setOpenFolder]);
@@ -1755,7 +1736,7 @@ function LibraryPanel({ projectId, onImport }: {
   // Delete a set. A folder takes everything under it — the folders filed
   // there, however deep, and every asset and template they hold — the way
   // the shelf deletes it; an asset filed in one of those needs no delete of
-  // its own. A camera clip filed there stays in Camera Roll, unfiled.
+  // its own.
   const remove = async (set: LibraryDeleteSet) => {
     setDeleting(null);
     const takes = folderDeleteTakes(listing, set.folders);
@@ -1766,9 +1747,7 @@ function LibraryPanel({ projectId, onImport }: {
     patch((d) => ({
       ...d,
       folders: d.folders.filter((f) => !takes.tree.has(f.id)),
-      assets: d.assets
-        .filter((a) => !gone.has(a.id))
-        .map((a) => (inTree(a) ? { ...a, folderId: null } : a)),
+      assets: d.assets.filter((a) => !gone.has(a.id)),
       templates: d.templates.filter((t) => !gone.has(t.id)),
     }));
     setPicked(new Set());
@@ -1783,8 +1762,7 @@ function LibraryPanel({ projectId, onImport }: {
     }
   };
   // How many items the folders hold between them, however deep — what the
-  // confirm counts beside them: what shows inside them, so a camera clip
-  // filed there, which shows in Camera Roll, is left out.
+  // confirm counts beside them.
   const heldBy = (fs: LibraryFolder[]) => {
     const takes = folderDeleteTakes(listing, fs);
     return takes.assets.length + takes.templates.length;
@@ -1803,7 +1781,6 @@ function LibraryPanel({ projectId, onImport }: {
     null;
 
   const move = async (id: string, folderId: string | null) => {
-    if (folderId === CAMERA_ROLL_FOLDER) return; // derived; only the phone files here
     const residency = shelfOf(id);
     if (!residency) return;
     if (folderId && folders.find((f) => f.id === folderId)?.residency !== residency) return;
@@ -1821,10 +1798,9 @@ function LibraryPanel({ projectId, onImport }: {
     (folderId ? folders.find((f) => f.id === folderId)?.residency : null) ?? activeResidency();
 
   const upload = (files: FileList | File[], into: string | null = openFolder) => {
-    const folderId = into === CAMERA_ROLL_FOLDER ? null : into;
-    const residency = shelfForNew(folderId);
+    const residency = shelfForNew(into);
     if (!reachable(residency)) return Promise.resolve();
-    return importLibraryFiles(files, { residency, folderId }, client);
+    return importLibraryFiles(files, { residency, folderId: into }, client);
   };
 
   // The whole panel takes drops: OS files upload to the shared library (into
@@ -1856,24 +1832,9 @@ function LibraryPanel({ projectId, onImport }: {
   };
   const bothShelves = availableResidencies().length > 1;
   const shownTemplates = templates.filter((t) => (t.folderId ?? null) === openFolder);
-  // The shelf at this level: the folders filed here. At the top the Camera
-  // Roll tile leads it while the phone has synced anything; the roll itself
-  // holds no folders.
-  const cameraRoll: LibraryFolder & { locked?: boolean } = {
-    id: CAMERA_ROLL_FOLDER,
-    name: t("cameraRoll"),
-    createdAt: 0,
-    residency: "cloud",
-    locked: true,
-  };
-  const shelfFolders: (LibraryFolder & { locked?: boolean })[] =
-    openFolder === null
-      ? [...(cameraCount > 0 ? [cameraRoll] : []), ...childrenOf(folders, null)]
-      : openFolder === CAMERA_ROLL_FOLDER
-        ? []
-        : childrenOf(folders, openFolder);
-  const trail =
-    openFolder === CAMERA_ROLL_FOLDER ? [cameraRoll] : folderTrail(folders, openFolder);
+  // The shelf at this level: the folders filed here.
+  const shelfFolders: (LibraryFolder & { locked?: boolean })[] = childrenOf(folders, openFolder);
+  const trail = folderTrail(folders, openFolder);
 
   // Which cards are picked, so a sweep or a ⇧-click hands the timeline (or a
   // folder tile) a run of clips in one drag. Only what the open folder shows
@@ -1932,7 +1893,6 @@ function LibraryPanel({ projectId, onImport }: {
   // files only beside itself: under a folder on its own shelf, never under
   // itself or anything inside it.
   const moveFolders = async (ids: string[], parentId: string | null) => {
-    if (parentId === CAMERA_ROLL_FOLDER) return;
     const target = parentId ? folders.find((f) => f.id === parentId)?.residency : null;
     if (parentId && !target) return;
     const moving = folders.filter(
@@ -1979,7 +1939,7 @@ function LibraryPanel({ projectId, onImport }: {
                 className="text-sm"
                 root={t("root")}
                 trail={trail}
-                onRename={openFolder !== CAMERA_ROLL_FOLDER ? renameFolder : undefined}
+                onRename={renameFolder}
                 mime={LIBRARY_MOVE_MIME}
                 folderMime={LIBRARY_FOLDER_MOVE_MIME}
                 onGo={setOpenFolder}

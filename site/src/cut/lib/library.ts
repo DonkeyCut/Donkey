@@ -98,15 +98,10 @@ export interface LibraryAsset {
    * An import from a site that publishes one carries it; it is what a card and
    * the viewer show while the video itself loads. */
   posterFile?: string;
-  /** How the asset entered the account from the iOS app: a phone camera
-   * recording (shown in Camera Roll, kept out of the Library grid) or an
-   * inspiration item. Cloud shelf only. */
-  origin?: "camera" | "inspiration";
-  /** A short name read off the clip itself — what is said in it and what is on
-   * screen — standing in for `name` wherever the asset is shown. A phone
-   * recording arrives named after the clock it was shot on, which tells nobody
-   * which clip it is; this is what the card, the viewer and the assistant read
-   * instead. Written once per clip by lib/clipTitle.ts. */
+  /** An inspiration item, saved from the iOS app. Cloud shelf only. */
+  origin?: "inspiration";
+  /** A short name for the clip, standing in for `name` wherever the asset is
+   * shown: on the card, in the viewer and to the assistant. */
   title?: string;
   /** Which shelf this came off. Stamped on arrival — the servers each answer
    * for themselves and don't know the other exists. */
@@ -542,8 +537,7 @@ export async function updateLibraryFolder(
 
 /** What a delete of `folders` takes off the shelf: those folders and the ones
  * filed under them, however deep, and the assets and templates filed in any
- * of them. A camera clip lives in Camera Roll whatever folder it is filed
- * under, so it stays; the shelf unfiles it. */
+ * of them. */
 export function folderDeleteTakes(
   data: LibraryData,
   folders: readonly { id: string }[],
@@ -552,7 +546,7 @@ export function folderDeleteTakes(
   const filed = (x: { folderId?: string | null }) => !!x.folderId && tree.has(x.folderId);
   return {
     tree,
-    assets: data.assets.filter((a) => filed(a) && a.origin !== "camera"),
+    assets: data.assets.filter(filed),
     templates: data.templates.filter(filed),
   };
 }
@@ -890,11 +884,9 @@ export async function importLibraryAsset(
     throw new UserError("font_not_for_timeline", "Fonts are used from the font menu, not the timeline.");
   if (isLinkedAssetType(lib.type))
     throw new UserError("lut_not_for_timeline", "A LUT is applied to a clip's color, from the Color panel.");
-  // The project's media takes the name the shelf shows, so a phone
-  // recording lands on the timeline under its title.
+  // The project's media takes the name the shelf shows.
   const name = lib.title || lib.name;
-  // A row uploaded unmeasured — a phone's camera-roll import carries no
-  // length or size — is read here, before the clip is cut from it, so the
+  // A row uploaded unmeasured, with no length or size, is read here, before the clip is cut from it, so the
   // clip takes the footage's true length and the row learns it.
   let { duration, width, height } = lib;
   if (lib.type === "video" && !(duration > 0)) {

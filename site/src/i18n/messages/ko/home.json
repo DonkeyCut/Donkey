@@ -2,7 +2,6 @@
   "tabs": {
     "projects": "프로젝트",
     "library": "라이브러리",
-    "cameraRoll": "카메라 롤",
     "templates": "템플릿"
   },
   "newProject": {
@@ -241,13 +240,6 @@
   "docText": {
     "empty": "빈 파일이에요.",
     "moreRows": "+{count}개 행 더 보기"
-  },
-  "cameraRoll": {
-    "emptyTitle": "아직 휴대폰에서 가져온 항목이 없어요.",
-    "emptyHint": "Donkey Cut iOS 앱에서 녹화한 클립이 여기에 자동으로 동기화돼요.",
-    "delete": "삭제",
-    "deleteTitle": "{what}을(를) 삭제할까요?",
-    "deleteBody": "{count, plural, other {클라우드 카메라 롤 및 촬영한 휴대폰에서 클립이 삭제돼요. 이미 해당 클립을 사용 중인 프로젝트에는 복사본이 유지돼요.}}"
   },
   "navUser": {
     "billing": "결제",

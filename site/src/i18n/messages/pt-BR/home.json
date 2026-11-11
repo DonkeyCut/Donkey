@@ -2,7 +2,6 @@
   "tabs": {
     "projects": "Projetos",
     "library": "Biblioteca",
-    "cameraRoll": "Rolo da Câmera",
     "templates": "Modelos"
   },
   "newProject": {
@@ -241,13 +240,6 @@
   "docText": {
     "empty": "Arquivo vazio.",
     "moreRows": "+{count} mais linhas"
-  },
-  "cameraRoll": {
-    "emptyTitle": "Nada do seu celular ainda.",
-    "emptyHint": "Os clipes gravados no app Donkey Cut para iOS são sincronizados aqui automaticamente.",
-    "delete": "Excluir",
-    "deleteTitle": "Excluir {what}?",
-    "deleteBody": "{count, plural, =1 {O clipe será removido do seu Rolo da Câmera na nuvem e do celular onde foi gravado. Os projetos que já o utilizam mantêm a própria cópia.} other {Os clipes serão removidos do seu Rolo da Câmera na nuvem e do celular onde foram gravados. Os projetos que já os utilizam mantêm a própria cópia.}}"
   },
   "navUser": {
     "billing": "Faturamento",

@@ -2,7 +2,6 @@
   "tabs": {
     "projects": "Projects",
     "library": "Library",
-    "cameraRoll": "Camera Roll",
     "templates": "Templates"
   },
   "newProject": {
@@ -241,13 +240,6 @@
   "docText": {
     "empty": "Empty file.",
     "moreRows": "+{count} more rows"
-  },
-  "cameraRoll": {
-    "emptyTitle": "Nothing from your phone yet.",
-    "emptyHint": "Clips you record in the Donkey Cut iOS app sync here automatically.",
-    "delete": "Delete",
-    "deleteTitle": "Delete {what}?",
-    "deleteBody": "{count, plural, =1 {The clip leaves your cloud Camera Roll and the phone it was shot on. Projects that already use it keep their own copy.} other {The clips leave your cloud Camera Roll and the phone they were shot on. Projects that already use them keep their own copy.}}"
   },
   "navUser": {
     "billing": "Billing",
