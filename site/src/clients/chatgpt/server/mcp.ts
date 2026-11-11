@@ -245,7 +245,7 @@ export function createChatgptServer(
       title: "Donkey Cut",
       icons: [{ src: `${config.issuer}/chatgpt-entry.svg`, mimeType: "image/svg+xml", sizes: ["any"] }],
       description:
-        "Open a cloud project initially, switch projects, or recover a missing card. Keep the existing card during edits and preview checks: reopening starts the card over with empty undo history. The editable card holds the full editor, timeline, media panel, inspector and preview. A read-only connection sees the preview; use render_preview when its revision is stale or missing. With no projectId, show the projects home, where the user opens or starts a project or browses their library; the card then tells you which project it shows. A deleted project answers view \"missing\" and the card offers to create a new one.",
+        "Open a cloud project initially, switch projects, or recover a missing card. Keep the existing card during edits and preview checks: reopening loads a new card from the saved project, which keeps every edit. The editable card holds the full editor, timeline, media panel, inspector and preview. A read-only connection sees the preview; use render_preview when its revision is stale or missing. With no projectId, show the projects home, where the user opens or starts a project or browses their library; the card then tells you which project it shows. A deleted project answers view \"missing\" and the card offers to create a new one.",
       inputSchema: z.object({ projectId: idSchema.optional() }),
       outputSchema: viewSchema,
       annotations: readOnlyAnnotations,
