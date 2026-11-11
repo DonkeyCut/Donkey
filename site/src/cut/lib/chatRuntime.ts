@@ -96,6 +96,10 @@ export const CUT_JUDGE = {
   qualityTreatmentSeconds: 8,
   // How many times one turn may be sent back to work by the gate.
   qualityRounds: 3,
+  // The probability below which a brief item counts as open, and how many
+  // times open items may send one turn back.
+  qualityBriefDone: 0.5,
+  qualityBriefRounds: 3,
 };
 
 // How a talk or an interview is read for the moments worth cutting a short

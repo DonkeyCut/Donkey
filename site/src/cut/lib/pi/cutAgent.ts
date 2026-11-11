@@ -83,6 +83,10 @@ export interface CutAgentDeps {
   models: { simple: string; complex: string };
   /** The fresh editor snapshot for the newest message. */
   buildContext: () => unknown;
+  /** The editor as it stands now, read when the turn's work is judged; null
+   * while the chat's project is not the one open. Unset reads buildContext,
+   * which is live already where this is unset. */
+  editorNow?: () => unknown;
   /** Attachment metadata resolved into wire media parts for the newest
    * message. Best-effort — a ref that no longer resolves returns []. */
   resolveRefs: (meta: unknown[]) => Promise<WirePart[]>;
@@ -881,6 +885,7 @@ export function streamCutChat({
               const replyText = Array.isArray(msg.content)
                 ? msg.content.map((c) => (c.type === "text" ? c.text : "")).join("")
                 : "";
+              gate.routed((settled as TurnRoute | null)?.intent ?? null);
               const verdict = await gate.hold(replyText, deps, settings, abortSignal);
               if (!verdict) return false;
               deps.hooks?.onQualityGate?.(verdict.step, gate.held);

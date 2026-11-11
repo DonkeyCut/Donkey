@@ -38,6 +38,7 @@ export function productionDeps(projectId?: string, signal?: AbortSignal): CutAge
       complex: geminiModelRoleNames.chat,
     },
     buildContext: () => context,
+    editorNow: () => (!projectId || useEditor.getState().projectId === projectId ? buildAiContext() : null),
     resolveRefs: async (meta) => {
       const refs = meta.map(normalizeRef).filter((r) => r !== null);
       const resolve = async () => (await refsToParts(refs)).parts;

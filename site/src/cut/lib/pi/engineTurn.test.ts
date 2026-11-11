@@ -178,7 +178,7 @@ describe("handledSince", () => {
 describe("EngineGate", () => {
   test("a turn that half-watched its source is sent back once, then closes when nothing moved", async () => {
     const { deps: d, asks } = deps({ finished: 0.1 });
-    const gate = new EngineGate("what happens in this video?");
+    const gate = new EngineGate("what happens in this video?", "simple");
     gate.record("watch_video", WATCH_RESULT, undefined);
     const steer = await gate.steer("g1", "It opens on a yellow title.", d);
     expect(steer).toContain("from=20");
@@ -188,7 +188,7 @@ describe("EngineGate", () => {
 
   test("a turn that changed the project without looking is not held", async () => {
     const { deps: d, asks } = deps({ finished: 0.01 });
-    const gate = new EngineGate("mute the first clip");
+    const gate = new EngineGate("mute the first clip", "simple");
     gate.record("set_clip_muted", { id: "c1", muted: true }, undefined);
     expect(await gate.steer("g1", "Muted it.", d)).toBeNull();
     expect(asks.length).toBe(0);
@@ -196,7 +196,7 @@ describe("EngineGate", () => {
 
   test("the gate off lets the turn close", async () => {
     const { deps: d, asks } = deps({ finished: 0.1, settings: { qualityGate: false } });
-    const gate = new EngineGate("what happens in this video?");
+    const gate = new EngineGate("what happens in this video?", "simple");
     gate.record("watch_video", WATCH_RESULT, undefined);
     expect(await gate.steer("g1", "It opens on a yellow title.", d)).toBeNull();
     expect(asks.length).toBe(0);
@@ -204,7 +204,7 @@ describe("EngineGate", () => {
 
   test("a replayed gate the turn already answered is not judged again", async () => {
     const { deps: d, asks } = deps({ finished: 0.1 });
-    const gate = new EngineGate("what happens in this video?");
+    const gate = new EngineGate("what happens in this video?", "simple");
     gate.record("watch_video", WATCH_RESULT, undefined);
     expect(await gate.steer("g1", "It opens on a yellow title.", d)).toContain("from=20");
     gate.record("watch_video", { ...WATCH_RESULT, coveredTo: 40 }, undefined);

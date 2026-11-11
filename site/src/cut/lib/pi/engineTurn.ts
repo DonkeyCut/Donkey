@@ -5,6 +5,7 @@ import type { ResolvedAction } from "../instantAction";
 import { messageText } from "../messageText";
 import { judgeTurnAndAction, playInstant, type CutAgentDeps } from "./cutAgent";
 import { toToolResult } from "./tools";
+import type { TurnIntent } from "../turnJudge";
 import { TurnGate } from "./turnGate";
 
 // A Claude or Codex turn judged the way a Gemini turn is. The page asks the
@@ -107,8 +108,8 @@ export class EngineGate {
   // its start, and an answered gate must not be judged or billed again.
   private readonly answered = new Set<string>();
 
-  constructor(ask: string) {
-    this.gate = new TurnGate(ask);
+  constructor(ask: string, intent: TurnIntent) {
+    this.gate = new TurnGate(ask, intent);
   }
 
   /** One tool call the page ran for the turn. */

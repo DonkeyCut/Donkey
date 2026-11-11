@@ -1,11 +1,14 @@
 import { askJudge } from "../judge";
-import { editorSlice, type CutJudgeSettings } from "../turnJudge";
+import { briefMeasures, briefSteer, openItems, splitBrief, type BriefItem, type BriefNote } from "../turnBrief";
+import { editorSlice, type CutJudgeSettings, type TurnIntent } from "../turnJudge";
 import {
   QUALITY_QUESTIONS,
+  QUALITY_STEER_PREFIX,
   qualityState,
   qualityVerdict,
   recordLook,
   type QualityAnswers,
+  type QualityVerdict,
   type WatchedSource,
 } from "../turnQuality";
 import type { CutAgentDeps } from "./cutAgent";
@@ -43,7 +46,7 @@ async function gateVerdict(
     failed: [...new Set(records.filter((r) => r.error).map((r) => `${r.name} (${r.error})`))],
     mutated: records.some((r) => !r.error && isMutatingTool(r.name)),
     sources: [...looks.values()],
-    editor: editorSlice(deps.buildContext()),
+    editor: editorSlice(editorOf(deps) ?? deps.buildContext()),
   };
   try {
     const { answers } = await askJudge(deps.judge, qualityState(work), QUALITY_QUESTIONS, abortSignal);
@@ -53,6 +56,27 @@ async function gateVerdict(
   }
 }
 
+/** The editor as it stands at sign-off; null while the chat's project is not
+ * the one open. */
+function editorOf(deps: CutAgentDeps): unknown {
+  return deps.editorNow ? deps.editorNow() : deps.buildContext();
+}
+
+/** The tool whose result carries a note's body into the turn. */
+const NOTE_READ = "read_note";
+
+/** How many times each tool ran without failing. */
+function ranCounts(records: LedgerRecord[]): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const r of records) {
+    if (r.error) {
+      continue;
+    }
+    counts[r.name] = (counts[r.name] ?? 0) + 1;
+  }
+  return counts;
+}
+
 export class TurnGate {
   /** Everything the turn ran, harvested off the tool results in code. */
   readonly records: LedgerRecord[] = [];
@@ -60,39 +84,87 @@ export class TurnGate {
   private rounds = 0;
   // What the turn had looked at and run the last time the gate held it.
   private mark = "";
+  // The notes this turn read, by id: the rest of its brief beside the ask. A
+  // note read again replaces itself.
+  private readonly notes = new Map<string, BriefNote>();
+  // The brief's checklist, split once for the brief it was split from.
+  private brief: { key: string; items: BriefItem[] } | null = null;
+  private briefRounds = 0;
 
-  constructor(private readonly ask: string) {}
+  constructor(
+    private readonly ask: string,
+    private intent: TurnIntent | null = null
+  ) {}
 
   /** How many times the gate has sent the turn back. */
   get held(): number {
-    return this.rounds;
+    return this.rounds + this.briefRounds;
+  }
+
+  /** The route the turn's judgment settled on, once it lands. */
+  routed(intent: TurnIntent | null): void {
+    this.intent = intent ?? this.intent;
   }
 
   /** One tool call the turn ran: its response, or the error it failed with. */
   record(name: string, response: unknown, errorText: string | undefined): void {
     recordCall(this.records, name, response, errorText);
-    if (errorText === undefined) {
-      recordLook(this.looks, name, response);
+    if (errorText !== undefined) {
+      return;
     }
+    recordLook(this.looks, name, response);
+
+    // A note the turn read joins its brief: a guide @-mentioned beside a
+    // one-line ask is most of what the turn was told to do.
+    const note = response as { id?: unknown; title?: unknown; body?: unknown } | undefined;
+    if (name !== NOTE_READ || typeof note?.body !== "string" || !note.body.trim()) {
+      return;
+    }
+    const id = typeof note.id === "string" ? note.id : note.body;
+    this.notes.set(id, { title: typeof note.title === "string" ? note.title : "", body: note.body });
   }
 
   /** The verdict that sends the signing-off turn back to work, or null to let
    * it close. */
   async hold(reply: string, deps: CutAgentDeps, settings: CutJudgeSettings, signal?: AbortSignal) {
-    if (!settings.qualityGate || this.rounds >= settings.qualityRounds) {
+    if (!settings.qualityGate) {
+      return null;
+    }
+
+    // One sent back that returns with the same record has stopped moving,
+    // and sending it again would spin.
+    const mark = workMark(this.records, this.looks);
+    if (mark === this.mark) {
+      return null;
+    }
+
+    // The footage holds go first: a turn still owing a look at its sources
+    // cannot know yet whether the brief is met. The brief holds come after.
+    const verdict =
+      (await this.footageHold(reply, deps, settings, signal)) ?? (await this.briefHold(reply, deps, settings, signal));
+    if (!verdict) {
+      return null;
+    }
+    this.mark = mark;
+    return verdict;
+  }
+
+  /** The holds that judge a turn grounded in footage. */
+  private async footageHold(
+    reply: string,
+    deps: CutAgentDeps,
+    settings: CutJudgeSettings,
+    signal?: AbortSignal
+  ): Promise<QualityVerdict | null> {
+    if (this.rounds >= settings.qualityRounds) {
       return null;
     }
 
     // The gate judges work grounded in footage: a turn that looked at a
     // source can be held to what it saw. A turn that opened no source is
     // measurable too when it changed nothing — an ask for work answered in
-    // words leaves the project where it was. One sent back that returns with
-    // the same record has stopped moving, and sending it again would spin.
+    // words leaves the project where it was.
     if (this.looks.size === 0 && this.records.some((r) => !r.error && isMutatingTool(r.name))) {
-      return null;
-    }
-    const mark = workMark(this.records, this.looks);
-    if (mark === this.mark) {
       return null;
     }
 
@@ -100,8 +172,59 @@ export class TurnGate {
     if (!verdict) {
       return null;
     }
-    this.mark = mark;
     this.rounds++;
     return verdict;
+  }
+
+  /**
+   * The brief hold: everything the turn was told — the ask, and every note
+   * it read — split into a checklist, and each item judged against the
+   * measured editor. A complex ask, or one that came with a note, is held to
+   * it; a simple ask with nothing beside it is one item the footage holds
+   * already cover. Fails open: a split or a judgment that cannot be asked
+   * lets the turn sign off.
+   */
+  private async briefHold(
+    reply: string,
+    deps: CutAgentDeps,
+    settings: CutJudgeSettings,
+    signal?: AbortSignal
+  ): Promise<QualityVerdict | null> {
+    if (this.briefRounds >= settings.qualityBriefRounds) {
+      return null;
+    }
+    if (this.intent !== "complex" && this.notes.size === 0) {
+      return null;
+    }
+
+    try {
+      // The checklist is split once per brief; a note read after the split
+      // changes the brief, and the next sign-off splits it again.
+      const notes = [...this.notes.values()];
+      const key = JSON.stringify([this.ask, notes]);
+      if (this.brief?.key !== key) {
+        this.brief = { key, items: await splitBrief(deps.post, this.ask, notes, signal) };
+      }
+      if (this.brief.items.length === 0) {
+        return null;
+      }
+
+      // Each item judged against the editor as it now stands. A chat whose
+      // project is not open has nothing current to measure.
+      const live = editorOf(deps);
+      if (live === null) {
+        return null;
+      }
+      const editor = briefMeasures(live);
+      const work = { items: this.brief.items, ran: ranCounts(this.records), reply, editor };
+      const open = await openItems(deps.judge, work, settings, signal);
+      if (open.length === 0) {
+        return null;
+      }
+      this.briefRounds++;
+      return { step: "brief", steer: briefSteer(open, editor, QUALITY_STEER_PREFIX) };
+    } catch {
+      return null;
+    }
   }
 }

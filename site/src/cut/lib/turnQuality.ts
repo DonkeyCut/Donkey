@@ -204,7 +204,7 @@ export type QualityAnswers = {
   closeness: ChoiceAnswer<Record<"shape" | "normal" | "exact", string>>;
 };
 
-export type QualityStep = "watch" | "build" | "check" | "repair";
+export type QualityStep = "watch" | "build" | "check" | "repair" | "brief";
 
 export interface QualityVerdict {
   step: QualityStep;

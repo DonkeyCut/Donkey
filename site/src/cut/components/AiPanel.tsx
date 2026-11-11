@@ -1356,7 +1356,7 @@ function ChatSession({
           }
         }
         const ask = options.messages.findLast((m) => m.role === "user" && !isResumeMessage(m));
-        engineGateRef.current = decision?.route.gate ? new EngineGate(ask ? messageText(ask) : "") : null;
+        engineGateRef.current = decision?.route.gate ? new EngineGate(ask ? messageText(ask) : "", decision.route.intent) : null;
         const send: EngineSend = { context: deps.buildContext(), route: decision?.route };
         return countChunks(await engine().sendMessages({ ...options, body: { ...options.body, ...send } }), (mark) => { streamed.current = mark; });
       },
