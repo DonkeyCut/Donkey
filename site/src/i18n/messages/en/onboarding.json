@@ -85,5 +85,20 @@
     "progress": "{current} of {total}",
     "locked": "Finish the tour to start your own project",
     "backLocked": "Finish the tour to leave this project"
+  },
+  "templateTour": {
+    "menu": {
+      "title": "Open a clip's menu",
+      "body": "Every clip has a ⋮ menu. Click it on this clip."
+    },
+    "replace": {
+      "title": "Replace the clip",
+      "body": "Swap in your own photo or video. It takes this clip's place in the template."
+    },
+    "chat": {
+      "title": "Or ask the assistant",
+      "body": "Ask “Replace the clips with my own footage” and it swaps every clip for you."
+    },
+    "replay": "Show how to replace clips"
   }
 }

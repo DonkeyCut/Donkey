@@ -1331,7 +1331,6 @@
     "templates.detail.progress": "51a324484201",
     "templates.detail.copyLink": "2f84eea5d45d",
     "templates.detail.linkCopied": "c2e98476efb5",
-    "templates.detail.size": "d302ea7d505c",
     "templates.detail.seconds": "c1f7eddeb673",
     "templates.detail.fps": "8853f540d07e",
     "templates.detail.similar": "3b072dd7b295",
@@ -2592,7 +2591,14 @@
     "tour.chat.prompt": "b27d77aa0732",
     "tour.progress": "7e20641fe8fb",
     "tour.locked": "d503fd48a6d4",
-    "tour.backLocked": "7933631d4780"
+    "tour.backLocked": "7933631d4780",
+    "templateTour.menu.title": "181c7ab14e5c",
+    "templateTour.menu.body": "f22b3c612729",
+    "templateTour.replace.title": "390a35663e47",
+    "templateTour.replace.body": "40ec373cfc62",
+    "templateTour.chat.title": "64bd7f92b236",
+    "templateTour.chat.body": "d2bf703737dd",
+    "templateTour.replay": "0089b951b0aa"
   },
   "de/panels": {
     "transitions.groups.fade": "5298d08bb7ae",
@@ -4436,7 +4442,6 @@
     "templates.detail.progress": "51a324484201",
     "templates.detail.copyLink": "2f84eea5d45d",
     "templates.detail.linkCopied": "c2e98476efb5",
-    "templates.detail.size": "d302ea7d505c",
     "templates.detail.seconds": "c1f7eddeb673",
     "templates.detail.fps": "8853f540d07e",
     "templates.detail.similar": "3b072dd7b295",
@@ -5697,7 +5702,14 @@
     "tour.chat.prompt": "b27d77aa0732",
     "tour.progress": "7e20641fe8fb",
     "tour.locked": "d503fd48a6d4",
-    "tour.backLocked": "7933631d4780"
+    "tour.backLocked": "7933631d4780",
+    "templateTour.menu.title": "181c7ab14e5c",
+    "templateTour.menu.body": "f22b3c612729",
+    "templateTour.replace.title": "390a35663e47",
+    "templateTour.replace.body": "40ec373cfc62",
+    "templateTour.chat.title": "64bd7f92b236",
+    "templateTour.chat.body": "d2bf703737dd",
+    "templateTour.replay": "0089b951b0aa"
   },
   "es/panels": {
     "transitions.groups.fade": "5298d08bb7ae",
@@ -7541,7 +7553,6 @@
     "templates.detail.progress": "51a324484201",
     "templates.detail.copyLink": "2f84eea5d45d",
     "templates.detail.linkCopied": "c2e98476efb5",
-    "templates.detail.size": "d302ea7d505c",
     "templates.detail.seconds": "c1f7eddeb673",
     "templates.detail.fps": "8853f540d07e",
     "templates.detail.similar": "3b072dd7b295",
@@ -8802,7 +8813,14 @@
     "tour.chat.prompt": "b27d77aa0732",
     "tour.progress": "7e20641fe8fb",
     "tour.locked": "d503fd48a6d4",
-    "tour.backLocked": "7933631d4780"
+    "tour.backLocked": "7933631d4780",
+    "templateTour.menu.title": "181c7ab14e5c",
+    "templateTour.menu.body": "f22b3c612729",
+    "templateTour.replace.title": "390a35663e47",
+    "templateTour.replace.body": "40ec373cfc62",
+    "templateTour.chat.title": "64bd7f92b236",
+    "templateTour.chat.body": "d2bf703737dd",
+    "templateTour.replay": "0089b951b0aa"
   },
   "fr/panels": {
     "transitions.groups.fade": "5298d08bb7ae",
@@ -10646,7 +10664,6 @@
     "templates.detail.progress": "51a324484201",
     "templates.detail.copyLink": "2f84eea5d45d",
     "templates.detail.linkCopied": "c2e98476efb5",
-    "templates.detail.size": "d302ea7d505c",
     "templates.detail.seconds": "c1f7eddeb673",
     "templates.detail.fps": "8853f540d07e",
     "templates.detail.similar": "3b072dd7b295",
@@ -11907,7 +11924,14 @@
     "tour.chat.prompt": "b27d77aa0732",
     "tour.progress": "7e20641fe8fb",
     "tour.locked": "d503fd48a6d4",
-    "tour.backLocked": "7933631d4780"
+    "tour.backLocked": "7933631d4780",
+    "templateTour.menu.title": "181c7ab14e5c",
+    "templateTour.menu.body": "f22b3c612729",
+    "templateTour.replace.title": "390a35663e47",
+    "templateTour.replace.body": "40ec373cfc62",
+    "templateTour.chat.title": "64bd7f92b236",
+    "templateTour.chat.body": "d2bf703737dd",
+    "templateTour.replay": "0089b951b0aa"
   },
   "ja/panels": {
     "transitions.groups.fade": "5298d08bb7ae",
@@ -13751,7 +13775,6 @@
     "templates.detail.progress": "51a324484201",
     "templates.detail.copyLink": "2f84eea5d45d",
     "templates.detail.linkCopied": "c2e98476efb5",
-    "templates.detail.size": "d302ea7d505c",
     "templates.detail.seconds": "c1f7eddeb673",
     "templates.detail.fps": "8853f540d07e",
     "templates.detail.similar": "3b072dd7b295",
@@ -15012,7 +15035,14 @@
     "tour.chat.prompt": "b27d77aa0732",
     "tour.progress": "7e20641fe8fb",
     "tour.locked": "d503fd48a6d4",
-    "tour.backLocked": "7933631d4780"
+    "tour.backLocked": "7933631d4780",
+    "templateTour.menu.title": "181c7ab14e5c",
+    "templateTour.menu.body": "f22b3c612729",
+    "templateTour.replace.title": "390a35663e47",
+    "templateTour.replace.body": "40ec373cfc62",
+    "templateTour.chat.title": "64bd7f92b236",
+    "templateTour.chat.body": "d2bf703737dd",
+    "templateTour.replay": "0089b951b0aa"
   },
   "ko/panels": {
     "transitions.groups.fade": "5298d08bb7ae",
@@ -16856,7 +16886,6 @@
     "templates.detail.progress": "51a324484201",
     "templates.detail.copyLink": "2f84eea5d45d",
     "templates.detail.linkCopied": "c2e98476efb5",
-    "templates.detail.size": "d302ea7d505c",
     "templates.detail.seconds": "c1f7eddeb673",
     "templates.detail.fps": "8853f540d07e",
     "templates.detail.similar": "3b072dd7b295",
@@ -18117,7 +18146,14 @@
     "tour.chat.prompt": "b27d77aa0732",
     "tour.progress": "7e20641fe8fb",
     "tour.locked": "d503fd48a6d4",
-    "tour.backLocked": "7933631d4780"
+    "tour.backLocked": "7933631d4780",
+    "templateTour.menu.title": "181c7ab14e5c",
+    "templateTour.menu.body": "f22b3c612729",
+    "templateTour.replace.title": "390a35663e47",
+    "templateTour.replace.body": "40ec373cfc62",
+    "templateTour.chat.title": "64bd7f92b236",
+    "templateTour.chat.body": "d2bf703737dd",
+    "templateTour.replay": "0089b951b0aa"
   },
   "pt-BR/panels": {
     "transitions.groups.fade": "5298d08bb7ae",
@@ -19961,7 +19997,6 @@
     "templates.detail.progress": "51a324484201",
     "templates.detail.copyLink": "2f84eea5d45d",
     "templates.detail.linkCopied": "c2e98476efb5",
-    "templates.detail.size": "d302ea7d505c",
     "templates.detail.seconds": "c1f7eddeb673",
     "templates.detail.fps": "8853f540d07e",
     "templates.detail.similar": "3b072dd7b295",
@@ -21222,7 +21257,14 @@
     "tour.chat.prompt": "b27d77aa0732",
     "tour.progress": "7e20641fe8fb",
     "tour.locked": "d503fd48a6d4",
-    "tour.backLocked": "7933631d4780"
+    "tour.backLocked": "7933631d4780",
+    "templateTour.menu.title": "181c7ab14e5c",
+    "templateTour.menu.body": "f22b3c612729",
+    "templateTour.replace.title": "390a35663e47",
+    "templateTour.replace.body": "40ec373cfc62",
+    "templateTour.chat.title": "64bd7f92b236",
+    "templateTour.chat.body": "d2bf703737dd",
+    "templateTour.replay": "0089b951b0aa"
   },
   "zh-CN/panels": {
     "transitions.groups.fade": "5298d08bb7ae",

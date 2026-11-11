@@ -17,6 +17,7 @@ import { refetchProjects, useTemplateIndex } from "@/cut/lib/queries";
 import { localized, templatePoster, type GalleryTemplate } from "@/cut/lib/templateGallery";
 import { useEditor } from "@/cut/lib/store";
 import { copyTemplate } from "@/cut/lib/templateUse";
+import { cueTemplateTour } from "@/cut/lib/onboarding";
 import { track } from "@/lib/analytics";
 
 // Each visit of the template page's "Use" link carries a fresh run id; the run
@@ -89,6 +90,7 @@ function useTemplateCopy(template: GalleryTemplate | undefined, run: string): Ph
         }
         void refetchProjects(client, target);
         track("project_created", { source: "template" });
+        cueTemplateTour(projectId);
         open(projectId);
       } catch (e) {
         setPhase({ state: "failed", message: describeError(e, t("detail.failed")) });
@@ -189,8 +191,6 @@ export function TemplateUseView({ id, run }: { id: string; run: string }) {
  * template stops playing and the copy runs in a dialog centered over it, then
  * opens the project. */
 export function TemplateUseDialog({ template, onClose }: { template: GalleryTemplate; onClose: () => void }) {
-  const t = useTranslations("home.templates");
-  const locale = useLocale();
   const phase = useTemplateCopy(template, "");
 
   // The template behind the dialog holds still while it is copied.
@@ -210,6 +210,8 @@ function UseDialogFrame({
   phase: Phase;
   onClose: () => void;
 }) {
+  const t = useTranslations("home.templates");
+  const locale = useLocale();
   const busy = phase.state === "copying";
   return (
     <Dialog open disablePointerDismissal={busy} onOpenChange={(next) => !next && !busy && onClose()}>

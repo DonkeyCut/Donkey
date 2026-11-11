@@ -217,3 +217,9 @@ body.driver-active [data-tour="side-rail"] [data-slot="scroll-area-scrollbar"] {
 body.driver-active [data-tour="side-rail"] [data-slot="scroll-area-viewport"] {
   overflow: hidden !important;
 }
+
+/* A clip's menu button shows only on hover; while a tour points at it, it
+   stays shown. */
+.tl-clip-menu[data-tour-shown] {
+  opacity: 1;
+}

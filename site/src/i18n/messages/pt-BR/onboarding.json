@@ -85,5 +85,20 @@
     "progress": "{current} de {total}",
     "locked": "Conclua o tour para iniciar seu próprio projeto",
     "backLocked": "Conclua o tour para sair deste projeto"
+  },
+  "templateTour": {
+    "menu": {
+      "title": "Abra o menu de um clipe",
+      "body": "Todo clipe tem um menu ⋮. Clique nele neste clipe."
+    },
+    "replace": {
+      "title": "Substitua o clipe",
+      "body": "Troque pela sua própria foto ou vídeo. Ele assume o lugar deste clipe no modelo."
+    },
+    "chat": {
+      "title": "Ou peça ao assistente",
+      "body": "Peça “Substitua os clipes pelas minhas próprias filmagens” e ele troca cada clipe para você."
+    },
+    "replay": "Mostrar como substituir clipes"
   }
 }

@@ -13,6 +13,23 @@ export const useOnboardingCover = create<{ up: boolean }>(() => ({ up: false }))
 
 export const setOnboardingCover = (up: boolean) => useOnboardingCover.setState({ up });
 
+/** Where the template tour runs: the project a template was just copied
+ * into, or a template project whose ? asked for it again. A copy cues run 0,
+ * which runs only while the account has tours left; each ? ask is a new run
+ * that always does. A run that ends takes the cue away, so opening the
+ * project again never repeats it. */
+export const useTemplateTourCue = create<{ projectId: string | null; run: number }>(() => ({
+  projectId: null,
+  run: 0,
+}));
+
+export const cueTemplateTour = (projectId: string) => useTemplateTourCue.setState({ projectId, run: 0 });
+
+export const replayTemplateTour = (projectId: string) =>
+  useTemplateTourCue.setState((s) => ({ projectId, run: s.run + 1 }));
+
+export const endTemplateTour = () => useTemplateTourCue.setState({ projectId: null });
+
 export function openOnboarding(): void {
   window.dispatchEvent(new Event(EVENT));
 }

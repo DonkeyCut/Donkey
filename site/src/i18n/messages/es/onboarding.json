@@ -85,5 +85,20 @@
     "progress": "{current} de {total}",
     "locked": "Completa el recorrido para empezar tu propio proyecto",
     "backLocked": "Termina el recorrido para salir de este proyecto"
+  },
+  "templateTour": {
+    "menu": {
+      "title": "Abre el menú de un clip",
+      "body": "Cada clip tiene un menú ⋮. Haz clic en él en este clip."
+    },
+    "replace": {
+      "title": "Reemplaza el clip",
+      "body": "Cámbialo por tu propia foto o video. Ocupará el lugar de este clip en la plantilla."
+    },
+    "chat": {
+      "title": "O pídeselo al asistente",
+      "body": "Pide “Reemplaza los clips con mi propio material” y cambiará cada clip por ti."
+    },
+    "replay": "Mostrar cómo reemplazar clips"
   }
 }

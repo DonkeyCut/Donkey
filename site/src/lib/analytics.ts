@@ -10,6 +10,7 @@ import type { UpgradeEntry } from "@/cut/lib/upgrade";
 import type {
   OnboardingRun,
   ReferralSource,
+  TemplateTourStep,
   TourStep,
 } from "@/lib/onboarding/sequence";
 
@@ -65,7 +66,7 @@ export type AnalyticsEvents = {
   onboarding_slides_done: { source: OnboardingRun; skipped: boolean; step: number };
   // A starter tour step done, and a locked project button sending the
   // account back to the tour.
-  onboarding_tour_step: { step: TourStep };
+  onboarding_tour_step: { step: TourStep | TemplateTourStep };
   onboarding_tour_resumed: void;
   // The sequence's plans slide came up; intro as on the plans modal.
   // exit is "paywall" on a phone, where the slide has no free way on.

@@ -83,7 +83,9 @@ async function templateDoc(t: GalleryTemplate): Promise<ProjectDoc | null> {
   if (!obj) {
     return null;
   }
-  const doc = JSON.parse(obj.bytes.toString("utf8")) as ProjectDoc;
+  // Every copy of the template, whatever shelf it lands on, says where it
+  // came from.
+  const doc: ProjectDoc = { ...(JSON.parse(obj.bytes.toString("utf8")) as ProjectDoc), fromTemplate: t.id };
   docs.set(t.id, { version: t.version, doc });
   return doc;
 }
@@ -219,8 +221,6 @@ export const templatesApi = {
     return cachedRedirect(mediaObjectUrl(templateKey(id, TEMPLATE_POSTER), { version: t.version }));
   },
 
-  /** Copy a template into the signed-in account's cloud. */
-  async copy(id: string, req: Request) {
   /** A video clip's first frame, which the template page's timeline tiles
    * across the clip in place of decoding the footage. */
   async frame(id: string, clipId: string) {
@@ -231,6 +231,8 @@ export const templatesApi = {
     return cachedRedirect(mediaObjectUrl(templateFrameKey(id, clipId), { version: t.version }));
   },
 
+  /** Copy a template into the signed-in account's cloud. */
+  async copy(id: string, req: Request) {
     try {
       const session = await auth.api.getSession({ headers: req.headers });
       if (!session?.user) {

@@ -4437,6 +4437,7 @@ function ClipMenu({
         render={
           <button
             aria-label={tr("options")}
+            data-tour="clip-menu"
             className={cn("tl-clip-menu absolute top-1 right-2 z-4 grid size-[18px] place-items-center rounded-[5px] bg-black/55 text-white opacity-0 transition-opacity group-hover:opacity-100 hover:bg-black/75", TOUCH_SHOWN)}
             onPointerDown={(e) => e.stopPropagation()}
           />
@@ -4447,6 +4448,7 @@ function ClipMenu({
       <DropdownMenuContent align="start" className="w-44">
         {!readOnly && (
           <DropdownMenuItem
+            data-tour="clip-replace"
             onClick={() => {
               // The same menu sits on video and soundtrack clips; the store
               // says which row this one is on.

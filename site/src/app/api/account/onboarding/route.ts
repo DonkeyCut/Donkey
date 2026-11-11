@@ -12,8 +12,10 @@ import {
   ONBOARDING_VERSION,
   REFERRAL_OTHER_MAX_LENGTH,
   REFERRAL_SOURCES,
+  TEMPLATE_TOUR_RUNS,
   TOUR_STEPS,
   isKnownReferralSource,
+  isTemplateTourRun,
 } from "@/lib/onboarding/sequence";
 import { prisma } from "@/lib/prisma";
 
@@ -75,7 +77,7 @@ const updateSchema = z
   .or(z.object({ completed: z.literal(true), skipped: z.boolean() }))
   .or(z.object({ slidesDone: z.literal(true) }))
   .or(z.object({ restart: z.literal(true) }))
-  .or(z.object({ tourStep: z.enum(TOUR_STEPS) }));
+  .or(z.object({ tourStep: z.enum([...TOUR_STEPS, ...TEMPLATE_TOUR_RUNS]) }));
 
 // One write for everything the sequence records: the referral answer when it's
 // given, the slides' end, each tour step, the run's end, and a restart that
@@ -107,7 +109,12 @@ export const PUT = withDonkeyAuth(async (request: DonkeyAuthenticatedRequest) =>
     "slidesDone" in update
       ? { slidesDoneAt: new Date() }
       : "restart" in update
-      ? { skipped: false, slidesDoneAt: new Date(), tourSteps: [] }
+      ? {
+          skipped: false,
+          slidesDoneAt: new Date(),
+          // The starter tour runs again; the template tour stays seen.
+          tourSteps: (await prisma.userOnboarding.findUnique({ where: { userId } }))?.tourSteps.filter(isTemplateTourRun) ?? [],
+        }
       : "referralSources" in update
       ? {
           referralSources: [...new Set(update.referralSources)],

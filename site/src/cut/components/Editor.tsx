@@ -97,6 +97,7 @@ import { EmbeddedNewProject } from "./EmbeddedNewProject";
 import { ExportDialog } from "./ExportDialog";
 import { ReplaceDialog } from "./ReplaceDialog";
 import { StarterTour } from "./onboarding/StarterTour";
+import { TemplateTour, TemplateTourButton } from "./onboarding/TemplateTour";
 import { Inspector, useHasInspector } from "./Inspector";
 import { Lightbox } from "./Lightbox";
 import { Preview } from "./Preview";
@@ -247,6 +248,8 @@ export function Editor({
   const exportOpen = useEditor((s) => s.exportOpen);
   const aiOpen = useEditor((s) => s.aiOpen);
   const timelineOpen = useEditor((s) => s.timelineOpen);
+  // A project made from a template offers its tour again from the timeline.
+  const fromTemplate = useEditor((s) => s.fromTemplate);
   const sharedFeatures = useEditor((s) => s.sharedFeatures);
   // The timeline's height is bounded by the window, and the window changes
   // size under it: a browser resize, or the ChatGPT card leaving fullscreen.
@@ -737,8 +740,17 @@ export function Editor({
       // Evaluated every tick (not short-circuited) so the asset baseline
       // advances even when another slice triggered this save.
       const assetsDirty = assetsChanged(s.assets);
-      const changed = assetsDirty || docFieldsEdited(s, last, lastBars);
-      if (!changed) return;
+      const fieldsEdited = docFieldsEdited(s, last, lastBars);
+      if (!assetsDirty && !fieldsEdited) return;
+
+      // A template copy stops offering its tour at its first edit to the
+      // document. Asset changes alone are often the media settling (a probe,
+      // a proxy landing), so they keep it. Clearing the field is itself an
+      // edit, and the tick it starts saves both.
+      if (fieldsEdited && s.fromTemplate) {
+        useEditor.setState({ fromTemplate: null });
+        return;
+      }
       last = serializeDoc(s);
       lastBars = s.transitions;
       editSeq++;
@@ -1469,7 +1481,7 @@ export function Editor({
         {timelineOpen && (
           <div className="relative min-w-0">
             <SpeedCurveStrip />
-            <Timeline />
+            <Timeline toolbarStart={fromTemplate && !viewer && !chatgpt ? <TemplateTourButton /> : undefined} />
           </div>
         )}
       </div>
@@ -1483,6 +1495,7 @@ export function Editor({
         />
       )}
       {!viewer && !chatgpt && <StarterTour projectId={projectId} />}
+      {!viewer && !chatgpt && <TemplateTour projectId={projectId} />}
       {exportOpen && <ExportDialog />}
       {!viewer && <ReplaceDialog onImport={importFiles} />}
       {shareGone && (

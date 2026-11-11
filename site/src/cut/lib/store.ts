@@ -486,6 +486,10 @@ export interface EditorState {
   /** The aspect was chosen deliberately (picker, set_aspect, or saved in the
    * doc) — the first-import orientation guess stands down. Not a doc field. */
   aspectTouched: boolean;
+  /** The gallery template the project was made from, while it is unchanged:
+   * the timeline offers the template tour until then. The first edit clears
+   * it. */
+  fromTemplate: string | null;
   /** Preview guides turned on, persisted per project. */
   guides: GuideId[];
   /** The custom guide lines, drawn when "custom" is among `guides`. */
@@ -1609,6 +1613,7 @@ export const DOC_KEYS = [
   "background",
   "colorSpace",
   "magnet",
+  "fromTemplate",
   "publish",
   "notes",
   "subtitles",
@@ -2114,6 +2119,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
         mediaFolders: [],
         aspect: lastChosenAspect() ?? "9:16",
         aspectTouched: lastChosenAspect() !== null,
+        fromTemplate: null,
         guides: [],
         guidesHidden: false,
         guideLines: EMPTY_GUIDE_LINES,
@@ -2170,6 +2176,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
     mediaFolders: [],
     aspect: lastChosenAspect() ?? "9:16",
     aspectTouched: lastChosenAspect() !== null,
+    fromTemplate: null,
     guides: [],
     guidesHidden: false,
     guideLines: EMPTY_GUIDE_LINES,
@@ -2509,6 +2516,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
           mediaFolders: doc.mediaFolders ?? [],
           aspect,
           aspectTouched: doc.aspect !== undefined || lastChosenAspect() !== null,
+          fromTemplate: typeof doc.fromTemplate === "string" ? doc.fromTemplate : null,
           guides: sanitizeGuides(doc.guides),
           guidesHidden: false,
           guideLines: sanitizeGuideLines(doc.guideLines),
@@ -5911,6 +5919,7 @@ export function serializeDoc(s: {
   background: string;
   colorSpace: OutputSpace;
   magnet: boolean;
+  fromTemplate: string | null;
   publish: { caption: string; tags: string; soundTitle: string; handle: string };
   notes: { text: string; publishedAt: string; links: string[] };
   subtitles: SubtitlesBlock;
@@ -5939,6 +5948,7 @@ export function serializeDoc(s: {
     background: s.background,
     colorSpace: s.colorSpace,
     magnet: s.magnet,
+    fromTemplate: s.fromTemplate,
     subtitles: s.subtitles,
     publish: { ...s.publish },
     notes: { ...s.notes, links: [...s.notes.links] },
@@ -5981,6 +5991,7 @@ const DOC_FIELD_EDITED: {
   background: (s, last) => s.background !== last.background,
   colorSpace: (s, last) => s.colorSpace !== last.colorSpace,
   magnet: (s, last) => s.magnet !== (last.magnet === true),
+  fromTemplate: (s, last) => s.fromTemplate !== (last.fromTemplate ?? null),
   publish: (s, last) =>
     s.publish.caption !== last.publish?.caption ||
     s.publish.tags !== last.publish?.tags ||

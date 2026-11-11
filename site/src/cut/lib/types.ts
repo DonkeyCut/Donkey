@@ -1837,6 +1837,10 @@ export interface ProjectDoc {
   version: 1;
   /** Absent on an ordinary project. */
   kind?: ProjectKind;
+  /** The gallery template this project was made from, until the project is
+   * changed or its template tour is done; absent otherwise. A save sends null
+   * to clear it. */
+  fromTemplate?: string | null;
   /** The project's stable API id. On the local engine the folder is named
    * after the project and follows renames, so the id lives in the doc; the
    * server stamps it on every write. */

@@ -85,5 +85,20 @@
     "progress": "{current} von {total}",
     "locked": "Schließe die Tour ab, um dein eigenes Projekt zu starten",
     "backLocked": "Beende die Tour, um dieses Projekt zu verlassen"
+  },
+  "templateTour": {
+    "menu": {
+      "title": "Öffne das Clip-Menü",
+      "body": "Jeder Clip hat ein ⋮-Menü. Klicke bei diesem Clip darauf."
+    },
+    "replace": {
+      "title": "Ersetze den Clip",
+      "body": "Tausche ihn gegen dein eigenes Foto oder Video aus. Es nimmt den Platz dieses Clips in der Vorlage ein."
+    },
+    "chat": {
+      "title": "Oder frage den Assistenten",
+      "body": "Frag einfach „Ersetze die Clips durch mein eigenes Material“ und es tauscht jeden Clip für dich aus."
+    },
+    "replay": "Zeigen, wie du Clips ersetzt"
   }
 }

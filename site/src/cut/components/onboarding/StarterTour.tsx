@@ -18,7 +18,6 @@ import { useEffect, useRef } from "react";
 
 import { useEngineUser } from "@/cut/lib/backend/hooks";
 import {
-  fillChatComposer,
   holdTour,
   releaseTour,
   useOnboardingCover,
@@ -33,6 +32,8 @@ import { TOUR_STEPS, type TourStep } from "@/lib/onboarding/sequence";
 import { nextTourStep, onboardingStage } from "@/lib/onboarding/stage";
 import { useOnboardingState, useSaveOnboarding } from "@/queries/onboarding";
 
+import { followTarget, inView, pause, shown, typeOut, waitForTarget } from "./tourDom";
+
 // How long a step waits for its control to show (the timeline mounting, a panel
 // opening) before letting the step go, so a starter that lost that control can
 // never hold the account in the tour.
@@ -46,22 +47,10 @@ const SETTLE_MS = 350;
 // clip's settings open, the Media tab showing.
 const LINGER_MS = 1_500;
 
-// What a control can scroll inside: the timeline and the app's scroll areas.
-// A control scrolled out of one has left the highlight behind.
-const SCROLLERS = "[data-tl-scroll], [data-slot='scroll-area-viewport']";
-
-// How much of a control has to show each way to count as in view: nearly all
-// of a small one, and this many px of a large one.
-const IN_VIEW_SHARE = 0.9;
-const IN_VIEW_PX = 80;
-
 // The clip step lets playback run on to the next clip and pauses there. It
 // picks one starting at least this far ahead, and stops waiting at the cap.
 const APPROACH_LEAD_S = 0.5;
 const APPROACH_CAP_MS = 10_000;
-
-// The chat step types its example message at this pace, per character.
-const TYPE_MS = 35;
 
 // The chat step waits for the assistant's reply to land. A turn that hasn't
 // started by the first bound never will; the second caps a long one.
@@ -294,38 +283,6 @@ export function StarterTour({ projectId }: { projectId: string }) {
   return null;
 }
 
-// The first match in view: a route left behind by instant navigation stays
-// mounted with display:none, and its controls must not count.
-function shown(selector: string): Element | null {
-  for (const el of document.querySelectorAll(selector)) {
-    if (inView(el)) {
-      return el;
-    }
-  }
-  return null;
-}
-
-// Whether the control shows inside its scroller and the window, by enough to
-// see and click it each way.
-function inView(el: Element, axes: "both" | "vertical" = "both"): boolean {
-  if (!el.isConnected || !el.checkVisibility()) {
-    return false;
-  }
-  const rect = el.getBoundingClientRect();
-  const frames = [new DOMRect(0, 0, window.innerWidth, window.innerHeight)];
-  const scroller = el.closest(SCROLLERS);
-  if (scroller) {
-    frames.push(scroller.getBoundingClientRect());
-  }
-  const enough = (shown: number, size: number) => shown >= Math.min(size * IN_VIEW_SHARE, IN_VIEW_PX);
-  return frames.every(
-    (frame) =>
-      enough(Math.min(rect.bottom, frame.bottom) - Math.max(rect.top, frame.top), rect.height) &&
-      (axes === "vertical" ||
-        enough(Math.min(rect.right, frame.right) - Math.max(rect.left, frame.left), rect.width)),
-  );
-}
-
 // A clip's box on the timeline, by its id. An editor left behind by instant
 // navigation keeps its own hidden copy, so the visible one is picked.
 function clipBox(id: string): Element | null {
@@ -396,23 +353,6 @@ function playToNextClip(signal: AbortSignal): Promise<void> {
   });
 }
 
-// Types `text` into the chat composer a character at a time. A key the person
-// presses takes the composer back from it.
-async function typeOut(text: string, signal: AbortSignal): Promise<void> {
-  let stopped = false;
-  const stop = () => {
-    stopped = true;
-  };
-  window.addEventListener("keydown", stop, { capture: true });
-  signal.addEventListener("abort", stop);
-  for (let i = 1; i <= text.length && !stopped; i += 1) {
-    fillChatComposer(text.slice(0, i));
-    await pause(TYPE_MS);
-  }
-  window.removeEventListener("keydown", stop, { capture: true });
-  signal.removeEventListener("abort", stop);
-}
-
 // The timeline clip in view nearest the playhead. With every clip scrolled
 // away, the first one scrolls into view.
 function clipInView(): Element | null {
@@ -429,65 +369,6 @@ function clipInView(): Element | null {
   clips[0].scrollIntoView({ block: "nearest", inline: "nearest" });
   return clips[0];
 }
-
-// Keeps the highlight on its control: a scroll, a resize or a re-render
-// checks once per frame whether the control is still in view. `moved` redraws
-// the highlight where it is now; `lost` fires when it has gone.
-function followTarget(target: Element, on: { moved: () => void; lost: () => void }): () => void {
-  let frame = 0;
-  const check = () => {
-    frame = 0;
-    if (inView(target)) {
-      on.moved();
-      return;
-    }
-    on.lost();
-  };
-  const schedule = () => {
-    frame ||= window.requestAnimationFrame(check);
-  };
-  const resized = new ResizeObserver(schedule);
-  resized.observe(target);
-  const rendered = new MutationObserver(schedule);
-  rendered.observe(document.body, { childList: true, subtree: true });
-  document.addEventListener("scroll", schedule, { capture: true, passive: true });
-  window.addEventListener("resize", schedule);
-  return () => {
-    window.cancelAnimationFrame(frame);
-    resized.disconnect();
-    rendered.disconnect();
-    document.removeEventListener("scroll", schedule, { capture: true });
-    window.removeEventListener("resize", schedule);
-  };
-}
-
-// Resolves with the control once it shows, or null after `ms`.
-function waitForTarget(find: () => Element | null, ms: number, signal: AbortSignal): Promise<Element | null> {
-  return new Promise((resolve) => {
-    const hit = find();
-    if (hit) {
-      return resolve(hit);
-    }
-    const observer = new MutationObserver(() => {
-      const el = find();
-      if (el) {
-        finish(el);
-      }
-    });
-    const timer = window.setTimeout(() => finish(null), ms);
-    const finish = (el: Element | null) => {
-      observer.disconnect();
-      window.clearTimeout(timer);
-      signal.removeEventListener("abort", stop);
-      resolve(el);
-    };
-    const stop = () => finish(null);
-    signal.addEventListener("abort", stop);
-    observer.observe(document.body, { attributes: true, childList: true, subtree: true });
-  });
-}
-
-const pause = (ms: number) => new Promise<void>((resolve) => window.setTimeout(resolve, ms));
 
 // Resolves once a chat turn has started and finished, or when none starts in
 // time, or at the cap.

@@ -41,3 +41,18 @@ export type TourStep = (typeof TOUR_STEPS)[number];
 
 export const isTourStep = (id: string): id is TourStep =>
   (TOUR_STEPS as readonly string[]).includes(id);
+
+// The template tour: how to replace a template's clips, in the project an
+// account makes from one. It runs by itself for the first two templates an
+// account uses; each run it finishes joins the account's tour list as the next
+// of TEMPLATE_TOUR_RUNS, and replaying the welcome sequence keeps them.
+export const TEMPLATE_TOUR_STEPS = ["template-menu", "template-replace", "template-chat"] as const;
+
+export type TemplateTourStep = (typeof TEMPLATE_TOUR_STEPS)[number];
+
+export const TEMPLATE_TOUR_RUNS = ["template-run-1", "template-run-2"] as const;
+
+export type TemplateTourRun = (typeof TEMPLATE_TOUR_RUNS)[number];
+
+export const isTemplateTourRun = (id: string): id is TemplateTourRun =>
+  (TEMPLATE_TOUR_RUNS as readonly string[]).includes(id);

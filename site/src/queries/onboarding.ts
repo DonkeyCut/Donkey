@@ -2,7 +2,13 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { ONBOARDING_VERSION, type ReferralSource, type TourStep } from "@/lib/onboarding/sequence";
+import {
+  ONBOARDING_VERSION,
+  isTemplateTourRun,
+  type ReferralSource,
+  type TemplateTourRun,
+  type TourStep,
+} from "@/lib/onboarding/sequence";
 import { apiFetch } from "@/queries/apiClient";
 
 export const onboardingQueryKey = ["account-onboarding"] as const;
@@ -25,7 +31,7 @@ type OnboardingUpdate =
   | { completed: true; skipped: boolean }
   | { slidesDone: true }
   | { restart: true }
-  | { tourStep: TourStep };
+  | { tourStep: TourStep | TemplateTourRun };
 
 /** The account's onboarding row as it stands now. */
 export async function fetchOnboardingState(): Promise<OnboardingState> {
@@ -110,7 +116,7 @@ function applyUpdate(state: OnboardingState, update: OnboardingUpdate): Onboardi
       skipped: false,
       slidesDoneAt: new Date().toISOString(),
       starterReady: true,
-      tourSteps: [],
+      tourSteps: state.tourSteps.filter(isTemplateTourRun),
     };
   }
   if ("tourStep" in update) {

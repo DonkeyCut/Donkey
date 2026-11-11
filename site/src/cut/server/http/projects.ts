@@ -148,6 +148,7 @@ export const projectsApi = {
         mediaFolders: Array.isArray(body.mediaFolders) ? body.mediaFolders : existing.mediaFolders,
         kind: isProjectKind(body.kind) ? body.kind : existing.kind,
         aspect: normalizeAspect(body.aspect) ?? existing.aspect,
+        fromTemplate: body.fromTemplate === null ? undefined : typeof body.fromTemplate === "string" ? body.fromTemplate : existing.fromTemplate,
         guides: Array.isArray(body.guides) ? sanitizeGuides(body.guides) : existing.guides,
         guideLines: body.guideLines !== undefined ? sanitizeGuideLines(body.guideLines) : existing.guideLines,
         background: typeof body.background === "string" ? body.background : existing.background,
