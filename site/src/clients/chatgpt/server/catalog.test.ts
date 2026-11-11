@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { AI_TOOLS, PROJECT_TOOLS } from "@/cut/server/ai/catalog";
-import { COMMAND_NAMES, COMMANDS, READ_COMMANDS, SKILL_INDEX, commandHints, readSkill, unknownCommandNames, unmappedCommands } from "./catalog";
+import { COMMAND_NAMES, COMMANDS, READ_COMMANDS, SKILL_INDEX, commandEffectNote, commandHints, readSkill, unknownCommandNames, unmappedCommands } from "./catalog";
 import { SERVER_INSTRUCTIONS } from "./mcp";
 
 test("first-class history tools can queue their editor commands", () => {
@@ -74,6 +74,28 @@ test("ChatGPT preserves the shared inspection schemas and teaches their use", ()
 test("every exposed command declares its effect, so its tool carries honest annotations", () => {
   expect(unmappedCommands()).toEqual([]);
   expect(COMMAND_NAMES).not.toContain("list_projects");
+});
+
+test("a command that moves or overwrites what is there is destructive", () => {
+  // Placing slides the clips after the landing spot; a template, a replicated
+  // edit or a designed text run takes over the frame or caption look.
+  for (const name of ["add_clip", "add_overlay_video", "freeze_frame", "generate_image", "stock_add", "library_add", "template_use", "replicate_project", "add_text_sequence", "group_items", "subtitles_translate_track", "set_guides"]) {
+    expect(commandHints(name).destructiveHint).toBe(true);
+  }
+
+  // Cut detection keeps a source's first picture box and overwrites nothing.
+  expect(commandHints("detect_cuts")).toMatchObject({ readOnlyHint: false, destructiveHint: false });
+  for (const name of ["add_title", "make_template", "voiceover_generate"]) {
+    expect(commandHints(name).destructiveHint).toBe(false);
+  }
+});
+
+test("every command's description states the effect its hints encode", () => {
+  for (const name of COMMAND_NAMES) {
+    expect(commandEffectNote(name).length).toBeGreaterThan(0);
+  }
+  expect(commandEffectNote("read_project")).toContain("changes nothing");
+  expect(commandEffectNote("add_clip")).toContain("move");
 });
 
 test("nothing teaches the retired generic executor", () => {

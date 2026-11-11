@@ -58,11 +58,11 @@ export const unknownCommandNames = (names: string[]): string[] => names.filter((
 
 /** What a command does, in the terms of OpenAI's tool annotations. A read
  * changes nothing; a search reaches the public web; session moves only the
- * editor's view (playhead, selection, open timeline, guides); record keeps
- * the assistant's own coverage and frame maps on an asset; add writes new
- * things alone; set overwrites a value, the same each time; change deletes,
- * overwrites or moves by an amount; share opens a public link. Undo does not
- * make a write additive. */
+ * editor's view (playhead, selection, open timeline); record keeps the
+ * assistant's own coverage, frame maps and first picture box on an asset; add
+ * writes new things and moves nothing already there; set overwrites a value,
+ * the same each time; change deletes, overwrites or moves by an amount; share
+ * opens a public link. Undo does not make a write additive. */
 type Effect = "read" | "search" | "session" | "record" | "add" | "set" | "change" | "share";
 
 const HINTS: Record<Effect, Required<Pick<ToolAnnotations, "readOnlyHint" | "destructiveHint" | "idempotentHint" | "openWorldHint">>> = {
@@ -76,6 +76,19 @@ const HINTS: Record<Effect, Required<Pick<ToolAnnotations, "readOnlyHint" | "des
   share: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
 };
 
+// The sentence each tool's description ends with, so the listing a reviewer
+// reads states what its hints encode.
+const NOTES: Record<Effect, string> = {
+  read: "Read-only: it changes nothing in the project or the account.",
+  search: "Read-only: it searches the public web and changes nothing.",
+  session: "It changes only the editor's view of the project.",
+  record: "It saves the assistant's own analysis on the source asset and leaves the edit as it was.",
+  add: "It adds new items and leaves every existing one where it was.",
+  set: "It overwrites an existing value; the same call again gives the same result.",
+  change: "It can move, overwrite or delete what the project already holds.",
+  share: "It opens a public link that anyone holding it can use.",
+};
+
 // Every exposed command's effect; a test holds this map to COMMANDS.
 const EFFECTS: Record<string, Effect> = {
   get_asset_info: "read", find_media: "read", detect_silence: "read",
@@ -86,16 +99,14 @@ const EFFECTS: Record<string, Effect> = {
   read_note: "read", read_folder: "read", library_list: "read", notes_list: "read", template_gallery: "read",
   check_facts: "search",
   seek: "session", select: "session", select_items: "session", switch_timeline: "session",
-  set_guides: "session", wait_for_uploads: "session",
-  watch_video: "record", listen_audio: "record",
-  add_clip: "add", add_overlay_video: "add", add_title: "add",
-  add_text_sequence: "add", freeze_frame: "add", group_items: "add", copy_from_timeline: "add",
+  wait_for_uploads: "session",
+  watch_video: "record", listen_audio: "record", detect_cuts: "record",
+  add_title: "add", copy_from_timeline: "add",
   add_shape: "add", add_sticker: "add", create_sticker: "add", add_effect: "add",
-  subtitles_add_track: "add", subtitles_translate_track: "add", voiceover_generate: "add",
-  generate_music: "add", read_subtitles_aloud: "add", generate_image: "add", stock_add: "add",
-  library_add: "add", template_add: "add", save_template: "add", copy_project_media: "add",
-  replicate_project: "add", template_use: "add", make_template: "add",
-  note_source: "set", detect_beats: "set", find_picture: "set", detect_cuts: "set", trim_clip: "set", place_clip: "set",
+  subtitles_add_track: "add", voiceover_generate: "add",
+  generate_music: "add", read_subtitles_aloud: "add",
+  template_add: "add", save_template: "add", copy_project_media: "add", make_template: "add",
+  note_source: "set", detect_beats: "set", find_picture: "set", set_guides: "set", trim_clip: "set", place_clip: "set",
   set_clip_muted: "set", rename_item: "set", set_clip_hidden: "set", set_track_hidden: "set",
   set_track_muted: "set", set_magnet: "set", update_overlay_video: "set", update_overlay: "set",
   set_mask: "set", track_motion: "set", set_clip_keyframes: "set", update_audio: "set",
@@ -112,6 +123,12 @@ const EFFECTS: Record<string, Effect> = {
   set_project_notes: "set", set_background: "set", set_aspect: "set", set_project_name: "set",
   set_project_color: "set", replace_item: "set", align_to_audio: "set", pack_lanes: "set",
   file_asset: "set", convert_media: "set", sync_lyrics: "set", subtitles_generate: "set",
+  // Placing on video track 0 or an overlay track slides the clips after the
+  // landing spot; a template, a replicated edit or a designed text run also
+  // takes over the frame shape, frame color or caption look.
+  add_clip: "change", add_overlay_video: "change", freeze_frame: "change", generate_image: "change",
+  stock_add: "change", library_add: "change", template_use: "change", replicate_project: "change",
+  add_text_sequence: "change", group_items: "change", subtitles_translate_track: "change",
   move_selection: "change", ungroup_items: "change", move_timeline_selection: "change",
   insert_item_row: "change", split_at: "change", move_clip: "change", reorder_track: "change",
   refine_speech_cuts: "change", delete_item: "change", remove_gap: "change", detach_audio: "change",
@@ -123,6 +140,9 @@ const EFFECTS: Record<string, Effect> = {
 
 /** A command's annotations, from its effect. */
 export const commandHints = (name: string) => HINTS[EFFECTS[name]];
+
+/** The sentence stating a command's effect. */
+export const commandEffectNote = (name: string) => NOTES[EFFECTS[name]];
 
 /** Commands that change nothing: a read runs without saving the document. */
 export const READ_COMMANDS = new Set(
