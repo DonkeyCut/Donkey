@@ -9,6 +9,7 @@
  *   bun run scripts/template-publish.ts order <ids.json>
  *   bun run scripts/template-publish.ts frames <id>
  *   bun run scripts/template-publish.ts peaks <id>
+ *   bun run scripts/template-publish.ts render "<project folder>" <meta.json> <out.mp4>
  *
  * The project folder is a Mac library folder (project.json + media/). The
  * meta file holds the gallery entry the document cannot say:
@@ -22,7 +23,8 @@
  * ships too, small, so the template page's timeline shows the clips without
  * decoding the footage; `frames` bakes them for a template already live. The
  * waveform peaks of every sound an audio clip plays ship the same way, and
- * `peaks` bakes them for a template already live.
+ * `peaks` bakes them for a template already live. `render` exports a project
+ * folder as the gallery would ship it, uploading nothing, to check it first.
  *
  * Every environment reads the one bucket, so a publish is live on every
  * site that serves the gallery the moment the index lands.
@@ -103,7 +105,40 @@ const MAKER_FIELDS = ["renders", "genvideo", "publish", "notes", "firstOpen", "u
 
 type Meta = Pick<GalleryTemplate, "id" | "name" | "description" | "category" | "style" | "fps">;
 
+// Publishes on this machine take turns at the index: each holds this lock
+// directory while it reads and writes the index, so two at once never drop
+// each other's entry. A lock older than the stale age is a crashed holder's.
+const INDEX_LOCK = path.join(os.tmpdir(), "donkey-template-index.lock");
+const LOCK_POLL_MS = 200;
+const LOCK_STALE_MS = 60_000;
+
 const [command, ...args] = process.argv.slice(2);
+
+/** Change the index under the lock: read it, let `change` return the new
+ * one, write it. */
+async function changeIndex(change: (index: TemplateIndex) => TemplateIndex) {
+  for (;;) {
+    try {
+      await fs.mkdir(INDEX_LOCK);
+      break;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "EEXIST") {
+        throw err;
+      }
+    }
+    const held = await fs.stat(INDEX_LOCK).catch(() => null);
+    if (held && Date.now() - held.mtimeMs > LOCK_STALE_MS) {
+      await fs.rm(INDEX_LOCK, { recursive: true, force: true });
+      continue;
+    }
+    await Bun.sleep(LOCK_POLL_MS);
+  }
+  try {
+    await writeIndex(change(await readIndex()));
+  } finally {
+    await fs.rm(INDEX_LOCK, { recursive: true, force: true });
+  }
+}
 
 async function readIndex(): Promise<TemplateIndex> {
   const obj = await getObject(TEMPLATE_INDEX_KEY);
@@ -309,10 +344,10 @@ function detailOf(file: string): number {
   return Math.sqrt(px.reduce((a, v) => a + (v - mean) ** 2, 0) / px.length);
 }
 
-/** The card's still: the candidate frame with the most detail, exported
- * through the headless doc export with media read from `sources`. The session points
- * at a loopback that answers the media presign with the local files. */
-async function renderPoster(doc: ProjectDoc, sources: Map<string, string>, tmp: string, out: string) {
+/** The template exported through the headless doc export with media read
+ * from `sources`, into `tmp`. The session points at a loopback that answers
+ * the media presign with the local files. */
+async function renderCut(doc: ProjectDoc, sources: Map<string, string>, tmp: string) {
   const server = Bun.serve({
     port: 0,
     hostname: "127.0.0.1",
@@ -347,25 +382,29 @@ async function renderPoster(doc: ProjectDoc, sources: Map<string, string>, tmp: 
     await fs.mkdir(handle.tmpDir, { recursive: true });
     const session = { base: server.url.origin, headers: {} };
     const spec = (await buildDocExportSpec(session, doc.id!, POSTER_PRESET, handle.tmpDir, { doc, version: "1" })) as ExportSpec;
-    const scale = `scale='if(gt(iw,ih),${POSTER_LONG_EDGE},-2)':'if(gt(iw,ih),-2,${POSTER_LONG_EDGE})'`;
-
-    // The template rendered once; each candidate is a still cut from it, and
-    // the most detailed one is the card.
     await runExport(handle, spec, (file) => sources.get(path.basename(file))!);
-    let best = { detail: -1, file: "" };
-    for (const [i, share] of POSTER_CANDIDATES.entries()) {
-      const still = path.join(tmp, `poster-${i}.jpg`);
-      execFileSync("ffmpeg", ["-v", "error", "-y", "-ss", String(spec.duration * share), "-i", handle.outPath,
-        "-frames:v", "1", "-vf", scale, "-q:v", "3", still]);
-      const detail = detailOf(still);
-      if (detail > best.detail) {
-        best = { detail, file: still };
-      }
-    }
-    await fs.copyFile(best.file, out);
+    return { file: handle.outPath, duration: spec.duration };
   } finally {
     server.stop(true);
   }
+}
+
+/** The card's still: of the candidate frames cut from one render, the one
+ * with the most detail. */
+async function renderPoster(doc: ProjectDoc, sources: Map<string, string>, tmp: string, out: string) {
+  const cut = await renderCut(doc, sources, tmp);
+  const scale = `scale='if(gt(iw,ih),${POSTER_LONG_EDGE},-2)':'if(gt(iw,ih),-2,${POSTER_LONG_EDGE})'`;
+  let best = { detail: -1, file: "" };
+  for (const [i, share] of POSTER_CANDIDATES.entries()) {
+    const still = path.join(tmp, `poster-${i}.jpg`);
+    execFileSync("ffmpeg", ["-v", "error", "-y", "-ss", String(cut.duration * share), "-i", cut.file,
+      "-frames:v", "1", "-vf", scale, "-q:v", "3", still]);
+    const detail = detailOf(still);
+    if (detail > best.detail) {
+      best = { detail, file: still };
+    }
+  }
+  await fs.copyFile(best.file, out);
 }
 
 // How far before a source's end a frame is read when the clip starts past it.
@@ -481,6 +520,22 @@ async function peaks(id: string) {
   await fs.rm(tmp, { recursive: true, force: true });
 }
 
+/** Export a project folder as the gallery would ship it to `out`, uploading
+ * nothing: the check before a publish. */
+async function render(dir: string, metaPath: string, out: string) {
+  const meta = JSON.parse(await fs.readFile(metaPath, "utf8")) as Meta;
+  const source = JSON.parse(await fs.readFile(path.join(dir, "project.json"), "utf8")) as ProjectDoc;
+  const doc = galleryDoc(source, meta);
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "template-render-"));
+  try {
+    const cut = await renderCut(doc, lightFootage(dir, doc, tmp), tmp);
+    await fs.copyFile(cut.file, out);
+    console.log(`rendered ${meta.id} (${cut.duration.toFixed(1)}s) to ${out}`);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+}
+
 async function publish(dir: string, metaPath: string) {
   const meta = JSON.parse(await fs.readFile(metaPath, "utf8")) as Meta;
   checkMeta(meta);
@@ -526,20 +581,20 @@ async function publish(dir: string, metaPath: string) {
     music: doc.audioClips.length > 0,
     version: String(Date.now()),
   };
-  const index = await readIndex();
-  const at = index.templates.findIndex((t) => t.id === meta.id);
-  if (at >= 0) {
-    index.templates[at] = entry;
-  } else {
-    index.templates.push(entry);
-  }
-  await writeIndex(index);
+  await changeIndex((index) => {
+    const at = index.templates.findIndex((t) => t.id === meta.id);
+    if (at >= 0) {
+      index.templates[at] = entry;
+    } else {
+      index.templates.push(entry);
+    }
+    return index;
+  });
   console.log(`published ${meta.id} (${entry.seconds}s, ${entry.slots} slots, ${entry.texts} texts)`);
 }
 
 async function remove(id: string) {
-  const index = await readIndex();
-  await writeIndex({ templates: index.templates.filter((t) => t.id !== id) });
+  await changeIndex((index) => ({ templates: index.templates.filter((t) => t.id !== id) }));
   const gone = await deletePrefix(templateKey(id, ""));
   console.log(`removed ${id} (${gone} objects)`);
 }
@@ -548,16 +603,19 @@ async function remove(id: string) {
  * gallery, in its order; the rest keep theirs behind them. */
 async function order(file: string) {
   const ids = JSON.parse(await fs.readFile(file, "utf8")) as string[];
-  const index = await readIndex();
-  const byId = new Map(index.templates.map((t) => [t.id, t]));
-  const unknown = ids.filter((id) => !byId.has(id));
-  if (unknown.length > 0) {
-    throw new Error(`not in the gallery: ${unknown.join(", ")}`);
-  }
-  const lead = new Set(ids);
-  const templates = [...ids.map((id) => byId.get(id)!), ...index.templates.filter((t) => !lead.has(t.id))];
-  await writeIndex({ templates });
-  console.log(`ordered ${ids.length} of ${templates.length} templates`);
+  let total = 0;
+  await changeIndex((index) => {
+    const byId = new Map(index.templates.map((t) => [t.id, t]));
+    const unknown = ids.filter((id) => !byId.has(id));
+    if (unknown.length > 0) {
+      throw new Error(`not in the gallery: ${unknown.join(", ")}`);
+    }
+    const lead = new Set(ids);
+    const templates = [...ids.map((id) => byId.get(id)!), ...index.templates.filter((t) => !lead.has(t.id))];
+    total = templates.length;
+    return { templates };
+  });
+  console.log(`ordered ${ids.length} of ${total} templates`);
 }
 
 if (command === "publish" && args.length === 2) {
@@ -570,8 +628,10 @@ if (command === "publish" && args.length === 2) {
   await frames(args[0]);
 } else if (command === "peaks" && args.length === 1) {
   await peaks(args[0]);
+} else if (command === "render" && args.length === 3) {
+  await render(args[0], args[1], args[2]);
 } else {
-  console.error("usage: template-publish.ts publish <project folder> <meta.json> | remove <id> | order <ids.json> | frames <id> | peaks <id>");
+  console.error("usage: template-publish.ts publish <project folder> <meta.json> | remove <id> | order <ids.json> | frames <id> | peaks <id> | render <project folder> <meta.json> <out.mp4>");
   process.exit(1);
 }
 process.exit(0);
