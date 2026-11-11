@@ -47,12 +47,14 @@ import {
 import { runExport, type ExportSpec, type RenderHandle } from "../src/cut/server/exportPipeline";
 import { contentTypeFor } from "../src/cut/server/serveFile";
 
-// The card's still: the frame this far in (or halfway through a shorter
-// template), scaled down. The export renders a short stretch from it, the way
-// a range download does.
+// The card's still: of a few frames spread through the template, the one with
+// the most going on, scaled down. A fade's black frame shows nothing, and the
+// middle of a template usually has its picture and type on screen together.
+// The template renders once and each candidate is a still cut from it.
 const POSTER_LONG_EDGE = 720;
-const POSTER_AT_S = 1;
-const POSTER_SPAN_S = 0.2;
+const POSTER_CANDIDATES = [0.2, 0.35, 0.5, 0.65, 0.8];
+// The size a candidate is measured at, a small grey thumbnail.
+const POSTER_PROBE_PX = 64;
 const POSTER_PRESET = "tiktok";
 // The headless session's media presign, which the poster's loopback answers.
 const PRESIGN_GET = "/api/cut-cloud/media/presign-get";
@@ -63,6 +65,8 @@ const MEDIA_ROUTE = "/m/";
 const FOOTAGE_LONG_EDGE = 1920;
 const FOOTAGE_MAX_BPS = 8_000_000;
 const FOOTAGE_RATE = "6M";
+// Sound an audio clip plays off footage is kept at this rate.
+const FOOTAGE_AUDIO_RATE = "160k";
 // A source keeps only the seconds its clips play, with room either side for
 // a trim, once that saves at least a fifth of it.
 const FOOTAGE_HANDLE_S = 1;
@@ -126,18 +130,19 @@ function masterOnly(asset: StoredAsset): StoredAsset {
 
 /** The document as the gallery serves it: the edit alone, with nothing of the
  * maker's own (renders, publishing notes, the opening layout) riding along.
- * Templates ship silent: no soundtrack, every clip muted. An asset keeps only
- * its master file, the one file the gallery serves; a proxy or a separate
- * sound recording would name files that never publish. */
+ * Footage ships muted: the only sound is the template's own soundtrack, its
+ * audio clips. An asset keeps only its master file, the one file the gallery
+ * serves; a proxy or a separate sound recording would name files that never
+ * publish. */
 function galleryDoc(doc: ProjectDoc, meta: Meta): ProjectDoc {
   const edit: ProjectDoc = {
     ...doc,
     id: meta.id,
     name: meta.name.en,
     folderId: null,
-    assets: doc.assets.filter((a) => a.type !== "audio").map(masterOnly),
+    assets: doc.assets.map(masterOnly),
     clips: doc.clips.map((c) => ({ ...c, muted: true })),
-    audioClips: [],
+    audioClips: doc.audioClips ?? [],
   };
   for (const key of MAKER_FIELDS) {
     delete edit[key];
@@ -177,18 +182,19 @@ function frameBefore(file: string, t: number): number {
   return times.length > 0 ? Math.max(...times) : 0;
 }
 
-/** The source seconds a file's clips play, widened by the handle, as the cut
- * to make: `from` sits just before a real frame, so that frame opens the
- * shorter file and every later one moves back by exactly `from`. Null when
- * nothing plays the file, or a matte is cut to its full length. */
+/** The source seconds a file's clips play or sound, widened by the handle, as
+ * the cut to make: `from` sits just before a real frame, so that frame opens
+ * the shorter file and every later one moves back by exactly `from`. Null
+ * when nothing plays the file, or a matte is cut to its full length. */
 function playedSpan(doc: ProjectDoc, assetId: string, file: string, src: Probe): { from: number; to: number } | null {
   const clips = doc.clips.filter((c) => c.assetId === assetId);
   const matted = clips.some((c) => c.removal?.matte || c.card?.matte);
-  if (clips.length === 0 || matted) {
+  const spans = [...clips, ...doc.audioClips.filter((c) => c.assetId === assetId)];
+  if (spans.length === 0 || matted) {
     return null;
   }
-  const lo = Math.min(...clips.map((c) => c.in)) - FOOTAGE_HANDLE_S;
-  const hi = Math.max(...clips.map((c) => c.out)) + FOOTAGE_HANDLE_S;
+  const lo = Math.min(...spans.map((c) => c.in)) - FOOTAGE_HANDLE_S;
+  const hi = Math.max(...spans.map((c) => c.out)) + FOOTAGE_HANDLE_S;
   const from = lo > 0 ? Math.max(0, frameBefore(file, lo) - FRAME_LEAD_S) : 0;
   return { from, to: Math.min(src.duration, hi) };
 }
@@ -197,7 +203,7 @@ function playedSpan(doc: ProjectDoc, assetId: string, file: string, src: Probe):
  * source second in the document drops by `from`. What the assistant once
  * watched or heard in the old file no longer lines up and is left behind. */
 function shiftSource(doc: ProjectDoc, asset: StoredAsset, from: number, duration: number) {
-  for (const clip of doc.clips) {
+  for (const clip of [...doc.clips, ...doc.audioClips]) {
     if (clip.assetId !== asset.id) {
       continue;
     }
@@ -242,12 +248,15 @@ function lightFootage(dir: string, doc: ProjectDoc, tmp: string): Map<string, st
     }
 
     // Long edge to 1080p at most, the frame rate and timestamps as they were.
-    // The gallery ships silent, so the sound stays behind.
+    // Footage ships muted, so its sound stays behind unless an audio clip
+    // plays it, e.g. sound detached from a clip onto its own track.
+    const heard = doc.audioClips.some((c) => doc.assets.some((a) => a.id === c.assetId && a.fileName === asset.fileName));
+    const sound = heard ? ["-map", "0:a:0?", "-c:a", "aac", "-b:a", FOOTAGE_AUDIO_RATE] : ["-an"];
     const out = path.join(tmp, asset.fileName);
     const edge = Math.min(FOOTAGE_LONG_EDGE, Math.max(src.width, src.height));
     const scale = `scale='if(gt(iw,ih),${edge},-2)':'if(gt(iw,ih),-2,${edge})'`;
     const cut = trim ? ["-ss", String(trim.from), "-t", String(trim.to - trim.from)] : [];
-    execFileSync("ffmpeg", ["-v", "error", "-y", ...cut, "-i", file, "-map", "0:v:0", "-an", "-vf", scale,
+    execFileSync("ffmpeg", ["-v", "error", "-y", ...cut, "-i", file, "-map", "0:v:0", ...sound, "-vf", scale,
       "-fps_mode", "passthrough", "-c:v", "libx264", "-crf", "23", "-maxrate", FOOTAGE_RATE,
       "-bufsize", "12M", "-preset", "slow", "-pix_fmt", "yuv420p", "-movflags", "+faststart", out]);
     const light = probe(out);
@@ -277,8 +286,17 @@ function lightFootage(dir: string, doc: ProjectDoc, tmp: string): Map<string, st
   return sources;
 }
 
-/** The card's still: the template's frame at POSTER_AT_S, exported through
- * the headless doc export with media read from `sources`. The session points
+/** How much a picture shows: the spread of its brightness, measured on a
+ * small grey copy. A flat frame, black or any one color, scores zero. */
+function detailOf(file: string): number {
+  const px = execFileSync("ffmpeg", ["-v", "error", "-i", file, "-frames:v", "1",
+    "-vf", `scale=${POSTER_PROBE_PX}:${POSTER_PROBE_PX},format=gray`, "-f", "rawvideo", "-"]);
+  const mean = px.reduce((a, v) => a + v, 0) / px.length;
+  return Math.sqrt(px.reduce((a, v) => a + (v - mean) ** 2, 0) / px.length);
+}
+
+/** The card's still: the candidate frame with the most detail, exported
+ * through the headless doc export with media read from `sources`. The session points
  * at a loopback that answers the media presign with the local files. */
 async function renderPoster(doc: ProjectDoc, sources: Map<string, string>, tmp: string, out: string) {
   const server = Bun.serve({
@@ -315,11 +333,22 @@ async function renderPoster(doc: ProjectDoc, sources: Map<string, string>, tmp: 
     await fs.mkdir(handle.tmpDir, { recursive: true });
     const session = { base: server.url.origin, headers: {} };
     const spec = (await buildDocExportSpec(session, doc.id!, POSTER_PRESET, handle.tmpDir, { doc, version: "1" })) as ExportSpec;
-    const at = Math.min(POSTER_AT_S, spec.duration / 2);
-    const range = { start: at, end: Math.min(spec.duration, at + POSTER_SPAN_S) };
-    await runExport(handle, { ...spec, range }, (file) => sources.get(path.basename(file))!);
     const scale = `scale='if(gt(iw,ih),${POSTER_LONG_EDGE},-2)':'if(gt(iw,ih),-2,${POSTER_LONG_EDGE})'`;
-    execFileSync("ffmpeg", ["-v", "error", "-y", "-i", handle.outPath, "-frames:v", "1", "-vf", scale, "-q:v", "3", out]);
+
+    // The template rendered once; each candidate is a still cut from it, and
+    // the most detailed one is the card.
+    await runExport(handle, spec, (file) => sources.get(path.basename(file))!);
+    let best = { detail: -1, file: "" };
+    for (const [i, share] of POSTER_CANDIDATES.entries()) {
+      const still = path.join(tmp, `poster-${i}.jpg`);
+      execFileSync("ffmpeg", ["-v", "error", "-y", "-ss", String(spec.duration * share), "-i", handle.outPath,
+        "-frames:v", "1", "-vf", scale, "-q:v", "3", still]);
+      const detail = detailOf(still);
+      if (detail > best.detail) {
+        best = { detail, file: still };
+      }
+    }
+    await fs.copyFile(best.file, out);
   } finally {
     server.stop(true);
   }
@@ -365,6 +394,7 @@ async function publish(dir: string, metaPath: string) {
     seconds: Math.round(timelineEnd(doc) * 10) / 10,
     slots: footageSlots(doc.clips, doc.assets).length,
     texts: doc.overlays.filter(isTextOverlay).length,
+    music: doc.audioClips.length > 0,
     version: String(Date.now()),
   };
   const index = await readIndex();
