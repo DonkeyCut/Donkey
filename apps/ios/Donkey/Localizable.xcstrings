@@ -1412,7 +1412,7 @@
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Clips werden per Wi-Fi Direct an diesen Mac übertragen, sobald er in der Nähe ist – auch ohne Netzwerk."
+            "value" : "Clips werden per Wi-Fi Direct an diesen Mac gesendet, sobald er in der Nähe ist – mit oder ohne Netzwerk."
           }
         },
         "en" : {
@@ -1424,37 +1424,37 @@
         "es" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Los clips van a esta Mac mediante Wi-Fi Direct cuando está cerca, con o sin red."
+            "value" : "Los clips van a esta Mac por Wi-Fi Direct cuando esté cerca, con o sin red."
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Les clips sont envoyés à ce Mac via Wi-Fi Direct dès qu'il est à proximité, avec ou sans réseau."
+            "value" : "Les clips sont envoyés vers ce Mac via Wi-Fi Direct dès qu'il est à proximité, avec ou sans réseau."
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "このMacが近くにある時は、ネットワーク接続の有無にかかわらずWi-Fi Directでクリップが転送されます。"
+            "value" : "ネットワークの有無にかかわらず、近くにある時はいつでもWi-Fi Direct経由でクリップがこのMacに送信されます。"
           }
         },
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "네트워크 연결 여부와 상관없이 Mac이 근처에 있으면 Wi-Fi Direct로 클립이 전송돼요."
+            "value" : "네트워크 연결 여부와 상관없이 이 Mac이 근처에 있을 때마다 Wi-Fi Direct를 통해 클립이 전송돼요."
           }
         },
         "pt-BR" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Os clipes são enviados para este Mac via Wi-Fi Direct sempre que ele estiver por perto, com ou sem rede."
+            "value" : "Os clipes vão para este Mac via Wi-Fi Direct sempre que ele estiver por perto, com ou sem rede."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "只要此 Mac 在附近，无论是否有网络，片段都会通过 Wi-Fi 直连传输到此 Mac。"
+            "value" : "只要此 Mac 在附近，无论是否有网络，片段都会通过 Wi-Fi Direct 传输到此 Mac。"
           }
         }
       }
@@ -5519,7 +5519,7 @@
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Nicht genügend Cloud-Speicher – gespeicherte Medien bleiben auf diesem iPhone"
+            "value" : "Nicht genug Cloud-Speicher – gespeicherte Medien bleiben auf diesem Smartphone"
           }
         },
         "en" : {
@@ -5531,7 +5531,7 @@
         "es" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Sin espacio suficiente en la nube: los archivos guardados se quedan en este teléfono"
+            "value" : "Almacenamiento en la nube insuficiente — el contenido multimedia guardado se queda en este teléfono"
           }
         },
         "fr" : {
@@ -5543,25 +5543,25 @@
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "クラウドストレージの空き容量が不足しています — 保存したメディアはこのiPhoneに残ります"
+            "value" : "クラウドストレージの空き容量不足 — 保存されたメディアはこのiPhoneに残ります"
           }
         },
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "클라우드 저장 공간 부족 — 저장한 미디어가 이 휴대폰에 유지됨"
+            "value" : "클라우드 저장 공간 부족 — 저장된 미디어는 이 휴대폰에 보관돼요"
           }
         },
         "pt-BR" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Armazenamento na nuvem insuficiente — as mídias salvas ficam neste telefone"
+            "value" : "Armazenamento na nuvem insuficiente — a mídia salva fica neste telefone"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "云存储空间不足 — 保存的媒体将保留在此手机上"
+            "value" : "云存储空间不足 — 已保存的媒体将保留在此手机上"
           }
         }
       }
@@ -9176,7 +9176,7 @@
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Die Clips werden von diesem iPhone gelöscht."
+            "value" : "Die Clips werden von diesem Smartphone übertragen."
           }
         },
         "en" : {
@@ -9188,37 +9188,37 @@
         "es" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Los clips se eliminarán de este teléfono."
+            "value" : "Los clips van desde este teléfono."
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Les clips seront supprimés de ce téléphone."
+            "value" : "Les clips sont envoyés depuis ce téléphone."
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "クリップはこのiPhoneから削除されます。"
+            "value" : "クリップはこのiPhoneから送信されます。"
           }
         },
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "클립이 이 휴대폰에서 삭제돼요."
+            "value" : "클립은 이 휴대폰에서 전송돼요."
           }
         },
         "pt-BR" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Os clipes serão removidos deste telefone."
+            "value" : "Os clipes vão deste telefone."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "这些片段将从此手机移除。"
+            "value" : "片段从此手机传输。"
           }
         }
       }
