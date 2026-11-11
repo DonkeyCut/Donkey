@@ -54,10 +54,11 @@ export function PlansSlide({ run, exit, onSkipPro }: { run: OnboardingRun; exit:
 
   return (
     <div className="mx-auto w-full max-w-[1040px]">
-      <h2 className="text-center text-[clamp(24px,3vw,32px)] leading-[1.1] font-semibold tracking-[-0.02em]">
+      {/* A phone gives the height to the cards. */}
+      <h2 className="hidden text-center text-[clamp(24px,3vw,32px)] leading-[1.1] font-semibold tracking-[-0.02em] md:block">
         {t("title")}
       </h2>
-      <p className="mt-3 text-center text-[16px] text-foreground/70">
+      <p className="mt-3 hidden text-center text-[16px] text-foreground/70 md:block">
         {exit === "paywall" ? t("paywallSubtitle") : t("subtitle")}
       </p>
 
@@ -132,9 +133,9 @@ function PlanCard({
       {offer ? (
         <OfferSticker offer={offer} tone="yellow" className="onboarding-sticker-shake absolute -top-4 -right-4 z-10" />
       ) : null}
-      <div className="flex h-full flex-col p-6 md:p-7">
+      <div className="flex h-full flex-col p-5 md:p-7">
         <div className="flex items-center gap-2">
-          <div className="text-[22px] font-semibold">{copy.name}</div>
+          <div className="text-[20px] font-semibold md:text-[22px]">{copy.name}</div>
           {recommended ? (
             <span className="rounded-full bg-ink px-2.5 py-0.5 text-[12px] font-semibold text-white">
               {t("bestValue")}
@@ -144,17 +145,17 @@ function PlanCard({
         {offer ? (
           <IntroPrice offer={offer} />
         ) : (
-          <div className="mt-4 flex items-baseline gap-1.5">
-            <span className="text-[clamp(34px,4vw,44px)] leading-[0.95] font-semibold">{copy.amount}</span>
+          <div className="mt-2 flex items-baseline gap-1.5 md:mt-4">
+            <span className="text-[30px] leading-[0.95] font-semibold md:text-[clamp(34px,4vw,44px)]">{copy.amount}</span>
             <span className="text-[14px] font-semibold text-[#201715]/70">{copy.cadence}</span>
           </div>
         )}
-        <p className="mt-4 text-[15px] leading-[1.5] text-[#1a1a1a]">{copy.body}</p>
+        <p className="mt-2.5 text-[14px] leading-[1.4] text-[#1a1a1a] md:mt-4 md:text-[15px] md:leading-[1.5]">{copy.body}</p>
 
-        <div className="mt-5 grid gap-2.5">
+        <div className="mt-3 grid gap-1.5 md:mt-5 md:gap-2.5">
           {copy.features.map((feature) => (
-            <div key={feature.text} className="flex items-center gap-2.5 text-[14px] font-semibold text-[#1a1a1a]">
-              <span className="inline-flex size-6 shrink-0 items-center justify-center rounded-full border-2 border-ink bg-white">
+            <div key={feature.text} className="flex items-center gap-2.5 text-[13px] leading-[1.35] font-semibold text-[#1a1a1a] md:text-[14px]">
+              <span className="inline-flex size-5 shrink-0 items-center justify-center rounded-full border-2 border-ink bg-white md:size-6">
                 <FeatureIcon kind={feature.kind} />
               </span>
               {feature.text}
@@ -163,7 +164,7 @@ function PlanCard({
         </div>
 
         {/* The buttons line up across the row whatever each card holds. */}
-        <div className="mt-auto pt-7">
+        <div className="mt-auto pt-4 md:pt-7">
           <Button
             onClick={onPick}
             disabled={busy}
@@ -195,15 +196,15 @@ function IntroPrice({ offer }: { offer: IntroOffer }) {
 
   return (
     <>
-      <div className="mt-4 flex items-baseline gap-3">
-        <span className="text-[clamp(34px,4vw,44px)] leading-[0.95] font-semibold">
+      <div className="mt-2 flex items-baseline gap-3 md:mt-4">
+        <span className="text-[30px] leading-[0.95] font-semibold md:text-[clamp(34px,4vw,44px)]">
           {formatMinorPrice(offer.introMinor, offer.currency, locale)}
         </span>
         <span className="text-[20px] font-semibold text-[#201715]/40 line-through decoration-2">
           {formatMinorPrice(offer.priceMinor, offer.currency, locale)}
         </span>
       </div>
-      <div className="mt-2.5 text-[13px] font-semibold text-[#201715]">
+      <div className="mt-1.5 text-[13px] font-semibold text-[#201715] md:mt-2.5">
         {t("covers", { months: offer.months, price: formatMinorPrice(offer.priceMinor, offer.currency, locale) })}
       </div>
     </>
