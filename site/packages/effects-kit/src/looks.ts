@@ -288,12 +288,16 @@ export function lookFilterLines(
   const k = clampAmount(amount);
   const scale = ((1 << depth) - 1) / 255;
   if (style === "halation") {
+    // The screen blend runs in RGB: on YUV planes it would screen the
+    // neutral chroma too and tint the whole picture purple.
+    const rgb = depth === 10 ? "gbrp10le" : "gbrp";
     return [
       `[${inLabel}]split=2[lkb${tag}][lkh${tag}]`,
       `[lkh${tag}]lutyuv=y='clip((val-${fmt(160 * scale)})*3,0,${fmt(255 * scale)})',` +
         `gblur=sigma=${fmt((18 * hPx) / 1920)},` +
-        `colorchannelmixer=rr=1:gg=0.55:bb=0.35[lkg${tag}]`,
-      `[lkb${tag}][lkg${tag}]blend=all_mode=screen:all_opacity=${fmt(0.6 * k)},format=${pixFmt}[${outLabel}]`,
+        `colorchannelmixer=rr=1:gg=0.55:bb=0.35,format=${rgb}[lkg${tag}]`,
+      `[lkb${tag}]format=${rgb}[lkr${tag}]`,
+      `[lkr${tag}][lkg${tag}]blend=all_mode=screen:all_opacity=${fmt(0.6 * k)},format=${pixFmt}[${outLabel}]`,
     ];
   }
   if (style === "dreamy") {

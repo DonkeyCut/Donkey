@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { spawnSync } from "node:child_process";
 import { lookCssFilter, lookFilterLines, lookPost } from "./looks";
 import { LOOK_IDS } from "./index";
 
@@ -15,7 +16,7 @@ describe("lookFilterLines", () => {
   });
 
   test("halation and dreamy are split/blend graphs", () => {
-    expect(lookFilterLines("a", "b", "halation", 1, 1920, "yuv420p", "t")!.length).toBe(3);
+    expect(lookFilterLines("a", "b", "halation", 1, 1920, "yuv420p", "t")!.length).toBe(4);
     expect(lookFilterLines("a", "b", "dreamy", 1, 1920, "yuv420p", "t")!.length).toBe(3);
   });
 
@@ -67,5 +68,32 @@ describe("canvas recipes", () => {
     for (const id of LOOK_IDS) {
       expect(lookCssFilter(id, 0.3).includes("NaN")).toBe(false);
     }
+  });
+});
+
+// A frame rendered through a look's ffmpeg graph, as its RGB bytes.
+const hasFfmpeg = spawnSync("ffmpeg", ["-version"], { stdio: "ignore" }).status === 0;
+function renderLook(style: string, color: string): Uint8Array {
+  const graph = lookFilterLines("0:v", "out", style, 1, 36, "yuv420p", "t")!.join(";");
+  const run = spawnSync("ffmpeg", ["-v", "error", "-f", "lavfi", "-i", `color=c=${color}:s=64x36:d=0.04`,
+    "-filter_complex", graph, "-map", "[out]", "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"]);
+  return new Uint8Array(run.stdout);
+}
+
+describe("look graphs keep color", () => {
+  // A grey frame below the highlight knee gets no glow, so it stays grey:
+  // blending in YUV would screen the chroma planes and tint it purple.
+  test.skipIf(!hasFfmpeg)("halation leaves a mid grey frame grey", () => {
+    const px = renderLook("halation", "0x808080");
+    const at = (32 + 18 * 64) * 3;
+    expect(Math.abs(px[at] - px[at + 1])).toBeLessThan(4);
+    expect(Math.abs(px[at + 2] - px[at + 1])).toBeLessThan(4);
+  });
+
+  test.skipIf(!hasFfmpeg)("dreamy leaves a mid grey frame grey", () => {
+    const px = renderLook("dreamy", "0x808080");
+    const at = (32 + 18 * 64) * 3;
+    expect(Math.abs(px[at] - px[at + 1])).toBeLessThan(4);
+    expect(Math.abs(px[at + 2] - px[at + 1])).toBeLessThan(4);
   });
 });
