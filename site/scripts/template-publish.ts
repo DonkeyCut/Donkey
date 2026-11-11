@@ -31,6 +31,7 @@
  */
 
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { headSrc } from "@donkeycut/effects-kit";
 import { statSync } from "node:fs";
 import fs from "node:fs/promises";
@@ -396,10 +397,42 @@ async function renderCut(doc: ProjectDoc, sources: Map<string, string>, tmp: str
   }
 }
 
+// A `render` keeps its cut in the project folder, beside the key of what it
+// rendered, so the publish that follows takes its still from it.
+const KEPT_CUT = ".render.mp4";
+const KEPT_KEY = ".render.key";
+
+/** What the picture of a render of `doc` from `dir` depends on: the document
+ * and the size and age of every file it shows. The still is a picture, so the
+ * sound is left out, and a soundtrack added after the render keeps it. */
+function cutKey(dir: string, doc: ProjectDoc): string {
+  const assets = doc.assets.filter((a) => a.type !== "audio");
+  const hash = createHash("sha256").update(JSON.stringify({ ...doc, assets, audioClips: [] }));
+  for (const fileName of [...new Set(assets.map((a) => a.fileName).filter(Boolean))].sort()) {
+    const stat = statSync(path.join(dir, "media", fileName!));
+    hash.update(`${fileName}:${stat.size}:${stat.mtimeMs}`);
+  }
+  return hash.digest("hex");
+}
+
+/** The cut a `render` kept for exactly this document and media, if any. */
+async function keptCut(dir: string, doc: ProjectDoc) {
+  const key = await fs.readFile(path.join(dir, KEPT_KEY), "utf8").catch(() => "");
+  if (key !== cutKey(dir, doc)) {
+    return null;
+  }
+  const file = path.join(dir, KEPT_CUT);
+  if (!(await fs.stat(file).catch(() => null))) {
+    return null;
+  }
+  return { file, duration: probe(file).duration };
+}
+
 /** The card's still: of the candidate frames cut from one render, the one
- * with the most detail. */
-async function renderPoster(doc: ProjectDoc, sources: Map<string, string>, tmp: string, out: string) {
-  const cut = await renderCut(doc, sources, tmp);
+ * with the most detail. A cut kept by `render` for the same document serves
+ * as that render. */
+async function renderPoster(dir: string, doc: ProjectDoc, sources: Map<string, string>, tmp: string, out: string) {
+  const cut = (await keptCut(dir, doc)) ?? (await renderCut(doc, sources, tmp));
   const scale = `scale='if(gt(iw,ih),${POSTER_LONG_EDGE},-2)':'if(gt(iw,ih),-2,${POSTER_LONG_EDGE})'`;
   let best = { detail: -1, file: "" };
   for (const [i, share] of POSTER_CANDIDATES.entries()) {
@@ -537,6 +570,8 @@ async function render(dir: string, metaPath: string, out: string) {
   try {
     const cut = await renderCut(doc, lightFootage(dir, doc, tmp), tmp);
     await fs.copyFile(cut.file, out);
+    await fs.copyFile(cut.file, path.join(dir, KEPT_CUT));
+    await fs.writeFile(path.join(dir, KEPT_KEY), cutKey(dir, doc));
     console.log(`rendered ${meta.id} (${cut.duration.toFixed(1)}s) to ${out}`);
   } finally {
     await fs.rm(tmp, { recursive: true, force: true });
@@ -568,7 +603,7 @@ async function publish(dir: string, metaPath: string) {
     await bakeFrames(meta.id, doc, sources, tmp);
     await bakePeaks(meta.id, doc, sources);
     const poster = path.join(tmp, TEMPLATE_POSTER);
-    await renderPoster(doc, sources, tmp, poster);
+    await renderPoster(dir, doc, sources, tmp, poster);
 
     // Media first, the index last, so the gallery never lists a template whose
     // bytes are still landing.
@@ -601,6 +636,10 @@ async function publish(dir: string, metaPath: string) {
     }
     return index;
   });
+
+  // The kept cut has served its still; it goes once the template is live.
+  await fs.rm(path.join(dir, KEPT_CUT), { force: true });
+  await fs.rm(path.join(dir, KEPT_KEY), { force: true });
   console.log(`published ${meta.id} (${entry.seconds}s, ${entry.slots} slots, ${entry.texts} texts)`);
 }
 
