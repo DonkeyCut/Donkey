@@ -1,6 +1,6 @@
 "use client";
 
-// The starter tour's hold on new projects. While an account owes the tour, the
+// The starter tour's hold on new projects. While a new account owes the tour, the
 // onboarding host in the app shell registers here, and every way of making a
 // project asks first: newProjectAllowed for the home, the sidebar, a file drop
 // and a duplicate. The shared view runs outside the app shell, so its copy
@@ -16,7 +16,7 @@ import { useEnvironment } from "@/cut/lib/environment";
 import { projectHref, useCutBase } from "@/cut/lib/nav";
 import { starterProjectId } from "@/cut/lib/starter";
 import { track } from "@/lib/analytics";
-import { onboardingStage } from "@/lib/onboarding/stage";
+import { tourHoldsNew } from "@/lib/onboarding/stage";
 import { fetchOnboardingState, onboardingQueryKey, useOnboardingState } from "@/queries/onboarding";
 
 let resumeTour: (() => void) | null = null;
@@ -45,7 +45,7 @@ export function tourHoldsProjects(): boolean {
  * account already on its way to its starter. Read fresh, since the view has
  * no app shell keeping the account's stage. */
 export async function tourHoldsCopy(userId: string, base: string): Promise<boolean> {
-  if (onboardingStage(await fetchOnboardingState()) !== "tour") {
+  if (!tourHoldsNew(await fetchOnboardingState())) {
     return false;
   }
   track("onboarding_tour_resumed");
@@ -61,7 +61,7 @@ export function useTourLock(): { locked: boolean; resume: () => void } {
   const userId = useEngineUser();
   const router = useRouter();
   const base = useCutBase();
-  const locked = !chatgpt && onboardingStage(data) === "tour";
+  const locked = !chatgpt && tourHoldsNew(data);
 
   const resume = useCallback(() => {
     if (!userId) {

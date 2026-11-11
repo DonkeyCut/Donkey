@@ -1,7 +1,7 @@
 "use client";
 
-// The app shell's part in onboarding after the slides. While the starter tour
-// is owed it holds new projects (src/cut/lib/tourLock.ts). Once the tour is
+// The app shell's part in onboarding after the slides. While a first run owes
+// the starter tour it holds new projects (src/cut/lib/tourLock.ts). Once the tour is
 // done, or when an account has no starter to tour, it shows the plans, and
 // showing them is what ends onboarding: closing the dialog and leaving for
 // checkout both find the account already done. A subscriber sees the plan they

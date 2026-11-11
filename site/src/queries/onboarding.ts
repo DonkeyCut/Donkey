@@ -107,7 +107,6 @@ function applyUpdate(state: OnboardingState, update: OnboardingUpdate): Onboardi
   if ("restart" in update) {
     return {
       ...state,
-      completedAt: null,
       skipped: false,
       slidesDoneAt: new Date().toISOString(),
       starterReady: true,

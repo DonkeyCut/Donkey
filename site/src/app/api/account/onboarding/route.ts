@@ -107,7 +107,7 @@ export const PUT = withDonkeyAuth(async (request: DonkeyAuthenticatedRequest) =>
     "slidesDone" in update
       ? { slidesDoneAt: new Date() }
       : "restart" in update
-      ? { completedAt: null, skipped: false, slidesDoneAt: new Date(), tourSteps: [] }
+      ? { skipped: false, slidesDoneAt: new Date(), tourSteps: [] }
       : "referralSources" in update
       ? {
           referralSources: [...new Set(update.referralSources)],

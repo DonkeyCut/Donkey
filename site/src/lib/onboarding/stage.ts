@@ -14,12 +14,22 @@ type StageFields = {
   starterReady: boolean;
 };
 
-/** Whether this account still owes us a run of the current sequence. */
+/** Whether this account still owes us a run of the current sequence. A replay
+ * keeps the account's finish, and slides that end after it open a new run. */
 export function needsOnboarding(state: StageFields | undefined): boolean {
   if (!state) {
     return false;
   }
-  return state.completedAt === null || state.version < ONBOARDING_VERSION;
+  if (state.completedAt === null || state.version < ONBOARDING_VERSION) {
+    return true;
+  }
+  return state.slidesDoneAt !== null && Date.parse(state.slidesDoneAt) > Date.parse(state.completedAt);
+}
+
+/** Whether the tour holds new projects: a first run only. A finished account
+ * replaying the tour keeps making projects. */
+export function tourHoldsNew(state: StageFields | undefined): boolean {
+  return onboardingStage(state) === "tour" && state?.completedAt === null;
 }
 
 /** The stage this account is at, or null while the read is in flight. The tour

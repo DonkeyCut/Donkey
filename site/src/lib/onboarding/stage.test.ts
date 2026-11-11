@@ -1,9 +1,10 @@
 import { describe, expect, test } from "bun:test";
 
 import { ONBOARDING_VERSION, TOUR_STEPS } from "@/lib/onboarding/sequence";
-import { nextTourStep, onboardingStage } from "@/lib/onboarding/stage";
+import { nextTourStep, onboardingStage, tourHoldsNew } from "@/lib/onboarding/stage";
 
 const DONE_AT = "2026-10-29T00:00:00.000Z";
+const REPLAYED_AT = "2026-11-11T00:00:00.000Z";
 
 // A brand-new account: nothing done, starter seeded.
 const fresh = {
@@ -40,6 +41,25 @@ describe("onboardingStage", () => {
   // the new fields; it must never land back in the tour or the lock.
   test("leaves a finished account done", () => {
     expect(onboardingStage({ ...fresh, completedAt: DONE_AT })).toBe("done");
+  });
+});
+
+// A finished account that replayed the sequence keeps its finish; slides that
+// ended after it open the tour again.
+describe("replay", () => {
+  const replay = { ...fresh, completedAt: DONE_AT, slidesDoneAt: REPLAYED_AT, tourSteps: ["play"] };
+
+  test("tours the starter again", () => {
+    expect(onboardingStage(replay)).toBe("tour");
+  });
+
+  test("is done once the replay finishes", () => {
+    expect(onboardingStage({ ...replay, completedAt: "2026-11-12T00:00:00.000Z" })).toBe("done");
+  });
+
+  test("never holds new projects", () => {
+    expect(tourHoldsNew(replay)).toBe(false);
+    expect(tourHoldsNew({ ...fresh, slidesDoneAt: DONE_AT })).toBe(true);
   });
 });
 
