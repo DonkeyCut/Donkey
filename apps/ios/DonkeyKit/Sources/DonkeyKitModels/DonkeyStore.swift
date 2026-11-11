@@ -199,11 +199,6 @@ final class RecordingRecord {
     var thumbnailFileName: String?
     var duration: TimeInterval
     var createdAt: Date
-    /// Cloud library asset id once the clip has synced.
-    var remoteAssetId: String?
-    /// The upload name the cloud claimed at presign time. An interrupted
-    /// upload resumes under it instead of claiming a twin.
-    var claimedFileName: String?
 
     init(_ recording: Recording) {
         id = recording.id
@@ -454,9 +449,6 @@ public final class DonkeyStore: IdeasStoring, RecordingStoring, SyncJournalStori
         let id = recording.id
         let descriptor = FetchDescriptor<RecordingRecord>(predicate: #Predicate { $0.id == id })
         if let record = try context.fetch(descriptor).first {
-            if let remote = record.remoteAssetId {
-                context.insert(TombstoneRecord(kind: SyncTombstone.Kind.libraryAsset.rawValue, remoteId: remote, stamp: .now))
-            }
             context.delete(record)
         }
         try context.save()
@@ -593,31 +585,6 @@ public final class DonkeyStore: IdeasStoring, RecordingStoring, SyncJournalStori
         try context.save()
     }
 
-    public func recordingRemote(_ id: UUID) throws -> (assetId: String?, claimedFileName: String?) {
-        let descriptor = FetchDescriptor<RecordingRecord>(predicate: #Predicate { $0.id == id })
-        let record = try context.fetch(descriptor).first
-        return (record?.remoteAssetId, record?.claimedFileName)
-    }
-
-    @discardableResult
-    public func setRecordingRemote(_ id: UUID, assetId: String?, claimedFileName: String?) throws -> Bool {
-        let descriptor = FetchDescriptor<RecordingRecord>(predicate: #Predicate { $0.id == id })
-        guard let record = try context.fetch(descriptor).first else {
-            // The recording was deleted while its upload was in flight, so
-            // the delete had no asset id to tombstone. The finished upload
-            // reports one here; tombstone it so the cloud copy goes too.
-            if let assetId {
-                context.insert(TombstoneRecord(kind: SyncTombstone.Kind.libraryAsset.rawValue, remoteId: assetId, stamp: .now))
-                try context.save()
-            }
-            return false
-        }
-        record.remoteAssetId = assetId
-        record.claimedFileName = claimedFileName
-        try context.save()
-        return true
-    }
-
     /// The cloud copy is gone with no tombstone behind it, so the item keeps
     /// its files and stops counting as synced.
     public func clearInspirationRemote(_ id: UUID) throws {
@@ -640,18 +607,6 @@ public final class DonkeyStore: IdeasStoring, RecordingStoring, SyncJournalStori
     public func inspirationRemoteAssetId(_ id: UUID) throws -> String? {
         let descriptor = FetchDescriptor<InspirationRecord>(predicate: #Predicate { $0.id == id })
         return try context.fetch(descriptor).first?.remoteAssetId
-    }
-
-    /// Drop a recording the cloud deleted. The twin of deleteRecording without
-    /// the tombstone: the delete came down, so nothing goes back up.
-    public func removeRecordingFromCloudDelete(id: UUID) throws {
-        let descriptor = FetchDescriptor<RecordingRecord>(predicate: #Predicate { $0.id == id })
-        guard let record = try context.fetch(descriptor).first else { return }
-        for fileName in [record.fileName, record.thumbnailFileName].compactMap({ $0 }) {
-            try? FileManager.default.removeItem(at: recordingsDirectory.appending(path: fileName))
-        }
-        context.delete(record)
-        try context.save()
     }
 
     public func isInspirationLinkSynced(_ id: UUID) throws -> Bool {

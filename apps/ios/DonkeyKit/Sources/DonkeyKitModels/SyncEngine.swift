@@ -1,15 +1,15 @@
 import Foundation
 
-// The phone's side of sync. One engine owns every queue — recordings up,
-// inspiration up, notes both ways, deletes replayed — against a journal the
+// The phone's side of sync. One engine owns every queue — inspiration up,
+// notes both ways, deletes replayed — against a journal the
 // store persists, so nothing depends on the app staying open: whatever was
 // mid-flight when the app died is picked up from the journal on the next
 // kick. Every byte moves at most once.
 //
 // Two weights of traffic ride different connections. Notes, folders, deletes
 // and saved links are small, so they move whenever the phone is online.
-// Recordings and inspiration media are not, so they wait for Wi-Fi while the
-// app's Wi-Fi-only setting holds.
+// Inspiration media is not, so it waits for Wi-Fi while the app's Wi-Fi-only
+// setting holds. Camera recordings stay on this phone.
 
 nonisolated public struct SyncTombstone: Equatable, Sendable, Identifiable {
     nonisolated public enum Kind: String, Sendable {
@@ -21,8 +21,8 @@ nonisolated public struct SyncTombstone: Equatable, Sendable, Identifiable {
         /// A note label deleted here. The cloud row goes, and every note
         /// wearing it lets it go on both sides.
         case noteLabel
-        /// A synced recording or inspiration item deleted here; the cloud
-        /// asset goes with it.
+        /// A synced inspiration item deleted here; the cloud asset goes with
+        /// it.
         case libraryAsset
     }
 
@@ -71,18 +71,6 @@ public protocol SyncJournalStoring: AnyObject {
     func cleanNoteLabelIds() throws -> [UUID]
     func removeNoteLabelFromCloudDelete(id: UUID) throws
 
-    // Recordings
-    func recordingRemote(_ id: UUID) throws -> (assetId: String?, claimedFileName: String?)
-    /// Journal a recording's cloud copy. Returns false when the row is gone —
-    /// deleted while the bytes were in flight — in which case the store
-    /// leaves a libraryAsset tombstone for `assetId`, so the replay takes the
-    /// fresh cloud copy down with it.
-    @discardableResult
-    func setRecordingRemote(_ id: UUID, assetId: String?, claimedFileName: String?) throws -> Bool
-    /// Remove a recording the cloud deleted, movie and thumbnail with it. No
-    /// tombstone: the delete came down.
-    func removeRecordingFromCloudDelete(id: UUID) throws
-
     // Inspiration
     func inspirationRemoteAssetId(_ id: UUID) throws -> String?
     /// Remove an inspiration item the cloud deleted, its files with it.
@@ -118,8 +106,8 @@ public protocol SyncJournalStoring: AnyObject {
 
 @Observable
 public final class SyncEngine {
-    /// The account is out of cloud storage. The Library banner reads this;
-    /// media uploads pause while it holds.
+    /// The account is out of cloud storage. Media uploads pause while it
+    /// holds.
     public private(set) var storageFull = false
     /// The current network, reported by the app target's path monitor.
     public var network: NetworkPath = .offline {
@@ -129,33 +117,18 @@ public final class SyncEngine {
     /// flipping the switch takes effect on the next kick.
     private let wiFiOnlyForMedia: () -> Bool
 
-    /// Live upload progress per recording, layered over the journal.
-    private var uploadStates: [UUID: RecordingSyncState] = [:]
-    private var uploading: Set<UUID> = []
-
-    public weak var media: MediaModel?
     public weak var ideas: IdeasModel?
 
     private let journal: any SyncJournalStoring
     private let service: any CloudSyncServicing
     private let signedIn: () -> Bool
-    /// Reads a recording's upload payload (bytes, dimensions, poster) off the
-    /// file; the app target implements it with AVFoundation.
-    private let uploadFor: (Recording) async -> LibraryUpload?
     private var running = false
     private var runAgain = false
     /// A pass that ends with work still queued books its own next try, so a
-    /// timeout or a 5xx costs a wait instead of stranding the clip until the
+    /// timeout or a 5xx costs a wait instead of stranding the item until the
     /// app is next launched. Doubles until the ceiling, resets on a clean pass.
     @ObservationIgnored private var retryDelay = SyncEngine.firstRetry
     @ObservationIgnored private var retryScheduled = false
-    /// Recordings whose bytes could not be read. They stop counting as queued
-    /// work, and the loop stops re-probing them. A read can also fail because
-    /// the file was momentarily out of reach — offloaded storage, a move the
-    /// library had not finished settling — so the set clears whenever a new
-    /// recording lands, which is a point where the library has demonstrably
-    /// changed and the stranded takes deserve another look.
-    @ObservationIgnored private var unreadable: Set<UUID> = []
     private static let firstRetry: Duration = .seconds(15)
     private static let retryCeiling: Duration = .seconds(300)
 
@@ -163,44 +136,22 @@ public final class SyncEngine {
         journal: any SyncJournalStoring,
         service: any CloudSyncServicing,
         signedIn: @escaping () -> Bool,
-        wiFiOnlyForMedia: @escaping () -> Bool = { true },
-        uploadFor: @escaping (Recording) async -> LibraryUpload?
+        wiFiOnlyForMedia: @escaping () -> Bool = { true }
     ) {
         self.journal = journal
         self.service = service
         self.signedIn = signedIn
         self.wiFiOnlyForMedia = wiFiOnlyForMedia
-        self.uploadFor = uploadFor
-    }
-
-    /// Journal answers memoized per recording, so a badge read is a set
-    /// lookup instead of a SwiftData fetch per visible card. The engine is
-    /// the journal's only writer, so it refreshes these on its own writes.
-    @ObservationIgnored private var syncedIds: Set<UUID> = []
-    @ObservationIgnored private var checkedIds: Set<UUID> = []
-
-    /// The badge state the Library shows for a recording.
-    public func state(for recording: Recording) -> RecordingSyncState {
-        if let live = uploadStates[recording.id] { return live }
-        if syncedIds.contains(recording.id) { return .synced }
-        if !checkedIds.contains(recording.id) {
-            checkedIds.insert(recording.id)
-            if (try? journal.recordingRemote(recording.id))?.assetId != nil {
-                syncedIds.insert(recording.id)
-                return .synced
-            }
-        }
-        return heldForWiFi ? .waitingForWiFi : .onDevice
     }
 
     /// The connection is cellular and the setting says media stays off it.
-    /// A clip's badge says so, and the Library banner reads the same policy
-    /// once there is something actually waiting on it.
-    public var heldForWiFi: Bool {
+    /// The Ideas banner reads the same policy once there is something
+    /// actually waiting on it.
+    private var heldForWiFi: Bool {
         network == .cellular && wiFiOnlyForMedia()
     }
 
-    /// Media is held back and there is media to hold: what the Library banner
+    /// Media is held back and there is media to hold: what the Ideas banner
     /// shows.
     public var waitingForWiFi: Bool {
         heldForWiFi && pendingMedia
@@ -240,7 +191,7 @@ public final class SyncEngine {
         await run()
     }
 
-    /// Something changed — a new recording, a note edit, the network, a
+    /// Something changed — a saved item, a note edit, the network, a
     /// sign-in. One runner drains every queue; a kick during a run schedules
     /// one more pass so nothing lands between checks.
     public func kick() {
@@ -275,7 +226,6 @@ public final class SyncEngine {
         await syncLibrary()
         await refreshStorage()
         guard !storageFull, mediaAllowed else { return }
-        await uploadPendingRecordings()
         await uploadPendingInspirationMedia()
     }
 
@@ -325,12 +275,9 @@ public final class SyncEngine {
         }
     }
 
-    /// Bytes the phone still owes the cloud: clips it shot, media it saved.
+    /// Bytes the phone still owes the cloud: media it saved.
     private var pendingMedia: Bool {
-        if (media?.recordings ?? []).contains(where: {
-            !unreadable.contains($0.id) && ((try? journal.recordingRemote($0.id))?.assetId) == nil
-        }) { return true }
-        return (ideas?.inspiration ?? []).contains { item in
+        (ideas?.inspiration ?? []).contains { item in
             guard case .media = item.kind else { return false }
             return ((try? journal.inspirationRemoteAssetId(item.id)) ?? nil) == nil
         }
@@ -369,41 +316,24 @@ public final class SyncEngine {
 
     /// The other half of a delete: what left the shelf at the desk leaves this
     /// phone too. The listing carries every asset the shelf holds and every one
-    /// someone deleted, so a synced clip named among the tombstones goes here,
+    /// someone deleted, so a synced item named among the tombstones goes here,
     /// files and all.
     ///
     /// An id in neither set left by some other hand — the storage sweep
     /// reclaiming a lapsed account. Nothing is deleted for that: the phone
-    /// forgets the cloud copy instead, so the clip reads as on-device again and
+    /// forgets the cloud copy instead, so the item reads as unsynced again and
     /// goes back up once there is room.
     private func syncLibrary() async {
-        // The local side is read before the listing is asked for, so a clip
+        // The local side is read before the listing is asked for, so an item
         // that finishes uploading meanwhile is never judged by a listing that
         // predates it.
-        let recordings: [(id: UUID, assetId: String)] = (media?.recordings ?? []).compactMap {
-            recording in
-            ((try? journal.recordingRemote(recording.id))?.assetId)
-                .map { (recording.id, $0) }
-        }
         let inspiration: [(id: UUID, assetId: String)] = (ideas?.inspiration ?? []).compactMap {
             item in
             ((try? journal.inspirationRemoteAssetId(item.id)) ?? nil)
                 .map { (item.id, $0) }
         }
-        guard !recordings.isEmpty || !inspiration.isEmpty else { return }
+        guard !inspiration.isEmpty else { return }
         guard let shelf = try? await service.fetchLibrary() else { return }
-        var recordingsChanged = false
-        for (id, assetId) in recordings where !shelf.assetIds.contains(assetId) {
-            uploadStates[id] = nil
-            syncedIds.remove(id)
-            checkedIds.remove(id)
-            if shelf.deletedIds.contains(assetId) {
-                try? journal.removeRecordingFromCloudDelete(id: id)
-                recordingsChanged = true
-            } else {
-                _ = try? journal.setRecordingRemote(id, assetId: nil, claimedFileName: nil)
-            }
-        }
         var inspirationChanged = false
         for (id, assetId) in inspiration where !shelf.assetIds.contains(assetId) {
             if shelf.deletedIds.contains(assetId) {
@@ -413,7 +343,6 @@ public final class SyncEngine {
             }
             inspirationChanged = true
         }
-        if recordingsChanged { media?.reloadFromStore() }
         if inspirationChanged { ideas?.reloadFromStore() }
     }
 
@@ -619,71 +548,6 @@ public final class SyncEngine {
         )
     }
 
-    // MARK: Recordings
-
-    /// A finished recording heads for the cloud at once, or waits for Wi-Fi.
-    public func recordingAdded(_ recording: Recording) {
-        unreadable.removeAll()
-        kick()
-    }
-
-    private func uploadPendingRecordings() async {
-        for recording in media?.recordings ?? [] {
-            guard mediaAllowed, !storageFull else { return }
-            let remote = try? journal.recordingRemote(recording.id)
-            guard remote?.assetId == nil,
-                  !uploading.contains(recording.id),
-                  !unreadable.contains(recording.id) else { continue }
-            guard var upload = await uploadFor(recording) else {
-                unreadable.insert(recording.id)
-                continue
-            }
-            upload.resume = remote?.claimedFileName != nil
-            if let claimed = remote?.claimedFileName { upload.fileName = claimed }
-            uploading.insert(recording.id)
-            uploadStates[recording.id] = .uploading(percent: 0)
-            defer { uploading.remove(recording.id) }
-            do {
-                let asset = try await service.uploadLibraryMedia(upload) { [weak self] fraction in
-                    Task { @MainActor [weak self] in
-                        self?.setUploadProgress(recording.id, fraction)
-                    }
-                }
-                let journaled = ((try? journal.setRecordingRemote(recording.id, assetId: asset.id, claimedFileName: asset.fileName)) ?? false)
-                if journaled {
-                    uploadStates[recording.id] = .synced
-                    syncedIds.insert(recording.id)
-                    checkedIds.remove(recording.id)
-                } else {
-                    // Deleted mid-upload: the journal left a tombstone for
-                    // the fresh asset; another pass replays it.
-                    uploadStates[recording.id] = nil
-                    kick()
-                }
-                storageFull = false
-            } catch CloudSyncError.storageFull {
-                uploadStates[recording.id] = nil
-                // Remember the claim if one was minted before the refusal —
-                // the retry resumes under the same name.
-                _ = try? journal.setRecordingRemote(recording.id, assetId: nil, claimedFileName: upload.resume ? upload.fileName : nil)
-                storageFull = true
-                return
-            } catch CloudSyncError.unauthorized {
-                uploadStates[recording.id] = nil
-                return
-            } catch {
-                // Transient: keep the claim so the retry resumes, drop the bar.
-                uploadStates[recording.id] = nil
-                _ = try? journal.setRecordingRemote(recording.id, assetId: nil, claimedFileName: upload.fileName)
-            }
-        }
-    }
-
-    private func setUploadProgress(_ id: UUID, _ fraction: Double) {
-        guard uploading.contains(id) else { return }
-        uploadStates[id] = .uploading(percent: Int((fraction * 100).rounded()))
-    }
-
     // MARK: Inspiration
 
     /// Saved links, both halves of the round trip: a link the cloud has not
@@ -786,7 +650,7 @@ public final class SyncEngine {
                 resume: true
             )
             do {
-                let asset = try await service.uploadLibraryMedia(upload, progress: { _ in })
+                let asset = try await service.uploadLibraryMedia(upload)
                 try? journal.markInspirationMediaSynced(item.id, remoteAssetId: asset.id)
                 storageFull = false
             } catch CloudSyncError.storageFull {

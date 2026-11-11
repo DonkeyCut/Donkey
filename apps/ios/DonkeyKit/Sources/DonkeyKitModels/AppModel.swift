@@ -17,8 +17,8 @@ public final class AppModel {
     }
 
     /// Videos ride Wi-Fi only. Notes, folders, deletes and saved links are
-    /// small enough to spend cellular data on; a recording is not, so it waits
-    /// for Wi-Fi while this holds. The sync engine reads it as policy.
+    /// small enough to spend cellular data on; saved media is not, so it
+    /// waits for Wi-Fi while this holds. The sync engine reads it as policy.
     ///
     /// The switch lives on the app's own page in iOS Settings, which writes
     /// this key; `refreshFromDefaults()` is how the app picks up what it says.

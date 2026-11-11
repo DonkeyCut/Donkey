@@ -20,7 +20,7 @@ nonisolated public struct StorageUsage: Equatable, Sendable {
     }
 }
 
-/// One library upload: a recording off the camera or an inspiration item.
+/// One library upload: an inspiration item saved on the phone.
 nonisolated public struct LibraryUpload: Sendable {
     public var fileURL: URL
     public var fileName: String
@@ -31,9 +31,7 @@ nonisolated public struct LibraryUpload: Sendable {
     public var duration: TimeInterval
     public var width: Int?
     public var height: Int?
-    public var origin: String // "camera" | "inspiration"
-    /// JPEG poster stored beside the media so the desktop card paints at once.
-    public var poster: Data?
+    public var origin: String // "inspiration"
     /// True when this upload was claimed before (the journal holds the name):
     /// the server re-mints the same claim instead of minting a twin.
     public var resume: Bool
@@ -49,7 +47,6 @@ nonisolated public struct LibraryUpload: Sendable {
         width: Int? = nil,
         height: Int? = nil,
         origin: String,
-        poster: Data? = nil,
         resume: Bool = false
     ) {
         self.fileURL = fileURL
@@ -62,7 +59,6 @@ nonisolated public struct LibraryUpload: Sendable {
         self.width = width
         self.height = height
         self.origin = origin
-        self.poster = poster
         self.resume = resume
     }
 }
@@ -276,8 +272,8 @@ nonisolated public enum CloudSyncError: Error, Equatable {
     /// The server refused with a reason worth reading out loud — out of
     /// renders for the day, out of room. The message is the server's own.
     case refused(String)
-    /// The account is out of cloud storage: uploads pause, the Library shows
-    /// its banner, and nothing retries until space frees up.
+    /// The account is out of cloud storage: uploads pause, and nothing
+    /// retries until space frees up.
     case storageFull
     /// The session is gone; syncing waits for the next sign-in.
     case unauthorized
@@ -291,12 +287,8 @@ nonisolated public enum CloudSyncError: Error, Equatable {
 
 /// What the app target's CutCloudClient does for the sync engine.
 public protocol CloudSyncServicing: AnyObject {
-    /// Presign → PUT the bytes to R2 → complete. Reports rough progress in
-    /// 0...1.
-    func uploadLibraryMedia(
-        _ upload: LibraryUpload,
-        progress: @escaping @Sendable (Double) -> Void
-    ) async throws -> RemoteAsset
+    /// Presign → PUT the bytes to R2 → complete.
+    func uploadLibraryMedia(_ upload: LibraryUpload) async throws -> RemoteAsset
     func deleteLibraryAsset(id: String) async throws
     /// The shelf's asset ids and its tombstones, for the pass that mirrors
     /// deletes made at the desk back onto this phone.

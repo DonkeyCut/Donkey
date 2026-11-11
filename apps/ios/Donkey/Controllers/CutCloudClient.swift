@@ -4,9 +4,7 @@ import Foundation
 import UIKit
 
 /// The phone's HTTP client for the hosted Cut API (/api/cut-cloud/*). The
-/// bearer session comes from the keychain, and every request carries the iOS
-/// client header — the marker that links this account for the desktop's phone
-/// features.
+/// bearer session comes from the keychain.
 final class CutCloudClient: NSObject {
     private let base = AuthBackend.baseURL
 
@@ -64,7 +62,6 @@ final class CutCloudClient: NSObject {
         // the desk a moment ago — so nothing answers them out of the URL cache.
         if method == "GET" { request.cachePolicy = .reloadIgnoringLocalCacheData }
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        request.setValue("ios", forHTTPHeaderField: "x-donkey-cut-client")
         if let body {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.httpBody = try? JSONSerialization.data(withJSONObject: body)
@@ -199,10 +196,7 @@ extension CutCloudClient: CloudSyncServicing {
         var fileName: String
     }
 
-    func uploadLibraryMedia(
-        _ upload: LibraryUpload,
-        progress: @escaping @Sendable (Double) -> Void
-    ) async throws -> RemoteAsset {
+    func uploadLibraryMedia(_ upload: LibraryUpload) async throws -> RemoteAsset {
         let presign = try await presignLibrary(
             fileName: upload.fileName,
             mime: upload.mime,
@@ -211,12 +205,7 @@ extension CutCloudClient: CloudSyncServicing {
         )
         if presign.done != true {
             guard let url = presign.url.flatMap(URL.init(string:)) else { throw CloudSyncError.transport }
-            try await putFile(upload.fileURL, to: url, mime: upload.mime, progress: progress)
-        }
-        let posterKey: String? = if let poster = upload.poster {
-            try? await uploadPoster(poster, besides: presign.fileName)
-        } else {
-            nil
+            try await putFile(upload.fileURL, to: url, mime: upload.mime)
         }
         // The row carries the footage's length and size: the desktop cuts
         // clips to them and sizes the card from them. A camera-roll import
@@ -232,13 +221,11 @@ extension CutCloudClient: CloudSyncServicing {
             meta["width"] = width
             meta["height"] = height
         }
-        var body: [String: Any] = ["key": presign.key, "meta": meta]
-        if let posterKey { body["posterKey"] = posterKey }
+        let body: [String: Any] = ["key": presign.key, "meta": meta]
         let data = try await send(
             try request("POST", "/api/cut-cloud/library/complete", body: body)
         )
         let asset = try decode(AssetResponse.self, from: data)
-        progress(1)
         return RemoteAsset(id: asset.id, fileName: asset.fileName)
     }
 
@@ -291,50 +278,12 @@ extension CutCloudClient: CloudSyncServicing {
         return out
     }
 
-    /// The recording's thumbnail goes up beside the movie so the desktop card
-    /// paints without decoding video. Best-effort: the upload stands without it.
-    private func uploadPoster(_ poster: Data, besides fileName: String) async throws -> String {
-        let posterName = (fileName as NSString).deletingPathExtension + "-poster.jpg"
-        let presign = try await presignLibrary(
-            fileName: posterName,
-            mime: "image/jpeg",
-            bytes: Int64(poster.count),
-            resume: true
-        )
-        if presign.done != true {
-            guard let url = presign.url.flatMap(URL.init(string:)) else { throw CloudSyncError.transport }
-            try await putData(poster, to: url, mime: "image/jpeg")
-        }
-        return presign.key
-    }
-
-    private func putFile(
-        _ file: URL,
-        to url: URL,
-        mime: String,
-        progress: @escaping @Sendable (Double) -> Void
-    ) async throws {
+    private func putFile(_ file: URL, to url: URL, mime: String) async throws {
         let response: URLResponse
         do {
             (_, response) = try await URLSession.shared.upload(
                 for: putRequest(url, mime: mime),
-                fromFile: file,
-                delegate: UploadProgressDelegate(progress)
-            )
-        } catch {
-            throw CloudSyncError.transport
-        }
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-            throw CloudSyncError.transport
-        }
-    }
-
-    private func putData(_ data: Data, to url: URL, mime: String) async throws {
-        let response: URLResponse
-        do {
-            (_, response) = try await URLSession.shared.upload(
-                for: putRequest(url, mime: mime),
-                from: data
+                fromFile: file
             )
         } catch {
             throw CloudSyncError.transport
@@ -753,40 +702,6 @@ extension CutCloudClient: AnalyticsServicing {
     }
 }
 
-// MARK: - Recording payloads
-
-extension CutCloudClient {
-    /// Everything an upload needs, read off the finished recording: bytes on
-    /// disk, probed dimensions, and the stored thumbnail as the poster.
-    static func uploadPayload(for recording: Recording, media: MediaModel) async -> LibraryUpload? {
-        let fileURL = media.movieURL(for: recording)
-        guard let size = fileURL.fileByteCount else { return nil }
-        var width: Int?
-        var height: Int?
-        let asset = AVURLAsset(url: fileURL)
-        if let track = try? await asset.loadTracks(withMediaType: .video).first,
-           let (naturalSize, transform) = try? await track.load(.naturalSize, .preferredTransform) {
-            let rect = CGRect(origin: .zero, size: naturalSize).applying(transform)
-            width = Int(abs(rect.width).rounded())
-            height = Int(abs(rect.height).rounded())
-        }
-        let poster = media.thumbnailURL(for: recording).flatMap { try? Data(contentsOf: $0) }
-        return LibraryUpload(
-            fileURL: fileURL,
-            fileName: recording.fileName,
-            mime: "video/quicktime",
-            bytes: size,
-            name: "Recording \(recording.createdAt.formatted(date: .abbreviated, time: .shortened))",
-            type: "video",
-            duration: recording.duration,
-            width: width,
-            height: height,
-            origin: "camera",
-            poster: poster
-        )
-    }
-}
-
 // MARK: - Session transport
 
 private extension URLSession {
@@ -800,26 +715,6 @@ private extension URLSession {
 }
 
 // MARK: - Session delegates
-
-/// Reports PUT progress off the session's queue back to the caller.
-private nonisolated final class UploadProgressDelegate: NSObject, URLSessionTaskDelegate {
-    private let onProgress: @Sendable (Double) -> Void
-
-    init(_ onProgress: @escaping @Sendable (Double) -> Void) {
-        self.onProgress = onProgress
-    }
-
-    func urlSession(
-        _ session: URLSession,
-        task: URLSessionTask,
-        didSendBodyData bytesSent: Int64,
-        totalBytesSent: Int64,
-        totalBytesExpectedToSend: Int64
-    ) {
-        guard totalBytesExpectedToSend > 0 else { return }
-        onProgress(Double(totalBytesSent) / Double(totalBytesExpectedToSend))
-    }
-}
 
 /// Stops the API's 302 so the Location header can be read.
 private nonisolated final class RedirectCatcher: NSObject, URLSessionTaskDelegate {

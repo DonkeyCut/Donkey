@@ -346,10 +346,7 @@ import Testing
         /// Runs while the bytes are "in flight", before the upload returns.
         var onUpload: (() -> Void)?
 
-        func uploadLibraryMedia(
-            _ upload: LibraryUpload,
-            progress: @escaping @Sendable (Double) -> Void
-        ) async throws -> RemoteAsset {
+        func uploadLibraryMedia(_ upload: LibraryUpload) async throws -> RemoteAsset {
             uploads.append(upload.fileName)
             onUpload?()
             let asset = try uploadResult.get()
@@ -471,21 +468,8 @@ import Testing
             journal: store,
             service: cloud,
             signedIn: { true },
-            wiFiOnlyForMedia: { wiFiOnlyForMedia },
-            uploadFor: { recording in
-                LibraryUpload(
-                    fileURL: media.movieURL(for: recording),
-                    fileName: recording.fileName,
-                    mime: "video/quicktime",
-                    bytes: 100,
-                    name: "Recording",
-                    type: "video",
-                    duration: recording.duration,
-                    origin: "camera"
-                )
-            }
+            wiFiOnlyForMedia: { wiFiOnlyForMedia }
         )
-        engine.media = media
         engine.ideas = ideas
         media.sync = engine
         // Assigned before the engine is observed so the didSet kick (a no-op
@@ -501,91 +485,51 @@ import Testing
         return rig.media.recordings[0]
     }
 
-    @Test func recordingUploadsOnceAndJournals() async throws {
+    /// Camera recordings stay on this phone: no upload, and a delete leaves
+    /// nothing for the cloud.
+    @Test func recordingsStayOnThePhone() async throws {
         let rig = try makeRig()
         let recording = try ingestClip(rig)
         await rig.engine.run()
-        #expect(rig.cloud.uploads == [recording.fileName])
-        #expect(rig.engine.state(for: recording) == .synced)
-        // A second pass moves nothing: the journal already holds the asset.
+        #expect(rig.cloud.uploads.isEmpty)
+        #expect(!rig.engine.waitingForWiFi)
+
+        rig.media.delete(recording)
         await rig.engine.run()
-        #expect(rig.cloud.uploads.count == 1)
+        #expect(try rig.store.tombstones().isEmpty)
+        #expect(rig.cloud.deletedAssets.isEmpty)
     }
 
-    @Test func fullStoragePausesUploadsAndRaisesBanner() async throws {
+    @Test func fullStoragePausesUploads() async throws {
         let rig = try makeRig()
         rig.cloud.usage = StorageUsage(bytes: 10, quotaBytes: 10)
-        _ = try ingestClip(rig)
+        rig.ideas.addInspiration(mediaData: Data(repeating: 3, count: 64), isVideo: false)
         await rig.engine.run()
         #expect(rig.engine.storageFull)
         #expect(rig.cloud.uploads.isEmpty)
     }
 
-    @Test func transientFailureKeepsClaimForResume() async throws {
+    @Test func deleteOfSyncedInspirationReachesCloud() async throws {
         let rig = try makeRig()
-        let recording = try ingestClip(rig)
-        rig.cloud.uploadResult = .failure(.transport)
+        let item = try #require(rig.ideas.addInspiration(mediaData: Data(repeating: 3, count: 64), isVideo: false))
         await rig.engine.run()
-        let journaled = try rig.store.recordingRemote(recording.id)
-        #expect(journaled.assetId == nil)
-        #expect(journaled.claimedFileName == recording.fileName)
-        #expect(rig.engine.state(for: recording) == .onDevice)
-        rig.cloud.uploadResult = .success(RemoteAsset(id: "asset-9", fileName: recording.fileName))
-        await rig.engine.run()
-        #expect(rig.engine.state(for: recording) == .synced)
-    }
-
-    @Test func deleteDuringUploadTombstonesTheFreshAsset() async throws {
-        let rig = try makeRig()
-        let recording = try ingestClip(rig)
-        rig.cloud.onUpload = { rig.media.delete(recording) }
-        await rig.engine.run()
-        // The finished upload found its row gone, so the journal holds a
-        // tombstone for the asset; the next pass takes the cloud copy down.
+        rig.ideas.deleteInspiration(id: item.id)
         await rig.engine.run()
         #expect(rig.cloud.deletedAssets == ["asset-1"])
         #expect(try rig.store.tombstones().isEmpty)
-    }
-
-    @Test func deleteOfSyncedRecordingReachesCloud() async throws {
-        let rig = try makeRig()
-        let recording = try ingestClip(rig)
-        await rig.engine.run()
-        rig.media.delete(recording)
-        await rig.engine.run()
-        #expect(rig.cloud.deletedAssets == ["asset-1"])
-        #expect(try rig.store.tombstones().isEmpty)
-    }
-
-    @Test func cloudDeleteTakesTheClipOffThePhone() async throws {
-        let rig = try makeRig()
-        let recording = try ingestClip(rig)
-        let movie = rig.media.movieURL(for: recording)
-        await rig.engine.run()
-        // Deleted at the desk: the shelf tombstones the asset.
-        try await rig.cloud.deleteLibraryAsset(id: "asset-1")
-        rig.cloud.deletedAssets.removeAll()
-        await rig.engine.run()
-        #expect(rig.media.recordings.isEmpty)
-        #expect(!FileManager.default.fileExists(atPath: movie.localPath))
-        // The delete came down, so nothing goes back up for it.
-        #expect(try rig.store.tombstones().isEmpty)
-        #expect(rig.cloud.deletedAssets.isEmpty)
-        #expect(rig.cloud.uploads.count == 1)
     }
 
     @Test func anAssetThatVanishedGoesBackUpInsteadOfLeaving() async throws {
         let rig = try makeRig()
-        let recording = try ingestClip(rig)
+        let item = try #require(rig.ideas.addInspiration(mediaData: Data(repeating: 3, count: 64), isVideo: false))
         await rig.engine.run()
         // The storage sweep collected it: gone from the shelf with no
         // tombstone, which is not a delete anyone made.
         rig.cloud.libraryAssets.removeAll()
         await rig.engine.run()
-        #expect(rig.media.recordings.map(\.id) == [recording.id])
-        // The same pass that noticed puts the clip back on the shelf.
+        #expect(rig.ideas.inspiration.map(\.id) == [item.id])
+        // The same pass that noticed puts the item back on the shelf.
         #expect(rig.cloud.uploads.count == 2)
-        #expect(rig.engine.state(for: recording) == .synced)
     }
 
     @Test func cloudDeleteTakesTheInspirationItemToo() async throws {
@@ -905,10 +849,9 @@ import Testing
 
     @Test func cellularCarriesNotesAndHoldsVideos() async throws {
         // The default: notes are small enough to spend cellular data on, a
-        // clip is not. The clip says so on its card and moves on Wi-Fi.
+        // saved video is not. It moves on Wi-Fi.
         let rig = try makeRig()
         rig.engine.network = .cellular
-        let recording = try ingestClip(rig)
         rig.ideas.addInspiration(mediaData: Data(repeating: 3, count: 64), isVideo: true)
         rig.ideas.openEditor()
         rig.ideas.draft?.body = "typed on the train"
@@ -916,23 +859,20 @@ import Testing
         await rig.engine.run()
         #expect(rig.cloud.uploads.isEmpty)
         #expect(rig.cloud.notes[note.id] != nil)
-        #expect(rig.engine.state(for: recording) == .waitingForWiFi)
         #expect(rig.engine.waitingForWiFi)
 
         rig.engine.network = .wifi
         await rig.engine.run()
-        #expect(rig.cloud.uploads.count == 2)
-        #expect(rig.engine.state(for: recording) == .synced)
+        #expect(rig.cloud.uploads.count == 1)
         #expect(!rig.engine.waitingForWiFi)
     }
 
     @Test func cellularMovesVideosWhenTheSettingIsOff() async throws {
         let rig = try makeRig(wiFiOnlyForMedia: false)
         rig.engine.network = .cellular
-        let recording = try ingestClip(rig)
+        rig.ideas.addInspiration(mediaData: Data(repeating: 3, count: 64), isVideo: true)
         await rig.engine.run()
-        #expect(rig.cloud.uploads == [recording.fileName])
-        #expect(rig.engine.state(for: recording) == .synced)
+        #expect(rig.cloud.uploads.count == 1)
         #expect(!rig.engine.waitingForWiFi)
     }
 
@@ -940,11 +880,11 @@ import Testing
         // Everything light keeps moving while media waits: a delete made here
         // reaches the cloud, and a saved link is handed to the worker.
         let rig = try makeRig()
-        let recording = try ingestClip(rig)
+        let item = try #require(rig.ideas.addInspiration(mediaData: Data(repeating: 3, count: 64), isVideo: false))
         await rig.engine.run()
-        let assetId = try #require(try rig.store.recordingRemote(recording.id).assetId)
+        let assetId = try #require(try rig.store.inspirationRemoteAssetId(item.id))
         rig.engine.network = .cellular
-        rig.media.delete(recording)
+        rig.ideas.deleteInspiration(id: item.id)
         #expect(rig.ideas.addInspiration(urlText: "https://example.com/clip"))
         await rig.engine.run()
         #expect(rig.cloud.deletedAssets == [assetId])
@@ -965,7 +905,7 @@ import Testing
     @Test func offlineMovesNothing() async throws {
         let rig = try makeRig()
         rig.engine.network = .offline
-        _ = try ingestClip(rig)
+        rig.ideas.addInspiration(mediaData: Data(repeating: 3, count: 64), isVideo: false)
         rig.ideas.openEditor()
         rig.ideas.draft?.body = "typed in a tunnel"
         let note = rig.ideas.saveDraft()!

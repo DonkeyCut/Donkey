@@ -58,7 +58,7 @@ struct MacLinkSheet: View {
         } header: {
             Text("Paired")
         } footer: {
-            Text("Clips go to this Mac over Wi-Fi Direct whenever it is nearby, with or without a network. They still upload to the cloud separately once there is internet.")
+            Text("Clips go to this Mac over Wi-Fi Direct whenever it is nearby, with or without a network.")
         }
 
         Section {

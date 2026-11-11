@@ -1406,55 +1406,55 @@
         }
       }
     },
-    "Clips go to this Mac over Wi-Fi Direct whenever it is nearby, with or without a network. They still upload to the cloud separately once there is internet." : {
+    "Clips go to this Mac over Wi-Fi Direct whenever it is nearby, with or without a network." : {
       "extractionState" : "manual",
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Clips werden per Wi-Fi Direct an diesen Mac übertragen, sobald er in der Nähe ist – auch ohne Netzwerk. Sobald eine Internetverbindung besteht, werden sie zusätzlich in die Cloud geladen."
+            "value" : "Clips werden per Wi-Fi Direct an diesen Mac übertragen, sobald er in der Nähe ist – auch ohne Netzwerk."
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Clips go to this Mac over Wi-Fi Direct whenever it is nearby, with or without a network. They still upload to the cloud separately once there is internet."
+            "value" : "Clips go to this Mac over Wi-Fi Direct whenever it is nearby, with or without a network."
           }
         },
         "es" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Los clips van a esta Mac mediante Wi-Fi Direct cuando está cerca, con o sin red. Se subirán a la nube por separado cuando haya internet."
+            "value" : "Los clips van a esta Mac mediante Wi-Fi Direct cuando está cerca, con o sin red."
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Les clips sont envoyés à ce Mac via Wi-Fi Direct dès qu'il est à proximité, avec ou sans réseau. Ils sont tout de même téléversés sur le cloud dès qu'une connexion internet est disponible."
+            "value" : "Les clips sont envoyés à ce Mac via Wi-Fi Direct dès qu'il est à proximité, avec ou sans réseau."
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "このMacが近くにある時は、ネットワーク接続の有無にかかわらずWi-Fi Directでクリップが転送されます。インターネット接続があれば、別途クラウドにもアップロードされます。"
+            "value" : "このMacが近くにある時は、ネットワーク接続の有無にかかわらずWi-Fi Directでクリップが転送されます。"
           }
         },
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "네트워크 연결 여부와 상관없이 Mac이 근처에 있으면 Wi-Fi Direct로 클립이 전송돼요. 인터넷이 연결되면 클라우드에도 별도로 업로드됩니다."
+            "value" : "네트워크 연결 여부와 상관없이 Mac이 근처에 있으면 Wi-Fi Direct로 클립이 전송돼요."
           }
         },
         "pt-BR" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Os clipes são enviados para este Mac via Wi-Fi Direct sempre que ele estiver por perto, com ou sem rede. Eles também serão enviados para a nuvem separadamente assim que houver internet."
+            "value" : "Os clipes são enviados para este Mac via Wi-Fi Direct sempre que ele estiver por perto, com ou sem rede."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "只要此 Mac 在附近，无论是否有网络，片段都会通过 Wi-Fi 直连传输到此 Mac。一旦连入互联网，片段仍会单独上传到云端。"
+            "value" : "只要此 Mac 在附近，无论是否有网络，片段都会通过 Wi-Fi 直连传输到此 Mac。"
           }
         }
       }
@@ -5513,55 +5513,55 @@
         }
       }
     },
-    "Not enough cloud storage — recordings stay on this phone" : {
+    "Not enough cloud storage — saved media stays on this phone" : {
       "extractionState" : "manual",
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Nicht genügend Cloud-Speicher – Aufnahmen bleiben auf diesem iPhone"
+            "value" : "Nicht genügend Cloud-Speicher – gespeicherte Medien bleiben auf diesem iPhone"
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Not enough cloud storage — recordings stay on this phone"
+            "value" : "Not enough cloud storage — saved media stays on this phone"
           }
         },
         "es" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Sin espacio suficiente en la nube: las grabaciones se quedan en este teléfono"
+            "value" : "Sin espacio suficiente en la nube: los archivos guardados se quedan en este teléfono"
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Stockage cloud insuffisant — les enregistrements restent sur ce téléphone"
+            "value" : "Stockage cloud insuffisant — les médias enregistrés restent sur ce téléphone"
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "クラウドストレージの空き容量が不足しています — 録画はこのiPhoneに保存されます"
+            "value" : "クラウドストレージの空き容量が不足しています — 保存したメディアはこのiPhoneに残ります"
           }
         },
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "클라우드 저장 공간 부족 — 녹화본이 이 휴대폰에 유지됨"
+            "value" : "클라우드 저장 공간 부족 — 저장한 미디어가 이 휴대폰에 유지됨"
           }
         },
         "pt-BR" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Armazenamento na nuvem insuficiente — as gravações ficam neste telefone"
+            "value" : "Armazenamento na nuvem insuficiente — as mídias salvas ficam neste telefone"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "云存储空间不足 — 录制内容将保留在此手机上"
+            "value" : "云存储空间不足 — 保存的媒体将保留在此手机上"
           }
         }
       }
@@ -8640,59 +8640,6 @@
         }
       }
     },
-    "Syncing" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Wird synchronisiert"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Syncing"
-          }
-        },
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Sincronizando"
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Synchronisation"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "同期中"
-          }
-        },
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "동기화 중"
-          }
-        },
-        "pt-BR" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Sincronizando"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "正在同步"
-          }
-        }
-      }
-    },
     "System" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -9223,56 +9170,55 @@
         }
       }
     },
-    "The clips go from this phone and from the cloud." : {
-      "comment" : "Delete confirmation: deleting removes the clips from this phone and from the cloud.",
+    "The clips go from this phone." : {
       "extractionState" : "manual",
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Die Clips werden von diesem iPhone und aus der Cloud gelöscht."
+            "value" : "Die Clips werden von diesem iPhone gelöscht."
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "The clips go from this phone and from the cloud."
+            "value" : "The clips go from this phone."
           }
         },
         "es" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Los clips se eliminarán de este teléfono y de la nube."
+            "value" : "Los clips se eliminarán de este teléfono."
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Les clips seront supprimés de ce téléphone et du cloud."
+            "value" : "Les clips seront supprimés de ce téléphone."
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "クリップはこのiPhoneとクラウドから削除されます。"
+            "value" : "クリップはこのiPhoneから削除されます。"
           }
         },
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "클립이 이 휴대폰과 클라우드에서 삭제돼요."
+            "value" : "클립이 이 휴대폰에서 삭제돼요."
           }
         },
         "pt-BR" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Os clipes serão removidos deste telefone e da nuvem."
+            "value" : "Os clipes serão removidos deste telefone."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "这些片段将从此手机和云端移除。"
+            "value" : "这些片段将从此手机移除。"
           }
         }
       }
@@ -10547,59 +10493,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "等待获取…"
-          }
-        }
-      }
-    },
-    "Wi-Fi" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "WLAN"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Wi-Fi"
-          }
-        },
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Wi-Fi"
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Wi-Fi"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Wi-Fi"
-          }
-        },
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Wi-Fi"
-          }
-        },
-        "pt-BR" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Wi-Fi"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Wi-Fi"
           }
         }
       }

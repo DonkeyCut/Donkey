@@ -61,7 +61,9 @@ struct IdeasScreen: View {
     var body: some View {
         NavigationStack(path: $path) {
             VStack(spacing: 0) {
-                if media.waitingForWiFi {
+                if media.storageFull {
+                    StorageBanner()
+                } else if media.waitingForWiFi {
                     WiFiBanner()
                 }
                 ScreenHeader(title: String(localized: "Ideas"), app: app, auth: auth)

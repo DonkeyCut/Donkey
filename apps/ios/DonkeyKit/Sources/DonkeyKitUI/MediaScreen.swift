@@ -20,11 +20,6 @@ struct MediaScreen: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if media.storageFull {
-                StorageBanner()
-            } else if media.waitingForWiFi {
-                WiFiBanner()
-            }
             ScreenHeader(title: headerTitle, app: app, auth: auth) {
                 if selecting {
                     Button("Cancel") { endSelecting() }
@@ -55,7 +50,6 @@ struct MediaScreen: View {
                         .padding(.top, 14)
                         .padding(.bottom, 24)
                     }
-                    .refreshable { await media.sync?.refreshNow() }
                 }
             }
             if selecting {
@@ -78,7 +72,7 @@ struct MediaScreen: View {
             Button("Delete", role: .destructive) { deleteSelected() }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("The clips go from this phone and from the cloud.")
+            Text("The clips go from this phone.")
         }
         .fullScreenCover(item: $playing) { recording in
             RecordingPlayerView(url: media.movieURL(for: recording))
@@ -186,11 +180,11 @@ struct SelectionBar: View {
     }
 }
 
-/// Pinned above everything in the library when the cloud is full: edge to
-/// edge, under the status bar, just tall enough to say why clips stay local.
+/// The account is out of cloud storage: saved inspiration media waits on the
+/// phone until space frees up.
 struct StorageBanner: View {
     var body: some View {
-        Text("Not enough cloud storage — recordings stay on this phone")
+        Text("Not enough cloud storage — saved media stays on this phone")
             .font(.footnote.weight(.semibold))
             .foregroundStyle(.white)
             .frame(maxWidth: .infinity)
@@ -200,8 +194,8 @@ struct StorageBanner: View {
     }
 }
 
-/// Cellular, with videos set to Wi-Fi only: the clips are on the phone and
-/// go up as soon as it joins a network.
+/// Cellular, with videos set to Wi-Fi only: saved inspiration media is on the
+/// phone and goes up as soon as it joins a network.
 struct WiFiBanner: View {
     var body: some View {
         Label("On cellular — videos upload on Wi-Fi", systemImage: "wifi")
@@ -244,10 +238,6 @@ struct RecordingCard: View {
                 .background(.black.opacity(0.65), in: RoundedRectangle(cornerRadius: 8))
                 .padding(8)
         }
-        .overlay(alignment: .bottomLeading) {
-            SyncBadge(state: media.syncState(for: recording))
-                .padding(8)
-        }
         .overlay(alignment: .topTrailing) {
             if selecting {
                 Image(systemName: selected ? "checkmark.circle.fill" : "circle")
@@ -260,34 +250,6 @@ struct RecordingCard: View {
         }
         .scaleEffect(selected ? 0.94 : 1)
         .animation(.snappy(duration: 0.15), value: selected)
-    }
-}
-
-/// Shown on a card while its bytes are on their way up, or while they are
-/// waiting for Wi-Fi, in the same white-on-scrim overlay the duration reads
-/// in. A clip that is settled — on the phone or in the cloud — carries no
-/// badge.
-struct SyncBadge: View {
-    let state: RecordingSyncState
-
-    var body: some View {
-        switch state {
-        case .uploading:
-            scrim { Text("Syncing") }
-        case .waitingForWiFi:
-            scrim { Label("Wi-Fi", systemImage: "wifi") }
-        case .onDevice, .synced:
-            EmptyView()
-        }
-    }
-
-    private func scrim(@ViewBuilder _ content: () -> some View) -> some View {
-        content()
-            .font(.caption2.weight(.bold))
-            .foregroundStyle(.white)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 3)
-            .background(.black.opacity(0.65), in: RoundedRectangle(cornerRadius: 8))
     }
 }
 

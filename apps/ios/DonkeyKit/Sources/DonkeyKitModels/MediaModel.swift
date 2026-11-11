@@ -16,16 +16,6 @@ nonisolated public struct Recording: Identifiable, Equatable, Sendable {
     }
 }
 
-/// Where a clip's bytes live relative to the cloud.
-nonisolated public enum RecordingSyncState: Equatable, Sendable {
-    case onDevice
-    /// On cellular with the Wi-Fi-only setting on: the clip has somewhere to
-    /// go and is waiting for the connection to allow it.
-    case waitingForWiFi
-    case uploading(percent: Int)
-    case synced
-}
-
 public protocol RecordingStoring: AnyObject {
     func loadRecordings() throws -> [Recording]
     /// Moves a finished movie into the store and persists its metadata.
@@ -39,8 +29,8 @@ public protocol RecordingStoring: AnyObject {
 public final class MediaModel {
     public private(set) var recordings: [Recording] = []
 
-    /// The engine that carries recordings to the cloud. Wired by the app
-    /// entry; nil in tests, where everything reads as on-device.
+    /// The sync engine, held here for the screens that kick it. Recordings
+    /// stay on this phone. Wired by the app entry; nil in tests.
     public var sync: SyncEngine?
 
     private let store: any RecordingStoring
@@ -50,34 +40,26 @@ public final class MediaModel {
         reloadFromStore()
     }
 
-    /// Re-read what the store holds — how a delete that came down from the
-    /// cloud lands on screen.
-    public func reloadFromStore() {
+    private func reloadFromStore() {
         recordings = (try? store.loadRecordings()) ?? []
     }
 
-    public func syncState(for recording: Recording) -> RecordingSyncState {
-        sync?.state(for: recording) ?? .onDevice
-    }
-
-    /// The cloud is out of room; the Library banner reads this.
-    public var storageFull: Bool { sync?.storageFull ?? false }
-
-    /// Clips are waiting for Wi-Fi; the Library banner reads this too.
+    /// Inspiration media is waiting for Wi-Fi; the Ideas banner reads this.
     public var waitingForWiFi: Bool { sync?.waitingForWiFi ?? false }
+
+    /// The cloud refused an upload for want of space; the Ideas banner reads
+    /// this.
+    public var storageFull: Bool { sync?.storageFull ?? false }
 
     public func ingest(movieAt url: URL, duration: TimeInterval, thumbnail: Data?) {
         guard let recording = try? store.ingest(movieAt: url, duration: duration, thumbnail: thumbnail) else { return }
         recordings.insert(recording, at: 0)
-        sync?.recordingAdded(recording)
     }
 
-    /// Deletes the clip everywhere: the local file now, and the cloud copy
-    /// through the tombstone the store records.
+    /// Deletes the clip and its files from this phone.
     public func delete(_ recording: Recording) {
         try? store.deleteRecording(recording)
         recordings.removeAll { $0.id == recording.id }
-        sync?.kick()
     }
 
     public func movieURL(for recording: Recording) -> URL { store.movieURL(for: recording) }
