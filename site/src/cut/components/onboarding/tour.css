@@ -12,7 +12,7 @@
   /* Light mode's glow sits on the dimmed editor, so it runs denser and wider
      than dark mode's to read at all. */
   --tour-glow-ring: color-mix(in oklab, var(--tour-ring) 55%, transparent);
-  --tour-glow: 0 0 56px 18px color-mix(in oklab, var(--tour-ring) 90%, transparent);
+  --tour-glow: 0 0 28px 9px color-mix(in oklab, var(--tour-ring) 90%, transparent);
   --tour-glow-low: 0.7;
 }
 
@@ -21,7 +21,7 @@
   --tour-ring: #0a84ff;
   --tour-shadow: rgb(0 0 0 / 0.5);
   --tour-glow-ring: color-mix(in oklab, var(--tour-ring) 25%, transparent);
-  --tour-glow: 0 0 40px 10px color-mix(in oklab, var(--tour-ring) 50%, transparent);
+  --tour-glow: 0 0 20px 5px color-mix(in oklab, var(--tour-ring) 50%, transparent);
   --tour-glow-low: 0.45;
 }
 
@@ -31,7 +31,7 @@
     --tour-ring: #0a84ff;
     --tour-shadow: rgb(0 0 0 / 0.5);
   --tour-glow-ring: color-mix(in oklab, var(--tour-ring) 25%, transparent);
-  --tour-glow: 0 0 40px 10px color-mix(in oklab, var(--tour-ring) 50%, transparent);
+  --tour-glow: 0 0 20px 5px color-mix(in oklab, var(--tour-ring) 50%, transparent);
   --tour-glow-low: 0.45;
   }
 }
