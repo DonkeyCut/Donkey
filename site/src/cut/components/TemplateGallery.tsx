@@ -7,6 +7,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useLocale, useTranslations } from "next-intl";
 import { LayoutTemplate, Loader2, MoreHorizontal, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import {
   DropdownMenu,
@@ -97,6 +98,10 @@ type Card = { kind: "own"; template: OwnTemplate } | { kind: "gallery"; template
 // keep it.
 const PAGE_SIZE = 24;
 const PAGE_PARAM = "page";
+
+// Placeholder tiles while the gallery's index loads: two rows of the widest
+// grid.
+const SKELETON_TILES = 6;
 
 /** The page a URL asks for; anything unreadable is the first. */
 function pageFrom(raw: string | null): number {
@@ -346,7 +351,11 @@ export function TemplateGallery() {
 
         <div className={cn("mx-auto w-full max-w-7xl px-4 sm:px-10", pages > 1 ? "pb-24" : "pb-6")}>
           {loading && own.length === 0 ? (
-            <Loader2 className="mx-auto my-16 size-5 animate-spin text-muted-foreground" />
+            <div className="grid grid-cols-1 gap-3 pt-1 sm:grid-cols-2 lg:grid-cols-3">
+              {Array.from({ length: SKELETON_TILES }, (_, i) => (
+                <Skeleton key={i} className="aspect-video rounded-xl" />
+              ))}
+            </div>
           ) : cards.length === 0 ? (
             <p className="py-16 text-center text-sm text-muted-foreground">{t("empty")}</p>
           ) : (

@@ -1,10 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import type { MouseEvent } from "react";
+import { useState, type MouseEvent } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { localized, templatePage, templatePoster, type GalleryTemplate } from "@/cut/lib/templateGallery";
 import { formatTime } from "@/cut/lib/time";
+import { Skeleton } from "@/components/ui/skeleton";
 
 /** Opening and closing the template panel from links inside it: a tile or
  * the close button keeps its real href for a new tab, and a plain click
@@ -29,6 +30,12 @@ export function GalleryTile({ template, panel }: { template: GalleryTemplate; pa
   const locale = useLocale();
   const name = localized(template.name, locale);
 
+  // A skeleton holds the tile until its poster has drawn or failed. A poster
+  // already in the cache is complete before React attaches onLoad, so the
+  // ref reads that state on mount.
+  const [settled, setSettled] = useState(false);
+  const settle = () => setSettled(true);
+
   return (
     <Link
       href={templatePage(template.id)}
@@ -39,7 +46,21 @@ export function GalleryTile({ template, panel }: { template: GalleryTemplate; pa
     >
       {/* Lazy: the browser fetches posters as tiles scroll near the view. */}
       {/* eslint-disable-next-line @next/next/no-img-element -- a signed CDN still, not a Next asset */}
-      <img src={templatePoster(template)} alt="" loading="lazy" decoding="async" className="absolute inset-0 size-full object-contain" />
+      <img
+        ref={(el) => {
+          if (el?.complete) {
+            settle();
+          }
+        }}
+        src={templatePoster(template)}
+        alt=""
+        loading="lazy"
+        decoding="async"
+        onLoad={settle}
+        onError={settle}
+        className="absolute inset-0 size-full object-contain"
+      />
+      {!settled && <Skeleton className="absolute inset-0 rounded-none" />}
       <span className="absolute bottom-2 left-2 max-w-[70%] truncate rounded-md bg-black/65 px-1.5 py-0.5 text-[11px] font-medium text-white opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100 pointer-coarse:opacity-100">
         {name} · {t(`aspects.${template.aspect}`)}
       </span>
