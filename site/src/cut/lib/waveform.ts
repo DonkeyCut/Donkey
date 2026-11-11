@@ -14,6 +14,28 @@
  */
 const MAX_GAIN = 8;
 
+/** Waveform buckets per second of media. At the deepest zoom (800 px/s) a
+ * bucket spans 4px — about one drawn bar — so the strip stays honest at every
+ * zoom. */
+export const PEAKS_PER_SECOND = 200;
+/** Most buckets one source may hold. The array stays resident for the whole
+ * session — on the asset and in the cache entry beside it — so length is what
+ * bounds the memory a project of long sources costs. Anything up to five
+ * minutes keeps the full density; past that the strip folds more of the
+ * source into each bar the further in it is zoomed. */
+const PEAKS_MAX = 60_000;
+// Fewest buckets a source gets, and the count for one of unknown length.
+const PEAKS_MIN = 400;
+const PEAKS_UNKNOWN = 1600;
+
+/** How many peak buckets a source of `duration` seconds is measured into. */
+export function peakBuckets(duration: number): number {
+  if (!(duration > 0)) {
+    return PEAKS_UNKNOWN;
+  }
+  return Math.min(PEAKS_MAX, Math.max(PEAKS_MIN, Math.round(duration * PEAKS_PER_SECOND)));
+}
+
 /** Multiplier to draw `peaks` with. 1 for an empty or already-full read. */
 export function waveGain(peaks: readonly number[]): number {
   let max = 0;

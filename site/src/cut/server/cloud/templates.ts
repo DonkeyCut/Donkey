@@ -6,6 +6,7 @@
 //   cut/templates/<id>/media/<file>     the media its assets name
 //   cut/templates/<id>/poster.jpg       the gallery card's still
 //   cut/templates/<id>/frames/<clip>.jpg each video clip's first frame, small
+//   cut/templates/<id>/peaks.json       each sounding asset's waveform peaks
 //
 // Anyone can read a published template, the way a public share reads: the
 // gallery page and the template's read-only editor need no session. Copying
@@ -28,6 +29,7 @@ export const TEMPLATE_INDEX_KEY = `${TEMPLATE_ROOT}/index.json`;
 export const templateKey = (id: string, rest: string) => `${TEMPLATE_ROOT}/${id}/${rest}`;
 export const templateMediaKey = (id: string, fileName: string) => templateKey(id, `media/${fileName}`);
 export const TEMPLATE_POSTER = "poster.jpg";
+export const TEMPLATE_PEAKS = "peaks.json";
 export const templateFrameKey = (id: string, clipId: string) => templateKey(id, `frames/${clipId}.jpg`);
 // The frames' height: the timeline's strip at twice its size.
 export const TEMPLATE_FRAME_H = 96;
@@ -229,6 +231,17 @@ export const templatesApi = {
       return err(NOT_FOUND, 404);
     }
     return cachedRedirect(mediaObjectUrl(templateFrameKey(id, clipId), { version: t.version }));
+  },
+
+  /** The waveform peaks of every asset an audio clip plays, keyed by asset
+   * id, which the template page's timeline draws in place of decoding the
+   * sound. */
+  async peaks(id: string) {
+    const t = await publishedTemplate(id);
+    if (!t) {
+      return err(NOT_FOUND, 404);
+    }
+    return cachedRedirect(mediaObjectUrl(templateKey(id, TEMPLATE_PEAKS), { version: t.version }));
   },
 
   /** Copy a template into the signed-in account's cloud. */

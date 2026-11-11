@@ -8,6 +8,7 @@
  *   bun run scripts/template-publish.ts remove <id>
  *   bun run scripts/template-publish.ts order <ids.json>
  *   bun run scripts/template-publish.ts frames <id>
+ *   bun run scripts/template-publish.ts peaks <id>
  *
  * The project folder is a Mac library folder (project.json + media/). The
  * meta file holds the gallery entry the document cannot say:
@@ -19,7 +20,9 @@
  * lists templates in the index's order; `order` takes a JSON array of ids to
  * lead it, and the rest follow as they were. Each video clip's first frame
  * ships too, small, so the template page's timeline shows the clips without
- * decoding the footage; `frames` bakes them for a template already live.
+ * decoding the footage; `frames` bakes them for a template already live. The
+ * waveform peaks of every sound an audio clip plays ship the same way, and
+ * `peaks` bakes them for a template already live.
  *
  * Every environment reads the one bucket, so a publish is live on every
  * site that serves the gallery the moment the index lands.
@@ -41,6 +44,7 @@ import {
   type TemplateIndex,
 } from "../src/cut/lib/templateGallery";
 import { timelineEnd } from "../src/cut/lib/timelineEnd";
+import { peakBuckets } from "../src/cut/lib/waveform";
 import { isTextOverlay, type ProjectDoc, type StoredAsset } from "../src/cut/lib/types";
 import { buildDocExportSpec } from "../src/cut/lib/headless/docExport";
 import { installHeadlessRuntime } from "../src/cut/lib/headless/runtime";
@@ -48,6 +52,7 @@ import { deletePrefix, getObject, putObject } from "../src/cut/server/cloud/r2";
 import {
   TEMPLATE_FRAME_H,
   TEMPLATE_INDEX_KEY,
+  TEMPLATE_PEAKS,
   TEMPLATE_POSTER,
   templateFrameKey,
   templateKey,
@@ -392,18 +397,61 @@ async function bakeFrames(id: string, doc: ProjectDoc, sources: Map<string, stri
   console.log(`frames ${count}`);
 }
 
-/** Bake the clip frames of a template already published, from its stored
- * document and media. */
-async function frames(id: string) {
+// Peaks keep this many decimals; the strip draws a few dozen pixels tall.
+const PEAK_DECIMALS = 3;
+// The decoded sound of one source is read whole into memory.
+const PEAK_READ_BYTES = 1 << 30;
+const F32_BYTES = 4;
+
+/** The loudest sample of the first channel in each of `buckets` equal slices
+ * of `file`, measured the way the editor measures a waveform. */
+function peaksOf(file: string, buckets: number): number[] {
+  const raw = execFileSync("ffmpeg", ["-v", "error", "-i", file, "-map", "0:a:0", "-af", "pan=mono|c0=c0",
+    "-f", "f32le", "-"], { maxBuffer: PEAK_READ_BYTES });
+  const samples = new Float32Array(raw.buffer, raw.byteOffset, Math.floor(raw.byteLength / F32_BYTES));
+  const peaks = new Array<number>(buckets).fill(0);
+  for (let i = 0; i < samples.length; i++) {
+    const at = Math.min(buckets - 1, Math.floor((i / samples.length) * buckets));
+    const v = Math.abs(samples[i]);
+    if (v > peaks[at]) {
+      peaks[at] = v;
+    }
+  }
+  const scale = 10 ** PEAK_DECIMALS;
+  return peaks.map((v) => Math.round(Math.min(1, v) * scale) / scale);
+}
+
+/** The waveform of every asset an audio clip plays, keyed by asset id, read
+ * from the media as it ships and stored beside the template. */
+async function bakePeaks(id: string, doc: ProjectDoc, sources: Map<string, string>) {
+  const heard = new Set(doc.audioClips.map((c) => c.assetId));
+  const baked: Record<string, number[]> = {};
+  for (const asset of doc.assets) {
+    if (!heard.has(asset.id)) {
+      continue;
+    }
+    const file = asset.fileName ? sources.get(asset.fileName) : undefined;
+    if (!file) {
+      throw new Error(`${id}: asset ${asset.id} has no sound to bake peaks from.`);
+    }
+    baked[asset.id] = peaksOf(file, peakBuckets(asset.duration));
+  }
+  await putObject(templateKey(id, TEMPLATE_PEAKS), Buffer.from(JSON.stringify(baked)), "application/json");
+  console.log(`peaks  ${Object.keys(baked).length}`);
+}
+
+/** A published template's stored document, with the files of the assets
+ * `keep` picks downloaded into a temp folder. */
+async function storedTemplate(id: string, keep: (asset: StoredAsset, doc: ProjectDoc) => boolean) {
   const stored = await getObject(templateKey(id, "project.json"));
   if (!stored) {
     throw new Error(`${id} is not published.`);
   }
   const doc = JSON.parse(stored.bytes.toString("utf8")) as ProjectDoc;
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "template-frames-"));
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "template-bake-"));
   const sources = new Map<string, string>();
   for (const asset of doc.assets) {
-    if (asset.type !== "video" || !asset.fileName || sources.has(asset.fileName)) {
+    if (!keep(asset, doc) || !asset.fileName || sources.has(asset.fileName)) {
       continue;
     }
     const media = await getObject(templateMediaKey(id, asset.fileName));
@@ -414,7 +462,22 @@ async function frames(id: string) {
     await fs.writeFile(file, media.bytes);
     sources.set(asset.fileName, file);
   }
+  return { doc, sources, tmp };
+}
+
+/** Bake the clip frames of a template already published, from its stored
+ * document and media. */
+async function frames(id: string) {
+  const { doc, sources, tmp } = await storedTemplate(id, (a) => a.type === "video");
   await bakeFrames(id, doc, sources, tmp);
+  await fs.rm(tmp, { recursive: true, force: true });
+}
+
+/** Bake the waveform peaks of a template already published, from its stored
+ * document and media. */
+async function peaks(id: string) {
+  const { doc, sources, tmp } = await storedTemplate(id, (a, doc) => doc.audioClips.some((c) => c.assetId === a.id));
+  await bakePeaks(id, doc, sources);
   await fs.rm(tmp, { recursive: true, force: true });
 }
 
@@ -439,6 +502,7 @@ async function publish(dir: string, metaPath: string) {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "template-"));
   const sources = lightFootage(dir, doc, tmp);
   await bakeFrames(meta.id, doc, sources, tmp);
+  await bakePeaks(meta.id, doc, sources);
   const poster = path.join(tmp, TEMPLATE_POSTER);
   await renderPoster(doc, sources, tmp, poster);
 
@@ -504,8 +568,10 @@ if (command === "publish" && args.length === 2) {
   await order(args[0]);
 } else if (command === "frames" && args.length === 1) {
   await frames(args[0]);
+} else if (command === "peaks" && args.length === 1) {
+  await peaks(args[0]);
 } else {
-  console.error("usage: template-publish.ts publish <project folder> <meta.json> | remove <id> | order <ids.json> | frames <id>");
+  console.error("usage: template-publish.ts publish <project folder> <meta.json> | remove <id> | order <ids.json> | frames <id> | peaks <id>");
   process.exit(1);
 }
 process.exit(0);

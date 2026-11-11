@@ -1,8 +1,8 @@
 // How much the timeline draws. The editor draws everything. A template's page
 // is watched, not edited, so its timeline is light: each video clip shows the
-// first frame the template baked for it, tiled across the clip, and nothing
-// reads the footage (no filmstrip sweep, edge frames, tile captures or
-// waveforms); beat dots stay off. The decoders stay with the preview.
+// first frame the template baked for it, tiled across the clip, its sound
+// draws from peaks baked beside them, and nothing reads the footage (no
+// filmstrip sweep, edge frames or tile captures); beat dots stay off. The decoders stay with the preview.
 
 import { create } from "zustand";
 

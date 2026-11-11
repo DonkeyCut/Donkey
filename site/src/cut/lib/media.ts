@@ -66,6 +66,7 @@ import { pickThumbTimes, type ThumbProbe } from "./filmstrip";
 import { reportSwallowed } from "./report";
 import { cloudMediaGone, cloudMediaStatus } from "./chunkCache";
 import { landDerived, liveAsset } from "./derivedWrites";
+import { PEAKS_PER_SECOND, peakBuckets } from "./waveform";
 import { baseFrameAt, baseFramesAt, baseFrameSink, colorReadAt } from "./baseFrame";
 import { colorRecord } from "./colorProbe";
 import { previewFile, sameColorRead } from "./sourceColor";
@@ -2603,6 +2604,27 @@ export async function ensurePeaks(asset: MediaAsset) {
   }
 }
 
+/** Land waveform peaks baked ahead of time, keyed by asset id, on the open
+ * project's assets. A light timeline reads nothing from the sound, so a
+ * template's soundtrack draws from the peaks its publish measured, e.g.
+ * `{ "a1": [0.02, 0.4, …] }` from `/api/templates/<id>/peaks`. */
+export async function landBakedPeaks(url: string) {
+  const projectId = useEditor.getState().projectId;
+  const res = await fetch(url);
+  if (!res.ok) {
+    throw new Error(`Baked peaks answered ${res.status}.`);
+  }
+  const baked = (await res.json()) as Record<string, number[]>;
+
+  // A template switched while the file was in flight keeps its own sound.
+  if (useEditor.getState().projectId !== projectId) {
+    return;
+  }
+  for (const [id, peaks] of Object.entries(baked)) {
+    landDerived(id, { peaks });
+  }
+}
+
 // Filmstrip frames render at 60 CSS px tall — capture at 3× so they stay sharp
 // on Retina (and when a tall timeline scales the row up).
 const THUMB_H = 180;
@@ -3305,26 +3327,11 @@ async function pumpEdgeFrames() {
   }
 }
 
-/** Waveform buckets per second of media. At the deepest zoom (800 px/s) a
- * bucket spans 4px — about one drawn bar — so the strip stays honest at every
- * zoom. */
-const PEAKS_PER_SECOND = 200;
-/** Most buckets one source may hold. The array stays resident for the whole
- * session — on the asset and in the cache entry beside it — so length is what
- * bounds the memory a project of long sources costs. Anything up to five
- * minutes keeps the full density; past that the strip folds more of the
- * source into each bar the further in it is zoomed. */
-const PEAKS_MAX = 60_000;
-
 function makePeaks(
   src: string | Blob,
   duration: number,
   onPartial?: (peaks: number[]) => void,
   gate?: IdleGate
 ): Promise<number[]> {
-  const buckets =
-    duration > 0
-      ? Math.min(PEAKS_MAX, Math.max(400, Math.round(duration * PEAKS_PER_SECOND)))
-      : 1600;
-  return audioPeaks(src, buckets, onPartial, gate);
+  return audioPeaks(src, peakBuckets(duration), onPartial, gate);
 }

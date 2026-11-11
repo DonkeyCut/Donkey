@@ -17,7 +17,9 @@ import { setPreviewMuted, usePreviewMute } from "@/cut/lib/previewMute";
 import { menuOnTop, shortcutDecline } from "@/cut/lib/shortcutGate";
 import { projectDuration, useEditor } from "@/cut/lib/store";
 import type { ShareFeatures } from "@/cut/lib/types";
-import { templateFrame } from "@/cut/lib/templateGallery";
+import { landBakedPeaks } from "@/cut/lib/media";
+import { reportSwallowed } from "@/cut/lib/report";
+import { templateFrame, templatePeaks } from "@/cut/lib/templateGallery";
 import { setFullTimeline, setLightTimeline } from "@/cut/lib/timelineDetail";
 import { Preview } from "./Preview";
 import { Timeline } from "./Timeline";
@@ -102,6 +104,10 @@ export function TemplatePlayer({
         await useEditor.getState().loadProject(projectId, { viewer: true });
         if (alive) {
           useEditor.getState().setPlaying(true);
+          // The soundtrack's waveform comes from the peaks its publish baked.
+          void landBakedPeaks(templatePeaks({ id: templateId, version })).catch((e: unknown) =>
+            reportSwallowed("[cut] template peaks failed", e, templateId)
+          );
         }
       } finally {
         release();
@@ -110,7 +116,7 @@ export function TemplatePlayer({
     return () => {
       alive = false;
     };
-  }, [templateId, projectId, features]);
+  }, [templateId, version, projectId, features]);
 
   // The cut running out starts it again from the top. The playback tick
   // that stops at the end writes the playhead there after it announces the

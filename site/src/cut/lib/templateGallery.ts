@@ -167,6 +167,12 @@ export function templateFrame(t: Pick<GalleryTemplate, "id" | "version">, clipId
   return `${templatePath(t.id)}/frames/${encodeURIComponent(clipId)}?v=${encodeURIComponent(t.version)}`;
 }
 
+/** The waveform peaks baked at publish for the template page's timeline,
+ * keyed by asset id. */
+export function templatePeaks(t: Pick<GalleryTemplate, "id" | "version">): string {
+  return `${templatePath(t.id)}/peaks?v=${encodeURIComponent(t.version)}`;
+}
+
 /** The template's public page. */
 export function templatePage(id: string): string {
   return `/templates/${encodeURIComponent(id)}`;
