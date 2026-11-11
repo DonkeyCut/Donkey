@@ -34,7 +34,7 @@ import { clipLen, clipSpeed, getClipSpans, MICRO_GAP_S, openedTimeline, overlayL
 import { captionStyle, cueOverlay, cueWordFrames, laneCues, laneHidden, subtitleLaneCount, trackPos } from "./subtitles";
 import { drawStreak, elementLook, isMaskAnimated, isOverlayAnimated, matteLumaToAlpha, normalizeGrade, paintMaskLuma, paintStrokeInk, retimeOf, type EaseId, type FlashFade, type FlashRhythm, type FlashTone, type GlitchKind, type LeakCourse, type Mask, type SpeedNode } from "@donkeycut/effects-kit";
 import { renderElementFrames, renderElementPng, renderStillPng, requireStickers } from "./textRender";
-import { holdOverlays } from "./frameGrid";
+import { gridFrame, holdOverlays } from "./frameGrid";
 import { CLIP_MIN_SECONDS, clipCovers, clipFrameAt, clipKeyed, clipPosed, clipPoseAt, clipZoom, contentRect, frameOf, isStickerOverlay, isTextOverlay, laneOf, overlayAnimStyle, projectBackground, rectOf, regionPx, removalActive, shadowInk, subjectMasked, parkedTimeline } from "./types";
 import { liveReader } from "./liveReader";
 import { soundSourceOf, spanSoundSpec, spanUsesSoundFeature, specSound } from "./soundSource";
@@ -681,6 +681,7 @@ async function renderClipShadowPictures(
   H: number,
   dur: number,
   fps: number,
+  start: number,
   tag: string,
   pngs: ExportPayload["pngs"],
   assets: MediaAsset[]
@@ -799,13 +800,19 @@ async function renderClipShadowPictures(
       pngs.push({ name, blob: await blobAt(0) });
       return { file: name };
     }
-    const rate = maskSampleFps(mask, dur, fps);
+    // A keyed clip is posed on every output frame, so its shadow samples
+    // there too: picture i shows on the output frame `lead` seconds into its
+    // slot, where the clip stands then. Example: a clip starting at 0.55 s
+    // at 24 fps first shows on frame 14, 0.033 s in.
+    const keyed = clipKeyed(clip);
+    const rate = keyed ? fps : maskSampleFps(mask, dur, fps);
+    const lead = keyed ? Math.max(0, gridFrame(start, fps) / fps - start) : 0;
     const step = 1 / rate;
     const n = Math.max(1, Math.round(dur * rate));
     const frames: { file: string; duration: number }[] = [];
     for (let i = 0; i < n; i++) {
       const name = `${tag}_f${i}.png`;
-      pngs.push({ name, blob: await blobAt(i * step) });
+      pngs.push({ name, blob: await blobAt(i * step + lead) });
       frames.push({ file: name, duration: i === n - 1 ? Math.max(step, dur - (n - 1) * step) : step });
     }
     return { frames };
@@ -1089,6 +1096,7 @@ export async function buildExportPayload(
       settings.height,
       dur,
       settings.fps,
+      spans[i].start,
       `shadow_c${i}`,
       pngs,
       doc.assets
@@ -1317,6 +1325,7 @@ export async function buildExportPayload(
       settings.height,
       olen,
       settings.fps,
+      entry.start,
       `shadow_ov${i}`,
       pngs,
       doc.assets
@@ -1449,11 +1458,12 @@ export async function buildExportPayload(
     // A Lottie sticker's pixels move on their own, so it exports as frames
     // even with no transform animation set.
     if (isOverlayAnimated(o) || (isStickerOverlay(o) && o.lottie) || subject) {
-      // Animated: a region-cropped 30fps frame sequence that the server plays
+      // Animated: a region-cropped sequence at the output rate, one picture
+      // per output frame for the stretches that move, that the server plays
       // as a concat-demuxer slideshow overlaid at the region. Presets sample
       // their heads and tails and reuse the middle; a keyframed pose changes
       // on its own schedule, so its whole span is sampled frame by frame.
-      const set = await renderElementFrames(o, settings.width, settings.height, 30, doc.assets);
+      const set = await renderElementFrames(o, settings.width, settings.height, settings.fps, doc.assets);
       const names = set.images.map((blob, j) => {
         const name = `overlay_${i}_f${j}.png`;
         pngs.push({ name, blob });
