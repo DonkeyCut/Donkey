@@ -51,6 +51,7 @@ function backend(kind: CutBackend["kind"]) {
     const method = init?.method ?? "GET";
     calls.push({ path, method, body: typeof init?.body === "string" ? JSON.parse(init.body) : undefined });
     if (method === "GET" && path === "/api/cut/projects/src") return Response.json(doc);
+    if (method === "GET" && path.endsWith("/media/")) return new Response("Not found.", { status: 404 });
     if (method === "GET" && path.includes("/media/")) return new Response("bytes");
     if (method === "POST" && path === "/api/cut/projects") return Response.json({ id: "dst" });
     if (method === "PUT") {
@@ -90,5 +91,24 @@ describe("copying a project with a ProRes master", () => {
     expect(copied.assets[0].color).toMatchObject({ detected: "apple-log" });
     const queued = dst.calls.filter((c) => c.method === "POST" && c.path === "/api/cut/projects/dst/proxy");
     expect(queued.map((c) => c.body)).toEqual([{ file: "IMG_1.MOV" }]);
+  });
+});
+
+// A template's color block is a placeholder the editor paints: it names no
+// file, so a copy carries the asset and reads no media for it.
+describe("copying a project with a color block", () => {
+  test("carries the block without reading a file for it", async () => {
+    uploads.length = 0;
+    const block = { id: "k", fileName: "", name: "Black intro", type: "video", duration: 2, block: { color: "#000000", label: "Black intro" } };
+    doc.assets.push(block as unknown as ProjectDoc["assets"][number]);
+    try {
+      const src = backend("browser");
+      const dst = backend("local");
+      expect(await copyProjectAcross(src.api, dst.api, "src")).toBe("dst");
+      expect(uploads.map((u) => u.fileName)).toEqual(["IMG_1.MOV", "IMG_1.proxy.mp4", "b.mp4"]);
+      expect(dst.saved()!.assets.find((a) => a.id === "k")).toMatchObject({ fileName: "", block: { label: "Black intro" } });
+    } finally {
+      doc.assets.pop();
+    }
   });
 });

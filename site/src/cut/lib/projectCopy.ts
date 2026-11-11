@@ -74,7 +74,9 @@ export async function copyProjectAcross(
     // quota-exempt media there — so a copy landing in the cloud leaves the
     // proxy behind and asks the worker for a new one once the doc is saved.
     const carryProxies = dst.kind !== "cloud";
-    const files = assets.flatMap((a) => [
+    // A color block names no file: the editor paints it, so it has no bytes
+    // to carry.
+    const files = assets.filter((a) => a.fileName).flatMap((a) => [
       { fileName: a.fileName, name: a.name },
       ...(carryProxies && a.proxy ? [{ fileName: a.proxy.fileName, name: a.name }] : []),
     ]);
