@@ -2178,9 +2178,16 @@ async function renderPass(
     const ks = [...keys].sort((a, b) => a.t - b.t);
     let e = `${num(ks[0].v)}`;
     for (let i = 0; i < ks.length - 1; i++) {
-      const dt = Math.max(1e-6, ks[i + 1].t - ks[i].t);
+      const dt = ks[i + 1].t - ks[i].t;
       const dv = ks[i + 1].v - ks[i].v;
       if (Math.abs(dv) < 1e-9) continue;
+
+      // Keys closer than the graph prints a time are a jump: a step, since a
+      // span written as "/0.000" fails the expression and the export.
+      if (num(dt) === num(0)) {
+        e += `+${num(dv)}*gte(${varExpr},${num(ks[i].t)})`;
+        continue;
+      }
       e += `+${num(dv)}*${easeExpr(ks[i].ease, `clip((${varExpr}-${num(ks[i].t)})/${num(dt)},0,1)`)}`;
     }
     return `(${e})`;

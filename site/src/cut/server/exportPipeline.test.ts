@@ -904,6 +904,15 @@ describe("clip keyframes in the filtergraph", () => {
     expect(xfadeMismatches(g)).toEqual([]);
   });
 
+  // Two keys on one instant make a jump. The span between them prints at the
+  // graph's three decimals, so a tiny span became "/0.000" and ffmpeg failed
+  // to evaluate the expression, failing the whole export.
+  test("keys sharing an instant never divide by zero", async () => {
+    const jump = [KF[0], { ...KF[0], scale: 1.4 }, { ...KF[1], t: 2 }];
+    const g = await graphFor({ clips: [clip("a.mp4", { out: 4, kf: jump })] });
+    expect(g.join(";")).not.toContain("/0.000");
+  });
+
   test("a keyed clip moves along its key's ease, as the kit evaluator does", async () => {
     const eased = [{ ...KF[0], ease: "power3.out" as const }, KF[1]];
     const g = await graphFor({ clips: [clip("a.mp4", { out: 4, kf: eased })] });
