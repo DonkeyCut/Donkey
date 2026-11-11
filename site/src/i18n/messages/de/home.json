@@ -311,6 +311,10 @@
     },
     "empty": "Keine Vorlagen entsprechen diesen Filtern.",
     "clearFilters": "Filter zurücksetzen",
+    "search": "Vorlagen suchen",
+    "clearSearch": "Suche löschen",
+    "searchFailed": "Die Vorlagensuche ist gerade nicht verfügbar.",
+    "noMatches": "Keine Vorlagen entsprechen dieser Suche.",
     "detail": {
       "close": "Zurück zu Vorlagen",
       "use": "Als neues Projekt verwenden",

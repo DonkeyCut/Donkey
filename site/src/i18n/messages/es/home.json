@@ -311,6 +311,10 @@
     },
     "empty": "Ninguna plantilla coincide con estos filtros.",
     "clearFilters": "Borrar filtros",
+    "search": "Buscar plantillas",
+    "clearSearch": "Borrar búsqueda",
+    "searchFailed": "La búsqueda de plantillas no está disponible en este momento.",
+    "noMatches": "Ninguna plantilla coincide con esta búsqueda.",
     "detail": {
       "close": "Volver a plantillas",
       "use": "Usar como nuevo proyecto",

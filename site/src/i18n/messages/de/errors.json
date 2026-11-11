@@ -428,6 +428,9 @@
     "notes": "Notizen"
   },
   "template_missing": "Diese Vorlage ist nicht mehr verfügbar.",
+  "template_search_failed": "Die Vorlagensuche ist gerade nicht verfügbar.",
+  "template_search_query": "Beschreibe die Vorlage, nach der du suchst.",
+  "template_search_sign_in": "Melde dich an, um nach Vorlagen zu suchen.",
   "template_sign_in_required": "Melde dich an, um diese Vorlage zu verwenden.",
   "template_use_failed": "Das Projekt konnte nicht erstellt werden.",
   "templates_read_failed": "Die Vorlagen konnten nicht gelesen werden.",

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useLocale, useTranslations } from "next-intl";
 import { LayoutTemplate, Loader2, MoreHorizontal, Trash2 } from "lucide-react";
@@ -41,6 +41,7 @@ import {
   refetchProjects,
   useOwnTemplates,
   useTemplateIndex,
+  useTemplateSearch,
 } from "@/cut/lib/queries";
 import { backendFor, type Residency } from "@/cut/lib/residency";
 import {
@@ -54,7 +55,9 @@ import {
   TEMPLATE_STYLES,
   templatePage,
   type GalleryTemplate,
+  type TemplateCandidate,
   type TemplateFilter,
+  type TemplateMatch,
 } from "@/cut/lib/templateGallery";
 import { copyAsKind } from "@/cut/lib/templateUse";
 import { formatTime } from "@/cut/lib/time";
@@ -65,6 +68,7 @@ import { CardPreview } from "./ProjectsHome";
 import { DeleteConfirm } from "./selectionMenu";
 import { GalleryTile, type PanelNav } from "./GalleryTile";
 import { TemplateDetail } from "./TemplateDetail";
+import { TemplateSearch } from "./TemplateSearch";
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
 import { Dialog, DialogPortal } from "@/components/ui/dialog";
 
@@ -98,6 +102,9 @@ type Card = { kind: "own"; template: OwnTemplate } | { kind: "gallery"; template
 // keep it.
 const PAGE_SIZE = 24;
 const PAGE_PARAM = "page";
+
+// The URL param that holds the search, so Back and reload keep it too.
+const QUERY_PARAM = "q";
 
 // Placeholder tiles while the gallery's index loads: two rows of the widest
 // grid.
@@ -138,6 +145,23 @@ function filterOwn(all: OwnTemplate[], f: Filter): OwnTemplate[] {
   );
 }
 
+/** How one of the person's own templates reads to search. */
+function ownCandidate({ project: p }: OwnTemplate): TemplateCandidate {
+  return {
+    id: p.id,
+    label: `${p.name}; the person's own template; frame ${p.aspect ?? DEFAULT_ASPECT}; ${Math.round(p.duration)}s long`,
+  };
+}
+
+/** The items a search kept, best fit first; every item when nothing is searched. */
+function byFit<T>(items: T[], idOf: (item: T) => string, matches: TemplateMatch[] | null): T[] {
+  if (!matches) {
+    return items;
+  }
+  const fit = new Map(matches.map((m) => [m.id, m.fit]));
+  return items.filter((i) => fit.has(idOf(i))).sort((a, b) => fit.get(idOf(b))! - fit.get(idOf(a))!);
+}
+
 /** One grid of templates, Donkey's or the person's own, under one row of
  * filter chips. */
 export function TemplateGallery() {
@@ -164,9 +188,20 @@ export function TemplateGallery() {
     setView(params.toString());
   }
   const filter = filterFrom(new URLSearchParams(view));
-  const own = filterOwn(mine, filter);
-  const gallery = filter.source === "mine" ? [] : filterTemplates(index.data?.templates ?? [], filter);
-  const loading = filter.source !== "mine" && index.isPending;
+  const query = new URLSearchParams(view).get(QUERY_PARAM)?.trim() ?? "";
+
+  // A search reads the person's own templates too while they are the source.
+  const ownCandidates = useMemo(() => (filter.source === "mine" ? mine.map(ownCandidate) : []), [filter.source, mine]);
+  const search = useTemplateSearch(query, ownCandidates);
+  const matches = query ? (search.data ?? []) : null;
+
+  const own = byFit(filterOwn(mine, filter), (o) => o.project.id, matches);
+  const gallery = byFit(
+    filter.source === "mine" ? [] : filterTemplates(index.data?.templates ?? [], filter),
+    (tpl) => tpl.id,
+    matches
+  );
+  const loading = (filter.source !== "mine" && index.isPending) || (!!query && search.isPending);
 
   // One page of the grid: the source's templates.
   // A page past the end, after a filter narrows the list, shows the last one.
@@ -205,6 +240,23 @@ export function TemplateGallery() {
     const qs = next.toString();
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
   };
+
+  // Swap the search in the URL; an empty one removes it. A new search starts
+  // on the first page.
+  const setQuery = useCallback(
+    (value: string) => {
+      const next = new URLSearchParams(window.location.search);
+      next.delete(PAGE_PARAM);
+      if (value) {
+        next.set(QUERY_PARAM, value);
+      } else {
+        next.delete(QUERY_PARAM);
+      }
+      const qs = next.toString();
+      router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+    },
+    [router, pathname]
+  );
 
   const label = (key: FilterKey, value: string): string => {
     if (key === "source") {
@@ -262,7 +314,8 @@ export function TemplateGallery() {
     }
   };
 
-  const active = FILTER_KEYS.some((k) => filter[k]);
+  const active = FILTER_KEYS.some((k) => filter[k]) || !!query;
+  const searchError = query && search.isError ? describeError(search.error, t("searchFailed")) : null;
 
   const open = openId ? (index.data?.templates.find((tpl) => tpl.id === openId) ?? null) : null;
 
@@ -314,8 +367,9 @@ export function TemplateGallery() {
 
         <div className="sticky top-0 z-10 bg-background">
           <div className="mx-auto flex w-full max-w-7xl flex-col gap-2 px-4 py-3 sm:px-10">
-            {/* One row of filter chips; on a phone the row scrolls sideways. */}
-            <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pt-1 pb-1 sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0">
+            {/* The search, then one row of filter chips it folds away while
+                it is open; on a phone the row scrolls sideways. */}
+            <TemplateSearch query={query} busy={!!query && search.isFetching} onSearch={setQuery}>
               {FILTER_KEYS.map((key) => (
                 <Select key={key} value={filter[key] ?? ANY} onValueChange={(v) => setFilter(key, String(v))}>
                   <SelectTrigger className="h-8 shrink-0 rounded-full border-foreground/20 px-3 text-[13px] hover:bg-muted dark:border-foreground/25" aria-label={t(`filters.${key}`)}>
@@ -343,9 +397,9 @@ export function TemplateGallery() {
                   {t("clearFilters")}
                 </Button>
               )}
-            </div>
+            </TemplateSearch>
 
-            {error && <p className="text-[13px] text-destructive">{error}</p>}
+            {(error ?? searchError) && <p className="text-[13px] text-destructive">{error ?? searchError}</p>}
           </div>
         </div>
 
@@ -357,7 +411,7 @@ export function TemplateGallery() {
               ))}
             </div>
           ) : cards.length === 0 ? (
-            <p className="py-16 text-center text-sm text-muted-foreground">{t("empty")}</p>
+            <p className="py-16 text-center text-sm text-muted-foreground">{query ? t("noMatches") : t("empty")}</p>
           ) : (
             <div className="grid grid-cols-1 gap-3 pt-1 sm:grid-cols-2 lg:grid-cols-3">
               {shown.map((card) =>

@@ -23,6 +23,7 @@ import { errorBody, UserError } from "@/cut/lib/userError";
 import { COPY_PROGRESS_TYPE, type CopyProgressLine } from "@/cut/lib/templateGallery";
 import { mediaObjectUrl, mediaUrlLifetime } from "./mediaCdn";
 import { copy, getObject, head, projectMediaKey } from "./r2";
+import { searchTemplates } from "./templateSearch";
 import { caught, decodeFileParam, err, redirect } from "./util";
 
 const TEMPLATE_ROOT = "cut/templates";
@@ -183,6 +184,15 @@ export const templatesApi = {
   async list() {
     try {
       return Response.json(await readTemplateIndex(), { headers: { "Cache-Control": PUBLIC_CACHE } });
+    } catch (e) {
+      return caught(e, "Could not read the templates.");
+    }
+  },
+
+  /** The templates that fit a description, best first. */
+  async search(req: Request) {
+    try {
+      return await searchTemplates(req, (await readTemplateIndex()).templates);
     } catch (e) {
       return caught(e, "Could not read the templates.");
     }

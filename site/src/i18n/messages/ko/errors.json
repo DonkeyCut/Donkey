@@ -428,6 +428,9 @@
     "notes": "메모"
   },
   "template_missing": "이 템플릿은 더 이상 사용할 수 없어요.",
+  "template_search_failed": "지금은 템플릿 검색을 이용할 수 없어요.",
+  "template_search_query": "찾으시는 템플릿을 설명해 주세요.",
+  "template_search_sign_in": "템플릿을 검색하려면 로그인해 주세요.",
   "template_sign_in_required": "이 템플릿을 사용하려면 로그인하세요.",
   "template_use_failed": "프로젝트를 만들 수 없어요.",
   "templates_read_failed": "템플릿을 불러올 수 없어요.",

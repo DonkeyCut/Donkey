@@ -428,6 +428,9 @@
     "notes": "笔记"
   },
   "template_missing": "此模板已不可用。",
+  "template_search_failed": "模板搜索暂不可用。",
+  "template_search_query": "描述你想查找的模板。",
+  "template_search_sign_in": "登录以搜索模板。",
   "template_sign_in_required": "登录以使用此模板。",
   "template_use_failed": "无法创建项目。",
   "templates_read_failed": "无法读取模板。",

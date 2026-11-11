@@ -428,6 +428,9 @@
     "notes": "Notes"
   },
   "template_missing": "Ce modèle n'est plus disponible.",
+  "template_search_failed": "La recherche de modèles n'est pas disponible pour le moment.",
+  "template_search_query": "Décrivez le modèle que vous recherchez.",
+  "template_search_sign_in": "Connectez-vous pour rechercher des modèles.",
   "template_sign_in_required": "Connectez-vous pour utiliser ce modèle.",
   "template_use_failed": "Impossible de créer le projet.",
   "templates_read_failed": "Impossible de lire les modèles.",

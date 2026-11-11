@@ -34,7 +34,7 @@ import {
   templatePage,
 } from "@/cut/lib/templateGallery";
 import { footageSlots } from "@/cut/lib/templateFill";
-import { copyAsKind, copyTemplate, fetchTemplateIndex } from "@/cut/lib/templateUse";
+import { copyAsKind, copyTemplate, fetchTemplateIndex, searchTemplateIndex } from "@/cut/lib/templateUse";
 import { CUT_APP_BASE, homeHref, projectHref } from "@/cut/lib/nav";
 import { appQueryClient } from "@/queries/appClient";
 
@@ -5747,12 +5747,19 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       const pick = <T extends string>(value: unknown, allowed: readonly T[]): T | undefined =>
         allowed.includes(value as T) ? (value as T) : undefined;
       const { templates } = await fetchTemplateIndex();
-      const found = filterTemplates(templates, {
+      const filtered = filterTemplates(templates, {
         category: pick(input.category, TEMPLATE_CATEGORIES),
         aspect: pick(input.aspect, TEMPLATE_ASPECTS),
         length: pick(input.length, TEMPLATE_LENGTHS),
         style: pick(input.style, TEMPLATE_STYLES),
       });
+
+      // A described search keeps the templates that fit it, best fit first.
+      const query = typeof input.query === "string" ? input.query.trim() : "";
+      const fit = query ? new Map((await searchTemplateIndex(query)).map((m) => [m.id, m.fit])) : null;
+      const found = fit
+        ? filtered.filter((t) => fit.has(t.id)).sort((a, b) => fit.get(b.id)! - fit.get(a.id)!)
+        : filtered;
       // One page at a time, so a growing gallery never floods the turn.
       const offset = typeof input.offset === "number" && Number.isSafeInteger(input.offset) && input.offset > 0 ? input.offset : 0;
       const limit = typeof input.limit === "number" && input.limit >= 1 ? Math.min(Math.floor(input.limit), TEMPLATE_PAGE_MAX) : TEMPLATE_PAGE_DEFAULT;

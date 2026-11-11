@@ -428,6 +428,9 @@
     "notes": "Notas"
   },
   "template_missing": "Esta plantilla ya no está disponible.",
+  "template_search_failed": "La búsqueda de plantillas no está disponible en este momento.",
+  "template_search_query": "Describe la plantilla que estás buscando.",
+  "template_search_sign_in": "Inicia sesión para buscar plantillas.",
   "template_sign_in_required": "Inicia sesión para usar esta plantilla.",
   "template_use_failed": "No se pudo crear el proyecto.",
   "templates_read_failed": "No se pudieron leer las plantillas.",

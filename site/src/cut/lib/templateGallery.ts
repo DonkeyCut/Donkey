@@ -80,6 +80,8 @@ export type GalleryTemplate = {
   texts: number;
   /** Whether a soundtrack plays under it. */
   music?: boolean;
+  /** Keywords search reads beside the name and description, in English. */
+  tags?: string[];
   /** Changes whenever the template is republished, so cached bytes turn over. */
   version: string;
 };
@@ -88,6 +90,16 @@ export type TemplateIndex = { templates: GalleryTemplate[] };
 
 /** The API the gallery is served from. */
 export const TEMPLATES_API = "/api/templates";
+
+// Search: a description in the searcher's own words, judged against every
+// template (server/cloud/templateSearch.ts). The page may send its own
+// templates along, each as an id and how it reads.
+export const TEMPLATE_SEARCH_ID = "search";
+export const TEMPLATE_SEARCH_API = `${TEMPLATES_API}/${TEMPLATE_SEARCH_ID}`;
+export const TEMPLATE_QUERY_MAX = 300;
+export const TEMPLATE_OWN_MAX = 200;
+export type TemplateCandidate = { id: string; label: string };
+export type TemplateMatch = { id: string; fit: number };
 
 // A template copy into the cloud answers as JSON lines with this type when
 // the client asks for its progress: counts of files copied, then the project

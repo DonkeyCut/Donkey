@@ -311,6 +311,10 @@
     },
     "empty": "Nenhum modelo corresponde a estes filtros.",
     "clearFilters": "Limpar filtros",
+    "search": "Buscar modelos",
+    "clearSearch": "Limpar busca",
+    "searchFailed": "A busca de modelos não está disponível no momento.",
+    "noMatches": "Nenhum modelo corresponde a esta busca.",
     "detail": {
       "close": "Voltar aos modelos",
       "use": "Usar como novo projeto",

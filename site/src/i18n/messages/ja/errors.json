@@ -428,6 +428,9 @@
     "notes": "ノート"
   },
   "template_missing": "このテンプレートは利用できなくなりました。",
+  "template_search_failed": "現在、テンプレート検索を利用できません。",
+  "template_search_query": "お探しのテンプレートについて説明してください。",
+  "template_search_sign_in": "テンプレートを検索するにはサインインしてください。",
   "template_sign_in_required": "このテンプレートを使用するにはサインインしてください。",
   "template_use_failed": "プロジェクトを作成できませんでした。",
   "templates_read_failed": "テンプレートを読み込めませんでした。",

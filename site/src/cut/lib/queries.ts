@@ -27,7 +27,8 @@ import { fetchLibrary, type LibraryAsset, type LibraryData } from "./library";
 import { freeItemName } from "./itemName";
 import { renameLibraryFile } from "./libraryRename";
 import { fetchNotes, placeLooseNotes, type NotesData } from "./notes";
-import { fetchTemplateIndex } from "./templateUse";
+import type { TemplateCandidate } from "./templateGallery";
+import { fetchTemplateIndex, searchTemplateIndex } from "./templateUse";
 import {
   availableResidencies,
   backendFor,
@@ -183,6 +184,16 @@ export function useTemplateIndex() {
   return useQuery({
     queryKey: templateIndexKey,
     queryFn: fetchTemplateIndex,
+    staleTime: TEMPLATE_INDEX_STALE_MS,
+  });
+}
+
+/** The templates a search fits, best first; idle while the query is empty. */
+export function useTemplateSearch(query: string, own: TemplateCandidate[]) {
+  return useQuery({
+    queryKey: [...templateIndexKey, "search", query, own],
+    queryFn: () => searchTemplateIndex(query, own),
+    enabled: query.length > 0,
     staleTime: TEMPLATE_INDEX_STALE_MS,
   });
 }

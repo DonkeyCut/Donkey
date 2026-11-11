@@ -13,6 +13,7 @@ interface TemplateRoute extends RouteEntry {
 
 const TEMPLATE_ROUTES: TemplateRoute[] = [
   { method: "GET", path: "/api/templates", handler: () => templatesApi.list() },
+  { method: "POST", path: "/api/templates/search", handler: (r) => templatesApi.search(r) },
   { method: "GET", path: "/api/templates/:id", handler: (_r, p) => templatesApi.meta(p.id) },
   { method: "GET", path: "/api/templates/:id/poster", handler: (_r, p) => templatesApi.poster(p.id) },
   { method: "GET", path: "/api/templates/:id/frames/:clip", handler: (_r, p) => templatesApi.frame(p.id, p.clip) },

@@ -4,8 +4,8 @@ import { templatesCatchAll } from "@/cut/server/cloud/templateRoutes";
 // anyone, the way a public share is. Deliberately NOT wrapped in
 // withDonkeyAuth — the gallery and a template's page open with no session —
 // so this is one of the named public exceptions (see
-// docs/guides/backend-apis.md). Only the copy into an account reads the
-// session, inside its own handler.
+// docs/guides/backend-apis.md). Copying into an account and searching read
+// the session, each inside its own handler.
 
 const handle = (request: Request) => templatesCatchAll(request);
 

@@ -311,6 +311,10 @@
     },
     "empty": "이 필터와 일치하는 템플릿이 없어요.",
     "clearFilters": "필터 초기화",
+    "search": "템플릿 검색",
+    "clearSearch": "검색 지우기",
+    "searchFailed": "지금은 템플릿 검색을 이용할 수 없어요.",
+    "noMatches": "검색과 일치하는 템플릿이 없어요.",
     "detail": {
       "close": "템플릿 목록으로",
       "use": "새 프로젝트로 사용",

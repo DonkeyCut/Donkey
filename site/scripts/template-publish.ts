@@ -14,7 +14,7 @@
  * The project folder is a Mac library folder (project.json + media/). The
  * meta file holds the gallery entry the document cannot say:
  *   { "id", "name": { "en", … }, "description": { "en", … }, "category",
- *     "style", "fps" }
+ *     "style", "fps", "tags"? }
  * The gallery plays the template live, so nothing is rendered ahead but the
  * card's still: one frame of it, exported here through the same pipeline a
  * download takes. Footage past 1080p or 8 Mbps ships re-encoded. The gallery
@@ -40,6 +40,7 @@ import { footageSlots } from "../src/cut/lib/templateFill";
 import {
   TEMPLATE_ASPECTS,
   TEMPLATE_CATEGORIES,
+  TEMPLATE_SEARCH_ID,
   TEMPLATE_STYLES,
   type GalleryTemplate,
   type TemplateAspect,
@@ -103,7 +104,7 @@ const ID_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 // What a project keeps for its maker, never for the people who start from it.
 const MAKER_FIELDS = ["renders", "genvideo", "publish", "notes", "firstOpen", "ui", "kind"] as const;
 
-type Meta = Pick<GalleryTemplate, "id" | "name" | "description" | "category" | "style" | "fps">;
+type Meta = Pick<GalleryTemplate, "id" | "name" | "description" | "category" | "style" | "fps" | "tags">;
 
 // Publishes on this machine take turns at the index: each holds this lock
 // directory while it reads and writes the index, so two at once never drop
@@ -155,6 +156,9 @@ function checkMeta(meta: Meta) {
   if (!ID_RE.test(meta.id)) {
     throw new Error(`id "${meta.id}" must be lowercase words joined by hyphens.`);
   }
+  if (meta.id === TEMPLATE_SEARCH_ID) {
+    throw new Error(`id "${meta.id}" is the gallery's search path.`);
+  }
   if (!meta.name?.en || !meta.description?.en) {
     throw new Error("name.en and description.en are required.");
   }
@@ -166,6 +170,9 @@ function checkMeta(meta: Meta) {
   }
   if (!(meta.fps > 0)) {
     throw new Error("fps is required.");
+  }
+  if (meta.tags !== undefined && !(Array.isArray(meta.tags) && meta.tags.every((t) => typeof t === "string" && t.trim()))) {
+    throw new Error("tags, when given, is a list of keywords.");
   }
 }
 

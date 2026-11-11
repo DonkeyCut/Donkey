@@ -311,6 +311,10 @@
     },
     "empty": "No templates match these filters.",
     "clearFilters": "Clear filters",
+    "search": "Search templates",
+    "clearSearch": "Clear search",
+    "searchFailed": "Template search isn't available right now.",
+    "noMatches": "No templates match this search.",
     "detail": {
       "close": "Back to templates",
       "use": "Use as new project",

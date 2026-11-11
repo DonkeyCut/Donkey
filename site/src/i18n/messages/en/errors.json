@@ -428,6 +428,9 @@
     "notes": "Notes"
   },
   "template_missing": "This template isn't available anymore.",
+  "template_search_failed": "Template search isn't available right now.",
+  "template_search_query": "Describe the template you are looking for.",
+  "template_search_sign_in": "Sign in to search templates.",
   "template_sign_in_required": "Sign in to use this template.",
   "template_use_failed": "Could not create the project.",
   "templates_read_failed": "Could not read the templates.",

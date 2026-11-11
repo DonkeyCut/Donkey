@@ -14,10 +14,13 @@ import type { Residency } from "./residency";
 import { backendFor } from "./residency";
 import {
   COPY_PROGRESS_TYPE,
+  TEMPLATE_SEARCH_API,
   TEMPLATES_API,
   type CopyProgressLine,
   type GalleryTemplate,
+  type TemplateCandidate,
   type TemplateIndex,
+  type TemplateMatch,
 } from "./templateGallery";
 import type { ProjectKind } from "./types";
 import { errorFromBody, UserError } from "./userError";
@@ -36,6 +39,23 @@ export async function fetchTemplateIndex(): Promise<TemplateIndex> {
     throw new UserError("templates_read_failed", "Could not read the templates.");
   }
   return (await res.json()) as TemplateIndex;
+}
+
+const SEARCH_FAILED = new UserError("template_search_failed", "Template search isn't available right now.");
+
+/** The templates that fit a description, best first: the gallery's, and any
+ * of the person's own sent along. */
+export async function searchTemplateIndex(query: string, own: TemplateCandidate[] = []): Promise<TemplateMatch[]> {
+  const res = await cloudRequest(TEMPLATE_SEARCH_API, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query, own }),
+  });
+  const body = (await res.json().catch(() => ({}))) as { matches?: TemplateMatch[] };
+  if (!res.ok) {
+    throw errorFromBody(body, SEARCH_FAILED);
+  }
+  return body.matches ?? [];
 }
 
 /** Make a new project from a gallery template in `target` and return its id. */
