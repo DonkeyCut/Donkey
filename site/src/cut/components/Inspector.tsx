@@ -281,49 +281,49 @@ export function Inspector() {
 
   // The layer floats over the editor: the preview runs the full width of the
   // row and passes under it. The button that brings a folded timeline back
-  // shares the layer, standing at the foot of the rail's column in the rail's
-  // own chrome. The bottom padding clears the host's own bar, so the panel and
-  // the button both stay above the card's composer.
+  // stands in the layer's bottom right corner, beside the chat, under the
+  // panel. The bottom padding clears the host's own bar, so the panel and the
+  // button both stay above the card's composer.
   const hasPanel = useHasInspector();
   return (
     <aside
       style={{ paddingBottom: "calc(0.75rem + var(--host-inset-bottom, 0px))" }}
-      className="pointer-events-none absolute inset-y-0 right-0 z-30 flex items-start gap-2 p-3"
+      className="pointer-events-none absolute inset-y-0 right-0 z-30 flex flex-col items-end gap-2 p-3"
     >
-      {/* Keyed on what is selected: picking something else builds a fresh
-          column, so it opens on that thing's own fields. */}
-      {hasPanel ? (
-        <InspectorColumn
-          key={group ? group.map((g) => `${g.kind}:${g.id}`).join() : selection?.id ?? "none"}
-          clip={group ? undefined : clip}
-          audio={group ? undefined : audio}
-          overlay={group ? undefined : overlay}
-          cue={group ? undefined : cue}
-          group={group ?? undefined}
-        />
-      ) : (
-        <ShowTimelineButton />
-      )}
+      <div className="flex min-h-0 flex-1 items-start gap-2">
+        {/* Keyed on what is selected: picking something else builds a fresh
+            column, so it opens on that thing's own fields. */}
+        {hasPanel && (
+          <InspectorColumn
+            key={group ? group.map((g) => `${g.kind}:${g.id}`).join() : selection?.id ?? "none"}
+            clip={group ? undefined : clip}
+            audio={group ? undefined : audio}
+            overlay={group ? undefined : overlay}
+            cue={group ? undefined : cue}
+            group={group ?? undefined}
+          />
+        )}
+      </div>
+      <ShowTimelineButton />
     </aside>
   );
 }
 
-/**
- * Brings the timeline back while it is folded away. It carries the rail's card
- * and button shape and hangs at the bottom of the rail's column, so its icon
- * sits under the rail's own buttons.
- */
 /** Rotation in the inspector keeps tenths of a degree: a screen in the shot can
  *  lean 0.4°, and a picture fitted onto it has to lean the same. */
 const tenthDeg = (v: number) => Math.round(v * 10) / 10;
 const formatDeg = (v: number) => `${tenthDeg(v)}°`;
 
+/** Brings the timeline back while it is folded away, in the rail's card and
+ * button shape. */
 function ShowTimelineButton() {
   const t = useTranslations("inspector.rail");
   const open = useEditor((s) => s.timelineOpen);
-  if (open) return null;
+  if (open) {
+    return null;
+  }
   return (
-    <div className="pointer-events-auto mt-auto shrink-0 self-end rounded-xl border bg-background p-1 shadow-md">
+    <div className="pointer-events-auto shrink-0 rounded-xl border bg-background p-1 shadow-md">
       <TooltipProvider>
         <Tooltip>
           <TooltipTrigger
@@ -429,7 +429,6 @@ function InspectorColumn({
           onPick={pick}
           onToggle={() => setOpen(!open)}
         />
-        <ShowTimelineButton />
       </div>
       {open && (
         <div
