@@ -81,6 +81,8 @@ export async function copyProjectAcross(
       ...(carryProxies && a.proxy ? [{ fileName: a.proxy.fileName, name: a.name }] : []),
     ]);
     const unique = new Set(files.map((f) => f.fileName)).size;
+    // The count shows from the start, before the first file lands.
+    opts.onProgress?.(0, unique);
     for (const f of files) {
       if (names.has(f.fileName)) continue;
       // A cloud project's media may exist only in this browser's store so far

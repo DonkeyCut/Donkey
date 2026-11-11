@@ -44,22 +44,29 @@ function DialogOverlay({
 // collapsible spacer above it. The spacer holds the dialog in the top third
 // while the viewport has room and gives its height back when it runs short, so
 // the whole dialog stays on screen in a frame as short as the ChatGPT card or a
-// phone in landscape. A dialog never sets its own top.
+// phone in landscape. A dialog never sets its own top; a "center" one, such as
+// a progress card over the page it works on, sits in the middle.
+type ModalPosition = "top" | "center"
+
 function ModalPositioner({
   className,
   children,
+  position = "top",
   ...props
-}: React.ComponentProps<"div">) {
+}: React.ComponentProps<"div"> & { position?: ModalPosition }) {
   return (
     <div
       data-slot="modal-positioner"
       className={cn(
         "pointer-events-none fixed inset-0 z-50 flex flex-col items-center p-4",
+        position === "center" && "justify-center",
         className
       )}
       {...props}
     >
-      <div aria-hidden className="w-0 shrink-[999] basis-[18dvh]" />
+      {position === "top" && (
+        <div aria-hidden className="w-0 shrink-[999] basis-[18dvh]" />
+      )}
       {children}
     </div>
   )
@@ -137,16 +144,24 @@ function DialogContent({
   className,
   children,
   overlayClassName,
+  overlay = "auto",
+  position = "top",
   showCloseButton = true,
   ...props
 }: DialogPrimitive.Popup.Props & {
   overlayClassName?: string
+  // A dialog opened over another draws no backdrop of its own unless "always".
+  overlay?: "auto" | "always"
+  position?: ModalPosition
   showCloseButton?: boolean
 }) {
   return (
     <DialogPortal>
-      <DialogOverlay className={overlayClassName} />
-      <ModalPositioner>
+      <DialogOverlay
+        className={overlayClassName}
+        forceRender={overlay === "always"}
+      />
+      <ModalPositioner position={position}>
         <DialogPrimitive.Popup
           data-slot="dialog-content"
           className={cn(

@@ -15,6 +15,7 @@ import { useNewProjectTarget } from "@/cut/lib/newProject";
 import { newProjectAllowed } from "@/cut/lib/projectLimit";
 import { refetchProjects, useTemplateIndex } from "@/cut/lib/queries";
 import { localized, templatePoster, type GalleryTemplate } from "@/cut/lib/templateGallery";
+import { useEditor } from "@/cut/lib/store";
 import { copyTemplate } from "@/cut/lib/templateUse";
 import { track } from "@/lib/analytics";
 
@@ -98,33 +99,49 @@ function useTemplateCopy(template: GalleryTemplate | undefined, run: string): Ph
   return phase;
 }
 
-/** The copy's progress: the template's still and name over what is happening,
- * and once it stops, why and the way back. */
+/** The copy's progress: the template's still beside its name and what is
+ * happening, over a bar while media copies, and once it stops, why and the way
+ * back. Every template and every state fills the same frame, so the card
+ * never changes size: the still sits letterboxed in one 16:9 box, and the
+ * bottom row holds the bar or the way back at one height. */
 function UseProgress({ template, phase, back }: { template: GalleryTemplate; phase: Phase; back: React.ReactElement }) {
   const t = useTranslations("home.templates");
   const locale = useLocale();
-  const [w, h] = template.aspect.split(":").map(Number);
+  const copying = phase.state === "copying";
+  const share = copying && phase.total > 0 ? phase.done / phase.total : 0;
   return (
-    <div className="flex w-full max-w-xs flex-col items-center gap-4 text-center">
-      <div
-        className="w-40 overflow-hidden rounded-2xl border border-border bg-muted"
-        style={{ aspectRatio: `${w} / ${h}` }}
-      >
-        {/* eslint-disable-next-line @next/next/no-img-element -- a signed CDN still, not a Next asset */}
-        <img src={templatePoster(template)} alt="" className="size-full object-cover" />
-      </div>
-      <div className="text-sm font-medium">{localized(template.name, locale)}</div>
-      {phase.state === "copying" ? (
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Loader2 className="size-4 animate-spin" />
-          {phase.total > 0 ? t("detail.progress", { done: phase.done, total: phase.total }) : t("detail.using")}
+    <div className="flex w-full flex-col gap-5">
+      <div className="flex items-center gap-5">
+        <div className="aspect-video h-36 shrink-0 overflow-hidden rounded-xl border border-border bg-black">
+          {/* eslint-disable-next-line @next/next/no-img-element -- a signed CDN still, not a Next asset */}
+          <img src={templatePoster(template)} alt="" className="size-full object-contain" />
         </div>
-      ) : (
-        <>
-          {phase.state === "failed" && <p className="text-sm text-destructive">{phase.message}</p>}
-          {back}
-        </>
-      )}
+        <div className="flex min-w-0 flex-col gap-1.5">
+          <div className="truncate text-lg font-semibold tracking-tight">{localized(template.name, locale)}</div>
+          {copying && (
+            <div className="flex items-center gap-2 text-[15px] text-muted-foreground tabular-nums">
+              <Loader2 className="size-4 shrink-0 animate-spin" />
+              {phase.total > 0 ? t("detail.progress", { done: phase.done, total: phase.total }) : t("detail.using")}
+            </div>
+          )}
+          {phase.state === "failed" && <p className="line-clamp-3 text-[15px] text-destructive">{phase.message}</p>}
+        </div>
+      </div>
+
+      {/* One row, one height: the bar while the copy runs, empty until the
+          first count arrives; the way back once it stops. */}
+      <div className="flex h-9 items-center justify-end">
+        {copying ? (
+          <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
+            <div
+              className="h-full rounded-full bg-foreground transition-[width] duration-300 ease-out"
+              style={{ width: `${share * 100}%` }}
+            />
+          </div>
+        ) : (
+          back
+        )}
+      </div>
     </div>
   );
 }
@@ -157,26 +174,52 @@ export function TemplateUseView({ id, run }: { id: string; run: string }) {
 
   return (
     <div className="grid h-full place-items-center px-4">
-      <UseProgress
+      <div className="w-full max-w-sm">
+        <UseProgress
         template={template}
         phase={phase}
-        back={<Button variant="outline" nativeButton={false} render={<Link href={homeHref(base, "templates")}>{t("detail.close")}</Link>} />}
-      />
+          back={<Button variant="outline" nativeButton={false} render={<Link href={homeHref(base, "templates")}>{t("detail.close")}</Link>} />}
+        />
+      </div>
     </div>
   );
 }
 
 /** "Use as new project" from the gallery's panel, inside the app already: the
- * copy runs in a dialog over the template and opens the project. */
+ * template stops playing and the copy runs in a dialog centered over it, then
+ * opens the project. */
 export function TemplateUseDialog({ template, onClose }: { template: GalleryTemplate; onClose: () => void }) {
   const t = useTranslations("home.templates");
   const locale = useLocale();
   const phase = useTemplateCopy(template, "");
-  // While the copy runs it cannot be dismissed; a stop offers the way back.
+
+  // The template behind the dialog holds still while it is copied.
+  useEffect(() => useEditor.getState().setPlaying(false), []);
+
+  return <UseDialogFrame template={template} phase={phase} onClose={onClose} />;
+}
+
+/** The copy dialog itself. While the copy runs it cannot be dismissed; a stop
+ * offers the way back. */
+function UseDialogFrame({
+  template,
+  phase,
+  onClose,
+}: {
+  template: GalleryTemplate;
+  phase: Phase;
+  onClose: () => void;
+}) {
   const busy = phase.state === "copying";
   return (
-    <Dialog open onOpenChange={(next) => !next && !busy && onClose()}>
-      <DialogContent showCloseButton={!busy} className="items-center py-8">
+    <Dialog open disablePointerDismissal={busy} onOpenChange={(next) => !next && !busy && onClose()}>
+      <DialogContent
+        position="center"
+        overlay="always"
+        overlayClassName="bg-black/30 backdrop-blur-sm"
+        showCloseButton={false}
+        className="p-7 sm:max-w-xl"
+      >
         <DialogTitle className="sr-only">{localized(template.name, locale)}</DialogTitle>
         <UseProgress
           template={template}
