@@ -317,11 +317,8 @@
       "copyLink": "リンクをコピー",
       "linkCopied": "リンクをコピーしました",
       "size": "{width} × {height} px",
-      "seconds": "{seconds, plural, other {#秒}}",
+      "seconds": "{seconds}秒",
       "fps": "{fps} fps",
-      "slots": "{count, plural, other {#個のクリップ枠}}",
-      "texts": "{count, plural, other {#個のテキスト}}",
-      "noMusic": "音楽は含まれていません。独自のサウンドトラックを追加してください。",
       "similar": "類似のテンプレート",
       "failed": "プロジェクトを作成できませんでした。",
       "missing": "このテンプレートは利用できなくなりました。"

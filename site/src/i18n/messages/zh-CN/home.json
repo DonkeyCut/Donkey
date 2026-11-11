@@ -317,11 +317,8 @@
       "copyLink": "复制链接",
       "linkCopied": "链接已复制",
       "size": "{width} × {height} px",
-      "seconds": "{seconds, plural, other {# 秒}}",
+      "seconds": "{seconds} 秒",
       "fps": "{fps} fps",
-      "slots": "{count, plural, other {# 个待填充片段}}",
-      "texts": "{count, plural, other {# 处文本}}",
-      "noMusic": "不含音乐。请添加你自己的配乐。",
       "similar": "相似模板",
       "failed": "无法创建项目。",
       "missing": "此模板已失效。"

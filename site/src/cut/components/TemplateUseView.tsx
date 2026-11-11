@@ -7,13 +7,14 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useLocale, useTranslations } from "next-intl";
 import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { useDescribeError } from "@/i18n/describeError";
 import { useComputeSettled } from "@/cut/lib/backend/hooks";
 import { homeHref, projectHref, useCutBase } from "@/cut/lib/nav";
 import { useNewProjectTarget } from "@/cut/lib/newProject";
 import { newProjectAllowed } from "@/cut/lib/projectLimit";
 import { refetchProjects, useTemplateIndex } from "@/cut/lib/queries";
-import { localized, templatePoster } from "@/cut/lib/templateGallery";
+import { localized, templatePoster, type GalleryTemplate } from "@/cut/lib/templateGallery";
 import { copyTemplate } from "@/cut/lib/templateUse";
 import { track } from "@/lib/analytics";
 
@@ -43,11 +44,11 @@ type Phase =
   | { state: "blocked" }
   | { state: "failed"; message: string };
 
-/** The in-app half of "Use as new project": copies the template to where new
- * projects land for this person, then opens the copy. It
- * runs inside the app so the Mac engine and the browser store are both in
- * reach. */
-export function TemplateUseView({ id, run }: { id: string; run: string }) {
+/** Copies `template` once, to where new projects land for this person, as
+ * soon as the gate knows whether this Mac has an engine (that decides where
+ * the project lands), then opens the copy. A `run` the copy is recorded under
+ * reopens that copy on a reload. */
+function useTemplateCopy(template: GalleryTemplate | undefined, run: string): Phase {
   const t = useTranslations("home.templates");
   const locale = useLocale();
   const describeError = useDescribeError();
@@ -56,13 +57,9 @@ export function TemplateUseView({ id, run }: { id: string; run: string }) {
   const client = useQueryClient();
   const settled = useComputeSettled();
   const { target } = useNewProjectTarget();
-  const index = useTemplateIndex();
-  const template = index.data?.templates.find((tpl) => tpl.id === id);
   const [phase, setPhase] = useState<Phase>({ state: "copying", done: 0, total: 0 });
   const started = useRef(false);
 
-  // Start once the gate knows whether this Mac has an engine, since that
-  // decides where the project lands.
   useEffect(() => {
     if (!template || !settled || started.current) {
       return;
@@ -98,6 +95,50 @@ export function TemplateUseView({ id, run }: { id: string; run: string }) {
     })();
   }, [template, settled, target, run, base, client, router, t, locale, describeError]);
 
+  return phase;
+}
+
+/** The copy's progress: the template's still and name over what is happening,
+ * and once it stops, why and the way back. */
+function UseProgress({ template, phase, back }: { template: GalleryTemplate; phase: Phase; back: React.ReactElement }) {
+  const t = useTranslations("home.templates");
+  const locale = useLocale();
+  const [w, h] = template.aspect.split(":").map(Number);
+  return (
+    <div className="flex w-full max-w-xs flex-col items-center gap-4 text-center">
+      <div
+        className="w-40 overflow-hidden rounded-2xl border border-border bg-muted"
+        style={{ aspectRatio: `${w} / ${h}` }}
+      >
+        {/* eslint-disable-next-line @next/next/no-img-element -- a signed CDN still, not a Next asset */}
+        <img src={templatePoster(template)} alt="" className="size-full object-cover" />
+      </div>
+      <div className="text-sm font-medium">{localized(template.name, locale)}</div>
+      {phase.state === "copying" ? (
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Loader2 className="size-4 animate-spin" />
+          {phase.total > 0 ? t("detail.progress", { done: phase.done, total: phase.total }) : t("detail.using")}
+        </div>
+      ) : (
+        <>
+          {phase.state === "failed" && <p className="text-sm text-destructive">{phase.message}</p>}
+          {back}
+        </>
+      )}
+    </div>
+  );
+}
+
+/** The in-app half of "Use as new project" from a template's own page: it
+ * runs inside the app so the Mac engine and the browser store are both in
+ * reach. */
+export function TemplateUseView({ id, run }: { id: string; run: string }) {
+  const t = useTranslations("home.templates");
+  const base = useCutBase();
+  const index = useTemplateIndex();
+  const template = index.data?.templates.find((tpl) => tpl.id === id);
+  const phase = useTemplateCopy(template, run);
+
   if (index.isPending) {
     return (
       <div className="grid h-full place-items-center">
@@ -114,30 +155,39 @@ export function TemplateUseView({ id, run }: { id: string; run: string }) {
     );
   }
 
-  const [w, h] = template.aspect.split(":").map(Number);
   return (
     <div className="grid h-full place-items-center px-4">
-      <div className="flex w-full max-w-xs flex-col items-center gap-4 text-center">
-        <div
-          className="w-40 overflow-hidden rounded-2xl border border-border bg-muted"
-          style={{ aspectRatio: `${w} / ${h}` }}
-        >
-          {/* eslint-disable-next-line @next/next/no-img-element -- a signed CDN still, not a Next asset */}
-          <img src={templatePoster(template)} alt="" className="size-full object-cover" />
-        </div>
-        <div className="text-sm font-medium">{localized(template.name, locale)}</div>
-        {phase.state === "copying" ? (
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Loader2 className="size-4 animate-spin" />
-            {phase.total > 0 ? t("detail.progress", { done: phase.done, total: phase.total }) : t("detail.using")}
-          </div>
-        ) : (
-          <>
-            {phase.state === "failed" && <p className="text-sm text-destructive">{phase.message}</p>}
-            <Button variant="outline" nativeButton={false} render={<Link href={homeHref(base, "templates")}>{t("detail.close")}</Link>} />
-          </>
-        )}
-      </div>
+      <UseProgress
+        template={template}
+        phase={phase}
+        back={<Button variant="outline" nativeButton={false} render={<Link href={homeHref(base, "templates")}>{t("detail.close")}</Link>} />}
+      />
     </div>
+  );
+}
+
+/** "Use as new project" from the gallery's panel, inside the app already: the
+ * copy runs in a dialog over the template and opens the project. */
+export function TemplateUseDialog({ template, onClose }: { template: GalleryTemplate; onClose: () => void }) {
+  const t = useTranslations("home.templates");
+  const locale = useLocale();
+  const phase = useTemplateCopy(template, "");
+  // While the copy runs it cannot be dismissed; a stop offers the way back.
+  const busy = phase.state === "copying";
+  return (
+    <Dialog open onOpenChange={(next) => !next && !busy && onClose()}>
+      <DialogContent showCloseButton={!busy} className="items-center py-8">
+        <DialogTitle className="sr-only">{localized(template.name, locale)}</DialogTitle>
+        <UseProgress
+          template={template}
+          phase={phase}
+          back={
+            <Button variant="outline" onClick={onClose}>
+              {t("detail.close")}
+            </Button>
+          }
+        />
+      </DialogContent>
+    </Dialog>
   );
 }

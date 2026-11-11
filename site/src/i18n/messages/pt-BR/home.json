@@ -317,11 +317,8 @@
       "copyLink": "Copiar link",
       "linkCopied": "Link copiado",
       "size": "{width} × {height} px",
-      "seconds": "{seconds, plural, one {# segundo} other {# segundos}}",
+      "seconds": "{seconds} s",
       "fps": "{fps} fps",
-      "slots": "{count, plural, one {# clipe para preencher} other {# clipes para preencher}}",
-      "texts": "{count, plural, one {# texto} other {# textos}}",
-      "noMusic": "Nenhuma música inclusa. Adicione sua própria trilha sonora.",
       "similar": "Modelos semelhantes",
       "failed": "Não foi possível criar o projeto.",
       "missing": "Este modelo não está mais disponível."

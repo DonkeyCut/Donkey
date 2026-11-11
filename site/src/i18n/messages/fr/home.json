@@ -317,11 +317,8 @@
       "copyLink": "Copier le lien",
       "linkCopied": "Lien copié",
       "size": "{width} × {height} px",
-      "seconds": "{seconds, plural, one {# seconde} other {# secondes}}",
+      "seconds": "{seconds} s",
       "fps": "{fps} fps",
-      "slots": "{count, plural, one {# clip à remplir} other {# clips à remplir}}",
-      "texts": "{count, plural, one {# texte} other {# textes}}",
-      "noMusic": "Musique non incluse. Ajoutez votre propre bande-son.",
       "similar": "Modèles similaires",
       "failed": "Impossible de créer le projet.",
       "missing": "Ce modèle n'est plus disponible."

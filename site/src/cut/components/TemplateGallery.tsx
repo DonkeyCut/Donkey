@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useLocale, useTranslations } from "next-intl";
 import { LayoutTemplate, Loader2, MoreHorizontal, Trash2 } from "lucide-react";
@@ -32,7 +32,7 @@ import {
 } from "@/components/ui/pagination";
 import { useDescribeError } from "@/i18n/describeError";
 import { apiJson } from "@/cut/lib/api";
-import { projectHref, useCutBase } from "@/cut/lib/nav";
+import { homeHref, projectHref, useCutBase } from "@/cut/lib/nav";
 import { newProjectAllowed } from "@/cut/lib/projectLimit";
 import { forgetProject } from "@/cut/lib/projectPurge";
 import {
@@ -51,17 +51,20 @@ import {
   TEMPLATE_LENGTHS,
   TEMPLATE_STYLES,
   templatePage,
-  templatePoster,
   type GalleryTemplate,
   type TemplateFilter,
 } from "@/cut/lib/templateGallery";
 import { copyAsKind } from "@/cut/lib/templateUse";
 import { formatTime } from "@/cut/lib/time";
-import { parseRatio, type ProjectSummary } from "@/cut/lib/types";
+import type { ProjectSummary } from "@/cut/lib/types";
 import { errorFromBody } from "@/cut/lib/userError";
 import { track } from "@/lib/analytics";
 import { CardPreview } from "./ProjectsHome";
 import { DeleteConfirm } from "./selectionMenu";
+import { GalleryTile, type PanelNav } from "./GalleryTile";
+import { TemplateDetail } from "./TemplateDetail";
+import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
+import { Dialog, DialogPortal } from "@/components/ui/dialog";
 
 // The gallery's filters, each a URL param so Back and reload keep the view.
 // Source shows Donkey's templates by default, or the person's own.
@@ -83,11 +86,7 @@ const OPTIONS: Record<FilterKey, readonly string[]> = {
   style: TEMPLATE_STYLES,
 };
 
-// Every card takes the same area, so a wide template spreads and a tall one
-// stands with equal weight, as the projects home lays out its tiles.
-const CARD_AREA = 200 * 356;
 // Projects without an aspect are 9:16.
-const DEFAULT_FRAME = { w: 9, h: 16 };
 const DEFAULT_ASPECT = "9:16";
 
 type OwnTemplate = { project: ProjectSummary; residency: Residency };
@@ -133,11 +132,6 @@ function filterOwn(all: OwnTemplate[], f: Filter): OwnTemplate[] {
   );
 }
 
-/** A card's width for its frame shape at a fixed area. */
-function cardWidth(frame: { w: number; h: number }, area: number): number {
-  return Math.round(Math.sqrt((area * frame.w) / frame.h));
-}
-
 /** One grid of templates, Donkey's or the person's own, under one row of
  * filter chips. */
 export function TemplateGallery() {
@@ -155,7 +149,15 @@ export function TemplateGallery() {
   const [busy, setBusy] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<OwnTemplate | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const filter = filterFrom(new URLSearchParams(params.toString()));
+  // The template the panel shows sits at its own page's URL, pushed over the
+  // gallery's, so a reload or a shared link lands on that page. The grid
+  // behind keeps reading the gallery's own query while the panel is open.
+  const openId = templateAt(pathname);
+  const [view, setView] = useState(params.toString());
+  if (!openId && view !== params.toString()) {
+    setView(params.toString());
+  }
+  const filter = filterFrom(new URLSearchParams(view));
   const own = filterOwn(mine, filter);
   const gallery = filter.source === "mine" ? [] : filterTemplates(index.data?.templates ?? [], filter);
   const loading = filter.source !== "mine" && index.isPending;
@@ -167,10 +169,12 @@ export function TemplateGallery() {
     ...gallery.map((tpl): Card => ({ kind: "gallery", template: tpl })),
   ];
   const pages = Math.max(1, Math.ceil(cards.length / PAGE_SIZE));
-  const page = Math.min(pageFrom(params.get(PAGE_PARAM)), pages);
+  const page = Math.min(pageFrom(new URLSearchParams(view).get(PAGE_PARAM)), pages);
   const shown = cards.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
-  // Open another page and start it at the top.
+  // Open another page and start it at the top of the grid, the one part of
+  // the page that scrolls.
+  const gridRef = useRef<HTMLDivElement>(null);
   const goTo = (n: number) => {
     const next = new URLSearchParams(params.toString());
     if (n === 1) {
@@ -179,7 +183,8 @@ export function TemplateGallery() {
       next.set(PAGE_PARAM, String(n));
     }
     const qs = next.toString();
-    router.replace(qs ? `${pathname}?${qs}` : pathname);
+    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+    gridRef.current?.scrollTo({ top: 0 });
   };
 
   // Swap one filter in the URL; "any" removes it. A new filter starts on
@@ -254,65 +259,129 @@ export function TemplateGallery() {
 
   const active = FILTER_KEYS.some((k) => filter[k]);
 
-  return (
-    <div className="mx-auto flex w-full max-w-6xl flex-col gap-5 px-4 py-9 sm:px-10">
-      <h1 className="text-lg font-semibold tracking-tight">{t("title")}</h1>
+  const open = openId ? (index.data?.templates.find((tpl) => tpl.id === openId) ?? null) : null;
 
-      {/* One row of filter chips; on a phone the row scrolls sideways. */}
-      <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pt-1 pb-1 sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0">
-        {FILTER_KEYS.map((key) => (
-          <Select key={key} value={filter[key] ?? ANY} onValueChange={(v) => setFilter(key, String(v))}>
-            <SelectTrigger className="h-8 shrink-0 rounded-full px-3 text-[13px]" aria-label={t(`filters.${key}`)}>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ANY} className="text-[13px]">
-                {key === "source" ? t("sources.default") : `${t(`filters.${key}`)}: ${t("all")}`}
-              </SelectItem>
-              {OPTIONS[key].map((v) => (
-                <SelectItem key={v} value={v} className="text-[13px]">
-                  {label(key, v)}
+  // The panel slides out with the last template still in it.
+  const [panelTemplate, setShown] = useState<GalleryTemplate | null>(open);
+  if (open && open !== panelTemplate) {
+    setShown(open);
+  }
+
+  // Whether the open template's history entry is ours to take back off the
+  // stack. One reached by the forward button already had its own.
+  const pushed = useRef(false);
+  const galleryHref = view ? `${homeHref(base, "templates")}?${view}` : homeHref(base, "templates");
+  const panel: PanelNav = {
+    open: (id) => {
+      // A similar template swaps in place, so closing still returns to the grid.
+      if (openId) {
+        window.history.replaceState(null, "", templatePage(id));
+        return;
+      }
+      window.history.pushState(null, "", templatePage(id));
+      pushed.current = true;
+    },
+    close: () => {
+      if (pushed.current) {
+        pushed.current = false;
+        window.history.back();
+        return;
+      }
+      window.history.pushState(null, "", galleryHref);
+    },
+  };
+
+  // The back button closing the panel leaves nothing of ours on the stack.
+  useEffect(() => {
+    if (!openId) {
+      pushed.current = false;
+    }
+  }, [openId]);
+
+  // The title and filters stay above the grid and the page bar below it;
+  // only the grid scrolls between them.
+  return (
+    <div className="flex h-full flex-col">
+      <div className="mx-auto flex w-full max-w-7xl shrink-0 flex-col gap-5 px-4 pt-9 pb-4 sm:px-10">
+        <h1 className="text-lg font-semibold tracking-tight">{t("title")}</h1>
+
+        {/* One row of filter chips; on a phone the row scrolls sideways. */}
+        <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pt-1 pb-1 sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0">
+          {FILTER_KEYS.map((key) => (
+            <Select key={key} value={filter[key] ?? ANY} onValueChange={(v) => setFilter(key, String(v))}>
+              <SelectTrigger className="h-8 shrink-0 rounded-full px-3 text-[13px]" aria-label={t(`filters.${key}`)}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ANY} className="text-[13px]">
+                  {key === "source" ? t("sources.default") : `${t(`filters.${key}`)}: ${t("all")}`}
                 </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        ))}
-        {active && (
-          <Button variant="ghost" size="sm" className="shrink-0 rounded-full" onClick={() => router.replace(pathname)}>
-            {t("clearFilters")}
-          </Button>
-        )}
+                {OPTIONS[key].map((v) => (
+                  <SelectItem key={v} value={v} className="text-[13px]">
+                    {label(key, v)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          ))}
+          {active && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="shrink-0 rounded-full"
+              onClick={() => router.replace(pathname)}
+            >
+              {t("clearFilters")}
+            </Button>
+          )}
+        </div>
+
+        {error && <p className="text-[13px] text-destructive">{error}</p>}
       </div>
 
-      {error && <p className="text-[13px] text-destructive">{error}</p>}
-
-      {loading && own.length === 0 ? (
-        <Loader2 className="mx-auto my-16 size-5 animate-spin text-muted-foreground" />
-      ) : cards.length === 0 ? (
-        <p className="py-16 text-center text-sm text-muted-foreground">{t("empty")}</p>
-      ) : (
-        <div className="flex flex-wrap items-start gap-5 pt-1">
-          {shown.map((card) =>
-            card.kind === "own" ? (
-              <OwnTemplateCard
-                key={card.template.project.id}
-                template={card.template}
-                busy={busy}
-                onUse={() => void startFrom(card.template)}
-                onDelete={() => setDeleting(card.template)}
-              />
-            ) : (
-              <TemplateCard key={card.template.id} template={card.template} />
-            )
+      <div ref={gridRef} className="min-h-0 flex-1 overflow-y-auto">
+        <div className="mx-auto w-full max-w-7xl px-4 pb-6 sm:px-10">
+          {loading && own.length === 0 ? (
+            <Loader2 className="mx-auto my-16 size-5 animate-spin text-muted-foreground" />
+          ) : cards.length === 0 ? (
+            <p className="py-16 text-center text-sm text-muted-foreground">{t("empty")}</p>
+          ) : (
+            <div className="grid grid-cols-1 gap-3 pt-1 sm:grid-cols-2 lg:grid-cols-3">
+              {shown.map((card) =>
+                card.kind === "own" ? (
+                  <OwnTemplateCard
+                    key={card.template.project.id}
+                    template={card.template}
+                    busy={busy}
+                    onUse={() => void startFrom(card.template)}
+                    onDelete={() => setDeleting(card.template)}
+                  />
+                ) : (
+                  <GalleryTile key={card.template.id} template={card.template} panel={panel} />
+                )
+              )}
+            </div>
           )}
+        </div>
+      </div>
+
+      {pages > 1 && (
+        <div className="shrink-0 border-t border-border py-3">
+          <GalleryPages page={page} pages={pages} onPage={goTo} />
         </div>
       )}
 
-      {pages > 1 && <GalleryPages page={page} pages={pages} onPage={goTo} />}
+      {panelTemplate && <TemplatePanel template={panelTemplate} open={!!open} closeHref={galleryHref} panel={panel} />}
 
       <DeleteConfirm
         open={!!deleting}
-        title={deleting ? tp("deleteTitle", { what: tk("named", { name: deleting.project.name }) }) : ""}
+        title={
+          deleting
+            ? tp("deleteTitle", {
+                what: tk("named", { name: deleting.project.name }),
+              })
+            : ""
+        }
         description={`${tp("deletesFolders", { count: 1 })} ${tp("cannotUndo")}`}
         action={tp("deleteProjects", { count: 1 })}
         busy={busy !== null}
@@ -326,7 +395,7 @@ export function TemplateGallery() {
 /** The page bar under the grid. */
 function GalleryPages({ page, pages, onPage }: { page: number; pages: number; onPage: (n: number) => void }) {
   return (
-    <Pagination className="pt-4">
+    <Pagination>
       <PaginationContent>
         <PaginationItem>
           <PaginationPrevious disabled={page === 1} onClick={() => onPage(page - 1)} />
@@ -368,27 +437,32 @@ function OwnTemplateCard({
   const t = useTranslations("home.templates");
   const tp = useTranslations("home.projects");
   const base = useCutBase();
-  const frame = parseRatio(p.aspect) ?? DEFAULT_FRAME;
-
   return (
-    <div className="group relative max-w-full" style={{ width: cardWidth(frame, CARD_AREA) }}>
-      <Link href={projectHref(base, p.id, "templates")} className="block outline-none">
-        <div
-          className="relative grid place-items-center overflow-hidden rounded-2xl border border-border bg-muted transition-shadow group-hover:shadow-[0_6px_28px_rgba(0,0,0,0.12)] group-has-focus-visible:ring-3 group-has-focus-visible:ring-ring/50"
-          style={{ aspectRatio: `${frame.w} / ${frame.h}` }}
-        >
-          <CardPreview project={p} residency={r} />
+    <div className="group relative">
+      <Link href={projectHref(base, p.id, "templates")} aria-label={p.name} className="block outline-none">
+        <div className="relative grid aspect-video place-items-center overflow-hidden rounded-xl bg-black group-has-focus-visible:ring-3 group-has-focus-visible:ring-ring/50">
+          {/* The project's own frame shape, whole in the tile, as gallery
+              tiles stand their stills. */}
+          <div
+            className="relative h-full max-w-full"
+            style={{
+              aspectRatio: (p.aspect ?? DEFAULT_ASPECT).replace(":", " / "),
+            }}
+          >
+            <CardPreview project={p} residency={r} />
+          </div>
           {busy === p.id && (
             <span className="absolute inset-0 grid place-items-center bg-black/40">
               <Loader2 className="size-5 animate-spin text-white" />
             </span>
           )}
+          <span className="absolute bottom-2 left-2 max-w-[70%] truncate rounded-md bg-black/65 px-1.5 py-0.5 text-[11px] font-medium text-white opacity-0 transition-opacity group-hover:opacity-100 group-has-focus-visible:opacity-100 pointer-coarse:opacity-100">
+            {p.name} · {t("sources.mine")}
+          </span>
           <span className="absolute right-2 bottom-2 rounded-md bg-black/65 px-1.5 py-0.5 font-mono text-[10px] text-white tabular-nums">
             {formatTime(p.duration)}
           </span>
         </div>
-        <div className="mt-2 truncate px-0.5 text-[13px] font-medium">{p.name}</div>
-        <div className="px-0.5 text-xs text-muted-foreground">{t("sources.mine")}</div>
       </Link>
       <DropdownMenu>
         <DropdownMenuTrigger
@@ -418,48 +492,39 @@ function OwnTemplateCard({
   );
 }
 
-/** One gallery card: the template's still. Its page plays it. */
-export function TemplateCard({
+// The template id in a template page's path, e.g. "/templates/surf-session".
+function templateAt(pathname: string): string | null {
+  const prefix = templatePage("");
+  if (!pathname.startsWith(prefix) || pathname.length === prefix.length) {
+    return null;
+  }
+  return decodeURIComponent(pathname.slice(prefix.length));
+}
+
+/** A template over the gallery: a panel that slides in from the right edge
+ * and holds the template's player, timeline and details, the grid dimmed on
+ * its left. */
+function TemplatePanel({
   template,
-  area = CARD_AREA,
+  open,
+  closeHref,
+  panel,
 }: {
   template: GalleryTemplate;
-  area?: number;
+  open: boolean;
+  closeHref: string;
+  panel: PanelNav;
 }) {
-  const t = useTranslations("home.templates");
   const locale = useLocale();
-  const [w, h] = template.aspect.split(":").map(Number);
-
   return (
-    <Link
-      href={templatePage(template.id)}
-      className="group max-w-full outline-none"
-      style={{ width: cardWidth({ w, h }, area) }}
-    >
-      <div
-        className="relative overflow-hidden rounded-2xl border border-border bg-muted transition-shadow group-hover:shadow-[0_6px_28px_rgba(0,0,0,0.12)] group-focus-visible:ring-3 group-focus-visible:ring-ring/50"
-        style={{ aspectRatio: `${w} / ${h}` }}
-      >
-        {/* Lazy: the browser fetches posters as cards scroll near the view. */}
-        {/* eslint-disable-next-line @next/next/no-img-element -- a signed CDN still, not a Next asset */}
-        <img
-          src={templatePoster(template)}
-          alt=""
-          loading="lazy"
-          decoding="async"
-          className="absolute inset-0 size-full object-cover"
-        />
-        <span className="absolute right-2 bottom-2 rounded-md bg-black/65 px-1.5 py-0.5 font-mono text-[10px] text-white tabular-nums">
-          {formatTime(template.seconds)}
-        </span>
-      </div>
-      <div className="mt-2 truncate px-0.5 text-[13px] font-medium">
-        {localized(template.name, locale)}
-      </div>
-      <div className="px-0.5 text-xs text-muted-foreground">
-        {t(`categories.${template.category}`)} ·{" "}
-        {t(`aspects.${template.aspect}`)}
-      </div>
-    </Link>
+    <Dialog open={open} onOpenChange={(next) => !next && panel.close()}>
+      <DialogPortal>
+        <DialogPrimitive.Backdrop className="fixed inset-0 z-50 bg-black/60 transition-opacity duration-300 ease-out supports-backdrop-filter:backdrop-blur-xs data-ending-style:opacity-0 data-starting-style:opacity-0" />
+        <DialogPrimitive.Popup className="app-surface fixed inset-y-0 right-0 z-50 w-full max-w-[1600px] overflow-hidden border-border bg-background text-foreground shadow-2xl outline-none transition-transform duration-300 ease-out data-ending-style:translate-x-full data-starting-style:translate-x-full md:w-[calc(100vw-3rem)] md:rounded-l-2xl md:border-l">
+          <DialogPrimitive.Title className="sr-only">{localized(template.name, locale)}</DialogPrimitive.Title>
+          <TemplateDetail template={template} closeHref={closeHref} panel={panel} />
+        </DialogPrimitive.Popup>
+      </DialogPortal>
+    </Dialog>
   );
 }

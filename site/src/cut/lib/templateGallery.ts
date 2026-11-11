@@ -77,6 +77,8 @@ export type GalleryTemplate = {
   slots: number;
   /** Titles and captions a person rewrites. */
   texts: number;
+  /** Whether a soundtrack plays under it. */
+  music?: boolean;
   /** Changes whenever the template is republished, so cached bytes turn over. */
   version: string;
 };

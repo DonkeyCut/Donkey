@@ -317,11 +317,8 @@
       "copyLink": "Link kopieren",
       "linkCopied": "Link kopiert",
       "size": "{width} × {height} px",
-      "seconds": "{seconds, plural, one {# Sekunde} other {# Sekunden}}",
+      "seconds": "{seconds} s",
       "fps": "{fps} fps",
-      "slots": "{count, plural, one {# Clip zum Ausfüllen} other {# Clips zum Ausfüllen}}",
-      "texts": "{count, plural, one {# Text} other {# Texte}}",
-      "noMusic": "Keine Musik enthalten. Füge deinen eigenen Soundtrack hinzu.",
       "similar": "Ähnliche Vorlagen",
       "failed": "Das Projekt konnte nicht erstellt werden.",
       "missing": "Diese Vorlage ist nicht mehr verfügbar."

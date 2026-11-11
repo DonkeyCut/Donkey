@@ -47,6 +47,12 @@ export function holdThreadsInMemory(): void {
   memory ??= { threads: new Map(), active: new Map() };
 }
 
+/** Back to this browser's durable threads, for a viewer that closes inside
+ * the app, e.g. a template panel over the gallery. */
+export function releaseThreadsMemory(): void {
+  memory = null;
+}
+
 /** A saved thread as this module handles it: an opaque record read only for its
  * id and modified time, so history, the cloud mirror, and project copies can
  * move threads around without knowing the panel's payload. */

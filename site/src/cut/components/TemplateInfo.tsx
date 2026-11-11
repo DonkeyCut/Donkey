@@ -3,17 +3,17 @@
 import Link from "next/link";
 import { useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
-import { Clock, Film, Gauge, Link2, Monitor, Music, Type, X } from "lucide-react";
+import { Clock, Gauge, Link2, Monitor, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DonkeyMark } from "@/components/DonkeyMark";
 import { homeHref, useCutBase } from "@/cut/lib/nav";
 import { useTemplateIndex } from "@/cut/lib/queries";
 import { ASPECT_FRAME, localized, similarTemplates, type GalleryTemplate } from "@/cut/lib/templateGallery";
-import { TemplateCard } from "./TemplateGallery";
+import { GalleryTile, inPanel, type PanelNav } from "./GalleryTile";
+import { TemplateUseDialog } from "./TemplateUseView";
 
-// How many related templates the panel offers, and their card size.
+// How many related templates the panel offers.
 const SIMILAR_COUNT = 4;
-const SIMILAR_CARD_AREA = 120 * 213;
 // How long "Link copied" stays on the button.
 const COPIED_MS = 2000;
 
@@ -24,10 +24,17 @@ function runHref(base: string, id: string): string {
 }
 
 /** The template page's top bar: the way back to the gallery and the name. */
-export function TemplateTopBar({ template }: { template: GalleryTemplate }) {
+export function TemplateTopBar({
+  template,
+  closeHref,
+  panel,
+}: {
+  template: GalleryTemplate;
+  closeHref: string;
+  panel?: PanelNav;
+}) {
   const t = useTranslations("home.templates");
   const locale = useLocale();
-  const base = useCutBase();
   return (
     <header className="flex h-full items-center gap-2 border-b border-border bg-card pr-3 pl-2">
       <Button
@@ -35,7 +42,7 @@ export function TemplateTopBar({ template }: { template: GalleryTemplate }) {
         size="icon-sm"
         aria-label={t("detail.close")}
         nativeButton={false}
-        render={<Link href={homeHref(base, "templates")} />}
+        render={<Link href={closeHref} scroll={false} onClick={panel ? (e) => inPanel(e, panel.close) : undefined} />}
       >
         <X />
       </Button>
@@ -51,12 +58,13 @@ export function TemplateTopBar({ template }: { template: GalleryTemplate }) {
 
 /** The template page's side panel: what the template is, and the button that
  * makes it the person's own project. */
-export function TemplateInfo({ template }: { template: GalleryTemplate }) {
+export function TemplateInfo({ template, panel }: { template: GalleryTemplate; panel?: PanelNav }) {
   const t = useTranslations("home.templates");
   const locale = useLocale();
   const base = useCutBase();
   const index = useTemplateIndex();
   const [copied, setCopied] = useState(false);
+  const [using, setUsing] = useState(false);
   const frame = ASPECT_FRAME[template.aspect];
   const similar = similarTemplates(index.data?.templates ?? [], template.id, SIMILAR_COUNT);
 
@@ -84,9 +92,18 @@ export function TemplateInfo({ template }: { template: GalleryTemplate }) {
       </div>
 
       <div className="flex flex-col gap-2">
-        <Button size="lg" nativeButton={false} render={<a href={runHref(base, template.id)} />}>
-          {t("detail.use")}
-        </Button>
+        {/* In the app's panel the copy runs in place; the template's own page
+            hands it to the app. */}
+        {panel ? (
+          <Button size="lg" onClick={() => setUsing(true)}>
+            {t("detail.use")}
+          </Button>
+        ) : (
+          <Button size="lg" nativeButton={false} render={<a href={runHref(base, template.id)} />}>
+            {t("detail.use")}
+          </Button>
+        )}
+        {using && <TemplateUseDialog template={template} onClose={() => setUsing(false)} />}
         <Button variant="outline" onClick={copyLink}>
           <Link2 data-icon="inline-start" />
           {copied ? t("detail.linkCopied") : t("detail.copyLink")}
@@ -96,24 +113,17 @@ export function TemplateInfo({ template }: { template: GalleryTemplate }) {
       <div className="grid grid-cols-2 gap-x-3 gap-y-2.5">
         {spec(Monitor, t("detail.size", { width: frame.width, height: frame.height }))}
         {spec(Clock, t("detail.seconds", { seconds: Math.round(template.seconds) }))}
-        {spec(Film, t("detail.slots", { count: template.slots }))}
         {spec(Gauge, t("detail.fps", { fps: template.fps }))}
-        {spec(Type, t("detail.texts", { count: template.texts }))}
       </div>
 
       <p className="text-[13px] leading-relaxed text-foreground/90">{localized(template.description, locale)}</p>
 
-      <div className="flex items-center gap-2 border-t border-border pt-4 text-[13px] text-muted-foreground">
-        <Music className="size-4 shrink-0" />
-        {t("detail.noMusic")}
-      </div>
-
       {similar.length > 0 && (
         <div className="flex flex-col gap-3 border-t border-border pt-4">
           <h2 className="text-[13px] font-semibold">{t("detail.similar")}</h2>
-          <div className="flex flex-wrap items-start gap-3">
+          <div className="grid grid-cols-1 gap-2">
             {similar.map((s) => (
-              <TemplateCard key={s.id} template={s} area={SIMILAR_CARD_AREA} />
+              <GalleryTile key={s.id} template={s} panel={panel} />
             ))}
           </div>
         </div>

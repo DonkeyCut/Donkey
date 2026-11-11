@@ -317,11 +317,8 @@
       "copyLink": "Copy link",
       "linkCopied": "Link copied",
       "size": "{width} × {height} px",
-      "seconds": "{seconds, plural, one {# second} other {# seconds}}",
+      "seconds": "{seconds} s",
       "fps": "{fps} fps",
-      "slots": "{count, plural, one {# clip to fill} other {# clips to fill}}",
-      "texts": "{count, plural, one {# text} other {# texts}}",
-      "noMusic": "No music included. Add your own soundtrack.",
       "similar": "Similar templates",
       "failed": "Could not create the project.",
       "missing": "This template isn't available anymore."

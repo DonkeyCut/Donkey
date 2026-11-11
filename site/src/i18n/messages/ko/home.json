@@ -317,11 +317,8 @@
       "copyLink": "링크 복사",
       "linkCopied": "링크 복사됨",
       "size": "{width} × {height} px",
-      "seconds": "{seconds, plural, other {#초}}",
+      "seconds": "{seconds}초",
       "fps": "{fps} fps",
-      "slots": "{count, plural, other {채울 클립 #개}}",
-      "texts": "{count, plural, other {텍스트 #개}}",
-      "noMusic": "음악이 포함되어 있지 않아요. 원하는 사운드트랙을 추가해 보세요.",
       "similar": "비슷한 템플릿",
       "failed": "프로젝트를 생성할 수 없어요.",
       "missing": "이 템플릿은 더 이상 사용할 수 없어요."
