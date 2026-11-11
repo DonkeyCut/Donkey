@@ -114,10 +114,11 @@ const runsWithCap = async (over: Partial<ExportSpec>, cap: number | undefined): 
  * finished frames (colorParamsFilter), for assertions about the chains. */
 const untagged = (g: string[]): string[] => g.filter((l) => !l.endsWith("[vtag]"));
 
+// Every chain the render's graphs carry: a range renders its picture and its
+// sound in runs of their own.
 const graphFor = async (over: Partial<ExportSpec>): Promise<string[]> => {
   const runs = await runsFor(over);
-  const enc = runs.find((a) => a.includes("-filter_complex"))!;
-  return enc[enc.indexOf("-filter_complex") + 1].split(";");
+  return runs.filter((a) => a.includes("-filter_complex")).flatMap((a) => a[a.indexOf("-filter_complex") + 1].split(";"));
 };
 
 type Clip = ExportSpec["clips"][number];
@@ -511,15 +512,18 @@ describe("passes", () => {
 
     // Forced into passes of two pieces.
     const passes = await runsWithCap({ clips: Array.from({ length: 6 }, (_, i) => clip("a.mp4", { in: i, out: i + 2 })) }, 2);
-    const pieces = passes.filter((a) => a.includes("-filter_complex"));
+    // Each piece renders its picture, then its sound, in runs of their own.
+    const graphs = passes.filter((a) => a.includes("-filter_complex"));
+    const pieces = graphs.filter((_, i) => i % 2 === 0);
     expect(pieces.length).toBeGreaterThan(1);
     for (const [k, a] of pieces.entries()) {
       // The picture goes to its own file with no sound, the mix out raw
-      // beside it.
-      const video = a.indexOf(`/tmp/graph-test/piece_${k}.mp4`);
-      const mix = a.indexOf(`/tmp/graph-test/piece_${k}.f32`);
-      expect(a.slice(a.indexOf("-filter_complex") + 2, video)).not.toContain("-c:a");
-      expect(a.slice(video, mix)).toContain("pcm_f32le");
+      // from the run after it.
+      expect(a.at(-1)).toBe(`/tmp/graph-test/piece_${k}.mp4`);
+      expect(a).not.toContain("-c:a");
+      const sound = graphs[2 * k + 1];
+      expect(sound.at(-1)).toBe(`/tmp/graph-test/piece_${k}.f32`);
+      expect(sound).toContain("pcm_f32le");
     }
     // The passes share one look at each file.
     expect(streamProbes.length).toBe(new Set(streamProbes).size);
@@ -854,6 +858,26 @@ describe("subject masks in the filtergraph", () => {
     expect(joined).toContain("gblur=sigma=");
     expect(g.filter((c) => c.includes("blend=all_mode=multiply")).length).toBe(3);
     expect(xfadeMismatches(g)).toEqual([]);
+  });
+});
+
+describe("subject masks in a range", () => {
+  // A masked layer the range keeps for its sound but shows on no frame of
+  // takes no matte: a split output with no reader fails the whole graph.
+  test("a layer the range leaves out of the picture takes no matte split", async () => {
+    const g = await graphFor({
+      duration: 6,
+      range: { start: 0, end: 4 },
+      clips: [clip("a.mp4", { out: 6, mask: { subject: {} } })],
+      overlayVideos: [{ file: "ov.mp4", in: 0, out: 2, start: 4, track: 1, muted: true, mask: { subject: {} } }],
+      behindMask: { file: "behind_mask.mp4", from: 0 },
+    });
+    // Every matte the split writes is read at the front of some chain.
+    const pads = (c: string, at: RegExp) => [...c.match(at)![0].matchAll(/\[([^\]]+)\]/g)].map((m) => m[1]);
+    const written = g.flatMap((c) => pads(c, /(?:\[[^\]]+\])*$/)).filter((l) => l.startsWith("bhs"));
+    const read = new Set(g.flatMap((c) => pads(c, /^(?:\[[^\]]+\])*/)));
+    expect(written.length).toBeGreaterThan(0);
+    expect(written.filter((l) => !read.has(l))).toEqual([]);
   });
 });
 
@@ -1251,11 +1275,29 @@ describe("delivery", () => {
 
   test("a range is cut from the finished composite and sets the file's length", async () => {
     const args = await encodeRun({ duration: 20, range: { start: 5, end: 12 } });
-    const graph = arg(args, "-filter_complex");
+    const graph = (await graphFor({ clips: [clip("a.mp4")], duration: 20, range: { start: 5, end: 12 } })).join(";");
     expect(graph).toContain("trim=start=5.000:end=12.000,setpts=PTS-STARTPTS[vrange]");
     expect(graph).toContain("atrim=start=5.000:end=12.000,asetpts=PTS-STARTPTS[arange]");
     expect(arg(args, "-map")).toBe("[vrange]");
     expect(arg(args, "-t")).toBe("7.000");
+  });
+
+  // One run writing a range's picture and its sound wedged at the last frame
+  // on a busy machine, its sources still open. A range renders each alone,
+  // and the sound joins the picture where the file is written.
+  test("a range renders its picture and its sound in runs of their own", async () => {
+    const runs = await runsFor({ clips: [clip("a.mp4")], duration: 20, range: { start: 5, end: 12 } });
+    const graphs = runs.filter((a) => a.includes("-filter_complex"));
+    expect(graphs).toHaveLength(2);
+    const [picture, sound] = graphs;
+    expect(picture.filter((a) => a === "-map")).toHaveLength(1);
+    expect(arg(picture, "-map")).toBe("[vrange]");
+    expect(arg(picture, "-filter_complex")).not.toContain("atrim");
+    expect(arg(sound, "-map")).toBe("[arange]");
+    expect(arg(sound, "-filter_complex")).not.toContain("[vrange]");
+    const join = runs.find((a) => a.includes("-display_rotation"))!;
+    expect(join.filter((a) => a === "-i")).toHaveLength(2);
+    expect(join).toContain("1:a");
   });
 
   test("a range hides the track-0 slots it cannot reach and drops the entries outside it", async () => {

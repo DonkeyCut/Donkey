@@ -10,7 +10,7 @@ import path from "node:path";
 import { atempoChain, audioChannels, hasStream, mediaDuration, num, videoDecodeCost, videoDimensions, videoPicture } from "./util";
 import { CUT_EXPORT_PASSES } from "../lib/exportPassSettings";
 import { xfadeTransition } from "./transitionExpr";
-import { assertGraphSafe, fanOutInputs, fexpr } from "./filterGraph";
+import { assertGraphSafe, chainsFeeding, fanOutInputs, fexpr, inputsRead } from "./filterGraph";
 import { bakeRetimedAudio, setptsExpr, type BakedAudio } from "./retimeAudio";
 import { bakeTurnedMedia } from "./turnMedia";
 import { withSpecColors } from "./fileColor";
@@ -822,6 +822,8 @@ const spanLen = (c: { in: number; out: number; speed?: number; speedCurve?: Spee
  * sound handle reaches, so a boundary never lands on a frame the neighbor
  * still shapes. */
 const RANGE_SLACK_S = 0.5;
+/** How near a frame's time a moment counts as on it, in frames. */
+const FRAME_EPS = 1e-6;
 
 /** Source seconds a file's input opens ahead of the earliest read the graph
  * makes of it, and the earliest it seeks to at all: a file read from near
@@ -2135,11 +2137,24 @@ async function renderPass(
   const outScale = Math.min(W, H) / 1080;
   const clipDrawable = (c: ExportSpec["clips"][number]) =>
     (c.image || videoPresence.get(c.file)) && !c.hidden;
+  // A layer that shows on no frame of the range stays out of the picture and
+  // keeps its sound. A range ending where a layer comes on (a pass ending on
+  // a piece's start, e.g.) would otherwise hold that layer's delayed stream
+  // open past the output's end, and the graph stops making frames. It takes
+  // no matte either, so the matte splits count only the layers drawn.
+  const showsInRange = (oc: (typeof overlayVideos)[number]) => {
+    if (!spec.range) {
+      return true;
+    }
+    const from = Math.max(spec.range.start, oc.start);
+    const to = Math.min(spec.range.end, oc.start + spanLen(oc));
+    return Math.ceil(from * spec.fps - FRAME_EPS) / spec.fps < to - FRAME_EPS / spec.fps;
+  };
   const subjectActive = !!spec.behindMask && behindMaskInput !== undefined;
   const matteConsumers = !subjectActive
     ? 0
     : spec.overlays.filter((o) => o.subject && o.frames?.length && o.blank).length +
-      overlayVideos.filter((oc) => oc.mask?.subject && (oc.image || videoPresence.get(oc.file)))
+      overlayVideos.filter((oc) => oc.mask?.subject && showsInRange(oc) && (oc.image || videoPresence.get(oc.file)))
         .length +
       spec.clips.filter((c) => c.mask?.subject && clipDrawable(c)).length;
   let matteN = 0;
@@ -3022,6 +3037,52 @@ async function renderPass(
   let ovk = 0;
   // Overlay one track clip onto `onto`, returning the new label; also queues
   // its audio.
+  // A layer's own sound, mixed in at its timeline place. It reads only the
+  // layer's timing and edges, so a layer whose picture stays out of a range
+  // still sounds in it.
+  const addOverlaySound = (oc: (typeof overlayVideos)[number], k: number) => {
+    const olen = spanLen(oc);
+    const hf = Math.max(0, Math.min(oc.headFade ?? 0, olen));
+    const tf = Math.max(0, Math.min(oc.tailFade ?? 0, olen - hf));
+    const hs = Math.max(0, Math.min(oc.headSound ?? 0, olen));
+    const ts = Math.max(0, Math.min(oc.tailSound ?? 0, olen - hs));
+    const osnd = sounding(oc);
+    if (!oc.muted && osnd && audioPresence.get(osnd.file)) {
+      const vol = (oc.volume ?? 1) !== 1 ? `volume=${num(oc.volume ?? 1)},` : "";
+      // A cross dissolve or a split edit reaches into the handle either side
+      // of the clip, so this stream starts before its own head and runs past
+      // its tail; everything timed inside it shifts by that head reach.
+      const lead = Math.min(oc.soundLead ?? 0, oc.start);
+      const back = Math.min(oc.soundBack ?? 0, Math.max(hs, lead), headRoom(osnd));
+      const ahead = Math.min(oc.soundAhead ?? 0, Math.max(ts, oc.soundTail ?? 0));
+      const splitIn = Math.min(lead, back);
+      const splitOut = Math.min(oc.soundTail ?? 0, ahead);
+      // The picture's fade edges carry the sound with them; zoom edges don't.
+      // A cross dissolve's ramps are equal-power and reach half level on the
+      // cut, so they are a volume expression rather than a fade to silence.
+      const afades =
+        (hf > 0.01 ? `afade=t=in:st=${num(back)}:d=${num(hf)},` : "") +
+        (tf > 0.01
+          ? `afade=t=out:st=${num(Math.max(0, back + olen - tf))}:d=${num(tf)},`
+          : "");
+      const crosses = crossFilters([
+        crossExpr(back, hs, true),
+        crossExpr(back + olen, ts, false),
+        splitIn > 0.01 ? splitExpr(back - splitIn, splitIn, oc.splitFade ?? 0, true) : "",
+        splitOut > 0.01 ? splitExpr(back + olen, splitOut, oc.splitFade ?? 0, false) : "",
+      ]);
+      const delayMs = Math.max(0, Math.round((oc.start - back) * 1000));
+      const lab = `ovs${k}`;
+      filters.push(
+        audioRead(osnd, -back, olen + ahead) +
+          toStereo(osnd.file) +
+          `${soundChain(oc.sound)}${vol}${afades}anull` +
+          `${crosses},adelay=${delayMs}:all=1[${lab}]`
+      );
+      overlaySoundLabels.push(lab);
+    }
+  };
+
   const addOverlay = (oc: (typeof overlayVideos)[number], onto: string): string => {
     const orIn = overlayRemovalInput.get(oc);
     if (!oc.image && !orIn && !videoPresence.get(oc.file)) return onto;
@@ -3221,46 +3282,20 @@ async function renderPass(
     } else {
       filters.push(`[${onto}][${seg}]overlay=${pos}:${enable}:eof_action=pass${ovl}[${next}]`);
     }
-    const osnd = sounding(oc);
-    if (!oc.muted && osnd && audioPresence.get(osnd.file)) {
-      const vol = (oc.volume ?? 1) !== 1 ? `volume=${num(oc.volume ?? 1)},` : "";
-      // A cross dissolve or a split edit reaches into the handle either side
-      // of the clip, so this stream starts before its own head and runs past
-      // its tail; everything timed inside it shifts by that head reach.
-      const lead = Math.min(oc.soundLead ?? 0, oc.start);
-      const back = Math.min(oc.soundBack ?? 0, Math.max(hs, lead), headRoom(osnd));
-      const ahead = Math.min(oc.soundAhead ?? 0, Math.max(ts, oc.soundTail ?? 0));
-      const splitIn = Math.min(lead, back);
-      const splitOut = Math.min(oc.soundTail ?? 0, ahead);
-      // The picture's fade edges carry the sound with them; zoom edges don't.
-      // A cross dissolve's ramps are equal-power and reach half level on the
-      // cut, so they are a volume expression rather than a fade to silence.
-      const afades =
-        (hf > 0.01 ? `afade=t=in:st=${num(back)}:d=${num(hf)},` : "") +
-        (tf > 0.01
-          ? `afade=t=out:st=${num(Math.max(0, back + olen - tf))}:d=${num(tf)},`
-          : "");
-      const crosses = crossFilters([
-        crossExpr(back, hs, true),
-        crossExpr(back + olen, ts, false),
-        splitIn > 0.01 ? splitExpr(back - splitIn, splitIn, oc.splitFade ?? 0, true) : "",
-        splitOut > 0.01 ? splitExpr(back + olen, splitOut, oc.splitFade ?? 0, false) : "",
-      ]);
-      const delayMs = Math.max(0, Math.round((oc.start - back) * 1000));
-      const lab = `ovs${k}`;
-      filters.push(
-        audioRead(osnd, -back, olen + ahead) +
-          toStereo(osnd.file) +
-          `${soundChain(oc.sound)}${vol}${afades}anull` +
-          `${crosses},adelay=${delayMs}:all=1[${lab}]`
-      );
-      overlaySoundLabels.push(lab);
-    }
+    addOverlaySound(oc, k);
     return next;
   };
 
   let vLabel = vAcc;
-  for (const oc of overlayVideos) vLabel = addOverlay(oc, vLabel);
+  for (const oc of overlayVideos) {
+    if (showsInRange(oc)) {
+      vLabel = addOverlay(oc, vLabel);
+      continue;
+    }
+    if (oc.image || overlayRemovalInput.get(oc) || videoPresence.get(oc.file)) {
+      addOverlaySound(oc, ovk++);
+    }
+  }
 
   // Burn in overlay elements. Static ones are full-frame PNGs windowed with
   // `enable` (half-open, so back-to-back overlays sharing a boundary never
@@ -3596,7 +3631,13 @@ async function renderPass(
   // are the delivery's mix, mastered or encoded once at the join.
   const master = spec.loudness !== undefined;
   if (master && spec.truePeakCeiling === undefined) throw new Error("A mastered export needs its true-peak ceiling.");
-  const rawMix = master || out.kind === "piece";
+  // A range ends its picture with its sources still open, and ffmpeg can
+  // wedge there while a sound output still reads: a busy machine froze a
+  // third of a template's passes at their last frame. A range renders its
+  // picture and its sound in runs of their own, each ending on its one kind
+  // of output, and its sound comes out raw for the join.
+  const split = spec.range !== undefined;
+  const rawMix = master || out.kind === "piece" || split;
   const mixPath = out.kind === "piece" ? out.mix : path.join(job.tmpDir, "mix.f32");
   const mixRate = spec.audioSampleRate ?? MIX_RATE;
   const mixChannels = spec.audioChannels ?? 2;
@@ -3608,7 +3649,35 @@ async function renderPass(
   // lets the second pass own faststart.
   const encodePath = out.kind === "piece" ? out.video : path.join(job.tmpDir, `encode${containerExtension(spec)}`);
   const [shareFrom, shareTo] = out.kind === "piece" ? out.progress : [0, 1];
-  await io.runFfmpeg(
+  const onProgress = (t: number) =>
+    (job.progress = Math.min(0.99, shareFrom + (shareTo - shareFrom) * (t / Math.max(0.1, span))));
+  const mixOutput = ["-map", `[${aLabel}]`, "-c:a", "pcm_f32le", "-ar", String(mixRate), "-ac", String(mixChannels), "-f", "f32le", ...soundLength, mixPath];
+  if (split) {
+    const picture = inputsRead(inputs, chainsFeeding(filters, [vLabel]));
+    await io.runFfmpeg(
+      job,
+      [
+        "-y",
+        ...picture.inputs,
+        "-filter_complex", assertGraphSafe(fanOutInputs(picture.chains).join(";")),
+        "-map", `[${vLabel}]`,
+        ...videoCodecArgs(enc, spec),
+        ...colorTagArgs(spec),
+        "-t", num(span),
+        encodePath,
+      ],
+      onProgress
+    );
+    const sound = inputsRead(inputs, chainsFeeding(filters, [aLabel, ...stemLabels]));
+    await io.runFfmpeg(job, [
+      "-y",
+      ...sound.inputs,
+      "-filter_complex", assertGraphSafe(fanOutInputs(sound.chains).join(";")),
+      ...mixOutput,
+      ...stemOutputs,
+    ]);
+  } else {
+    await io.runFfmpeg(
     job,
     [
       "-y",
@@ -3621,13 +3690,12 @@ async function renderPass(
       ...(rawMix ? [] : audioCodecArgs(spec)),
       "-t", num(span),
       encodePath,
-      ...(rawMix
-        ? ["-map", `[${aLabel}]`, "-c:a", "pcm_f32le", "-ar", String(mixRate), "-ac", String(mixChannels), "-f", "f32le", ...soundLength, mixPath]
-        : []),
+      ...(rawMix ? mixOutput : []),
       ...stemOutputs,
     ],
-    (t) => (job.progress = Math.min(0.99, shareFrom + (shareTo - shareFrom) * (t / Math.max(0.1, span))))
+    onProgress
   );
+  }
 
   // A piece is done once its files are written; the join masters, packs and
   // muxes the whole.
@@ -3661,14 +3729,16 @@ async function renderPass(
   // "desktop" frame. `-display_rotation 0` overrides that matrix to identity; a
   // stream copy re-emits the (already correct) pixels and audio unchanged and
   // writes the faststart-optimized final file.
-  // A mastered mix joins the picture here, encoded for the delivery.
+  // A raw mix — mastered, or a range's sound from its own run — joins the
+  // picture here, encoded for the delivery.
+  const rawSound = master ? masteredPath : rawMix ? mixPath : null;
   await io.runFfmpeg(job, [
     "-y",
     "-display_rotation", "0",
     "-i", encodePath,
-    ...(master
+    ...(rawSound
       ? [
-          "-f", "f32le", "-ar", String(mixRate), "-ac", String(mixChannels), "-i", masteredPath,
+          "-f", "f32le", "-ar", String(mixRate), "-ac", String(mixChannels), "-i", rawSound,
           "-map", "0:v", "-map", "1:a", "-c:v", "copy", ...audioCodecArgs(spec), "-t", num(span),
         ]
       : ["-map", "0", "-c", "copy"]),

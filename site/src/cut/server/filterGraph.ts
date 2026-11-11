@@ -65,6 +65,91 @@ export function fanOutInputs(filters: string[]): string[] {
   return [...splits, ...body];
 }
 
+/** The graph's chains one per entry: an entry may join several with `;`,
+ * which splits them wherever it stands outside a quoted value. */
+function chainsOf(filters: string[]): string[] {
+  return filters.flatMap((f) => {
+    const parts = f.split("'");
+    const chains = [""];
+    parts.forEach((part, i) => {
+      const pieces = i % 2 === 0 ? part.split(";") : [part];
+      chains[chains.length - 1] += (i > 0 ? "'" : "") + pieces[0];
+      chains.push(...pieces.slice(1));
+    });
+    return chains;
+  });
+}
+
+/** The labels a chain reads, from its front, and writes, at its end. */
+const LEAD_PADS = /^(?:\[[^\]]+\])*/;
+const TRAIL_PADS = /(?:\[[^\]]+\])*$/;
+const labelsOf = (pads: string) => [...pads.matchAll(/\[([^\]]+)\]/g)].map((m) => m[1]);
+
+/**
+ * The chains `outs` are built from, in graph order: one output's part of a
+ * graph that renders several, as a run of its own takes it.
+ */
+export function chainsFeeding(filters: string[], outs: string[]): string[] {
+  const chains = chainsOf(filters);
+
+  // Which chain writes each label.
+  const writer = new Map<string, number>();
+  chains.forEach((c, i) => {
+    for (const label of labelsOf(c.match(TRAIL_PADS)![0])) {
+      writer.set(label, i);
+    }
+  });
+
+  // Walk back from the outputs through every label read; an input stream
+  // such as `0:v` has no writer and ends the walk.
+  const kept = new Set<number>();
+  const wanted = [...outs];
+  while (wanted.length > 0) {
+    const at = writer.get(wanted.pop()!);
+    if (at === undefined || kept.has(at)) {
+      continue;
+    }
+    kept.add(at);
+    wanted.push(...labelsOf(chains[at].match(LEAD_PADS)![0]));
+  }
+  return chains.filter((_, i) => kept.has(i));
+}
+
+/**
+ * The inputs `chains` read, out of a run's `inputs` args, and the chains
+ * with their stream pads renumbered to match: `[3:a]` reading the second
+ * input kept becomes `[1:a]`. An input's flags travel with it.
+ */
+export function inputsRead(inputs: string[], chains: string[]): { inputs: string[]; chains: string[] } {
+  // Each input is its flags through `-i <path>`.
+  const groups: string[][] = [];
+  let open: string[] = [];
+  for (let i = 0; i < inputs.length; i++) {
+    open.push(inputs[i]);
+    if (inputs[i] === "-i") {
+      open.push(inputs[++i]);
+      groups.push(open);
+      open = [];
+    }
+  }
+
+  // The inputs read, in their order, and where each lands.
+  const indexOf = (stream: string) => Number(stream.split(":")[0]);
+  const read = new Set<number>();
+  for (const c of chains) {
+    mapPads(c, (pad, stream) => {
+      read.add(indexOf(stream));
+      return pad;
+    });
+  }
+  const order = [...read].sort((a, b) => a - b);
+  const moved = new Map(order.map((n, k) => [n, k]));
+  return {
+    inputs: order.flatMap((n) => groups[n]),
+    chains: chains.map((c) => mapPads(c, (pad, stream) => pad.replace(/^\[\d+/, `[${moved.get(indexOf(stream))}`))),
+  };
+}
+
 /** A filter option value single-quoted so the graph parser carries it whole. */
 export function fexpr(expr: string): string {
   if (expr.includes("'")) {

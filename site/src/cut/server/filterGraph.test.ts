@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { assertGraphSafe, fanOutInputs, fexpr } from "./filterGraph";
+import { assertGraphSafe, chainsFeeding, fanOutInputs, fexpr, inputsRead } from "./filterGraph";
 
 const thrown = (fn: () => unknown): string => {
   try {
@@ -69,5 +69,49 @@ describe("input fan-out", () => {
   test("a stream read once, and a graph's own labels, are left as written", () => {
     const g = ["[0:v]trim=0:2[v0]", "[1:a:0]atrim=0:2[a0]", "[v0][2:v]overlay[o]"];
     expect(fanOutInputs(g)).toEqual(g);
+  });
+});
+
+describe("one output's part of a graph", () => {
+  // A picture and a soundtrack composited in one graph, as an export builds it.
+  const graph = [
+    "[0:v]trim=0:2,setpts=PTS-STARTPTS[v0]",
+    "[1:v]scale=640:360[o0]",
+    "[v0][o0]overlay=0:0[vtag]",
+    "anullsrc=r=44100:cl=stereo,atrim=0:2[a0]",
+    "[2:a]atrim=0:2,asetpts=PTS-STARTPTS[snd0];[a0][snd0]amix=inputs=2[amix]",
+    "[0:a]volume=0.5[talk]",
+    "[amix][talk]amix=inputs=2[mix]",
+  ];
+
+  test("the picture keeps the chains it is built from and none of the sound's", () => {
+    expect(chainsFeeding(graph, ["vtag"])).toEqual([
+      "[0:v]trim=0:2,setpts=PTS-STARTPTS[v0]",
+      "[1:v]scale=640:360[o0]",
+      "[v0][o0]overlay=0:0[vtag]",
+    ]);
+  });
+
+  test("the sound keeps its sources, joined chains split apart", () => {
+    expect(chainsFeeding(graph, ["mix"])).toEqual([
+      "anullsrc=r=44100:cl=stereo,atrim=0:2[a0]",
+      "[2:a]atrim=0:2,asetpts=PTS-STARTPTS[snd0]",
+      "[a0][snd0]amix=inputs=2[amix]",
+      "[0:a]volume=0.5[talk]",
+      "[amix][talk]amix=inputs=2[mix]",
+    ]);
+  });
+
+  test("a run opens only the inputs its chains read, renumbered in order", () => {
+    const inputs = ["-ss", "4", "-i", "a.mp4", "-loop", "1", "-i", "b.png", "-f", "concat", "-safe", "0", "-i", "m.txt"];
+    const sound = inputsRead(inputs, chainsFeeding(graph, ["mix"]));
+    expect(sound.inputs).toEqual(["-ss", "4", "-i", "a.mp4", "-f", "concat", "-safe", "0", "-i", "m.txt"]);
+    expect(sound.chains).toContain("[1:a]atrim=0:2,asetpts=PTS-STARTPTS[snd0]");
+    expect(sound.chains).toContain("[0:a]volume=0.5[talk]");
+  });
+
+  test("a pad spelled inside a quoted option value stays as written", () => {
+    const chains = ["[2:a]atrim=0:2[x]", "[x]volume='[0:a]'[y]"];
+    expect(inputsRead(["-i", "a", "-i", "b", "-i", "c"], chainsFeeding(chains, ["y"])).chains[1]).toBe("[x]volume='[0:a]'[y]");
   });
 });
