@@ -904,6 +904,21 @@ describe("clip keyframes in the filtergraph", () => {
     expect(xfadeMismatches(g)).toEqual([]);
   });
 
+  // Every input gets a decoder pool and every filter a slice pool, each as
+  // wide as the machine: a template with 278 looping elements asked for more
+  // threads than a macOS process holds and the encoder never opened.
+  test("a crowded graph bounds its threads; a small one keeps ffmpeg's", async () => {
+    const many = Array.from({ length: 300 }, (_, i) => ({ file: `o${i}.png`, start: 0, end: 2 }));
+    const crowded = (await runsFor({ clips: [clip("a.mp4")], overlays: many })).find((a) => a.includes("-filter_complex"))!;
+    expect(crowded).toContain("-filter_complex_threads");
+    const reads = crowded.filter((a) => a === "-i").length;
+    expect(crowded.filter((a, i) => a === "-i" && crowded[i - 2] === "-threads" && crowded[i - 1] === "1").length).toBe(reads);
+
+    const plain = (await runsFor({ clips: [clip("a.mp4")], overlays: [{ file: "o0.png", start: 0, end: 2 }] })).find((a) => a.includes("-filter_complex"))!;
+    expect(plain).not.toContain("-filter_complex_threads");
+    expect(plain).not.toContain("-threads");
+  });
+
   // Two keys on one instant make a jump. The span between them prints at the
   // graph's three decimals, so a tiny span became "/0.000" and ffmpeg failed
   // to evaluate the expression, failing the whole export.

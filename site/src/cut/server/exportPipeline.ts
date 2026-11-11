@@ -55,6 +55,27 @@ function splitExpr(from: number, len: number, fade: number, opening: boolean): s
     : `clip(((${num(from + len)})-t)/${num(f)},0,1)`;
 }
 
+// ffmpeg gives every input a decoder pool and every filter a slice pool, each
+// as wide as the machine. Past a few dozen inputs a graph asks for more
+// threads than a macOS process may hold (4,096): a template with 278 looping
+// elements failed with EAGAIN before its encoder opened. A crowded graph
+// decodes each input on one thread and splits a fixed budget over its filters.
+const CROWDED_INPUTS = 48;
+const FILTER_THREAD_BUDGET = 1024;
+
+/** A pass's input args, bounded in threads when the graph is crowded. */
+function boundThreads(inputs: string[]): string[] {
+  const reads = inputs.filter((a) => a === "-i").length;
+  if (reads <= CROWDED_INPUTS) {
+    return inputs;
+  }
+  const filterThreads = Math.max(1, Math.floor(FILTER_THREAD_BUDGET / reads));
+  return [
+    ...inputs.flatMap((a) => (a === "-i" ? ["-threads", "1", "-i"] : [a])),
+    "-filter_complex_threads", String(filterThreads),
+  ];
+}
+
 /** The expressions folded into one `volume` filter, quoted so the graph
  * parser carries their commas whole.
  *
@@ -3665,7 +3686,7 @@ async function renderPass(
       job,
       [
         "-y",
-        ...picture.inputs,
+        ...boundThreads(picture.inputs),
         "-filter_complex", assertGraphSafe(fanOutInputs(picture.chains).join(";")),
         "-map", `[${vLabel}]`,
         ...videoCodecArgs(enc, spec),
@@ -3688,7 +3709,7 @@ async function renderPass(
     job,
     [
       "-y",
-      ...inputs,
+      ...boundThreads(inputs),
       "-filter_complex", assertGraphSafe(fanOutInputs(filters).join(";")),
       "-map", `[${vLabel}]`,
       ...(rawMix ? [] : ["-map", `[${aLabel}]`]),
