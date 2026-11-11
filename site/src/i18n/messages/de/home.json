@@ -55,9 +55,11 @@
     "moveToLocal": "Nach Lokal verschieben",
     "moveToCloud": "In die Cloud verschieben",
     "actions": "Projektaktionen",
-    "makeTemplate": "Vorlage erstellen",
+    "makeTemplate": "Als Vorlage speichern",
     "makeTemplateFailed": "Vorlage konnte nicht erstellt werden.",
-    "templateMade": "„{name}“ ist jetzt eine Vorlage unter <link>Vorlagen</link>."
+    "makingTemplate": "Vorlage wird erstellt…",
+    "templateMade": "Jetzt eine Vorlage unter „Meine Vorlagen“.",
+    "openTemplates": "„Meine Vorlagen“ öffnen"
   },
   "pick": {
     "project": "{count, plural, one {# Projekt} other {# Projekte}}",

@@ -55,9 +55,11 @@
     "moveToLocal": "ローカルに移動",
     "moveToCloud": "クラウドに移動",
     "actions": "プロジェクト操作",
-    "makeTemplate": "テンプレートを作成",
+    "makeTemplate": "テンプレートとして作成",
     "makeTemplateFailed": "テンプレートを作成できませんでした。",
-    "templateMade": "「{name}」が<link>テンプレート</link>に追加されました。"
+    "makingTemplate": "テンプレートを作成中…",
+    "templateMade": "「マイテンプレート」に追加されました。",
+    "openTemplates": "マイテンプレートを開く"
   },
   "pick": {
     "project": "{count, plural, other {#件のプロジェクト}}",

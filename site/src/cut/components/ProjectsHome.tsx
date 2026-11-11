@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type RefObject } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useLocale, useTranslations } from "next-intl";
@@ -82,7 +81,6 @@ import { newProjectAllowed } from "@/cut/lib/projectLimit";
 import { useStarterGone } from "@/cut/lib/tourLock";
 import { checkoutErrorCode } from "@/cut/lib/proUpgrade";
 import { homeHref, projectHref, useCutBase } from "@/cut/lib/nav";
-import { copyAsKind } from "@/cut/lib/templateUse";
 import { daysUntil, formatDate, formatTime } from "@/cut/lib/time";
 import {
   parseRatio,
@@ -111,6 +109,7 @@ import {
   usePickWords,
   useSelectionMenu,
 } from "./selectionMenu";
+import { TemplateMakeDialog } from "./TemplateMakeDialog";
 import { formatBytes } from "@/lib/bytes";
 import { useDescribeError } from "@/i18n/describeError";
 
@@ -357,9 +356,8 @@ export function ProjectsHome() {
   const [busy, setBusy] = useState(false);
   // One line of feedback when a cross-residency duplicate fails.
   const [dupError, setDupError] = useState<string | null>(null);
-  // The name of the project just made into a template, for the note that says
-  // where it went.
-  const [templateMade, setTemplateMade] = useState<string | null>(null);
+  // The project being made into a template, while its dialog is open.
+  const [making, setMaking] = useState<{ r: Residency; p: ProjectSummary } | null>(null);
   // A count of desktop files still uploading into fresh projects, plus whether an
   // OS-file drag is hovering the surface (a depth counter tames enter/leave noise
   // as the cursor crosses child tiles).
@@ -635,21 +633,12 @@ export function ProjectsHome() {
   };
 
   // Make a template from a project: a copy on the same shelf, marked as one and
-  // keeping the project's name, listed under Templates › My templates.
-  const makeTemplate = async (r: Residency, p: ProjectSummary) => {
+  // keeping the project's name, listed under Templates › My templates. The
+  // dialog runs the copy and shows its progress.
+  const makeTemplate = (r: Residency, p: ProjectSummary) => {
     if (!live(r)) return;
-    if (!(await newProjectAllowed(client))) return;
-    setBusy(true);
     setDupError(null);
-    try {
-      await copyAsKind(r, p.id, "template", p.name);
-      await refresh(r);
-      setTemplateMade(p.name);
-    } catch (e) {
-      setDupError(describeError(e, t("projects.makeTemplateFailed")));
-    } finally {
-      setBusy(false);
-    }
+    setMaking({ r, p });
   };
 
   // Move a project to another residency: copy it across (projectCopy.ts does
@@ -954,7 +943,7 @@ export function ProjectsHome() {
                   setRenaming({ project: p, residency: r });
                 }}
                 onDuplicate={() => void duplicate(r, p)}
-                onMakeTemplate={() => void makeTemplate(r, p)}
+                onMakeTemplate={() => makeTemplate(r, p)}
                 moveTo={moveDests(r)
                   .map((d) => ({ target: d, run: () => void moveAcross(r, d, p) }))}
                 onDelete={() => setDeleting(setOf(p, r))}
@@ -1031,7 +1020,7 @@ export function ProjectsHome() {
                 setRenaming({ project: p, residency: r });
               }}
               onDuplicate={() => void duplicate(r, p)}
-              onMakeTemplate={() => void makeTemplate(r, p)}
+              onMakeTemplate={() => makeTemplate(r, p)}
               moveTo={moveDests(r)
                 .map((d) => ({ target: d, run: () => void moveAcross(r, d, p) }))}
               onDelete={() => setDeleting(setOf(p, r))}
@@ -1172,18 +1161,7 @@ export function ProjectsHome() {
       <GraceBanner enabled={residencies.includes("cloud")} />
 
       {dupError && <p className="mb-4 text-sm text-destructive">{dupError}</p>}
-      {templateMade && (
-        <p className="mb-4 text-sm text-muted-foreground">
-          {t.rich("projects.templateMade", {
-            name: templateMade,
-            link: (chunks) => (
-              <Link href={homeHref(base, "templates")} className="font-medium text-foreground underline underline-offset-2">
-                {chunks}
-              </Link>
-            ),
-          })}
-        </p>
-      )}
+      {making && <TemplateMakeDialog project={making.p} residency={making.r} onClose={() => setMaking(null)} />}
 
       {homeView === "loading" ? (
         <div className="grid place-items-center py-24 text-muted-foreground">
@@ -1299,7 +1277,7 @@ export function ProjectsHome() {
             }
             onMakeTemplate={
               ctxSet.length === 1 && ctxFolders.length === 0
-                ? () => void makeTemplate(ctxSet[0].r, ctxSet[0].p)
+                ? () => makeTemplate(ctxSet[0].r, ctxSet[0].p)
                 : undefined
             }
             moveTo={ctxMoveTo}

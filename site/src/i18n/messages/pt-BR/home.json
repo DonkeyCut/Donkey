@@ -55,9 +55,11 @@
     "moveToLocal": "Mover para Local",
     "moveToCloud": "Mover para Nuvem",
     "actions": "Ações do projeto",
-    "makeTemplate": "Criar modelo",
+    "makeTemplate": "Transformar em modelo",
     "makeTemplateFailed": "Não foi possível criar o modelo.",
-    "templateMade": "“{name}” agora é um modelo em <link>Modelos</link>."
+    "makingTemplate": "Criando modelo…",
+    "templateMade": "Agora é um modelo em Meus modelos.",
+    "openTemplates": "Abrir Meus modelos"
   },
   "pick": {
     "project": "{count, plural, one {# projeto} other {# projetos}}",

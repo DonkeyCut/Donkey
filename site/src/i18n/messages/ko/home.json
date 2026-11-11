@@ -55,9 +55,11 @@
     "moveToLocal": "로컬로 이동",
     "moveToCloud": "클라우드로 이동",
     "actions": "프로젝트 작업",
-    "makeTemplate": "템플릿 만들기",
+    "makeTemplate": "템플릿으로 만들기",
     "makeTemplateFailed": "템플릿을 만들지 못했어요.",
-    "templateMade": "“{name}”이(가) <link>템플릿</link>에 템플릿으로 추가되었어요."
+    "makingTemplate": "템플릿 만드는 중…",
+    "templateMade": "이제 '내 템플릿'에 템플릿으로 등록되었어요.",
+    "openTemplates": "내 템플릿 열기"
   },
   "pick": {
     "project": "{count, plural, other {프로젝트 #개}}",

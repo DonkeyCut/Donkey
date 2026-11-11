@@ -55,9 +55,11 @@
     "moveToLocal": "Déplacer vers Local",
     "moveToCloud": "Déplacer vers Cloud",
     "actions": "Actions du projet",
-    "makeTemplate": "Créer un modèle",
+    "makeTemplate": "Enregistrer comme modèle",
     "makeTemplateFailed": "Impossible de créer le modèle.",
-    "templateMade": "« {name} » est désormais un modèle dans <link>Modèles</link>."
+    "makingTemplate": "Création du modèle…",
+    "templateMade": "Désormais disponible dans Mes modèles.",
+    "openTemplates": "Ouvrir Mes modèles"
   },
   "pick": {
     "project": "{count, plural, one {# projet} other {# projets}}",

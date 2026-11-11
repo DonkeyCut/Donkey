@@ -55,9 +55,11 @@
     "moveToLocal": "Move to Local",
     "moveToCloud": "Move to Cloud",
     "actions": "Project actions",
-    "makeTemplate": "Make template",
+    "makeTemplate": "Make as Template",
     "makeTemplateFailed": "Could not make the template.",
-    "templateMade": "“{name}” is now a template in <link>Templates</link>."
+    "makingTemplate": "Making template…",
+    "templateMade": "Now a template in My templates.",
+    "openTemplates": "Open My templates"
   },
   "pick": {
     "project": "{count, plural, one {# project} other {# projects}}",

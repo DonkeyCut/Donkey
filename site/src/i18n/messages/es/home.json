@@ -55,9 +55,11 @@
     "moveToLocal": "Mover a Local",
     "moveToCloud": "Mover a la nube",
     "actions": "Acciones del proyecto",
-    "makeTemplate": "Crear plantilla",
+    "makeTemplate": "Convertir en plantilla",
     "makeTemplateFailed": "No se pudo crear la plantilla.",
-    "templateMade": "“{name}” ahora es una plantilla en <link>Plantillas</link>."
+    "makingTemplate": "Creando plantilla…",
+    "templateMade": "Ahora es una plantilla en Mis plantillas.",
+    "openTemplates": "Abrir Mis plantillas"
   },
   "pick": {
     "project": "{count, plural, one {# proyecto} other {# proyectos}}",

@@ -55,9 +55,11 @@
     "moveToLocal": "移至本地",
     "moveToCloud": "移至云端",
     "actions": "项目操作",
-    "makeTemplate": "制作模板",
+    "makeTemplate": "设为模板",
     "makeTemplateFailed": "无法制作模板。",
-    "templateMade": "“{name}”已作为模板存入<link>模板</link>。"
+    "makingTemplate": "正在设为模板…",
+    "templateMade": "现已存入“我的模板”。",
+    "openTemplates": "打开“我的模板”"
   },
   "pick": {
     "project": "{count, plural, other {# 个项目}}",
