@@ -82,10 +82,17 @@ export function CutOnboarding() {
   const { chatgpt } = useEnvironment();
   // A phone ends on the plans with no free way out: the editor needs a
   // computer, so the phone's job is the account and the plan. A computer's
-  // slides hand over to the starter tour, and the plans come after it.
+  // slides end on the plans too, where continuing with free hands over to the
+  // starter tour, and the plans come again after it.
   const exit: PlansExit = useFormFactor() === "phone" ? "paywall" : "free";
   const toTour = exit === "free";
-  const [rawStep, setStep] = useState(0);
+  // Checkout leaves from the plans slide and lands back on settings with the
+  // slides still owed, so the trip back reopens them on the plans, not the
+  // welcome. Read during the first render, before settings drops the query.
+  const [fromCheckout] = useState(
+    () => typeof window !== "undefined" && new URLSearchParams(window.location.search).has("checkout"),
+  );
+  const [rawStep, setStep] = useState(fromCheckout ? SLIDES.length - 1 : 0);
   const saved = useMemo(() => (state?.referralSources ?? []).filter(isKnownReferralSource), [state]);
   const savedOther = saved.includes("other") ? (state?.referralOther ?? "") : "";
   const [referralDraft, setReferrals] = useState<ReferralSource[] | null>(null);
@@ -131,7 +138,11 @@ export function CutOnboarding() {
               ? "first_run"
               : "replay"
             : null;
-  const { data: pro } = useProSubscription({ pollMs: run && exit === "paywall" ? PAYWALL_POLL_MS : undefined });
+  // A computer back from checkout rereads the plan too, so a plan that lands
+  // takes the plans slide away and leaves the way on to the tour.
+  const { data: pro } = useProSubscription({
+    pollMs: run && (exit === "paywall" || fromCheckout) ? PAYWALL_POLL_MS : undefined,
+  });
 
   // Navigation and progress use the slides this account can see.
   const isPro = pro?.isActive ?? false;
@@ -139,8 +150,8 @@ export function CutOnboarding() {
   const slides = useMemo(
     () => SLIDES.filter((slide) =>
       (slide !== "credits" || signupCredits !== null) &&
-      (slide !== "plans" || (!isPro && !toTour))),
-    [signupCredits, isPro, toTour],
+      (slide !== "plans" || !isPro)),
+    [signupCredits, isPro],
   );
   const slideCount = slides.length;
   const step = Math.min(rawStep, slideCount - 1);
@@ -303,18 +314,17 @@ export function CutOnboarding() {
     if (slide === "referral" && !referrals.length) return;
     commitReferrals();
     if (step >= slideCount - 1) {
-      // The plans slide ends the sequence through its own two answers — Get
-      // Pro, or continue with free. Arrowing or Entering past it would be a
-      // third, silent one, so forward stops there. A subscriber never sees that
-      // slide, and on a computer the tour comes next, so forward off their last
-      // one is how the sequence ends.
-      if (isPro || toTour) {
+      // The plans slide ends the sequence through its own answers — a plan, or
+      // continue with free. Arrowing or Entering past it would be a third,
+      // silent one, so forward stops there. A subscriber never sees that
+      // slide, so forward off their last one is how the sequence ends.
+      if (slide !== "plans") {
         leave(false);
       }
       return;
     }
     setStep(step + 1);
-  }, [commitReferrals, isPro, leave, referrals, slide, slideCount, step, toTour]);
+  }, [commitReferrals, leave, referrals, slide, slideCount, step]);
 
   useEffect(() => {
     if (!run) return;
@@ -383,10 +393,9 @@ export function CutOnboarding() {
   };
 
   const last = step === slideCount - 1;
-  // A subscriber's last slide ends the sequence from the footer, and so does a
-  // computer's, where the tour comes next. A phone finds the plans slide's own
-  // answers.
-  const done = last && (isPro || toTour);
+  // A subscriber's last slide ends the sequence from the footer, on to the
+  // tour on a computer. Everyone else finds the plans slide's own answers.
+  const done = last && slide !== "plans";
 
   return (
     <div
@@ -435,7 +444,7 @@ export function CutOnboarding() {
             />
           )}
           {slide === "ai-chat" && <AiChatSlide />}
-          {slide === "plans" && <PlansSlide run={run} exit={exit} onSkipPro={() => finish(false)} />}
+          {slide === "plans" && <PlansSlide run={run} exit={exit} onSkipPro={() => leave(false)} />}
         </div>
         <div aria-hidden className="flex-[3]" />
       </div>
