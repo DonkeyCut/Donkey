@@ -483,3 +483,178 @@ describe("a flash shorter than an output frame", () => {
     60_000
   );
 });
+
+describe("an animated element that runs to the end of the cut", () => {
+  // The element's last picture holds from 0.2s to the cut's end at 1s, with
+  // no blank after it in its slideshow. It shows on the cut's last frame.
+  test.skipIf(!tools)(
+    "holds its last picture through the final frame",
+    async () => {
+      const mediaDir = await mkdtemp(path.join(os.tmpdir(), "cut-e2e-media-"));
+      const tmpDir = await mkdtemp(path.join(os.tmpdir(), "cut-e2e-job-"));
+      try {
+        ff(["-f", "lavfi", "-i", "color=c=black:s=64x64:r=30:d=1", "-pix_fmt", "yuv420p", path.join(mediaDir, "black.mp4")]);
+        const still = (name: string, c: string) =>
+          ff(["-f", "lavfi", "-i", `color=c=${c}:s=64x64`, "-frames:v", "1", "-pix_fmt", "rgba", path.join(tmpDir, name)]);
+        still("blank.png", "black@0.0");
+        still("f0.png", "red");
+        still("f1.png", "red");
+        const spec: ExportSpec = {
+          projectId: "p",
+          width: 64,
+          height: 64,
+          fps: 30,
+          crf: 18,
+          preset: "veryfast",
+          duration: 1,
+          clips: [{ file: "black.mp4", in: 0, out: 1, muted: true }],
+          audio: [],
+          overlays: [
+            {
+              start: 0.1,
+              end: 1,
+              x: 0,
+              y: 0,
+              blank: "blank.png",
+              frames: [
+                { file: "f0.png", duration: 0.1 },
+                { file: "f1.png", duration: 0.8 },
+              ],
+            },
+          ],
+        };
+        const job: RenderHandle = { tmpDir, outPath: path.join(tmpDir, "out.mp4"), progress: 0, log: [] };
+        await runExport(job, spec, (file) => path.join(mediaDir, file));
+        // The middle pixel of the last frame, as RGB.
+        const px = new Uint8Array(
+          ffmpegOut(["-sseof", "-0.04", "-i", job.outPath, "-frames:v", "1", "-vf", "crop=2:2:32:32", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"])
+        );
+        expect(px[0]).toBeGreaterThan(150);
+        expect(px[2]).toBeLessThan(100);
+      } finally {
+        await rm(mediaDir, { recursive: true, force: true });
+        await rm(tmpDir, { recursive: true, force: true });
+      }
+    },
+    60_000
+  );
+});
+
+describe("a keyed track-0 clip in a region off the frame's center", () => {
+  // The region spans x 0.05–0.45 and its keys hold its center there at half
+  // size, so the picture turns and scales about the region's own center and
+  // spans x 0.15–0.35, as the preview draws it.
+  test.skipIf(!tools)(
+    "poses about the region's center",
+    async () => {
+      const mediaDir = await mkdtemp(path.join(os.tmpdir(), "cut-e2e-media-"));
+      const tmpDir = await mkdtemp(path.join(os.tmpdir(), "cut-e2e-job-"));
+      try {
+        ff(["-f", "lavfi", "-i", "color=c=red:s=160x90:r=30:d=1", "-pix_fmt", "yuv420p", path.join(mediaDir, "red.mp4")]);
+        const key = { x: 0.25, y: 0.5, scale: 0.5, rotation: 0, opacity: 1 };
+        const spec: ExportSpec = {
+          projectId: "p",
+          width: 160,
+          height: 90,
+          fps: 30,
+          crf: 18,
+          preset: "veryfast",
+          duration: 1,
+          clips: [
+            {
+              file: "red.mp4",
+              in: 0,
+              out: 1,
+              muted: true,
+              fit: "fill",
+              frame: { x: 0.05, y: 0.2, w: 0.4, h: 0.6 },
+              kf: [{ t: 0, ...key }, { t: 1, ...key }],
+            },
+          ],
+          audio: [],
+          overlays: [],
+        };
+        const job: RenderHandle = { tmpDir, outPath: path.join(tmpDir, "out.mp4"), progress: 0, log: [] };
+        await runExport(job, spec, (file) => path.join(mediaDir, file));
+        // The red columns along the middle row of a frame halfway in.
+        const row = new Uint8Array(
+          ffmpegOut(["-ss", "0.5", "-i", job.outPath, "-frames:v", "1", "-vf", "crop=160:2:0:44", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"])
+        );
+        const red = [...Array(160).keys()].filter((x) => row[x * 3] > 150 && row[x * 3 + 1] < 90);
+        expect(red[0] / 160).toBeCloseTo(0.15, 1);
+        expect((red.at(-1)! + 1) / 160).toBeCloseTo(0.35, 1);
+      } finally {
+        await rm(mediaDir, { recursive: true, force: true });
+        await rm(tmpDir, { recursive: true, force: true });
+      }
+    },
+    60_000
+  );
+});
+
+describe("a keyed track-0 clip in a frame box over the background", () => {
+  // The clip sits in a box in the frame's middle, posed by its keys, with a
+  // print on track 1 beside it. Everything outside the two is the project's
+  // background color, as the preview draws it.
+  test.skipIf(!tools)(
+    "shows the background around the box",
+    async () => {
+      const mediaDir = await mkdtemp(path.join(os.tmpdir(), "cut-e2e-media-"));
+      const tmpDir = await mkdtemp(path.join(os.tmpdir(), "cut-e2e-job-"));
+      try {
+        ff(["-f", "lavfi", "-i", "color=c=red:s=160x90:r=30:d=1", "-pix_fmt", "yuv420p", path.join(mediaDir, "red.mp4")]);
+        const spec: ExportSpec = {
+          projectId: "p",
+          width: 160,
+          height: 90,
+          fps: 30,
+          crf: 18,
+          preset: "veryfast",
+          duration: 1,
+          background: "#F1EFEA",
+          clips: [
+            {
+              file: "red.mp4",
+              in: 0,
+              out: 1,
+              muted: true,
+              fit: "fill",
+              frame: { x: 0.18, y: 0.2, w: 0.3, h: 0.42 },
+              kf: [
+                { t: 0, x: 0.33, y: 0.55, scale: 1.25, rotation: -12, opacity: 0 },
+                { t: 0.35, x: 0.33, y: 0.41, scale: 1, rotation: -4, opacity: 1 },
+              ],
+            },
+          ],
+          overlayVideos: [
+            {
+              file: "red.mp4",
+              in: 0,
+              out: 1,
+              start: 0,
+              track: 1,
+              muted: true,
+              fit: "fill",
+              frame: { x: 0.52, y: 0.2, w: 0.3, h: 0.42 },
+              kf: [{ t: 0, x: 0.67, y: 0.41, scale: 1, rotation: 3, opacity: 1 }],
+            },
+          ],
+          audio: [],
+          overlays: [],
+        };
+        const job: RenderHandle = { tmpDir, outPath: path.join(tmpDir, "out.mp4"), progress: 0, log: [] };
+        await runExport(job, spec, (file) => path.join(mediaDir, file));
+        // A pixel near the bottom-left corner of a frame halfway in, as RGB:
+        // the background is 241,239,234.
+        const px = new Uint8Array(
+          ffmpegOut(["-ss", "0.5", "-i", job.outPath, "-frames:v", "1", "-vf", "crop=2:2:4:82", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"])
+        );
+        expect([...px.slice(0, 3)].every((v) => v > 215)).toBe(true);
+      } finally {
+        await rm(mediaDir, { recursive: true, force: true });
+        await rm(tmpDir, { recursive: true, force: true });
+      }
+    },
+    60_000
+  );
+});

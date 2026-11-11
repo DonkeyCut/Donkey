@@ -738,6 +738,48 @@ const CONCAT_US = 1e6;
 const edge = (t: number) => t.toFixed(6);
 
 /**
+ * The crop and pad that center a frame-sized segment on its region, so a
+ * pose turns, scales and places the region about its own center. The crop
+ * keeps the region's visible part; the pad's offsets stay even so a 4:2:0
+ * picture lands on the exact pixel. Null when the region already sits on the
+ * frame's center or shows nothing.
+ */
+function regionPivot(
+  r: { rx: number; ry: number; rw: number; rh: number },
+  W: number,
+  H: number
+): { filter: string; w: number; h: number } | null {
+  const cx = r.rx + r.rw / 2;
+  const cy = r.ry + r.rh / 2;
+  if (cx === W / 2 && cy === H / 2) {
+    return null;
+  }
+  const x0 = Math.max(0, r.rx);
+  const y0 = Math.max(0, r.ry);
+  const x1 = Math.min(W, r.rx + r.rw);
+  const y1 = Math.min(H, r.ry + r.rh);
+  if (x1 <= x0 || y1 <= y0) {
+    return null;
+  }
+
+  // Half the canvas reaches the farther visible edge from the center, one
+  // pixel more when that keeps the pad's offset even.
+  const half = (c: number, lo: number, hi: number) => {
+    const h = Math.max(c - lo, hi - c);
+    return h + ((h - (c - lo)) % 2);
+  };
+  const hw = half(cx, x0, x1);
+  const hh = half(cy, y0, y1);
+  return {
+    filter:
+      `crop=${x1 - x0}:${y1 - y0}:${x0}:${y0},` +
+      `pad=${2 * hw}:${2 * hh}:${hw - (cx - x0)}:${hh - (cy - y0)}:color=black@0.0`,
+    w: 2 * hw,
+    h: 2 * hh,
+  };
+}
+
+/**
  * An ffconcat slideshow of pictures laid end to end from 0, each held until
  * its `to` second. Every duration is the gap between two microsecond-rounded
  * ends, so a long run of one-frame pictures never drifts off the timeline.
@@ -749,6 +791,7 @@ const edge = (t: number) => t.toFixed(6);
 function concatList(holds: { file: string; to: number }[], fps: number): string {
   const lines = ["ffconcat version 1.0"];
   let at = 0;
+  let last: string | null = null;
   for (const h of holds) {
     const end = Math.round(h.to * CONCAT_US);
     if (end <= at) {
@@ -756,6 +799,13 @@ function concatList(holds: { file: string; to: number }[], fps: number): string 
     }
     lines.push(`file '${h.file}'`, `option framerate ${fps}`, `duration ${((end - at) / CONCAT_US).toFixed(6)}`);
     at = end;
+    last = h.file;
+  }
+  // The last picture's hold only counts when a picture follows it: without
+  // one the stream ends on its first frame, and an element running to the
+  // end of the cut vanishes after its entrance. Its file once more closes it.
+  if (last) {
+    lines.push(`file '${last}'`, `option framerate ${fps}`);
   }
   return lines.join("\n") + "\n";
 }
@@ -2665,12 +2715,25 @@ async function renderPass(
           cur = `cmc${j}`;
         }
         if (keyed) {
-          const tf = poseTransformFilters(c.kf!, W, H, segLead(j));
+          // The keys pose the region about its own center, as the preview
+          // does. The segment is the whole frame, so a region off center
+          // crops to its visible part and pads back out around its center.
+          // Example: a 0.05–0.45 region keyed to half size spans 0.15–0.35.
+          let boxW = W;
+          let boxH = H;
+          const pivot = region ? regionPivot(region, W, H) : null;
+          if (pivot) {
+            filters.push(`[${cur}]${pivot.filter}[ckc${j}]`);
+            cur = `ckc${j}`;
+            boxW = pivot.w;
+            boxH = pivot.h;
+          }
+          const tf = poseTransformFilters(c.kf!, boxW, boxH, segLead(j));
           if (tf) {
             filters.push(`[${cur}]null${tf}[ckt${j}]`);
             cur = `ckt${j}`;
           }
-          cur = softenPose(cur, c, dur, W, H, videoToAlpha, `cso${j}`, segLead(j));
+          cur = softenPose(cur, c, dur, boxW, boxH, videoToAlpha, `cso${j}`, segLead(j));
           const pos = posePositionExprs(c.kf!, -segLead(j));
           placeOnClear(cur, pos.x, pos.y, dur, `ckb${j}`, `ckp${j}`);
           cur = `ckp${j}`;
@@ -2687,11 +2750,11 @@ async function renderPass(
           alphaMultiply(cur, `cms${j}`, `csc${j}`, `cs${j}`);
           cur = `csc${j}`;
         }
-        // A keyed layer flattens onto the frame color — where the removal
-        // left the picture transparent, the export shows what the preview
-        // shows behind track 0.
+        // The layer flattens onto the frame color — wherever the removal,
+        // mask or pose left the frame transparent, the export shows what the
+        // preview shows behind track 0.
         filters.push(
-          `color=c=${rmIn ? padColor : "black"}:s=${W}x${H}:r=${fps}:d=${num(dur)}[cmb${j}]`
+          `color=c=${padColor}:s=${W}x${H}:r=${fps}:d=${num(dur)}[cmb${j}]`
         );
         const flatOut = rmIn && c.look ? `vrl${j}` : segCore;
         filters.push(

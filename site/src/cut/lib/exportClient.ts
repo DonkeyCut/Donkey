@@ -767,6 +767,8 @@ async function renderClipShadowPictures(
     ctx.globalCompositeOperation = "source-over";
     ctx.clearRect(0, 0, W, H);
     ctx.save();
+    // The shadow fades with the clip, as the preview draws it.
+    ctx.globalAlpha = pose ? Math.max(0, Math.min(1, pose.opacity)) : 1;
     ctx.shadowColor = shadowInk(sh);
     ctx.shadowBlur = Math.max(0, sh.blur) * scale;
     ctx.shadowOffsetX = (sh.x ?? 0) * scale;
@@ -880,6 +882,19 @@ const cardEntry = (tag: string) => ({
   flipV: undefined,
 });
 
+/** The clip with a keyed region that reaches past the frame rested on the
+ * frame's center; any other clip as it is. */
+function restCentered(c: VideoClip): VideoClip {
+  const f = c.frame;
+  if (!f || !clipKeyed(c)) {
+    return c;
+  }
+  if (f.x >= 0 && f.y >= 0 && f.x + f.w <= 1 && f.y + f.h <= 1) {
+    return c;
+  }
+  return { ...c, frame: { ...f, x: (1 - f.w) / 2, y: (1 - f.h) / 2 } };
+}
+
 /** Build the export spec + overlay PNGs from the cut. Media already lives in
  * the project folder — the spec references it by file name; only overlay PNGs
  * travel with the request. Shared by full exports and the low-res hover proxy. */
@@ -898,7 +913,12 @@ export async function buildExportPayload(
   doc = { ...doc, assets: await withAssetColors(doc.assets, doc) };
   // Elements shorter than an output frame widen onto the one they hold.
   doc = { ...doc, overlays: holdOverlays(doc.overlays, settings.fps) };
-  const spans = getClipSpans(doc.clips, doc.assets);
+  // A keyed track-0 clip renders on the full frame, so whatever part of its
+  // resting region lies past the frame edge is cut before the keys move it.
+  // The keys place the picture by absolute center, so the export rests the
+  // region on the frame's center, where all of it survives.
+  // Example: a box resting at x 1.05 that the keys slide to the middle.
+  const spans = getClipSpans(doc.clips, doc.assets).map((sp) => ({ ...sp, clip: restCentered(sp.clip) }));
   const duration = projectDuration(doc);
   const pngs: ExportPayload["pngs"] = [];
   const assetById = new Map(doc.assets.map((a) => [a.id, a]));
