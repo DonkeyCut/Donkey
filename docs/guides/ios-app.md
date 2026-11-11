@@ -1,28 +1,28 @@
 # The iOS App
 
 Donkey's iOS app lives at `apps/ios/`. It is the phone end of Donkey Cut:
-record clips with a teleprompter, jot notes and collect inspiration, and let
-everything flow to the desktop editor through the cloud shelf. Sign-in is
+record clips with a teleprompter, jot notes and collect inspiration; notes and
+inspiration reach the desktop editor through the cloud shelf. Sign-in is
 Google or Apple, exchanged for a Donkey Cut session on donkeycut.com; the same
 bearer session authenticates every cloud call.
 
 ## Sync
 
-One engine (`SyncEngine` in `DonkeyKitModels`) owns every queue: recordings
-up, inspiration up, notes both ways, deletes replayed. It works off a journal
+One engine (`SyncEngine` in `DonkeyKitModels`) owns every queue: inspiration
+up, notes both ways, deletes replayed. It works off a journal
 kept in the app's SwiftData store, so nothing depends on the app staying open
 — whatever was mid-flight when the app died is picked up on the next launch,
 foreground, network change, or edit.
 
 **The one rule on data:** traffic comes in two weights. Notes, folders,
 deletes and saved links are small, so they move whenever the phone is online.
-Recordings and inspiration media are not, so they ride Wi-Fi. *Videos on Wi-Fi
+Inspiration media is not, so it rides Wi-Fi. *Videos on Wi-Fi
 Only*, on out of the box, is the app's one switch on the matter, and it lives
 where the system's own data controls do: the app's page in iOS Settings, from
 a Settings bundle that writes the `mediaOnWiFiOnly` default the sync engine
 reads. The app takes whatever that key says as it comes forward. While the
-switch holds on a cellular connection the clips stay on the phone, each card
-says Wi-Fi and the Library and Ideas screens carry a slim banner, and the queue
+switch holds on a cellular connection media stays on the phone, the Ideas
+screen carries a slim banner, and the queue
 drains the moment the phone joins a network. Turn it off and media moves on
 whatever connection there is. Whether the app may touch cellular at all stays
 the system's call: iOS Settings carries the per-app Cellular Data switch, and a
@@ -30,8 +30,7 @@ request it forbids fails on its own.
 
 Every byte moves at most once. Uploads go straight to storage on presigned
 URLs; an interrupted upload re-presigns under the name it already claimed, and
-a retried completion lands on the asset it already made. Recordings arrive in
-the desktop library marked as camera clips (the Camera Roll tab), inspiration
+a retried completion lands on the asset it already made. Inspiration
 media lands in the Inspiration folder, and a saved inspiration link queues a
 cloud-side import: the worker fetches the source into the account's Inspiration
 folder, where the web Library shows it, and the phone streams it from there —
@@ -53,13 +52,8 @@ nothing is making any more. Notes merge by edit stamp; tombstones carry offline 
 
 A note's Library placement is kept apart from phone folders, and a phone edit leaves it in place. Note bodies are one-block-per-line Markdown, specified in `site/src/cut/lib/noteMarkdown.ts`, which every surface reads, teleprompter included.
 
-Deletes on the shelf run both ways. A synced recording deleted on the phone
-takes the cloud copy with it, and a clip deleted at the desk — from the Camera
-Roll or the Library — leaves a tombstone the phone reads on its next pass and
-deletes the local movie for. What the shelf simply stops listing is a different
-thing: an asset the storage sweep reclaimed carries no tombstone, so the phone
-keeps the clip it shot, forgets the cloud copy, and sends it back up once there
-is room.
+Inspiration deletes run both ways: a delete on the phone takes the cloud copy,
+and a delete at the desk leaves a tombstone the phone reads on its next pass.
 
 While on screen the phone pulls notes on its own clock; pull to refresh pulls
 at once.
@@ -69,9 +63,7 @@ books its own next try and backs off, up to five minutes between attempts, so
 a clip stranded by a bad moment on the network moves as soon as the network
 does.
 
-When the account is out of cloud storage, uploads pause and the Library shows
-a slim banner pinned over the notch; clips stay on the phone and the banner
-clears once space frees up.
+When the account is out of cloud storage, uploads pause and the Ideas screen shows a red banner until space frees up.
 
 Projects sync down as thumbnails only: the Projects tab lists cloud projects
 with cached poster images, and a tap streams the latest export — or the
@@ -103,8 +95,6 @@ the first frame is built, and the server check that follows only corrects it —
 a rejection signs out, a server that cannot be reached leaves the session
 standing, since recording and viewing are local. Nothing waits on the network
 to draw.
-
-The `x-donkey-cut-client: ios` header enables Camera Roll on desktop; Notes is available to every account.
 
 ## Camera
 
