@@ -62,6 +62,9 @@ export function easeAt(id: EaseId | undefined, p: number): number {
     case undefined:
     case "linear":
       return x;
+    // A stored name the list lacks moves at a constant rate, as easeExpr does.
+    default:
+      return x;
     case "sine.in":
       return 1 - Math.cos((x * Math.PI) / 2);
     case "sine.out":
