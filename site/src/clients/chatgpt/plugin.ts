@@ -5,6 +5,7 @@
 import { SETTINGS } from "@/lib/config/registry";
 import { CLIENT_ID, MCP_PATH, SCOPES } from "@/clients/chatgpt/server/config";
 import { pluginSkills } from "@/clients/chatgpt/server/guidance";
+import { REVIEWED } from "@/clients/chatgpt/server/reviewedListing";
 
 /** The package name the portal gave the listing; uploads update it. */
 const PACKAGE_NAME = "donkey-cut";
@@ -70,7 +71,7 @@ export function pluginFiles(demoRecordingUrl: string): PluginFile[] {
   const plugin = {
     $schema: "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
     name: PACKAGE_NAME,
-    version: "1.1.0",
+    version: REVIEWED.version,
     description: "Create and edit videos in Donkey Cut from ChatGPT.",
     author: { name: "HEY SALESMAN INC", url: issuer },
     homepage: issuer,

@@ -10,6 +10,7 @@ import {
   type ProjectView,
 } from "@/clients/chatgpt/contracts";
 import {
+  commandEffectNote,
   commandHints,
   COMMANDS,
   readSkill,
@@ -29,6 +30,7 @@ import {
   projectTools,
   type ProjectResult,
 } from "@/clients/chatgpt/server/projects";
+import { serveListing, type ToolListing } from "@/clients/chatgpt/server/reviewedListing";
 import { widgetHtml } from "@/clients/chatgpt/widget.generated";
 import { searchLinksOf, splitToolDisplay } from "@/cut/lib/toolDisplay";
 import { mcpLocale } from "@/clients/chatgpt/server/locale";
@@ -86,7 +88,7 @@ function listCommandTools(): CommandTool[] {
     return {
       name: command.name,
       title: command.name.charAt(0).toUpperCase() + command.name.slice(1).replaceAll("_", " "),
-      description: command.description,
+      description: `${command.description} ${commandEffectNote(command.name)}`,
       inputSchema: fromJsonSchema<Record<string, unknown>>({
         ...schema,
         type: "object",
@@ -152,6 +154,7 @@ export function createChatgptServer(
   config: ChatgptConfig,
   projects = projectTools(identity, config),
   t: ChatgptTranslator = ENGLISH,
+  listing: ToolListing = "reviewed",
 ) {
   const server = new McpServer(
     { name: "donkey-cut", title: "Donkey Cut", version: "1.3.0" },
@@ -161,6 +164,7 @@ export function createChatgptServer(
       capabilities: { extensions: { "openai/mentions": { searchTool: MENTION_TOOL } } },
     },
   );
+  serveListing(server, listing);
   const readMetadata = {
     securitySchemes: [{ type: "oauth2", scopes: ["projects:read"] }],
   };
@@ -241,7 +245,7 @@ export function createChatgptServer(
       title: "Donkey Cut",
       icons: [{ src: `${config.issuer}/chatgpt-entry.svg`, mimeType: "image/svg+xml", sizes: ["any"] }],
       description:
-        "Open a cloud project initially, switch projects, or recover a missing card. Keep the existing card during edits and preview checks: reopening creates a fresh editor with empty undo history. The editable card holds the full editor, timeline, media panel, inspector and preview. A read-only connection sees the preview; use render_preview when its revision is stale or missing. With no projectId, show the projects home, where the user opens or starts a project or browses their library; the card then tells you which project it shows. A deleted project answers view \"missing\" and the card offers to create a new one.",
+        "Open a cloud project initially, switch projects, or recover a missing card. Keep the existing card during edits and preview checks: reopening starts the card over with empty undo history. The editable card holds the full editor, timeline, media panel, inspector and preview. A read-only connection sees the preview; use render_preview when its revision is stale or missing. With no projectId, show the projects home, where the user opens or starts a project or browses their library; the card then tells you which project it shows. A deleted project answers view \"missing\" and the card offers to create a new one.",
       inputSchema: z.object({ projectId: idSchema.optional() }),
       outputSchema: viewSchema,
       annotations: readOnlyAnnotations,
@@ -279,7 +283,7 @@ export function createChatgptServer(
     {
       title: "Check a Donkey Cut preview",
       description:
-        "Read render progress or renew the playback URL of an existing preview. Returns expired when the preview needs rendering again.",
+        "Read render progress, or get a fresh playback URL for an existing preview. Returns expired when the preview needs rendering again.",
       inputSchema: z.object({ projectId: idSchema, jobId: idSchema }),
       outputSchema: viewSchema,
       annotations: readOnlyAnnotations,

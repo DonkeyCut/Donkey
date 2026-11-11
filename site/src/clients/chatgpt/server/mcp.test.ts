@@ -8,6 +8,7 @@ import {
 import { WIDGET_URI } from "@/clients/chatgpt/contracts";
 import type { projectTools, ProjectResult } from "@/clients/chatgpt/server/projects";
 import { COMMAND_NAMES, unknownCommandNames } from "@/clients/chatgpt/server/catalog";
+import { REVIEWED } from "@/clients/chatgpt/server/reviewedListing";
 
 const config = SETTINGS.chatgptApp.schema.parse({
   ...SETTINGS.chatgptApp.default,
@@ -101,7 +102,7 @@ describe("ChatGPT MCP protocol", () => {
           "redo",
           "render_preview",
           "undo",
-          ...COMMAND_NAMES,
+          ...COMMAND_NAMES.filter((name) => REVIEWED.tools.some((tool) => tool.name === name)),
         ].sort(),
       );
 
@@ -124,6 +125,7 @@ describe("ChatGPT MCP protocol", () => {
       expect(tools.find((tool) => tool.name === "check_facts")?.annotations).toMatchObject({ readOnlyHint: true, openWorldHint: true });
       expect(tools.find((tool) => tool.name === "library_share")?.annotations).toMatchObject({ openWorldHint: true, destructiveHint: true });
       expect(tools.find((tool) => tool.name === "add_title")?.annotations).toMatchObject({ readOnlyHint: false, destructiveHint: false });
+      expect(tools.find((tool) => tool.name === "add_clip")?.description).toContain("move, overwrite or delete");
       expect(tools.find((tool) => tool.name === "trim_clip")?.inputSchema.required).toContain("projectId");
       expect(tools.find((tool) => tool.name === "import_media")?._meta).toMatchObject({
         "openai/fileParams": ["files"],
