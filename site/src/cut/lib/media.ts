@@ -1,5 +1,6 @@
 "use client";
 
+import { timelineDetail } from "./timelineDetail";
 import { scanBeats, scanLevel, scanSilence, scanSpeech, type BeatScan, type LevelScan, type PcmChunk, type SpeechScan } from "./audioScan";
 import { syncSound, type SyncAnswer } from "./soundSync";
 import { LoudnessMeter, type LoudnessMeasure } from "./loudness";
@@ -2373,6 +2374,9 @@ export async function enrichAsset(asset: MediaAsset, src = asset.url) {
   // A block paints itself at whatever size asks, so there is no file to probe
   // and no still to stand in as its strip.
   if (asset.block) return;
+  // A light timeline draws footage as slabs, so nothing is read for it; a
+  // still is its own strip and costs no decode.
+  if (timelineDetail() === "light" && asset.type !== "image") return;
   if (knownMissing(asset)) return;
   if (enrichInFlight.has(asset.id)) return;
   enrichInFlight.add(asset.id);

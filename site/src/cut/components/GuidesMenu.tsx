@@ -27,6 +27,7 @@ export function GuidesMenu() {
   const aspect = useEditor((s) => s.aspect);
   const guides = useEditor((s) => s.guides);
   const guidesHidden = useEditor((s) => s.guidesHidden);
+  const readOnly = useEditor((s) => s.readOnly);
   const showing = guides.length > 0 && !guidesHidden;
   const toggle = () => useEditor.getState().toggleGuidesShown();
 
@@ -41,6 +42,12 @@ export function GuidesMenu() {
     }
     return null;
   };
+
+  // A read-only view, a template's page or a share, draws no guides, so it
+  // offers none.
+  if (readOnly) {
+    return null;
+  }
   return (
     <div className="mr-2 flex items-center overflow-hidden rounded-md border border-border">
       <Button

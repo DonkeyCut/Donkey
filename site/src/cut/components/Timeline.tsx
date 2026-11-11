@@ -63,6 +63,7 @@ import { canSplitItem } from "@/cut/lib/itemKinds";
 import { track0Clips, laneGapAt, blockClipAt, sameLane, type LaneRef, clipLen, clipSpeed, getClipSpans, maxClipFade, overlayLaneOrder, overlayLayers, projectDuration, resolveTransitions, rippleInsert, useEditor } from "@/cut/lib/store";
 import type { VideoTrackPlacement } from "@/cut/lib/store";
 import { playheadAt, setSkim, skimAt, subscribePlayhead, usePlayhead, useSkim } from "@/cut/lib/playhead";
+import { useTimelineDetail } from "@/cut/lib/timelineDetail";
 import { useBrushUi } from "@/cut/lib/removal/brushUi";
 import { useMatteBakes } from "@/cut/lib/removal/bakeJobs";
 import { cardMatteKey } from "@/cut/lib/cameraCard";
@@ -3911,8 +3912,11 @@ function ClipView({
   const filmIn = headSrc(clip);
   const filmOut = tailSrc(clip);
 
-  const startFrame = useEdgeFrame(asset, filmIn, `${clip.id}:in`);
-  const endFrame = useEdgeFrame(asset, filmOut, `${clip.id}:out`);
+  // A light timeline reads no frames from the footage: the box is a slab.
+  const light = useTimelineDetail((s) => s.detail === "light");
+  const lightSlab = light && asset.type === "video";
+  const startFrame = useEdgeFrame(lightSlab ? undefined : asset, filmIn, `${clip.id}:in`);
+  const endFrame = useEdgeFrame(lightSlab ? undefined : asset, filmOut, `${clip.id}:out`);
   const stripFailed = useSyncExternalStore(
     subscribeStripStatus,
     () => stripFailedFor(asset.id),
@@ -3937,19 +3941,21 @@ function ClipView({
   const offscreen = view.hi <= view.lo;
   const filmstrip = useMemo(
     () =>
-      filmstripFrames(
-        asset,
-        filmIn,
-        w,
-        pps,
-        rt,
-        FILM_H,
-        26,
-        { start: startFrame, end: endFrame },
-        view
-      ),
+      lightSlab
+        ? []
+        : filmstripFrames(
+            asset,
+            filmIn,
+            w,
+            pps,
+            rt,
+            FILM_H,
+            26,
+            { start: startFrame, end: endFrame },
+            view
+          ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [asset, filmIn, w, pps, rt, startFrame, endFrame, filmGen, view]
+    [asset, filmIn, w, pps, rt, startFrame, endFrame, filmGen, view, lightSlab]
   );
   useTileFrames(boxRef, clip.id, asset, filmstrip, filmIn, w, pps, rt.key, onTileFrame);
 
@@ -4000,7 +4006,7 @@ function ClipView({
       }}
     >
       <div className="pointer-events-none absolute inset-x-0 top-0" style={{ height: FILM_H }}>
-        <Filmstrip frames={filmstrip} grade={clip.grade} failed={stripFailed} hidden={offscreen} block={asset?.block} />
+        <Filmstrip frames={filmstrip} grade={clip.grade} failed={stripFailed || lightSlab} hidden={offscreen} block={asset?.block} />
       </div>
       <MissingChip assetId={asset.id} />
       {clip.grade?.lut && (
@@ -4129,7 +4135,7 @@ function ClipView({
       {/* Drawn wherever the source has a grid: on the band when there is one,
           along the bar's bottom edge when the clip plays silent. Every edge
           snaps to them either way. */}
-      <BeatDots asset={asset} lo={clip.in} hi={clip.out} retime={rt} pps={pps} w={barW} />
+      {!light && <BeatDots asset={asset} lo={clip.in} hi={clip.out} retime={rt} pps={pps} w={barW} />}
       <span
         className={cn(trimFor(barW), "tl-trim-l left-0")}
         onPointerDown={(e) => startLaneTrim(e, "video", clip.id, "l", ui)}
@@ -5483,6 +5489,7 @@ function AudioView({
   onSnap: (x: number | null) => void;
 }) {
   const loading = useEditor((s) => (asset ? s.loadingMedia.has(asset.fileName) : false));
+  const light = useTimelineDetail((s) => s.detail === "light");
   // Detached from a video bound to a recording, the clip plays the recording,
   // so the bar draws it on the video's clock.
   const recording = useEditor((s) => {
@@ -5547,7 +5554,7 @@ function AudioView({
       >
         <WaveformCanvas asset={recording ?? asset} from={clip.in + waveOff} to={clip.out + waveOff} w={barW} h={AUDIO_H - 8} map={rt.uniform && !rt.reverse ? undefined : (px) => rt.srcAt(px / pps) + waveOff} className="inset-x-0 inset-y-1" />
       </div>
-      <BeatDots asset={asset} lo={clip.in} hi={clip.out} retime={rt} pps={pps} w={barW} />
+      {!light && <BeatDots asset={asset} lo={clip.in} hi={clip.out} retime={rt} pps={pps} w={barW} />}
       <FadeEnvelope inPx={fadeInPx} outPx={fadeOutPx} barW={barW} />
       <FadeGrip clip={clip} side="in" pps={pps} barW={barW} fade={fadeIn} live={liveFade?.side === "in"} onLive={setLiveFade} />
       <FadeGrip clip={clip} side="out" pps={pps} barW={barW} fade={fadeOut} live={liveFade?.side === "out"} onLive={setLiveFade} />

@@ -11,6 +11,7 @@ import { syncFontAssets } from "@/cut/lib/fontAssets";
 import "@/cut/lib/googleFonts";
 import { playheadAt } from "@/cut/lib/playhead";
 import { projectDuration, useEditor } from "@/cut/lib/store";
+import { setTimelineDetail } from "@/cut/lib/timelineDetail";
 import { Preview } from "./Preview";
 
 // How near the end a stop has to land to count as the cut running out.
@@ -36,6 +37,7 @@ export function TemplatePlayer({ projectId }: { projectId: string }) {
   // Load the template read-only, then play it.
   useEffect(() => {
     let alive = true;
+    setTimelineDetail("light");
     void holdEditorLoad().then(async (release) => {
       try {
         if (!alive) {
@@ -55,6 +57,7 @@ export function TemplatePlayer({ projectId }: { projectId: string }) {
       alive = false;
       useEditor.getState().closeProject(projectId);
       releaseCutMode();
+      setTimelineDetail("full");
     };
   }, [projectId]);
 
