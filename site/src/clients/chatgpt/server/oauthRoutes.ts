@@ -221,14 +221,27 @@ export const consent = withDonkeyAuth(async (request) => {
     callbackUrl.searchParams.set("code", code);
   }
 
-  return new Response(null, {
-    status: 303,
-    headers: {
-      ...NO_STORE_HEADERS,
-      Location: callbackUrl.href,
-    },
-  });
+  return callbackPage(callbackUrl);
 });
+
+/** Hand the answer to the callback from a page. chatgpt.com answers 503 to
+ * its callback reached by redirecting this form POST, and serves the same
+ * URL to a plain navigation. */
+function callbackPage(callbackUrl: URL) {
+  const href = escapeHtml(callbackUrl.href);
+  return new Response(
+    `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="refresh" content="0;url=${href}"></head><body></body></html>`,
+    {
+      headers: {
+        ...NO_STORE_HEADERS,
+        "Content-Type": "text/html; charset=utf-8",
+        "Content-Security-Policy":
+          "default-src 'none'; frame-ancestors 'none'; base-uri 'none'",
+        "Referrer-Policy": "strict-origin-when-cross-origin",
+      },
+    },
+  );
+}
 
 /** POST /api/chatgpt/oauth/token: authenticate with the submitted code or refresh token. */
 export async function tokenEndpoint(request: Request) {
@@ -417,13 +430,11 @@ async function consentPage(
   </body>
 </html>`;
 
-  // Chromium applies form-action to the redirect after the consent POST, too.
-  const callbackOrigin = new URL(authorization.redirect_uri).origin;
   const contentSecurityPolicy = [
     "default-src 'none'",
     "img-src 'self'",
     "style-src 'unsafe-inline'",
-    `form-action 'self' ${callbackOrigin}`,
+    "form-action 'self'",
     "frame-ancestors 'none'",
     "base-uri 'none'",
   ].join("; ");
