@@ -316,7 +316,6 @@
       "progress": "Copie des médias {done} sur {total}…",
       "copyLink": "Copier le lien",
       "linkCopied": "Lien copié",
-      "size": "{width} × {height} px",
       "seconds": "{seconds} s",
       "fps": "{fps} fps",
       "similar": "Modèles similaires",

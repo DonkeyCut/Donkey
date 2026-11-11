@@ -316,7 +316,6 @@
       "progress": "Copiando multimedia {done} de {total}…",
       "copyLink": "Copiar enlace",
       "linkCopied": "Enlace copiado",
-      "size": "{width} × {height} px",
       "seconds": "{seconds} s",
       "fps": "{fps} fps",
       "similar": "Plantillas similares",

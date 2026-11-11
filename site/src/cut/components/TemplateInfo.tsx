@@ -3,12 +3,12 @@
 import Link from "next/link";
 import { useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
-import { Clock, Gauge, Link2, Monitor, X } from "lucide-react";
+import { Clock, Gauge, Link2, Monitor, Smartphone, Square, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DonkeyMark } from "@/components/DonkeyMark";
 import { homeHref, useCutBase } from "@/cut/lib/nav";
 import { useTemplateIndex } from "@/cut/lib/queries";
-import { ASPECT_FRAME, localized, similarTemplates, type GalleryTemplate } from "@/cut/lib/templateGallery";
+import { localized, similarTemplates, type GalleryTemplate, type TemplateAspect } from "@/cut/lib/templateGallery";
 import { GalleryTile, inPanel, type PanelNav } from "./GalleryTile";
 import { TemplateUseDialog } from "./TemplateUseView";
 
@@ -16,6 +16,14 @@ import { TemplateUseDialog } from "./TemplateUseView";
 const SIMILAR_COUNT = 4;
 // How long "Link copied" stays on the button.
 const COPIED_MS = 2000;
+
+// The shape line's icon follows the frame's shape, as in the editor's top bar.
+const ASPECT_ICON: Record<TemplateAspect, typeof Clock> = {
+  "9:16": Smartphone,
+  "4:5": Smartphone,
+  "1:1": Square,
+  "16:9": Monitor,
+};
 
 /** Where "Use as new project" goes: the app's use page, with a fresh run id
  * so a reload there never copies twice. */
@@ -65,7 +73,6 @@ export function TemplateInfo({ template, panel }: { template: GalleryTemplate; p
   const index = useTemplateIndex();
   const [copied, setCopied] = useState(false);
   const [using, setUsing] = useState(false);
-  const frame = ASPECT_FRAME[template.aspect];
   const similar = similarTemplates(index.data?.templates ?? [], template.id, SIMILAR_COUNT);
 
   const copyLink = () => {
@@ -111,7 +118,7 @@ export function TemplateInfo({ template, panel }: { template: GalleryTemplate; p
       </div>
 
       <div className="grid grid-cols-2 gap-x-3 gap-y-2.5">
-        {spec(Monitor, t("detail.size", { width: frame.width, height: frame.height }))}
+        {spec(ASPECT_ICON[template.aspect], t(`aspects.${template.aspect}`))}
         {spec(Clock, t("detail.seconds", { seconds: Math.round(template.seconds) }))}
         {spec(Gauge, t("detail.fps", { fps: template.fps }))}
       </div>

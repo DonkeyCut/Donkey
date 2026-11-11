@@ -316,7 +316,6 @@
       "progress": "正在复制媒体（{done}/{total}）…",
       "copyLink": "复制链接",
       "linkCopied": "链接已复制",
-      "size": "{width} × {height} px",
       "seconds": "{seconds} 秒",
       "fps": "{fps} fps",
       "similar": "相似模板",

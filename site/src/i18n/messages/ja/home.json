@@ -316,7 +316,6 @@
       "progress": "メディアをコピー中 ({done}/{total})…",
       "copyLink": "リンクをコピー",
       "linkCopied": "リンクをコピーしました",
-      "size": "{width} × {height} px",
       "seconds": "{seconds}秒",
       "fps": "{fps} fps",
       "similar": "類似のテンプレート",

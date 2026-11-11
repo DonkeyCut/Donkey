@@ -316,7 +316,6 @@
       "progress": "Medien werden kopiert: {done} von {total}…",
       "copyLink": "Link kopieren",
       "linkCopied": "Link kopiert",
-      "size": "{width} × {height} px",
       "seconds": "{seconds} s",
       "fps": "{fps} fps",
       "similar": "Ähnliche Vorlagen",

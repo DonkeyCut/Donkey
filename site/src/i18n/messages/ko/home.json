@@ -316,7 +316,6 @@
       "progress": "미디어 복사 중 ({done}/{total})…",
       "copyLink": "링크 복사",
       "linkCopied": "링크 복사됨",
-      "size": "{width} × {height} px",
       "seconds": "{seconds}초",
       "fps": "{fps} fps",
       "similar": "비슷한 템플릿",
