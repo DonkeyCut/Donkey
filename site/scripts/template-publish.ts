@@ -9,7 +9,7 @@
  *   bun run scripts/template-publish.ts order <ids.json>
  *   bun run scripts/template-publish.ts frames <id>
  *   bun run scripts/template-publish.ts peaks <id>
- *   bun run scripts/template-publish.ts render "<project folder>" <meta.json> <out.mp4>
+ *   bun run scripts/template-publish.ts render "<project folder>" <meta.json> <out.mp4> [--draft]
  *
  * The project folder is a Mac library folder (project.json + media/). The
  * meta file holds the gallery entry the document cannot say:
@@ -24,7 +24,8 @@
  * decoding the footage; `frames` bakes them for a template already live. The
  * waveform peaks of every sound an audio clip plays ship the same way, and
  * `peaks` bakes them for a template already live. `render` exports a project
- * folder as the gallery would ship it, uploading nothing, to check it first.
+ * folder as the gallery would ship it, uploading nothing, to check it first;
+ * `--draft` renders it at the editor's small preview size.
  *
  * Every environment reads the one bucket, so a publish is live on every
  * site that serves the gallery the moment the index lands.
@@ -355,7 +356,11 @@ function detailOf(file: string): number {
 /** The template exported through the headless doc export with media read
  * from `sources`, into `tmp`. The session points at a loopback that answers
  * the media presign with the local files. */
-async function renderCut(doc: ProjectDoc, sources: Map<string, string>, tmp: string) {
+// A check render: full size, kept for the publish's still. A draft: the
+// editor's small preview size, fast enough to look at between fixes.
+type RenderSize = "full" | "draft";
+
+async function renderCut(doc: ProjectDoc, sources: Map<string, string>, tmp: string, size: RenderSize = "full") {
   const server = Bun.serve({
     port: 0,
     hostname: "127.0.0.1",
@@ -389,7 +394,8 @@ async function renderCut(doc: ProjectDoc, sources: Map<string, string>, tmp: str
     };
     await fs.mkdir(handle.tmpDir, { recursive: true });
     const session = { base: server.url.origin, headers: {} };
-    const spec = (await buildDocExportSpec(session, doc.id!, POSTER_PRESET, handle.tmpDir, { doc, version: "1" })) as ExportSpec;
+    const target = size === "draft" ? "preview" : "export";
+    const spec = (await buildDocExportSpec(session, doc.id!, POSTER_PRESET, handle.tmpDir, { doc, version: "1" }, target)) as ExportSpec;
     await runExport(handle, spec, (file) => sources.get(path.basename(file))!);
     return { file: handle.outPath, duration: spec.duration };
   } finally {
@@ -562,16 +568,20 @@ async function peaks(id: string) {
 
 /** Export a project folder as the gallery would ship it to `out`, uploading
  * nothing: the check before a publish. */
-async function render(dir: string, metaPath: string, out: string) {
+async function render(dir: string, metaPath: string, out: string, size: RenderSize) {
   const meta = JSON.parse(await fs.readFile(metaPath, "utf8")) as Meta;
   const source = JSON.parse(await fs.readFile(path.join(dir, "project.json"), "utf8")) as ProjectDoc;
   const doc = galleryDoc(source, meta);
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "template-render-"));
   try {
-    const cut = await renderCut(doc, lightFootage(dir, doc, tmp), tmp);
+    const cut = await renderCut(doc, lightFootage(dir, doc, tmp), tmp, size);
     await fs.copyFile(cut.file, out);
-    await fs.copyFile(cut.file, path.join(dir, KEPT_CUT));
-    await fs.writeFile(path.join(dir, KEPT_KEY), cutKey(dir, doc));
+
+    // Only a full render can stand in for the publish's own.
+    if (size === "full") {
+      await fs.copyFile(cut.file, path.join(dir, KEPT_CUT));
+      await fs.writeFile(path.join(dir, KEPT_KEY), cutKey(dir, doc));
+    }
     console.log(`rendered ${meta.id} (${cut.duration.toFixed(1)}s) to ${out}`);
   } finally {
     await fs.rm(tmp, { recursive: true, force: true });
@@ -679,9 +689,11 @@ if (command === "publish" && args.length === 2) {
 } else if (command === "peaks" && args.length === 1) {
   await peaks(args[0]);
 } else if (command === "render" && args.length === 3) {
-  await render(args[0], args[1], args[2]);
+  await render(args[0], args[1], args[2], "full");
+} else if (command === "render" && args.length === 4 && args[3] === "--draft") {
+  await render(args[0], args[1], args[2], "draft");
 } else {
-  console.error("usage: template-publish.ts publish <project folder> <meta.json> | remove <id> | order <ids.json> | frames <id> | peaks <id> | render <project folder> <meta.json> <out.mp4>");
+  console.error("usage: template-publish.ts publish <project folder> <meta.json> | remove <id> | order <ids.json> | frames <id> | peaks <id> | render <project folder> <meta.json> <out.mp4> [--draft]");
   process.exit(1);
 }
 process.exit(0);
