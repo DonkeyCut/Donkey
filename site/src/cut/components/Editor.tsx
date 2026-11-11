@@ -107,8 +107,6 @@ import { StorageUpgradeDialog } from "./StorageUpgradeDialog";
 import { UpgradeDialog } from "./UpgradeDialog";
 import { TopBar } from "./TopBar";
 import { ViewerTopBar } from "./ViewerTopBar";
-import { TemplateFillSheet } from "./TemplateFillSheet";
-import { clearFillMark, hasFillMark } from "@/cut/lib/templateUse";
 
 /** Bounds on the viewer's change poll. The server picks the interval inside
  * this range from how long the owner has been idle; the floor keeps a live
@@ -299,12 +297,6 @@ export function Editor({
   useEffect(() => void syncLinkedLibrary(), []);
   const [conflictReloaded, setConflictReloaded] = useState(false);
   const [shareGone, setShareGone] = useState(false);
-  // A project just made from a gallery template opens asking for clips.
-  const [fillOpen, setFillOpen] = useState(() => !viewer && hasFillMark(projectId));
-  const closeFill = useCallback(() => {
-    clearFillMark();
-    setFillOpen(false);
-  }, []);
   // This project lives on this Mac and the Donkey app isn't answering. Nothing
   // to load, and nothing to guess at either: say where it is and wait.
   const [needsApp, setNeedsApp] = useState(false);
@@ -1493,7 +1485,6 @@ export function Editor({
       {!viewer && !chatgpt && <StarterTour projectId={projectId} />}
       {exportOpen && <ExportDialog />}
       {!viewer && <ReplaceDialog onImport={importFiles} />}
-      {fillOpen && <TemplateFillSheet onImport={importFiles} onClose={closeFill} />}
       {shareGone && (
         <div className="fixed top-14 left-1/2 z-50 max-w-[calc(100%-2rem)] -translate-x-1/2 rounded-full bg-foreground/90 px-3.5 py-1.5 text-center text-xs font-medium text-background shadow-lg">
           {t("shareGone")}

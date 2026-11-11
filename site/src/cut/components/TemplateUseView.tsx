@@ -14,7 +14,7 @@ import { useNewProjectTarget } from "@/cut/lib/newProject";
 import { newProjectAllowed } from "@/cut/lib/projectLimit";
 import { refetchProjects, useTemplateIndex } from "@/cut/lib/queries";
 import { localized, templatePoster } from "@/cut/lib/templateGallery";
-import { copyTemplate, markForFill } from "@/cut/lib/templateUse";
+import { copyTemplate } from "@/cut/lib/templateUse";
 import { track } from "@/lib/analytics";
 
 // Each visit of the template page's "Use" link carries a fresh run id; the run
@@ -44,7 +44,7 @@ type Phase =
   | { state: "failed"; message: string };
 
 /** The in-app half of "Use as new project": copies the template to where new
- * projects land for this person, then opens the copy with its fill sheet. It
+ * projects land for this person, then opens the copy. It
  * runs inside the app so the Mac engine and the browser store are both in
  * reach. */
 export function TemplateUseView({ id, run }: { id: string; run: string }) {
@@ -91,7 +91,6 @@ export function TemplateUseView({ id, run }: { id: string; run: string }) {
         }
         void refetchProjects(client, target);
         track("project_created", { source: "template" });
-        markForFill(projectId);
         open(projectId);
       } catch (e) {
         setPhase({ state: "failed", message: describeError(e, t("detail.failed")) });

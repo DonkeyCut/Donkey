@@ -326,14 +326,6 @@
       "similar": "Similar templates",
       "failed": "Could not create the project.",
       "missing": "This template isn't available anymore."
-    },
-    "fill": {
-      "title": "Add your clips",
-      "body": "Pick clips for the template's slots. They fill in order, and a slot you skip keeps its sample.",
-      "slot": "Clip {n} · {seconds}",
-      "pick": "Choose clips",
-      "skip": "Keep samples",
-      "replaceSlot": "Choose a clip for this slot"
     }
   }
 }

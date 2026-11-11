@@ -326,14 +326,6 @@
       "similar": "Ähnliche Vorlagen",
       "failed": "Das Projekt konnte nicht erstellt werden.",
       "missing": "Diese Vorlage ist nicht mehr verfügbar."
-    },
-    "fill": {
-      "title": "Füge deine Clips hinzu",
-      "body": "Wähle Clips für die Plätze der Vorlage. Sie werden der Reihe nach belegt. Übersprungene Plätze behalten ihr Beispiel.",
-      "slot": "Clip {n} · {seconds}",
-      "pick": "Clips auswählen",
-      "skip": "Beispiele behalten",
-      "replaceSlot": "Wähle einen Clip für diesen Slot"
     }
   }
 }

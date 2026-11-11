@@ -55,7 +55,7 @@ import {
   type GalleryTemplate,
   type TemplateFilter,
 } from "@/cut/lib/templateGallery";
-import { copyAsKind, markForFill } from "@/cut/lib/templateUse";
+import { copyAsKind } from "@/cut/lib/templateUse";
 import { formatTime } from "@/cut/lib/time";
 import { parseRatio, type ProjectSummary } from "@/cut/lib/types";
 import { errorFromBody } from "@/cut/lib/userError";
@@ -212,8 +212,7 @@ export function TemplateGallery() {
     return t(`styles.${value as GalleryTemplate["style"]}`);
   };
 
-  // A copy of the template on its own shelf, marked a project, opened with
-  // the sheet that asks for clips.
+  // A copy of the template on its own shelf, marked a project, opened.
   const startFrom = async ({ project: p, residency: r }: OwnTemplate) => {
     setError(null);
     if (!(await newProjectAllowed(client))) {
@@ -224,7 +223,6 @@ export function TemplateGallery() {
       const id = await copyAsKind(r, p.id, "project", p.name);
       void refetchProjects(client, r);
       track("project_created", { source: "template" });
-      markForFill(id);
       router.push(projectHref(base, id, "projects"));
     } catch (e) {
       setError(describeError(e, t("detail.failed")));

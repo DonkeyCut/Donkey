@@ -1340,13 +1340,7 @@
     "templates.detail.noMusic": "3b4cd59642fa",
     "templates.detail.similar": "3b072dd7b295",
     "templates.detail.failed": "20c27a1374f6",
-    "templates.detail.missing": "947dd4842911",
-    "templates.fill.title": "e9022deea3e3",
-    "templates.fill.body": "e822e3097889",
-    "templates.fill.slot": "cacbcfa93a0f",
-    "templates.fill.pick": "9d14f03c805f",
-    "templates.fill.skip": "1528b9406511",
-    "templates.fill.replaceSlot": "56a614e03574"
+    "templates.detail.missing": "947dd4842911"
   },
   "de/inspector": {
     "controls.mixed": "c0dcb865ad81",
@@ -4455,13 +4449,7 @@
     "templates.detail.noMusic": "3b4cd59642fa",
     "templates.detail.similar": "3b072dd7b295",
     "templates.detail.failed": "20c27a1374f6",
-    "templates.detail.missing": "947dd4842911",
-    "templates.fill.title": "e9022deea3e3",
-    "templates.fill.body": "e822e3097889",
-    "templates.fill.slot": "cacbcfa93a0f",
-    "templates.fill.pick": "9d14f03c805f",
-    "templates.fill.skip": "1528b9406511",
-    "templates.fill.replaceSlot": "56a614e03574"
+    "templates.detail.missing": "947dd4842911"
   },
   "es/inspector": {
     "controls.mixed": "c0dcb865ad81",
@@ -7570,13 +7558,7 @@
     "templates.detail.noMusic": "3b4cd59642fa",
     "templates.detail.similar": "3b072dd7b295",
     "templates.detail.failed": "20c27a1374f6",
-    "templates.detail.missing": "947dd4842911",
-    "templates.fill.title": "e9022deea3e3",
-    "templates.fill.body": "e822e3097889",
-    "templates.fill.slot": "cacbcfa93a0f",
-    "templates.fill.pick": "9d14f03c805f",
-    "templates.fill.skip": "1528b9406511",
-    "templates.fill.replaceSlot": "56a614e03574"
+    "templates.detail.missing": "947dd4842911"
   },
   "fr/inspector": {
     "controls.mixed": "c0dcb865ad81",
@@ -10685,13 +10667,7 @@
     "templates.detail.noMusic": "3b4cd59642fa",
     "templates.detail.similar": "3b072dd7b295",
     "templates.detail.failed": "20c27a1374f6",
-    "templates.detail.missing": "947dd4842911",
-    "templates.fill.title": "e9022deea3e3",
-    "templates.fill.body": "e822e3097889",
-    "templates.fill.slot": "cacbcfa93a0f",
-    "templates.fill.pick": "9d14f03c805f",
-    "templates.fill.skip": "1528b9406511",
-    "templates.fill.replaceSlot": "56a614e03574"
+    "templates.detail.missing": "947dd4842911"
   },
   "ja/inspector": {
     "controls.mixed": "c0dcb865ad81",
@@ -13800,13 +13776,7 @@
     "templates.detail.noMusic": "3b4cd59642fa",
     "templates.detail.similar": "3b072dd7b295",
     "templates.detail.failed": "20c27a1374f6",
-    "templates.detail.missing": "947dd4842911",
-    "templates.fill.title": "e9022deea3e3",
-    "templates.fill.body": "e822e3097889",
-    "templates.fill.slot": "cacbcfa93a0f",
-    "templates.fill.pick": "9d14f03c805f",
-    "templates.fill.skip": "1528b9406511",
-    "templates.fill.replaceSlot": "56a614e03574"
+    "templates.detail.missing": "947dd4842911"
   },
   "ko/inspector": {
     "controls.mixed": "c0dcb865ad81",
@@ -16915,13 +16885,7 @@
     "templates.detail.noMusic": "3b4cd59642fa",
     "templates.detail.similar": "3b072dd7b295",
     "templates.detail.failed": "20c27a1374f6",
-    "templates.detail.missing": "947dd4842911",
-    "templates.fill.title": "e9022deea3e3",
-    "templates.fill.body": "e822e3097889",
-    "templates.fill.slot": "cacbcfa93a0f",
-    "templates.fill.pick": "9d14f03c805f",
-    "templates.fill.skip": "1528b9406511",
-    "templates.fill.replaceSlot": "56a614e03574"
+    "templates.detail.missing": "947dd4842911"
   },
   "pt-BR/inspector": {
     "controls.mixed": "c0dcb865ad81",
@@ -20030,13 +19994,7 @@
     "templates.detail.noMusic": "3b4cd59642fa",
     "templates.detail.similar": "3b072dd7b295",
     "templates.detail.failed": "20c27a1374f6",
-    "templates.detail.missing": "947dd4842911",
-    "templates.fill.title": "e9022deea3e3",
-    "templates.fill.body": "e822e3097889",
-    "templates.fill.slot": "cacbcfa93a0f",
-    "templates.fill.pick": "9d14f03c805f",
-    "templates.fill.skip": "1528b9406511",
-    "templates.fill.replaceSlot": "56a614e03574"
+    "templates.detail.missing": "947dd4842911"
   },
   "zh-CN/inspector": {
     "controls.mixed": "c0dcb865ad81",

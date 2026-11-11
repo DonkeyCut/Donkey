@@ -142,33 +142,3 @@ export async function copyAsKind(r: Residency, id: string, kind: ProjectKind, na
   }
   return copyId;
 }
-
-// The opened copy asks once for clips to fill its footage slots. The ask rides
-// the tab's session storage from the copy to the editor that opens it.
-const FILL_KEY = "template-fill";
-
-export function markForFill(projectId: string) {
-  try {
-    sessionStorage.setItem(FILL_KEY, projectId);
-  } catch {
-    // Storage blocked: the project opens without the fill sheet.
-  }
-}
-
-/** Whether the project is a template copy that has not asked for clips yet. */
-export function hasFillMark(projectId: string): boolean {
-  try {
-    return sessionStorage.getItem(FILL_KEY) === projectId;
-  } catch {
-    return false;
-  }
-}
-
-/** The ask is answered, filled or skipped; it never comes back. */
-export function clearFillMark() {
-  try {
-    sessionStorage.removeItem(FILL_KEY);
-  } catch {
-    // Storage blocked: nothing was kept.
-  }
-}

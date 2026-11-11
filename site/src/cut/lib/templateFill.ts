@@ -1,4 +1,3 @@
-import { clipLen } from "./timelineEnd";
 import type { MediaAsset, VideoClip } from "./types";
 
 /** A template's footage slots: every clip playing a video or a still, in the
@@ -13,6 +12,3 @@ export function footageSlots(clips: VideoClip[], assets: Pick<MediaAsset, "id" |
     })
     .sort((a, b) => a.start - b.start || a.track - b.track);
 }
-
-/** Each slot's length, for the sheet's rows. */
-export const slotSeconds = (slot: VideoClip) => clipLen(slot);

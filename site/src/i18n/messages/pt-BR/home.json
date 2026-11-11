@@ -326,14 +326,6 @@
       "similar": "Modelos semelhantes",
       "failed": "Não foi possível criar o projeto.",
       "missing": "Este modelo não está mais disponível."
-    },
-    "fill": {
-      "title": "Adicione seus clipes",
-      "body": "Escolha os clipes para os espaços do modelo. Eles são preenchidos em ordem, e o espaço que você pular manterá o exemplo.",
-      "slot": "Clipe {n} · {seconds}",
-      "pick": "Escolher clipes",
-      "skip": "Manter amostras",
-      "replaceSlot": "Escolha um clipe para este espaço"
     }
   }
 }

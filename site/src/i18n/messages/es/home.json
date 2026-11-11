@@ -326,14 +326,6 @@
       "similar": "Plantillas similares",
       "failed": "No se pudo crear el proyecto.",
       "missing": "Esta plantilla ya no está disponible."
-    },
-    "fill": {
-      "title": "Agrega tus clips",
-      "body": "Elige clips para los espacios de la plantilla. Se llenan en orden, y los espacios que omitas conservarán su muestra.",
-      "slot": "Clip {n} · {seconds}",
-      "pick": "Elegir clips",
-      "skip": "Conservar muestras",
-      "replaceSlot": "Elige un clip para este espacio"
     }
   }
 }
