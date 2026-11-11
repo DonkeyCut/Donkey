@@ -4,15 +4,16 @@
  * Donkey's R2 bucket (see src/cut/server/cloud/templates.ts); nothing about
  * them lives in this repository.
  *
- *   bun run scripts/template-publish.ts publish "<project folder>" <meta.json> <render.mp4>
+ *   bun run scripts/template-publish.ts publish "<project folder>" <meta.json>
  *   bun run scripts/template-publish.ts remove <id>
  *
  * The project folder is a Mac library folder (project.json + media/). The
  * meta file holds the gallery entry the document cannot say:
  *   { "id", "name": { "en", … }, "description": { "en", … }, "category",
  *     "style", "fps" }
- * The render is the template exported; its first seconds become the card's
- * muted loop and its poster. Footage past 1080p or 8 Mbps ships re-encoded.
+ * The gallery plays the template live, so nothing is rendered ahead but the
+ * card's still: one frame of it, exported here through the same pipeline a
+ * download takes. Footage past 1080p or 8 Mbps ships re-encoded.
  *
  * Every environment reads the one bucket, so a publish is live on every
  * site that serves the gallery the moment the index lands.
@@ -34,20 +35,28 @@ import {
 } from "../src/cut/lib/templateGallery";
 import { timelineEnd } from "../src/cut/lib/timelineEnd";
 import { isTextOverlay, type ProjectDoc, type StoredAsset } from "../src/cut/lib/types";
+import { buildDocExportSpec } from "../src/cut/lib/headless/docExport";
+import { installHeadlessRuntime } from "../src/cut/lib/headless/runtime";
 import { deletePrefix, getObject, putObject } from "../src/cut/server/cloud/r2";
 import {
   TEMPLATE_INDEX_KEY,
   TEMPLATE_POSTER,
-  TEMPLATE_PREVIEW,
   templateKey,
   templateMediaKey,
 } from "../src/cut/server/cloud/templates";
+import { runExport, type ExportSpec, type RenderHandle } from "../src/cut/server/exportPipeline";
 import { contentTypeFor } from "../src/cut/server/serveFile";
 
-// The card's loop: the render's opening seconds, small and silent.
-const PREVIEW_SECONDS = 8;
-const PREVIEW_LONG_EDGE = 720;
+// The card's still: the frame this far in (or halfway through a shorter
+// template), scaled down. The export renders a short stretch from it, the way
+// a range download does.
+const POSTER_LONG_EDGE = 720;
 const POSTER_AT_S = 1;
+const POSTER_SPAN_S = 0.2;
+const POSTER_PRESET = "tiktok";
+// The headless session's media presign, which the poster's loopback answers.
+const PRESIGN_GET = "/api/cut-cloud/media/presign-get";
+const MEDIA_ROUTE = "/m/";
 // Footage ships light: video past this frame size or rate is re-encoded to it,
 // at its own frame rate and timing, so a copy to a Mac or a browser stays a
 // short download.
@@ -268,7 +277,55 @@ function lightFootage(dir: string, doc: ProjectDoc, tmp: string): Map<string, st
   return sources;
 }
 
-async function publish(dir: string, metaPath: string, render: string) {
+/** The card's still: the template's frame at POSTER_AT_S, exported through
+ * the headless doc export with media read from `sources`. The session points
+ * at a loopback that answers the media presign with the local files. */
+async function renderPoster(doc: ProjectDoc, sources: Map<string, string>, tmp: string, out: string) {
+  const server = Bun.serve({
+    port: 0,
+    hostname: "127.0.0.1",
+    async fetch(req) {
+      const url = new URL(req.url);
+
+      // Every asked-for file maps to this server's media route.
+      if (url.pathname === PRESIGN_GET && req.method === "POST") {
+        const body = (await req.json()) as { items?: { fileName: string }[] };
+        const urls = (body.items ?? []).map(({ fileName }) => ({
+          fileName,
+          url: `${server.url.origin}${MEDIA_ROUTE}${encodeURIComponent(fileName)}`,
+        }));
+        return Response.json({ urls });
+      }
+
+      // A media read: the file itself, ranges included.
+      const file = url.pathname.startsWith(MEDIA_ROUTE)
+        ? sources.get(decodeURIComponent(url.pathname.slice(MEDIA_ROUTE.length)))
+        : undefined;
+      return file ? new Response(Bun.file(file)) : new Response("Not found.", { status: 404 });
+    },
+  });
+  try {
+    await installHeadlessRuntime();
+    const handle: RenderHandle = {
+      tmpDir: path.join(tmp, "overlays"),
+      outPath: path.join(tmp, "poster.mp4"),
+      progress: 0,
+      log: [],
+    };
+    await fs.mkdir(handle.tmpDir, { recursive: true });
+    const session = { base: server.url.origin, headers: {} };
+    const spec = (await buildDocExportSpec(session, doc.id!, POSTER_PRESET, handle.tmpDir, { doc, version: "1" })) as ExportSpec;
+    const at = Math.min(POSTER_AT_S, spec.duration / 2);
+    const range = { start: at, end: Math.min(spec.duration, at + POSTER_SPAN_S) };
+    await runExport(handle, { ...spec, range }, (file) => sources.get(path.basename(file))!);
+    const scale = `scale='if(gt(iw,ih),${POSTER_LONG_EDGE},-2)':'if(gt(iw,ih),-2,${POSTER_LONG_EDGE})'`;
+    execFileSync("ffmpeg", ["-v", "error", "-y", "-i", handle.outPath, "-frames:v", "1", "-vf", scale, "-q:v", "3", out]);
+  } finally {
+    server.stop(true);
+  }
+}
+
+async function publish(dir: string, metaPath: string) {
   const meta = JSON.parse(await fs.readFile(metaPath, "utf8")) as Meta;
   checkMeta(meta);
   const source = JSON.parse(await fs.readFile(path.join(dir, "project.json"), "utf8")) as ProjectDoc;
@@ -285,16 +342,11 @@ async function publish(dir: string, metaPath: string, render: string) {
     await fs.access(path.join(dir, "media", fileName));
   }
 
-  // The card: a short muted loop scaled down, and its still.
+  // The footage as it ships, and the card's still rendered from it.
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "template-"));
   const sources = lightFootage(dir, doc, tmp);
-  const preview = path.join(tmp, TEMPLATE_PREVIEW);
   const poster = path.join(tmp, TEMPLATE_POSTER);
-  const scale = `scale='if(gt(iw,ih),${PREVIEW_LONG_EDGE},-2)':'if(gt(iw,ih),-2,${PREVIEW_LONG_EDGE})'`;
-  execFileSync("ffmpeg", ["-v", "error", "-y", "-i", render, "-t", String(PREVIEW_SECONDS), "-an", "-vf", scale,
-    "-c:v", "libx264", "-crf", "28", "-preset", "slow", "-pix_fmt", "yuv420p", "-movflags", "+faststart", preview]);
-  execFileSync("ffmpeg", ["-v", "error", "-y", "-ss", String(POSTER_AT_S), "-i", render, "-frames:v", "1", "-vf", scale,
-    "-q:v", "3", poster]);
+  await renderPoster(doc, sources, tmp, poster);
 
   // Media first, the index last, so the gallery never lists a template whose
   // bytes are still landing.
@@ -304,7 +356,6 @@ async function publish(dir: string, metaPath: string, render: string) {
     console.log(`media  ${fileName}`);
   }
   await putObject(templateKey(meta.id, "project.json"), Buffer.from(JSON.stringify(doc)), "application/json");
-  await putObject(templateKey(meta.id, TEMPLATE_PREVIEW), await fs.readFile(preview), "video/mp4");
   await putObject(templateKey(meta.id, TEMPLATE_POSTER), await fs.readFile(poster), "image/jpeg");
   await fs.rm(tmp, { recursive: true, force: true });
 
@@ -334,12 +385,12 @@ async function remove(id: string) {
   console.log(`removed ${id} (${gone} objects)`);
 }
 
-if (command === "publish" && args.length === 3) {
-  await publish(args[0], args[1], args[2]);
+if (command === "publish" && args.length === 2) {
+  await publish(args[0], args[1]);
 } else if (command === "remove" && args.length === 1) {
   await remove(args[0]);
 } else {
-  console.error("usage: template-publish.ts publish <project folder> <meta.json> <render.mp4> | remove <id>");
+  console.error("usage: template-publish.ts publish <project folder> <meta.json> | remove <id>");
   process.exit(1);
 }
 process.exit(0);

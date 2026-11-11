@@ -35,6 +35,7 @@ import {
   DropdownMenuItem,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
+import { MediaTransport } from "./MediaTransport";
 import { MaskGizmoCore, OverlayChromeHost, OverlayLayer, StagePress } from "./OverlayLayer";
 import { GuideHandles, GuideOverlay } from "./GuideOverlay";
 import { RemovalBrush } from "./RemovalBrush";
@@ -56,11 +57,64 @@ function stageClick() {
     s.select(null);
     return;
   }
+  togglePlay();
+}
+
+/** Play or pause, rewinding first when the playhead is parked at the end. */
+function togglePlay() {
+  const s = useEditor.getState();
   const total = projectDuration(s);
-  if (!total) return;
-  if (!s.playing && playheadAt() >= total - 0.01) s.seek(0);
+  if (!total) {
+    return;
+  }
+  if (!s.playing && playheadAt() >= total - 0.01) {
+    s.seek(0);
+  }
   s.setPlaying(!s.playing);
 }
+
+/** How finely the play mode's clock and scrub bar follow playback, seconds:
+ * ten steps a second keeps the bar moving without a render per frame. */
+const TRANSPORT_STEP_S = 0.1;
+
+/** The play mode's transport: play/pause, the scrub bar and the clock, over
+ * the picture. It reads the clock on its own so the stage never renders for
+ * it. */
+function PlayerTransport() {
+  const playing = useEditor((s) => s.playing);
+  const total = useEditor(projectDuration);
+  const time = usePreviewSelector((t) => Math.round(t / TRANSPORT_STEP_S) * TRANSPORT_STEP_S);
+  return (
+    <MediaTransport
+      playing={playing}
+      time={time}
+      duration={total}
+      onToggle={togglePlay}
+      onSeek={(t) => useEditor.getState().seek(t)}
+    />
+  );
+}
+
+/** The play mode's press target over the whole pane. */
+function PlayPress() {
+  const t = useTranslations("timeline.media");
+  const playing = useEditor((s) => s.playing);
+  return (
+    <button
+      type="button"
+      className="absolute inset-0 z-10 cursor-pointer outline-none focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:ring-inset"
+      aria-label={playing ? t("pause") : t("play")}
+      onClick={togglePlay}
+    />
+  );
+}
+
+/** The pane a fixed camera hands the pinch hook: none. */
+const NO_PANE: RefObject<HTMLElement | null> = { current: null };
+
+/** What the stage is for: `edit` is the editor's canvas, with selection,
+ * gizmos and the camera; `play` only plays, as a template's page shows it. */
+type PreviewMode = "edit" | "play";
 
 /** Paint the picture this project's preview last showed, then hand the canvas
  * back to the engine. Cloud media is a network away, so without this the
@@ -174,7 +228,7 @@ function BufferingBadge() {
   );
 }
 
-export function Preview() {
+export function Preview({ mode = "edit" }: { mode?: PreviewMode }) {
   const t = useTranslations("editor.preview");
   const canvasRef = useRef<HTMLCanvasElement>(null);
   // The extended-range canvas the HDR picture is presented on, over the
@@ -473,14 +527,17 @@ export function Preview() {
     return () => ro.disconnect();
   }, [aspect, applyPan]);
 
-  // A two-finger pinch on a touch screen zooms about its center.
-  usePinch(wrapRef, (factor, x, y) => zoomAt(x, y, factor));
+  // A two-finger pinch on a touch screen zooms about its center. Play mode
+  // keeps the camera fixed: no pinch, no wheel.
+  usePinch(mode === "play" ? NO_PANE : wrapRef, (factor, x, y) => zoomAt(x, y, factor));
 
   // Pinch and ⌘/ctrl-wheel zoom about the cursor; a plain scroll pans. The
   // listener is native so preventDefault beats the page's own pinch zoom.
   useEffect(() => {
     const wrap = wrapRef.current;
-    if (!wrap) return;
+    if (!wrap || mode === "play") {
+      return;
+    }
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
       const k = e.deltaMode === 1 ? 16 : 1;
@@ -499,7 +556,7 @@ export function Preview() {
     };
     wrap.addEventListener("wheel", onWheel, { passive: false });
     return () => wrap.removeEventListener("wheel", onWheel);
-  }, [zoomAt, pokeHud, panTo, holdPanGuide]);
+  }, [zoomAt, pokeHud, panTo, holdPanGuide, mode]);
 
   /** Grab the picture, or the room around it, and move the camera. */
   const cameraDrag = (e: React.PointerEvent, onTap: () => void) => {
@@ -557,7 +614,7 @@ export function Preview() {
   };
 
   return (
-    <section className="preview-pane relative flex min-h-0 min-w-0 flex-col bg-muted/40 select-none">
+    <section className={cn("preview-pane relative flex min-h-0 min-w-0 flex-col bg-muted/40 select-none", mode === "play" && "group")}>
       <div
         ref={wrapRef}
         className="relative flex min-h-0 flex-1 touch-none flex-col items-center justify-center gap-3 overflow-hidden p-3"
@@ -723,6 +780,15 @@ export function Preview() {
         <SelectionFrame stage={stage} />
         </div>
       </div>
+      {/* Play mode covers the pane with one press target, so a click plays or
+          pauses and nothing under it selects, drags, pans or zooms. */}
+      {mode === "play" && (
+        <>
+          <PlayPress />
+          <PlayerTransport />
+        </>
+      )}
+      {mode === "edit" && (
       <ZoomHud
         zoom={zoom}
         shown={hud.shown || lost}
@@ -741,6 +807,7 @@ export function Preview() {
           if (!held) pokeHud();
         }}
       />
+      )}
       {/* The right-click menu on the stage, anchored to the pointer: the
           dropdown keeps itself inside the window however small it is. */}
       <DropdownMenu open={frameMenu !== null} onOpenChange={(o) => !o && setFrameMenu(null)}>

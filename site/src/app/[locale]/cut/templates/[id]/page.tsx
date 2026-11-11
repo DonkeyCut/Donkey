@@ -1,12 +1,14 @@
 import type { Metadata } from "next";
 import { headers } from "next/headers";
+import { Suspense } from "react";
+import { connection } from "next/server";
 import { getLocale, getTranslations } from "next-intl/server";
 import { NoSessionReplay } from "@/app/_components/NoSessionReplay";
 import { localized, templatePoster } from "@/cut/lib/templateGallery";
 import { readTemplateIndex } from "@/cut/server/cloud/templates";
 import { TemplateDetailView } from "./TemplateDetailView";
 
-// A template's public page: the template playing in the read-only editor, with
+// A template's public page: the template playing live in the editor's stage, with
 // the button that makes it the visitor's own project. The document around it
 // is server-rendered for link previews.
 
@@ -19,6 +21,8 @@ async function origin(): Promise<string> {
 }
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
   const { id } = await params;
+  // The index read is timed against the clock, so the card renders per request.
+  await connection();
   const template = (await readTemplateIndex()).templates.find((t) => t.id === decodeURIComponent(id));
   const t = await getTranslations("home.templates");
   if (!template) {
@@ -34,9 +38,19 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
   };
 }
 
+// Renders nothing; it tells prerendering the page's metadata is per request
+// on purpose, and the Suspense keeps the rest of the page in the static shell.
+async function Connection() {
+  await connection();
+  return null;
+}
+
 export default function TemplatePage() {
   return (
     <>
+      <Suspense>
+        <Connection />
+      </Suspense>
       <NoSessionReplay />
       {/* Same reason the share page marks its tree: a browser's translator
           rewriting text nodes under the editor breaks hydration. */}

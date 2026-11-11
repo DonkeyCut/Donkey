@@ -3,7 +3,7 @@
 // share's do, so the client's template backend is a prefix rewrite and the
 // read-only editor opens a template exactly as it opens a share.
 import { matchRouteTable, type RouteEntry } from "../http/match";
-import { TEMPLATE_POSTER, TEMPLATE_PREVIEW, templatesApi } from "./templates";
+import { templatesApi } from "./templates";
 
 type TemplateHandler = (req: Request, params: Record<string, string>) => Promise<Response>;
 
@@ -14,8 +14,7 @@ interface TemplateRoute extends RouteEntry {
 const TEMPLATE_ROUTES: TemplateRoute[] = [
   { method: "GET", path: "/api/templates", handler: () => templatesApi.list() },
   { method: "GET", path: "/api/templates/:id", handler: (_r, p) => templatesApi.meta(p.id) },
-  { method: "GET", path: "/api/templates/:id/poster", handler: (_r, p) => templatesApi.card(p.id, TEMPLATE_POSTER) },
-  { method: "GET", path: "/api/templates/:id/preview", handler: (_r, p) => templatesApi.card(p.id, TEMPLATE_PREVIEW) },
+  { method: "GET", path: "/api/templates/:id/poster", handler: (_r, p) => templatesApi.poster(p.id) },
   { method: "POST", path: "/api/templates/:id/copy", handler: (r, p) => templatesApi.copy(p.id, r) },
   { method: "GET", path: "/api/templates/:id/projects/:pid", handler: (r, p) => templatesApi.doc(p.id, p.pid, r) },
   { method: "GET", path: "/api/templates/:id/projects/:pid/media/:file", handler: (_r, p) => templatesApi.media(p.id, p.pid, p.file) },

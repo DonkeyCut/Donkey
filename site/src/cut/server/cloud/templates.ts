@@ -5,7 +5,6 @@
 //   cut/templates/<id>/project.json     the template's project document
 //   cut/templates/<id>/media/<file>     the media its assets name
 //   cut/templates/<id>/poster.jpg       the gallery card's still
-//   cut/templates/<id>/preview.mp4      the card's short muted loop
 //
 // Anyone can read a published template, the way a public share reads: the
 // gallery page and the template's read-only editor need no session. Copying
@@ -28,7 +27,6 @@ export const TEMPLATE_INDEX_KEY = `${TEMPLATE_ROOT}/index.json`;
 export const templateKey = (id: string, rest: string) => `${TEMPLATE_ROOT}/${id}/${rest}`;
 export const templateMediaKey = (id: string, fileName: string) => templateKey(id, `media/${fileName}`);
 export const TEMPLATE_POSTER = "poster.jpg";
-export const TEMPLATE_PREVIEW = "preview.mp4";
 
 // How long a server instance trusts its read of the index before reading R2
 // again; a publish shows up within this window.
@@ -206,13 +204,13 @@ export const templatesApi = {
     }
   },
 
-  /** The card's still or loop. */
-  async card(id: string, file: typeof TEMPLATE_POSTER | typeof TEMPLATE_PREVIEW) {
+  /** The card's still. */
+  async poster(id: string) {
     const t = await publishedTemplate(id);
     if (!t) {
       return err(NOT_FOUND, 404);
     }
-    return cachedRedirect(mediaObjectUrl(templateKey(id, file), { version: t.version }));
+    return cachedRedirect(mediaObjectUrl(templateKey(id, TEMPLATE_POSTER), { version: t.version }));
   },
 
   /** Copy a template into the signed-in account's cloud. */

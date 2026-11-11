@@ -154,13 +154,9 @@ export function pageWindow(page: number, pages: number): (number | null)[] {
 
 const templatePath = (id: string) => `${TEMPLATES_API}/${encodeURIComponent(id)}`;
 
-/** A template's still card and its short moving card. */
+/** A template's still card. */
 export function templatePoster(t: GalleryTemplate): string {
   return `${templatePath(t.id)}/poster?v=${encodeURIComponent(t.version)}`;
-}
-
-export function templateMotion(t: GalleryTemplate): string {
-  return `${templatePath(t.id)}/preview?v=${encodeURIComponent(t.version)}`;
 }
 
 /** The template's public page. */

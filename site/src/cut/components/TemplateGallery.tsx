@@ -50,7 +50,6 @@ import {
   TEMPLATE_CATEGORIES,
   TEMPLATE_LENGTHS,
   TEMPLATE_STYLES,
-  templateMotion,
   templatePage,
   templatePoster,
   type GalleryTemplate,
@@ -421,8 +420,7 @@ function OwnTemplateCard({
   );
 }
 
-/** One gallery card: the poster, and the muted loop while a mouse rests on
- * it. Only the hovered card loads its loop, so one plays at a time. */
+/** One gallery card: the template's still. Its page plays it. */
 export function TemplateCard({
   template,
   area = CARD_AREA,
@@ -432,7 +430,6 @@ export function TemplateCard({
 }) {
   const t = useTranslations("home.templates");
   const locale = useLocale();
-  const [hovered, setHovered] = useState(false);
   const [w, h] = template.aspect.split(":").map(Number);
 
   return (
@@ -440,8 +437,6 @@ export function TemplateCard({
       href={templatePage(template.id)}
       className="group max-w-full outline-none"
       style={{ width: cardWidth({ w, h }, area) }}
-      onPointerEnter={(e) => e.pointerType === "mouse" && setHovered(true)}
-      onPointerLeave={() => setHovered(false)}
     >
       <div
         className="relative overflow-hidden rounded-2xl border border-border bg-muted transition-shadow group-hover:shadow-[0_6px_28px_rgba(0,0,0,0.12)] group-focus-visible:ring-3 group-focus-visible:ring-ring/50"
@@ -456,16 +451,6 @@ export function TemplateCard({
           decoding="async"
           className="absolute inset-0 size-full object-cover"
         />
-        {hovered && (
-          <video
-            src={templateMotion(template)}
-            autoPlay
-            muted
-            loop
-            playsInline
-            className="absolute inset-0 size-full object-cover"
-          />
-        )}
         <span className="absolute right-2 bottom-2 rounded-md bg-black/65 px-1.5 py-0.5 font-mono text-[10px] text-white tabular-nums">
           {formatTime(template.seconds)}
         </span>
