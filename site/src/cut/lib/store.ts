@@ -6935,9 +6935,21 @@ export function liftClipLooks(
   if (graded.length === 0) return null;
   const lifted: Overlay[] = [];
   const done = new Set<string>();
+
+  // An element grades every track beneath it, so a spine clip with a layer
+  // clip over any of its stretch keeps its look on the clip, grading itself
+  // alone: a noir backdrop under a full-color pane leaves the pane in color.
+  const layers = clips.filter((c) => (c.track ?? 0) > 0);
+  const layered = (start: number, end: number) =>
+    layers.some((l) => l.start < end && l.start + clipLen(l) > start);
   for (const c of graded) {
     const sp = spans.find((x) => x.clip.id === c.id);
-    if (!sp) continue;
+    if (!sp) {
+      continue;
+    }
+    if (layered(sp.start, sp.start + sp.len)) {
+      continue;
+    }
     done.add(c.id);
     // One row per overlapping grade, so two clips graded back to back share a
     // row and a layered pair does not.

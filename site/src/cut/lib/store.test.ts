@@ -2107,11 +2107,21 @@ describe("overlay row order", () => {
   test("a graded layer clip keeps its look, which grades that layer alone", () => {
     const a = asset(4);
     const spine = vclip({ track: 0, start: 0, out: 4, assetId: a.id, look: "noir" });
-    const layer = vclip({ track: 1, start: 0, out: 2, assetId: a.id, look: "vintage" });
+    const layer = vclip({ track: 1, start: 4, out: 2, assetId: a.id, look: "vintage" });
     const out = liftClipLooks([spine, layer], [], [{ clip: spine, start: 0, len: 4 }])!;
     expect(out.overlays.filter((o) => o.kind === "effect").length).toBe(1);
     expect(out.clips.find((c) => c.id === spine.id)!.look).toBeUndefined();
     expect(out.clips.find((c) => c.id === layer.id)!.look).toBe("vintage");
+  });
+
+  test("a spine look under a layer clip stays on the spine clip", () => {
+    // An effect grades every track beneath it, so a lifted noir would turn
+    // the full-color layer above the spine gray too.
+    const a = asset(4);
+    const spine = vclip({ track: 0, start: 0, out: 4, assetId: a.id, look: "noir" });
+    const layer = vclip({ track: 1, start: 1, out: 2, assetId: a.id });
+    const out = liftClipLooks([spine, layer], [], [{ clip: spine, start: 0, len: 4 }]);
+    expect(out).toBe(null);
   });
 
   test("an added effect opens the top row, and later ones join it", () => {
