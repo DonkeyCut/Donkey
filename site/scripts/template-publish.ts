@@ -6,6 +6,8 @@
  *
  *   bun run scripts/template-publish.ts publish "<project folder>" <meta.json>
  *   bun run scripts/template-publish.ts remove <id>
+ *   bun run scripts/template-publish.ts order <ids.json>
+ *   bun run scripts/template-publish.ts frames <id>
  *
  * The project folder is a Mac library folder (project.json + media/). The
  * meta file holds the gallery entry the document cannot say:
@@ -13,13 +15,18 @@
  *     "style", "fps" }
  * The gallery plays the template live, so nothing is rendered ahead but the
  * card's still: one frame of it, exported here through the same pipeline a
- * download takes. Footage past 1080p or 8 Mbps ships re-encoded.
+ * download takes. Footage past 1080p or 8 Mbps ships re-encoded. The gallery
+ * lists templates in the index's order; `order` takes a JSON array of ids to
+ * lead it, and the rest follow as they were. Each video clip's first frame
+ * ships too, small, so the template page's timeline shows the clips without
+ * decoding the footage; `frames` bakes them for a template already live.
  *
  * Every environment reads the one bucket, so a publish is live on every
  * site that serves the gallery the moment the index lands.
  */
 
 import { execFileSync } from "node:child_process";
+import { headSrc } from "@donkeycut/effects-kit";
 import { statSync } from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
@@ -39,8 +46,10 @@ import { buildDocExportSpec } from "../src/cut/lib/headless/docExport";
 import { installHeadlessRuntime } from "../src/cut/lib/headless/runtime";
 import { deletePrefix, getObject, putObject } from "../src/cut/server/cloud/r2";
 import {
+  TEMPLATE_FRAME_H,
   TEMPLATE_INDEX_KEY,
   TEMPLATE_POSTER,
+  templateFrameKey,
   templateKey,
   templateMediaKey,
 } from "../src/cut/server/cloud/templates";
@@ -354,6 +363,61 @@ async function renderPoster(doc: ProjectDoc, sources: Map<string, string>, tmp: 
   }
 }
 
+// How far before a source's end a frame is read when the clip starts past it.
+const FRAME_TAIL_S = 0.1;
+
+/** Each video clip's first frame, read from the footage as it ships and
+ * stored small beside the template. */
+async function bakeFrames(id: string, doc: ProjectDoc, sources: Map<string, string>, tmp: string) {
+  let count = 0;
+  for (const clip of doc.clips) {
+    const asset = doc.assets.find((a) => a.id === clip.assetId);
+    if (asset?.type !== "video" || asset.block) {
+      continue;
+    }
+
+    // The template page draws every footage clip from its frame, so a clip
+    // without footage to read stops the publish.
+    const file = asset.fileName ? sources.get(asset.fileName) : undefined;
+    if (!file) {
+      throw new Error(`${id}: clip ${clip.id} has no footage to bake a frame from.`);
+    }
+    const at = Math.max(0, Math.min(headSrc(clip), probe(file).duration - FRAME_TAIL_S));
+    const out = path.join(tmp, `frame-${clip.id}.jpg`);
+    execFileSync("ffmpeg", ["-v", "error", "-y", "-ss", String(at), "-i", file, "-frames:v", "1",
+      "-vf", `scale=-2:${TEMPLATE_FRAME_H}`, "-q:v", "4", out]);
+    await putObject(templateFrameKey(id, clip.id), await fs.readFile(out), "image/jpeg");
+    count++;
+  }
+  console.log(`frames ${count}`);
+}
+
+/** Bake the clip frames of a template already published, from its stored
+ * document and media. */
+async function frames(id: string) {
+  const stored = await getObject(templateKey(id, "project.json"));
+  if (!stored) {
+    throw new Error(`${id} is not published.`);
+  }
+  const doc = JSON.parse(stored.bytes.toString("utf8")) as ProjectDoc;
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "template-frames-"));
+  const sources = new Map<string, string>();
+  for (const asset of doc.assets) {
+    if (asset.type !== "video" || !asset.fileName || sources.has(asset.fileName)) {
+      continue;
+    }
+    const media = await getObject(templateMediaKey(id, asset.fileName));
+    if (!media) {
+      throw new Error(`${id} is missing ${asset.fileName}.`);
+    }
+    const file = path.join(tmp, asset.fileName);
+    await fs.writeFile(file, media.bytes);
+    sources.set(asset.fileName, file);
+  }
+  await bakeFrames(id, doc, sources, tmp);
+  await fs.rm(tmp, { recursive: true, force: true });
+}
+
 async function publish(dir: string, metaPath: string) {
   const meta = JSON.parse(await fs.readFile(metaPath, "utf8")) as Meta;
   checkMeta(meta);
@@ -374,6 +438,7 @@ async function publish(dir: string, metaPath: string) {
   // The footage as it ships, and the card's still rendered from it.
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "template-"));
   const sources = lightFootage(dir, doc, tmp);
+  await bakeFrames(meta.id, doc, sources, tmp);
   const poster = path.join(tmp, TEMPLATE_POSTER);
   await renderPoster(doc, sources, tmp, poster);
 
@@ -415,12 +480,32 @@ async function remove(id: string) {
   console.log(`removed ${id} (${gone} objects)`);
 }
 
+/** Put the templates `file` lists (a JSON array of ids) first in the
+ * gallery, in its order; the rest keep theirs behind them. */
+async function order(file: string) {
+  const ids = JSON.parse(await fs.readFile(file, "utf8")) as string[];
+  const index = await readIndex();
+  const byId = new Map(index.templates.map((t) => [t.id, t]));
+  const unknown = ids.filter((id) => !byId.has(id));
+  if (unknown.length > 0) {
+    throw new Error(`not in the gallery: ${unknown.join(", ")}`);
+  }
+  const lead = new Set(ids);
+  const templates = [...ids.map((id) => byId.get(id)!), ...index.templates.filter((t) => !lead.has(t.id))];
+  await writeIndex({ templates });
+  console.log(`ordered ${ids.length} of ${templates.length} templates`);
+}
+
 if (command === "publish" && args.length === 2) {
   await publish(args[0], args[1]);
 } else if (command === "remove" && args.length === 1) {
   await remove(args[0]);
+} else if (command === "order" && args.length === 1) {
+  await order(args[0]);
+} else if (command === "frames" && args.length === 1) {
+  await frames(args[0]);
 } else {
-  console.error("usage: template-publish.ts publish <project folder> <meta.json> | remove <id>");
+  console.error("usage: template-publish.ts publish <project folder> <meta.json> | remove <id> | order <ids.json> | frames <id>");
   process.exit(1);
 }
 process.exit(0);

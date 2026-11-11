@@ -579,7 +579,16 @@ type TimelineFold = "foldable" | "fixed";
 
 /** `openSpan` is the seconds the timeline fits as a project opens; a shorter
  * project fills the width. */
-export function Timeline({ fold = "foldable", openSpan = 0 }: { fold?: TimelineFold; openSpan?: number }) {
+export function Timeline({
+  fold = "foldable",
+  openSpan = 0,
+  toolbarStart,
+}: {
+  fold?: TimelineFold;
+  openSpan?: number;
+  /** A control a page adds at the toolbar's far left, such as a template's mute. */
+  toolbarStart?: React.ReactNode;
+}) {
   const tr = useTranslations("timeline.main");
   const transitionLabel = useLabels("transition");
   const shapeLabel = useLabels("shape");
@@ -2288,6 +2297,7 @@ export function Timeline({ fold = "foldable", openSpan = 0 }: { fold?: TimelineF
             measurement below lands: the overlap stops being something to get
             right and becomes something that cannot be drawn. */}
         <div className="col-start-1 row-start-1 ml-2.5 flex min-w-0 items-center gap-0.5 overflow-hidden">
+          {toolbarStart}
           <TimelinePicker />
           {!barTight && (
             <TimelineTools
@@ -3946,11 +3956,15 @@ function ClipView({
   const filmIn = headSrc(clip);
   const filmOut = tailSrc(clip);
 
-  // A light timeline reads no frames from the footage: the box is a slab.
+  // A light timeline reads nothing from the footage: a footage clip tiles
+  // the first frame its template baked for it across the box.
   const light = useTimelineDetail((s) => s.detail === "light");
-  const lightSlab = light && asset.type === "video";
-  const startFrame = useEdgeFrame(lightSlab ? undefined : asset, filmIn, `${clip.id}:in`);
-  const endFrame = useEdgeFrame(lightSlab ? undefined : asset, filmOut, `${clip.id}:out`);
+  const clipFrame = useTimelineDetail((s) => s.frame);
+  const lightStill = light && asset.type === "video" && !asset.block;
+  const baked = lightStill && clipFrame ? clipFrame(clip.id) : null;
+  const edgeFrame = useEdgeFrame(lightStill ? undefined : asset, filmIn, `${clip.id}:in`);
+  const startFrame = baked ?? edgeFrame;
+  const endFrame = useEdgeFrame(lightStill ? undefined : asset, filmOut, `${clip.id}:out`);
   const stripFailed = useSyncExternalStore(
     subscribeStripStatus,
     () => stripFailedFor(asset.id),
@@ -3975,23 +3989,21 @@ function ClipView({
   const offscreen = view.hi <= view.lo;
   const filmstrip = useMemo(
     () =>
-      lightSlab
-        ? []
-        : filmstripFrames(
-            asset,
-            filmIn,
-            w,
-            pps,
-            rt,
-            FILM_H,
-            26,
-            { start: startFrame, end: endFrame },
-            view
-          ),
+      filmstripFrames(
+        asset,
+        filmIn,
+        w,
+        pps,
+        rt,
+        FILM_H,
+        26,
+        { start: startFrame, end: endFrame },
+        view
+      ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [asset, filmIn, w, pps, rt, startFrame, endFrame, filmGen, view, lightSlab]
+    [asset, filmIn, w, pps, rt, startFrame, endFrame, filmGen, view]
   );
-  useTileFrames(boxRef, clip.id, asset, filmstrip, filmIn, w, pps, rt.key, onTileFrame);
+  useTileFrames(boxRef, clip.id, lightStill ? undefined : asset, filmstrip, filmIn, w, pps, rt.key, onTileFrame);
 
   // The move gesture is the shared lane behavior: parting, snapping, and
   // retracking across the stack's rows.
@@ -4040,7 +4052,7 @@ function ClipView({
       }}
     >
       <div className="pointer-events-none absolute inset-x-0 top-0" style={{ height: FILM_H }}>
-        <Filmstrip frames={filmstrip} grade={clip.grade} failed={stripFailed || lightSlab} hidden={offscreen} block={asset?.block} />
+        <Filmstrip frames={filmstrip} grade={clip.grade} failed={stripFailed || lightStill} hidden={offscreen} block={asset?.block} />
       </div>
       <MissingChip assetId={asset.id} />
       {clip.grade?.lut && (

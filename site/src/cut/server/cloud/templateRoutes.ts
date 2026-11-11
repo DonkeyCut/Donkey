@@ -15,6 +15,7 @@ const TEMPLATE_ROUTES: TemplateRoute[] = [
   { method: "GET", path: "/api/templates", handler: () => templatesApi.list() },
   { method: "GET", path: "/api/templates/:id", handler: (_r, p) => templatesApi.meta(p.id) },
   { method: "GET", path: "/api/templates/:id/poster", handler: (_r, p) => templatesApi.poster(p.id) },
+  { method: "GET", path: "/api/templates/:id/frames/:clip", handler: (_r, p) => templatesApi.frame(p.id, p.clip) },
   { method: "POST", path: "/api/templates/:id/copy", handler: (r, p) => templatesApi.copy(p.id, r) },
   { method: "GET", path: "/api/templates/:id/projects/:pid", handler: (r, p) => templatesApi.doc(p.id, p.pid, r) },
   { method: "GET", path: "/api/templates/:id/projects/:pid/media/:file", handler: (_r, p) => templatesApi.media(p.id, p.pid, p.file) },

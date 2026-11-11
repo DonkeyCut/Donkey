@@ -47,6 +47,7 @@ import type { WrappedAudioBuffer } from "mediabunny";
 import { assembleAudio, decodeAudioSpan, openAudioWalk, type AudioWalk } from "./mediaRead";
 import { allowance, holdMemory } from "./memoryBudget";
 import { meterAudioLate, meterClockJump } from "./perfTrace";
+import { usePreviewMute } from "./previewMute";
 import { fitSpan, retimeFits } from "./retimeFit";
 
 /** How much of a voice is pulled off its walk and scheduled at once, in source
@@ -260,6 +261,8 @@ export interface FxVoice {
 export class PreviewMixer {
   private ctx: AudioContext | null = null;
   private master: GainNode | null = null;
+  /** Lets go of the master mute's subscription. */
+  private unfollowMute: (() => void) | null = null;
   /** Where every voice lands, and what the effect chains treat. */
   private bus: GainNode | null = null;
   private fx = new Map<string, LiveFx>();
@@ -294,6 +297,14 @@ export class PreviewMixer {
       this.ctx = new AudioContext();
       this.master = this.ctx.createGain();
       this.master.connect(this.ctx.destination);
+      // The master mute silences the whole mix at its last node; every voice
+      // and effect keeps running, so unmuting picks up mid-play.
+      const master = this.master;
+      const follow = (muted: boolean) => {
+        master.gain.value = muted ? 0 : 1;
+      };
+      follow(usePreviewMute.getState().muted);
+      this.unfollowMute = usePreviewMute.subscribe((s) => follow(s.muted));
       // Voices meet on the bus and the effect chains treat what is on it —
       // the order the export's ffmpeg graph has.
       this.bus = this.ctx.createGain();
@@ -810,6 +821,8 @@ export class PreviewMixer {
     this.fxKey = "";
     this.decoded.clear();
     this.releaseMemory();
+    this.unfollowMute?.();
+    this.unfollowMute = null;
     void this.ctx?.close();
     this.ctx = null;
     this.master = null;

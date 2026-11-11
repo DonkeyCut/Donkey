@@ -80,7 +80,12 @@ export function TemplateDetail({
             and the panel scrolls up under them. */}
         <div className="h-[88dvh] min-h-0 md:h-auto md:flex-1">
           {gate.state === "ready" ? (
-            <TemplatePlayer templateId={gate.templateId} projectId={gate.projectId} features={gate.features} />
+            <TemplatePlayer
+              templateId={gate.templateId}
+              version={template.version}
+              projectId={gate.projectId}
+              features={gate.features}
+            />
           ) : (
             <div className="grid h-full place-items-center text-muted-foreground">
               <Loader2 className="size-5 animate-spin" />

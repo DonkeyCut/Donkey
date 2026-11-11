@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Clapperboard, Loader2 } from "lucide-react";
+import { Clapperboard, Loader2, Volume2, VolumeX } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { useDescribeError } from "@/i18n/describeError";
 import { bindCutMode, releaseCutMode } from "@/cut/lib/backend";
 import { bindTemplateBackend } from "@/cut/lib/backend/shared";
@@ -12,11 +13,15 @@ import { syncFontAssets } from "@/cut/lib/fontAssets";
 // set in them measure and draw in their own face.
 import "@/cut/lib/googleFonts";
 import { playheadAt } from "@/cut/lib/playhead";
+import { setPreviewMuted, usePreviewMute } from "@/cut/lib/previewMute";
+import { menuOnTop, shortcutDecline } from "@/cut/lib/shortcutGate";
 import { projectDuration, useEditor } from "@/cut/lib/store";
 import type { ShareFeatures } from "@/cut/lib/types";
-import { setTimelineDetail } from "@/cut/lib/timelineDetail";
+import { templateFrame } from "@/cut/lib/templateGallery";
+import { setFullTimeline, setLightTimeline } from "@/cut/lib/timelineDetail";
 import { Preview } from "./Preview";
 import { Timeline } from "./Timeline";
+import { TimelineActionButton } from "./TimelineActionButton";
 
 // How near the end a stop has to land to count as the cut running out.
 const END_SLACK_S = 0.05;
@@ -32,10 +37,13 @@ const OPEN_SPAN_S = 30;
  */
 export function TemplatePlayer({
   templateId,
+  version,
   projectId,
   features,
 }: {
   templateId: string;
+  /** The published version, which keys the template's baked clip frames. */
+  version: string;
   projectId: string;
   features: ShareFeatures;
 }) {
@@ -66,14 +74,19 @@ export function TemplatePlayer({
   useEffect(() => {
     bindCutMode("shared");
     holdThreadsInMemory();
-    setTimelineDetail("light");
     return () => {
       useEditor.getState().closeProject(opened.current);
       releaseCutMode();
       releaseThreadsMemory();
-      setTimelineDetail("full");
+      setFullTimeline();
+      setPreviewMuted(false);
     };
   }, []);
+
+  // The timeline draws this template's clips from the frames it baked.
+  useEffect(() => {
+    setLightTimeline((clipId) => templateFrame({ id: templateId, version }, clipId));
+  }, [templateId, version]);
 
   // Load the template through its read-only backend, then play it. Another
   // template loads over this one in place.
@@ -121,6 +134,35 @@ export function TemplatePlayer({
     [projectId]
   );
 
+  // Space plays and pauses, as in the editor, rewinding first from the end.
+  // A typing field, a dialog or an open menu keeps its own Space; a focused
+  // button does not, so the key never re-presses the last one clicked. The
+  // player takes the key first and keeps it, so an editor left mounted on a
+  // hidden page never toggles playback back.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.code !== "Space" || e.repeat || e.metaKey || e.ctrlKey || e.altKey) {
+        return;
+      }
+      if (shortcutDecline(e) || menuOnTop()) {
+        return;
+      }
+      const s = useEditor.getState();
+      const total = projectDuration(s);
+      if (s.projectId !== projectId || total <= 0) {
+        return;
+      }
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      if (!s.playing && playheadAt() >= total - END_SLACK_S) {
+        s.seek(0);
+      }
+      s.setPlaying(!s.playing);
+    };
+    window.addEventListener("keydown", onKey, { capture: true });
+    return () => window.removeEventListener("keydown", onKey, { capture: true });
+  }, [projectId]);
+
   if (failure && !stale) {
     return (
       <div className="grid h-full place-items-center px-4">
@@ -144,8 +186,20 @@ export function TemplatePlayer({
     <div className="grid h-full min-h-0 min-w-0 grid-rows-[minmax(0,1fr)_auto]">
       <Preview />
       <div className="relative min-w-0">
-        <Timeline fold="fixed" openSpan={OPEN_SPAN_S} />
+        <Timeline fold="fixed" openSpan={OPEN_SPAN_S} toolbarStart={<MuteButton />} />
       </div>
     </div>
+  );
+}
+
+/** The template's sound on or off; the picture plays on either way. */
+function MuteButton() {
+  const t = useTranslations("timeline.media");
+  const muted = usePreviewMute((s) => s.muted);
+  const label = muted ? t("unmute") : t("mute");
+  return (
+    <TimelineActionButton label={label} tooltip={label} pressed={muted} onClick={() => setPreviewMuted(!muted)}>
+      {muted ? <VolumeX /> : <Volume2 />}
+    </TimelineActionButton>
   );
 }

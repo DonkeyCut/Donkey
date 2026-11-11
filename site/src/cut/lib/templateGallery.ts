@@ -161,6 +161,12 @@ export function templatePoster(t: GalleryTemplate): string {
   return `${templatePath(t.id)}/poster?v=${encodeURIComponent(t.version)}`;
 }
 
+/** A video clip's first frame, baked at publish for the template page's
+ * timeline. */
+export function templateFrame(t: Pick<GalleryTemplate, "id" | "version">, clipId: string): string {
+  return `${templatePath(t.id)}/frames/${encodeURIComponent(clipId)}?v=${encodeURIComponent(t.version)}`;
+}
+
 /** The template's public page. */
 export function templatePage(id: string): string {
   return `/templates/${encodeURIComponent(id)}`;

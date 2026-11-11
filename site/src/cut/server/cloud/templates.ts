@@ -5,6 +5,7 @@
 //   cut/templates/<id>/project.json     the template's project document
 //   cut/templates/<id>/media/<file>     the media its assets name
 //   cut/templates/<id>/poster.jpg       the gallery card's still
+//   cut/templates/<id>/frames/<clip>.jpg each video clip's first frame, small
 //
 // Anyone can read a published template, the way a public share reads: the
 // gallery page and the template's read-only editor need no session. Copying
@@ -27,6 +28,11 @@ export const TEMPLATE_INDEX_KEY = `${TEMPLATE_ROOT}/index.json`;
 export const templateKey = (id: string, rest: string) => `${TEMPLATE_ROOT}/${id}/${rest}`;
 export const templateMediaKey = (id: string, fileName: string) => templateKey(id, `media/${fileName}`);
 export const TEMPLATE_POSTER = "poster.jpg";
+export const templateFrameKey = (id: string, clipId: string) => templateKey(id, `frames/${clipId}.jpg`);
+// The frames' height: the timeline's strip at twice its size.
+export const TEMPLATE_FRAME_H = 96;
+// A clip id names one object; anything else never reaches the bucket.
+const CLIP_ID = /^[\w-]+$/;
 
 // How long a server instance trusts its read of the index before reading R2
 // again; a publish shows up within this window.
@@ -215,6 +221,16 @@ export const templatesApi = {
 
   /** Copy a template into the signed-in account's cloud. */
   async copy(id: string, req: Request) {
+  /** A video clip's first frame, which the template page's timeline tiles
+   * across the clip in place of decoding the footage. */
+  async frame(id: string, clipId: string) {
+    const t = CLIP_ID.test(clipId) ? await publishedTemplate(id) : null;
+    if (!t) {
+      return err(NOT_FOUND, 404);
+    }
+    return cachedRedirect(mediaObjectUrl(templateFrameKey(id, clipId), { version: t.version }));
+  },
+
     try {
       const session = await auth.api.getSession({ headers: req.headers });
       if (!session?.user) {
