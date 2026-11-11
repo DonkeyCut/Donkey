@@ -3,7 +3,10 @@
 <plist version="1.0">
 <dict>
   <!-- Donkey is not sandboxed: it runs the bundled Cut engine and the media tools as child processes.
-       Screen recording and the microphone are governed by TCC plus the Info.plist usage strings, not
-       entitlements, so it needs none of its own. -->
+       Under the hardened runtime, TCC denies the microphone without asking unless the signature
+       carries audio-input, so screen recordings with a microphone need it. Screen capture is
+       governed by TCC and its Info.plist usage string alone. -->
+  <key>com.apple.security.device.audio-input</key>
+  <true/>
 </dict>
 </plist>

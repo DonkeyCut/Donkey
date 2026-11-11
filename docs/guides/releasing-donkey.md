@@ -83,8 +83,7 @@ GitHub's latest, moves the alias tags, and prunes releases beyond the latest 10.
 The app's Developer ID signing + notarization reuses the same secrets as the
 bundled tools (see below); without them the release falls back to an ad-hoc
 signed app that is not distributable. The app is signed with the hardened
-runtime. It carries no entitlements of its own — screen recording and the
-microphone are governed by TCC and the Info.plist usage strings.
+runtime. Its one entitlement, audio-input, lets TCC ask for the microphone.
 
 ## Bundled Tools
 
