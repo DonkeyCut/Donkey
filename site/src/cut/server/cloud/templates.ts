@@ -19,7 +19,8 @@ import type { Prisma } from "@/generated/prisma/client";
 import { auth } from "@/lib/auth";
 import { cloudProjectsFull } from "@/lib/billing/project-limit-server";
 import { prisma } from "@/lib/prisma";
-import { UserError } from "@/cut/lib/userError";
+import { errorBody, UserError } from "@/cut/lib/userError";
+import { COPY_PROGRESS_TYPE, type CopyProgressLine } from "@/cut/lib/templateGallery";
 import { mediaObjectUrl, mediaUrlLifetime } from "./mediaCdn";
 import { copy, getObject, head, projectMediaKey } from "./r2";
 import { caught, decodeFileParam, err, redirect } from "./util";
@@ -102,8 +103,14 @@ const cachedRedirect = (url: string) => redirect(url, { "Cache-Control": REDIREC
 // --- Copy into an account ---------------------------------------------------
 
 /** Land a template as a new cloud project of the account's: media copied
- * under it server-side and quota-exempt, the document stamped new. */
-async function copyToAccount(userId: string, t: GalleryTemplate, name: string): Promise<string> {
+ * under it server-side and quota-exempt, the document stamped new.
+ * `onProgress` hears the count of files copied as each one lands. */
+async function copyToAccount(
+  userId: string,
+  t: GalleryTemplate,
+  name: string,
+  onProgress?: (done: number, total: number) => void
+): Promise<string> {
   const source = await templateDoc(t);
   if (!source) {
     throw NOT_FOUND;
@@ -111,13 +118,17 @@ async function copyToAccount(userId: string, t: GalleryTemplate, name: string): 
   const id = randomUUID();
   const now = Date.now();
   const doc: ProjectDoc = { ...source, id: undefined, name, createdAt: now, updatedAt: now, folderId: null };
+  const files = [...templateFiles(source)];
+  let copied = 0;
+  onProgress?.(copied, files.length);
   const media = await Promise.all(
-    [...templateFiles(source)].map(async (fileName) => {
+    files.map(async (fileName) => {
       const info = await head(templateMediaKey(t.id, fileName));
       if (!info) {
         throw NOT_FOUND;
       }
       await copy(templateMediaKey(t.id, fileName), projectMediaKey(userId, id, fileName));
+      onProgress?.(++copied, files.length);
       return { fileName, bytes: info.bytes, mime: info.mime };
     })
   );
@@ -140,6 +151,29 @@ async function copyToAccount(userId: string, t: GalleryTemplate, name: string): 
     });
   });
   return id;
+}
+
+/** The copy as a stream of JSON lines, for a client that asked for its
+ * progress: a count as each file lands, then the project, or the failure in
+ * the body an error response carries, e.g.
+ *   {"done":0,"total":4}  {"done":1,"total":4} … {"projectId":"…"} */
+function copyStream(userId: string, t: GalleryTemplate, name: string): Response {
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      const send = (line: CopyProgressLine) => controller.enqueue(encoder.encode(`${JSON.stringify(line)}\n`));
+      try {
+        const projectId = await copyToAccount(userId, t, name, (done, total) => send({ done, total }));
+        send({ projectId });
+      } catch (e) {
+        console.error("[templates] copy failed", e);
+        send(errorBody(e === NOT_FOUND ? NOT_FOUND : COPY_FAILED, COPY_FAILED));
+      } finally {
+        controller.close();
+      }
+    },
+  });
+  return new Response(stream, { headers: { "Content-Type": COPY_PROGRESS_TYPE, "Cache-Control": "no-store" } });
 }
 
 // --- Handlers -----------------------------------------------------------------
@@ -260,6 +294,9 @@ export const templatesApi = {
       }
       const body = (await req.json().catch(() => ({}))) as { name?: string };
       const name = body.name?.trim() || t.name.en;
+      if (req.headers.get("accept")?.includes(COPY_PROGRESS_TYPE)) {
+        return copyStream(session.user.id, t, name);
+      }
       return Response.json({ projectId: await copyToAccount(session.user.id, t, name) });
     } catch (e) {
       if (e === NOT_FOUND) {

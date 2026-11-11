@@ -8,6 +8,7 @@
 // module holds the vocabulary the gallery filters by and the helpers both the
 // page and the assistant read the index with.
 import type { Locale } from "@/i18n/locales";
+import type { ErrorBody } from "./userError";
 
 export const TEMPLATE_CATEGORIES = [
   "opener",
@@ -87,6 +88,15 @@ export type TemplateIndex = { templates: GalleryTemplate[] };
 
 /** The API the gallery is served from. */
 export const TEMPLATES_API = "/api/templates";
+
+// A template copy into the cloud answers as JSON lines with this type when
+// the client asks for its progress: counts of files copied, then the project
+// or the failure.
+export const COPY_PROGRESS_TYPE = "application/x-ndjson";
+export type CopyProgressLine =
+  | { done: number; total: number }
+  | { projectId: string }
+  | ErrorBody;
 
 export function localized(text: LocalizedText, locale: string): string {
   return text[locale as Locale] ?? text.en;

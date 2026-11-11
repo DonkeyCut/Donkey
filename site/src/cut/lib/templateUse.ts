@@ -12,7 +12,13 @@ import { templateBackendFor } from "./backend/shared";
 import { copyProjectAcross } from "./projectCopy";
 import type { Residency } from "./residency";
 import { backendFor } from "./residency";
-import { TEMPLATES_API, type GalleryTemplate, type TemplateIndex } from "./templateGallery";
+import {
+  COPY_PROGRESS_TYPE,
+  TEMPLATES_API,
+  type CopyProgressLine,
+  type GalleryTemplate,
+  type TemplateIndex,
+} from "./templateGallery";
 import type { ProjectKind } from "./types";
 import { errorFromBody, UserError } from "./userError";
 
@@ -40,16 +46,7 @@ export async function copyTemplate(
   onProgress?: (done: number, total: number) => void
 ): Promise<string> {
   if (target === "cloud") {
-    const res = await cloudRequest(`${TEMPLATES_API}/${encodeURIComponent(template.id)}/copy`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name }),
-    });
-    const body = (await res.json().catch(() => null)) as { projectId?: string } | null;
-    if (!res.ok || !body?.projectId) {
-      throw errorFromBody(body, COPY_FAILED.message);
-    }
-    return body.projectId;
+    return copyToCloud(template, name, onProgress);
   }
   // A template carries no conversations, so none travel.
   return copyProjectAcross(templateBackendFor(template.id), backendFor(target), template.id, {
@@ -57,6 +54,52 @@ export async function copyTemplate(
     onProgress,
     chats: "skip",
   });
+}
+
+/** Copy a gallery template into the account's cloud. The server copies the
+ * media and streams a line as each file lands, so the page shows the count
+ * while it waits. A refusal before the copy starts (sign-in, the project
+ * limit) answers as a plain error body. */
+async function copyToCloud(
+  template: GalleryTemplate,
+  name: string,
+  onProgress?: (done: number, total: number) => void
+): Promise<string> {
+  const res = await cloudRequest(`${TEMPLATES_API}/${encodeURIComponent(template.id)}/copy`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: COPY_PROGRESS_TYPE },
+    body: JSON.stringify({ name }),
+  });
+  if (!res.ok || !res.body) {
+    throw errorFromBody(await res.json().catch(() => null), COPY_FAILED.message);
+  }
+
+  // Read the lines as they arrive; the last one names the project or the
+  // failure.
+  const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
+  let pending = "";
+  for (;;) {
+    const { value, done } = await reader.read();
+    pending += value ?? "";
+    const lines = pending.split("\n");
+    pending = done ? "" : (lines.pop() ?? "");
+    for (const raw of lines) {
+      if (!raw.trim()) {
+        continue;
+      }
+      const line = JSON.parse(raw) as CopyProgressLine;
+      if ("projectId" in line) {
+        return line.projectId;
+      }
+      if ("error" in line) {
+        throw errorFromBody(line, COPY_FAILED.message);
+      }
+      onProgress?.(line.done, line.total);
+    }
+    if (done) {
+      throw COPY_FAILED;
+    }
+  }
 }
 
 /** Duplicate a project on its own shelf and return the copy's id. The cloud

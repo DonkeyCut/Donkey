@@ -41,16 +41,17 @@ function recordRun(run: string, projectId: string) {
   }
 }
 
-type Phase =
+export type CopyPhase =
   | { state: "copying"; done: number; total: number }
   | { state: "blocked" }
+  | { state: "done" }
   | { state: "failed"; message: string };
 
 /** Copies `template` once, to where new projects land for this person, as
  * soon as the gate knows whether this Mac has an engine (that decides where
  * the project lands), then opens the copy. A `run` the copy is recorded under
  * reopens that copy on a reload. */
-function useTemplateCopy(template: GalleryTemplate | undefined, run: string): Phase {
+function useTemplateCopy(template: GalleryTemplate | undefined, run: string): CopyPhase {
   const t = useTranslations("home.templates");
   const locale = useLocale();
   const describeError = useDescribeError();
@@ -59,7 +60,7 @@ function useTemplateCopy(template: GalleryTemplate | undefined, run: string): Ph
   const client = useQueryClient();
   const settled = useComputeSettled();
   const { target } = useNewProjectTarget();
-  const [phase, setPhase] = useState<Phase>({ state: "copying", done: 0, total: 0 });
+  const [phase, setPhase] = useState<CopyPhase>({ state: "copying", done: 0, total: 0 });
   const started = useRef(false);
 
   useEffect(() => {
@@ -101,44 +102,62 @@ function useTemplateCopy(template: GalleryTemplate | undefined, run: string): Ph
   return phase;
 }
 
-/** The copy's progress: the template's still beside its name and what is
- * happening, over a bar while media copies, and once it stops, why and the way
- * back. Every template and every state fills the same frame, so the card
- * never changes size: the still sits letterboxed in one 16:9 box, and the
- * bottom row holds the bar or the way back at one height. */
-function UseProgress({ template, phase, back }: { template: GalleryTemplate; phase: Phase; back: React.ReactElement }) {
+/** A copy's progress: the still beside the name and what is happening, over
+ * a bar while it runs, and once it stops, what came of it and the way on.
+ * Every still and every state fills the same frame, so the card never
+ * changes size: the still sits letterboxed in one 16:9 box, and the bottom
+ * row holds the bar or the way on at one height. `working` says what runs
+ * until a count arrives; `done` says what a finished copy made. */
+function CopyProgress({
+  still,
+  name,
+  phase,
+  working,
+  done,
+  back,
+}: {
+  still: React.ReactNode;
+  name: string;
+  phase: CopyPhase;
+  working: string;
+  done?: React.ReactNode;
+  back: React.ReactNode;
+}) {
   const t = useTranslations("home.templates");
-  const locale = useLocale();
   const copying = phase.state === "copying";
-  const share = copying && phase.total > 0 ? phase.done / phase.total : 0;
+  const counted = copying && phase.total > 0;
   return (
     <div className="flex w-full flex-col gap-5">
       <div className="flex items-center gap-5">
-        <div className="aspect-video h-36 shrink-0 overflow-hidden rounded-xl border border-border bg-black">
-          {/* eslint-disable-next-line @next/next/no-img-element -- a signed CDN still, not a Next asset */}
-          <img src={templatePoster(template)} alt="" className="size-full object-contain" />
+        <div className="relative grid aspect-video h-36 shrink-0 place-items-center overflow-hidden rounded-xl border border-border bg-black">
+          {still}
         </div>
         <div className="flex min-w-0 flex-col gap-1.5">
-          <div className="truncate text-lg font-semibold tracking-tight">{localized(template.name, locale)}</div>
+          <div className="truncate text-lg font-semibold tracking-tight">{name}</div>
           {copying && (
             <div className="flex items-center gap-2 text-[15px] text-muted-foreground tabular-nums">
               <Loader2 className="size-4 shrink-0 animate-spin" />
-              {phase.total > 0 ? t("detail.progress", { done: phase.done, total: phase.total }) : t("detail.using")}
+              {counted ? t("detail.progress", { done: phase.done, total: phase.total }) : working}
             </div>
           )}
+          {phase.state === "done" && done && <p className="line-clamp-3 text-[15px] text-muted-foreground">{done}</p>}
           {phase.state === "failed" && <p className="line-clamp-3 text-[15px] text-destructive">{phase.message}</p>}
         </div>
       </div>
 
-      {/* One row, one height: the bar while the copy runs, empty until the
-          first count arrives; the way back once it stops. */}
-      <div className="flex h-9 items-center justify-end">
+      {/* One row, one height: the bar while the copy runs, sweeping until
+          the first count arrives; the way on once it stops. */}
+      <div className="flex h-9 items-center justify-end gap-2">
         {copying ? (
-          <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
-            <div
-              className="h-full rounded-full bg-foreground transition-[width] duration-300 ease-out"
-              style={{ width: `${share * 100}%` }}
-            />
+          <div className="relative h-2 w-full overflow-hidden rounded-full bg-muted">
+            {counted ? (
+              <div
+                className="h-full rounded-full bg-foreground transition-[width] duration-300 ease-out"
+                style={{ width: `${(phase.done / phase.total) * 100}%` }}
+              />
+            ) : (
+              <div className="absolute inset-y-0 w-1/3 animate-[cut-progress-sweep_1.2s_ease-in-out_infinite] rounded-full bg-foreground motion-reduce:hidden" />
+            )}
           </div>
         ) : (
           back
@@ -148,11 +167,20 @@ function UseProgress({ template, phase, back }: { template: GalleryTemplate; pha
   );
 }
 
+/** A template's still, letterboxed in the progress frame. */
+function TemplateStill({ template }: { template: GalleryTemplate }) {
+  return (
+    // eslint-disable-next-line @next/next/no-img-element -- a signed CDN still, not a Next asset
+    <img src={templatePoster(template)} alt="" className="size-full object-contain" />
+  );
+}
+
 /** The in-app half of "Use as new project" from a template's own page: it
  * runs inside the app so the Mac engine and the browser store are both in
  * reach. */
 export function TemplateUseView({ id, run }: { id: string; run: string }) {
   const t = useTranslations("home.templates");
+  const locale = useLocale();
   const base = useCutBase();
   const index = useTemplateIndex();
   const template = index.data?.templates.find((tpl) => tpl.id === id);
@@ -177,9 +205,11 @@ export function TemplateUseView({ id, run }: { id: string; run: string }) {
   return (
     <div className="grid h-full place-items-center px-4">
       <div className="w-full max-w-sm">
-        <UseProgress
-        template={template}
-        phase={phase}
+        <CopyProgress
+          still={<TemplateStill template={template} />}
+          name={localized(template.name, locale)}
+          phase={phase}
+          working={t("detail.using")}
           back={<Button variant="outline" nativeButton={false} render={<Link href={homeHref(base, "templates")}>{t("detail.close")}</Link>} />}
         />
       </div>
@@ -191,27 +221,47 @@ export function TemplateUseView({ id, run }: { id: string; run: string }) {
  * template stops playing and the copy runs in a dialog centered over it, then
  * opens the project. */
 export function TemplateUseDialog({ template, onClose }: { template: GalleryTemplate; onClose: () => void }) {
+  const t = useTranslations("home.templates");
+  const locale = useLocale();
   const phase = useTemplateCopy(template, "");
 
   // The template behind the dialog holds still while it is copied.
   useEffect(() => useEditor.getState().setPlaying(false), []);
 
-  return <UseDialogFrame template={template} phase={phase} onClose={onClose} />;
+  return (
+    <CopyDialog
+      still={<TemplateStill template={template} />}
+      name={localized(template.name, locale)}
+      phase={phase}
+      working={t("detail.using")}
+      closeLabel={t("detail.close")}
+      onClose={onClose}
+    />
+  );
 }
 
-/** The copy dialog itself. While the copy runs it cannot be dismissed; a stop
- * offers the way back. */
-function UseDialogFrame({
-  template,
+/** The copy dialog itself, centered over the page. While the copy runs it
+ * cannot be dismissed; a stop offers the way back, and `actions` sit beside
+ * it once the copy is done. */
+export function CopyDialog({
+  still,
+  name,
   phase,
+  working,
+  done,
+  actions,
+  closeLabel,
   onClose,
 }: {
-  template: GalleryTemplate;
-  phase: Phase;
+  still: React.ReactNode;
+  name: string;
+  phase: CopyPhase;
+  working: string;
+  done?: React.ReactNode;
+  actions?: React.ReactNode;
+  closeLabel: string;
   onClose: () => void;
 }) {
-  const t = useTranslations("home.templates");
-  const locale = useLocale();
   const busy = phase.state === "copying";
   return (
     <Dialog open disablePointerDismissal={busy} onOpenChange={(next) => !next && !busy && onClose()}>
@@ -222,14 +272,20 @@ function UseDialogFrame({
         showCloseButton={false}
         className="p-7 sm:max-w-xl"
       >
-        <DialogTitle className="sr-only">{localized(template.name, locale)}</DialogTitle>
-        <UseProgress
-          template={template}
+        <DialogTitle className="sr-only">{name}</DialogTitle>
+        <CopyProgress
+          still={still}
+          name={name}
           phase={phase}
+          working={working}
+          done={done}
           back={
-            <Button variant="outline" onClick={onClose}>
-              {t("detail.close")}
-            </Button>
+            <>
+              <Button variant="outline" onClick={onClose}>
+                {closeLabel}
+              </Button>
+              {phase.state === "done" && actions}
+            </>
           }
         />
       </DialogContent>

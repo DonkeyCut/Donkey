@@ -327,3 +327,14 @@ html:has(.app-surface) {
     scrollbar-width: thin;
   }
 }
+
+/* A progress bar's sweep while the work has no count yet: a third of the
+   track crossing it end to end. */
+@keyframes cut-progress-sweep {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(300%);
+  }
+}
