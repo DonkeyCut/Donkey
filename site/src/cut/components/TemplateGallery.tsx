@@ -7,6 +7,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useLocale, useTranslations } from "next-intl";
 import { LayoutTemplate, Loader2, MoreHorizontal, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -172,8 +173,7 @@ export function TemplateGallery() {
   const page = Math.min(pageFrom(new URLSearchParams(view).get(PAGE_PARAM)), pages);
   const shown = cards.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
-  // Open another page and start it at the top of the grid, the one part of
-  // the page that scrolls.
+  // Open another page and start it at the top of the gallery.
   const gridRef = useRef<HTMLDivElement>(null);
   const goTo = (n: number) => {
     const next = new URLSearchParams(params.toString());
@@ -298,49 +298,53 @@ export function TemplateGallery() {
     }
   }, [openId]);
 
-  // The title and filters stay above the grid and the page bar below it;
-  // only the grid scrolls between them.
+  // The whole gallery scrolls: the title goes up with the grid, the filter
+  // row pins to the top over it, and the page bar floats over its foot.
   return (
-    <div className="flex h-full flex-col">
-      <div className="mx-auto flex w-full max-w-7xl shrink-0 flex-col gap-5 px-4 pt-9 pb-4 sm:px-10">
-        <h1 className="text-lg font-semibold tracking-tight">{t("title")}</h1>
-
-        {/* One row of filter chips; on a phone the row scrolls sideways. */}
-        <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pt-1 pb-1 sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0">
-          {FILTER_KEYS.map((key) => (
-            <Select key={key} value={filter[key] ?? ANY} onValueChange={(v) => setFilter(key, String(v))}>
-              <SelectTrigger className="h-8 shrink-0 rounded-full px-3 text-[13px]" aria-label={t(`filters.${key}`)}>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={ANY} className="text-[13px]">
-                  {key === "source" ? t("sources.default") : `${t(`filters.${key}`)}: ${t("all")}`}
-                </SelectItem>
-                {OPTIONS[key].map((v) => (
-                  <SelectItem key={v} value={v} className="text-[13px]">
-                    {label(key, v)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          ))}
-          {active && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="shrink-0 rounded-full"
-              onClick={() => router.replace(pathname)}
-            >
-              {t("clearFilters")}
-            </Button>
-          )}
+    <div className="relative h-full">
+      <div ref={gridRef} className="h-full overflow-y-auto">
+        <div className="mx-auto w-full max-w-7xl px-4 pt-6 sm:px-10">
+          <h1 className="text-lg font-semibold tracking-tight">{t("title")}</h1>
         </div>
 
-        {error && <p className="text-[13px] text-destructive">{error}</p>}
-      </div>
+        <div className="sticky top-0 z-10 bg-background">
+          <div className="mx-auto flex w-full max-w-7xl flex-col gap-2 px-4 py-3 sm:px-10">
+            {/* One row of filter chips; on a phone the row scrolls sideways. */}
+            <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pt-1 pb-1 sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0">
+              {FILTER_KEYS.map((key) => (
+                <Select key={key} value={filter[key] ?? ANY} onValueChange={(v) => setFilter(key, String(v))}>
+                  <SelectTrigger className="h-8 shrink-0 rounded-full border-foreground/20 px-3 text-[13px] hover:bg-muted dark:border-foreground/25" aria-label={t(`filters.${key}`)}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={ANY} className="text-[13px]">
+                      {key === "source" ? t("sources.default") : `${t(`filters.${key}`)}: ${t("all")}`}
+                    </SelectItem>
+                    {OPTIONS[key].map((v) => (
+                      <SelectItem key={v} value={v} className="text-[13px]">
+                        {label(key, v)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ))}
+              {active && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="shrink-0 rounded-full"
+                  onClick={() => router.replace(pathname)}
+                >
+                  {t("clearFilters")}
+                </Button>
+              )}
+            </div>
 
-      <div ref={gridRef} className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto w-full max-w-7xl px-4 pb-6 sm:px-10">
+            {error && <p className="text-[13px] text-destructive">{error}</p>}
+          </div>
+        </div>
+
+        <div className={cn("mx-auto w-full max-w-7xl px-4 sm:px-10", pages > 1 ? "pb-24" : "pb-6")}>
           {loading && own.length === 0 ? (
             <Loader2 className="mx-auto my-16 size-5 animate-spin text-muted-foreground" />
           ) : cards.length === 0 ? (
@@ -365,9 +369,13 @@ export function TemplateGallery() {
         </div>
       </div>
 
+      {/* A pill floating over the grid's foot; the grid pads its end so the
+          last row scrolls clear of it. */}
       {pages > 1 && (
-        <div className="shrink-0 border-t border-border py-3">
-          <GalleryPages page={page} pages={pages} onPage={goTo} />
+        <div className="pointer-events-none absolute inset-x-0 bottom-4 flex justify-center px-4">
+          <div className="pointer-events-auto rounded-full border border-border bg-popover/90 p-1 shadow-lg backdrop-blur-md">
+            <GalleryPages page={page} pages={pages} onPage={goTo} />
+          </div>
         </div>
       )}
 
@@ -392,13 +400,17 @@ export function TemplateGallery() {
   );
 }
 
-/** The page bar under the grid. */
+// The current page: a grey fill in place of the outline, in both themes.
+const CURRENT_PAGE =
+  "border-transparent bg-foreground/10 font-semibold hover:bg-foreground/10 dark:border-transparent dark:bg-foreground/15 dark:hover:bg-foreground/15";
+
+/** The page bar floating over the grid. */
 function GalleryPages({ page, pages, onPage }: { page: number; pages: number; onPage: (n: number) => void }) {
   return (
-    <Pagination>
+    <Pagination className="w-auto">
       <PaginationContent>
         <PaginationItem>
-          <PaginationPrevious disabled={page === 1} onClick={() => onPage(page - 1)} />
+          <PaginationPrevious className="rounded-full" disabled={page === 1} onClick={() => onPage(page - 1)} />
         </PaginationItem>
         {pageWindow(page, pages).map((n, i) =>
           n === null ? (
@@ -407,14 +419,18 @@ function GalleryPages({ page, pages, onPage }: { page: number; pages: number; on
             </PaginationItem>
           ) : (
             <PaginationItem key={n}>
-              <PaginationLink isActive={n === page} onClick={() => onPage(n)}>
+              <PaginationLink
+                className={cn("rounded-full", n === page && CURRENT_PAGE)}
+                isActive={n === page}
+                onClick={() => onPage(n)}
+              >
                 {n}
               </PaginationLink>
             </PaginationItem>
           )
         )}
         <PaginationItem>
-          <PaginationNext disabled={page === pages} onClick={() => onPage(page + 1)} />
+          <PaginationNext className="rounded-full" disabled={page === pages} onClick={() => onPage(page + 1)} />
         </PaginationItem>
       </PaginationContent>
     </Pagination>
