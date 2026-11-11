@@ -113,14 +113,11 @@ the MCP tools in process.
 
 ## Publishing changes
 
-OpenAI keeps the tool metadata it scanned with each published version. A changed
-tool description, schema, annotation, `_meta`, CSP, frame domain or server
-instruction ships on deploy and replaces the published one once OpenAI's
-automated checks pass; removed tools go at once. Widget code at the same
-resource URI goes live on deploy, cached up to an hour. Renaming a tool, moving
-the widget's resource URI, or editing the listing needs a new version submitted
-for review, and a new server origin needs a new app. See OpenAI's
-[review guide](https://developers.openai.com/plugins/deploy/app-review#how-published-mcp-metadata-versions-work).
+ChatGPT reads a frozen listing: tool names, descriptions, schemas and
+annotations come from `reviewedTools.json`, and each call runs today's command,
+whose schema tests hold to a superset. `scripts/freeze-chatgpt-tools.ts`
+freezes the next plugin version and refuses while one is in review. Widget code
+goes live on deploy, cached up to an hour.
 
 ## Source entrypoints
 
