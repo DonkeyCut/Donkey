@@ -1,5 +1,6 @@
 "use client";
 
+import { siteUrl } from "./hosted";
 import { noteRef, noteIdSchema } from "@/cut/lib/noteReference";
 import { folderRef, folderReferenceSchema, projectFolderRef, libraryFolderRefs, type FolderReference } from "@/cut/lib/folderReference";
 
@@ -195,12 +196,13 @@ export const refFromLibrary = (a: LibraryAsset): AssetRef => ({
   ...libraryUse(a),
 });
 
+// Stock files are site paths; a headless run reads them on its bound site.
 export const refFromStock = (i: StockImage): AssetRef => ({
   scope: "stock",
   id: i.id,
   name: i.id,
   kind: "image",
-  url: i.file,
+  url: siteUrl(i.file),
 });
 
 export const refFromStockVideo = (v: StockVideo): AssetRef => ({
@@ -208,10 +210,10 @@ export const refFromStockVideo = (v: StockVideo): AssetRef => ({
   id: v.id,
   name: v.id,
   kind: "video",
-  url: v.file,
+  url: siteUrl(v.file),
   duration: v.duration,
   ...stockAspectDims(v.aspect),
-  thumb: v.thumb,
+  thumb: siteUrl(v.thumb),
 });
 
 export const refFromStockMusic = (m: StockMusic): AssetRef => ({

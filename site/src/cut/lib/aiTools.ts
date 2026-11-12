@@ -322,7 +322,7 @@ import { synthesizeMusic } from "./audioGen";
 import { composeMusicPrompt } from "./composeGen";
 import { stockAssetInDoc } from "./genvideo/docWriter";
 import { resolveVoiceAsk, synthesizeSpeech, SPEECH_VOICES } from "./tts";
-import { hostedFetch, hostedPost } from "./hosted";
+import { hostedFetch, hostedPost, siteUrl } from "./hosted";
 import { readHostedFailure } from "./hostedError";
 import { UserError } from "./userError";
 import { creditPriceQuote, type CreditPriceSheet } from "@/lib/credits/price-sheet";
@@ -5298,9 +5298,11 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       // Captured before the import: the media files under the chat that
       // asked, even if the user switches threads while it downloads.
       const chatId = chatOwner();
+      // Stock stills and clips are site files; a headless run reads them on
+      // the site it is bound to.
       const asset = vid
         ? await importStockVideo(projectId, {
-            url: vid.file,
+            url: siteUrl(vid.file),
             name: stockTitle(vid.id),
             duration: vid.duration,
             ...stockAspectDims(vid.aspect),
@@ -5311,7 +5313,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
               name: stockTitle(sfx.id),
               duration: sfx.duration,
             })
-          : await importImage(projectId, { url: img!.file, name: stockTitle(img!.id) });
+          : await importImage(projectId, { url: siteUrl(img!.file), name: stockTitle(img!.id) });
       tagChatAsset(asset.id, chatId);
       const addToTimeline = wantsTimeline(input, "start");
       const start = isNum(input.start) ? Math.max(0, input.start) : undefined;

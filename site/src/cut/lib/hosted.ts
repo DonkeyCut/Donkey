@@ -165,6 +165,11 @@ export function bindHostedSession(base: string, headers: Record<string, string>)
   session = { base: base.replace(/\/$/, ""), headers };
 }
 
+/** A site path, such as a stock file under /cut-stock/, as this process
+ * reaches it: same-origin in the page, on the bound site in a headless one,
+ * which has no page origin to resolve it against. */
+export const siteUrl = (path: string): string => (session && path.startsWith("/") ? session.base + path : path);
+
 /** Fetch a hosted route through the bound session when one exists. Every
  * hosted-route call in lib code goes through here so a headless process
  * reaches the right server with its auth. */
