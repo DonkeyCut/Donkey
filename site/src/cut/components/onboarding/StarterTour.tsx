@@ -2,8 +2,8 @@
 
 // The starter tour: once the slides lift, the account works through a few real
 // controls in its starter project, each one highlighted until it is used. The
-// editor's own state says when a step is done, so a step moves on only when the
-// person did the thing. driver.js draws the highlight and the popover, and its
+// editor's own state says when most steps are done, so a step moves on only
+// when the person did the thing; the chat step moves on at a click on the chat. driver.js draws the highlight and the popover, and its
 // code loads only while a tour runs. The tour has no close: the starter holds
 // the account (its back button is held) until the last step is done. An
 // account that leaves another way finds New project locked, and the lock
@@ -32,7 +32,7 @@ import { TOUR_STEPS, type TourStep } from "@/lib/onboarding/sequence";
 import { nextTourStep, onboardingStage } from "@/lib/onboarding/stage";
 import { useOnboardingState, useSaveOnboarding } from "@/queries/onboarding";
 
-import { followTarget, inView, pause, shown, typeOut, waitForTarget } from "./tourDom";
+import { followTarget, inView, pause, shown, waitForTarget } from "./tourDom";
 
 // How long a step waits for its control to show (the timeline mounting, a panel
 // opening) before letting the step go, so a starter that lost that control can
@@ -52,25 +52,20 @@ const LINGER_MS = 1_500;
 const APPROACH_LEAD_S = 0.5;
 const APPROACH_CAP_MS = 10_000;
 
-// The chat step waits for the assistant's reply to land. A turn that hasn't
-// started by the first bound never will; the second caps a long one.
-const REPLY_START_MS = 5_000;
-const REPLY_CAP_MS = 90_000;
-
 type StepSpec = {
   find: () => Element | null;
   side: "top" | "right" | "bottom" | "left";
   // Puts the editor where the step can be done, and clears a state that would
   // read as done before the person acts.
   prepare: () => void;
-  done: () => boolean;
+  // What finishes the step: the editor state turning true, or a click on the
+  // highlighted control.
+  done: (() => boolean) | "click";
   // How long the tour waits after the step, while its effect shows.
   linger: () => Promise<void>;
   // What runs before the step first shows, such as playback reaching the
   // control.
   approach?: (signal: AbortSignal) => Promise<void>;
-  // A message the step types into its control once it shows.
-  type?: "chat.prompt";
 };
 
 // Each step's popover body; a step whose title says it all has none.
@@ -125,16 +120,9 @@ const STEPS: Record<TourStep, StepSpec> = {
   chat: {
     find: () => shown('[data-tour="chat"]'),
     side: "left",
-    prepare: () => {
-      useTourSignals.setState({ chatSent: false });
-      useEditor.getState().setAiOpen(true);
-    },
-    done: () => useTourSignals.getState().chatSent,
-    type: "chat.prompt",
-    linger: async () => {
-      await replyLanded();
-      await pause(LINGER_MS);
-    },
+    prepare: () => useEditor.getState().setAiOpen(true),
+    done: "click",
+    linger: () => pause(LINGER_MS),
   },
 };
 
@@ -183,8 +171,8 @@ export function StarterTour({ projectId }: { projectId: string }) {
     const abort = new AbortController();
     let unwatch = () => {};
     let untrack = () => {};
+    let unclick = () => {};
     let recorded = false;
-    let typed = false;
 
     // The step is recorded at once, so leaving mid-pause keeps it. The
     // highlight clears so the editor shows the action's effect, and the pause
@@ -196,6 +184,7 @@ export function StarterTour({ projectId }: { projectId: string }) {
       recorded = true;
       unwatch();
       untrack();
+      unclick();
       tour.current?.destroy();
       tour.current = null;
       track("onboarding_tour_step", { step });
@@ -254,9 +243,11 @@ export function StarterTour({ projectId }: { projectId: string }) {
           progressText: t("progress", { current: TOUR_STEPS.indexOf(step) + 1, total: TOUR_STEPS.length }),
         },
       });
-      if (spec.type && !typed) {
-        typed = true;
-        void typeOut(t(spec.type), abort.signal);
+      // A click step finishes on any press inside its control.
+      unclick();
+      if (spec.done === "click") {
+        target.addEventListener("pointerdown", complete, { capture: true });
+        unclick = () => target.removeEventListener("pointerdown", complete, { capture: true });
       }
       untrack();
       untrack = followTarget(target, {
@@ -270,13 +261,16 @@ export function StarterTour({ projectId }: { projectId: string }) {
 
     // Doing the thing counts from the start, even before the highlight lands,
     // once the state it reads is clear.
-    unwatch = watchDone(spec.done, complete);
+    if (spec.done !== "click") {
+      unwatch = watchDone(spec.done, complete);
+    }
     void (spec.approach?.(abort.signal) ?? Promise.resolve()).then(show);
 
     return () => {
       abort.abort();
       unwatch();
       untrack();
+      unclick();
     };
   }, [active, step, saveOnboarding, t]);
 
@@ -368,32 +362,6 @@ function clipInView(): Element | null {
   }
   clips[0].scrollIntoView({ block: "nearest", inline: "nearest" });
   return clips[0];
-}
-
-// Resolves once a chat turn has started and finished, or when none starts in
-// time, or at the cap.
-function replyLanded(): Promise<void> {
-  return new Promise((resolve) => {
-    let started = useTourSignals.getState().chatRunning;
-    const timers = [
-      window.setTimeout(() => !started && finish(), REPLY_START_MS),
-      window.setTimeout(finish, REPLY_CAP_MS),
-    ];
-    const off = useTourSignals.subscribe((s) => {
-      if (s.chatRunning) {
-        started = true;
-        return;
-      }
-      if (started) {
-        finish();
-      }
-    });
-    function finish() {
-      timers.forEach((timer) => window.clearTimeout(timer));
-      off();
-      resolve();
-    }
-  });
 }
 
 // Calls `onDone` once `done` turns true, checking now and on every editor or

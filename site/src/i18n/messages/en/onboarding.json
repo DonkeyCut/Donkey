@@ -79,8 +79,7 @@
     },
     "chat": {
       "title": "Ask the assistant",
-      "body": "Press Enter to send it. The assistant edits the project for you.",
-      "prompt": "Make the August Recap title bigger"
+      "body": "Tell it what to change and it edits the project for you. Click the chat to finish."
     },
     "progress": "{current} of {total}",
     "locked": "Finish the tour to start your own project",

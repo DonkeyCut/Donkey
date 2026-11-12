@@ -79,8 +79,7 @@
     },
     "chat": {
       "title": "Pregúntale al asistente",
-      "body": "Presiona Enter para enviarlo. El asistente edita el proyecto por ti.",
-      "prompt": "Haz más grande el título Resumen de agosto"
+      "body": "Dile qué cambiar y editará el proyecto por ti. Haz clic en el chat para terminar."
     },
     "progress": "{current} de {total}",
     "locked": "Completa el recorrido para empezar tu propio proyecto",

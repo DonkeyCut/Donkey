@@ -79,8 +79,7 @@
     },
     "chat": {
       "title": "Frag den Assistenten",
-      "body": "Drücke Enter zum Senden. Der Assistent bearbeitet das Projekt für dich.",
-      "prompt": "Mach den Titel „August Recap“ größer"
+      "body": "Sag ihm, was geändert werden soll, und es bearbeitet das Projekt für dich. Klicke auf den Chat, um abzuschließen."
     },
     "progress": "{current} von {total}",
     "locked": "Schließe die Tour ab, um dein eigenes Projekt zu starten",

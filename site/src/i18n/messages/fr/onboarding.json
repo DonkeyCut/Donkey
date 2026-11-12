@@ -79,8 +79,7 @@
     },
     "chat": {
       "title": "Demander à l'assistant",
-      "body": "Appuyez sur Enter pour l'envoyer. L'assistant modifie le projet pour vous.",
-      "prompt": "Agrandir le titre Récap d'août"
+      "body": "Dites-lui quoi changer et il monte le projet pour vous. Cliquez sur le chat pour terminer."
     },
     "progress": "{current} sur {total}",
     "locked": "Terminez la visite pour démarrer votre propre projet",

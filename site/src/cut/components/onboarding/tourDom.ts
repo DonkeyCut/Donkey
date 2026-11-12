@@ -1,8 +1,6 @@
 // What the onboarding tours share for pointing at a control: finding it in
 // view, waiting for it to show, keeping the highlight on it as the editor
-// moves, and typing an example into the chat composer.
-
-import { fillChatComposer } from "@/cut/lib/onboarding";
+// moves.
 
 // What a control can scroll inside: the timeline and the app's scroll areas.
 // A control scrolled out of one has left the highlight behind.
@@ -12,9 +10,6 @@ const SCROLLERS = "[data-tl-scroll], [data-slot='scroll-area-viewport']";
 // of a small one, and this many px of a large one.
 const IN_VIEW_SHARE = 0.9;
 const IN_VIEW_PX = 80;
-
-// The chat step types its example message at this pace, per character.
-const TYPE_MS = 35;
 
 // The first match in view: a route left behind by instant navigation stays
 // mounted with display:none, and its controls must not count.
@@ -46,23 +41,6 @@ export function inView(el: Element, axes: "both" | "vertical" = "both"): boolean
       (axes === "vertical" ||
         enough(Math.min(rect.right, frame.right) - Math.max(rect.left, frame.left), rect.width)),
   );
-}
-
-// Types `text` into the chat composer a character at a time. A key the person
-// presses takes the composer back from it.
-export async function typeOut(text: string, signal: AbortSignal): Promise<void> {
-  let stopped = false;
-  const stop = () => {
-    stopped = true;
-  };
-  window.addEventListener("keydown", stop, { capture: true });
-  signal.addEventListener("abort", stop);
-  for (let i = 1; i <= text.length && !stopped; i += 1) {
-    fillChatComposer(text.slice(0, i));
-    await pause(TYPE_MS);
-  }
-  window.removeEventListener("keydown", stop, { capture: true });
-  signal.removeEventListener("abort", stop);
 }
 
 // Keeps the highlight on its control: a scroll, a resize or a re-render

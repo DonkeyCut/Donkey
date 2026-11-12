@@ -79,8 +79,7 @@
     },
     "chat": {
       "title": "Pergunte ao assistente",
-      "body": "Pressione Enter para enviar. O assistente edita o projeto para você.",
-      "prompt": "Aumente o título Retrospectiva de Agosto"
+      "body": "Diga o que mudar e ele edita o projeto para você. Clique no chat para finalizar."
     },
     "progress": "{current} de {total}",
     "locked": "Conclua o tour para iniciar seu próprio projeto",
