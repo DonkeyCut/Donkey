@@ -24,10 +24,12 @@ export interface DefaultNames {
   copy: (name: string) => string;
   /** The Library folder notes file into when nothing else holds them. */
   notes: string;
+  /** The Media folder a project made from a template keeps its media in. */
+  templateAssets: string;
 }
 
 type DefaultsTranslator = (
-  key: "untitled" | "text" | "frame" | "copy" | "notes",
+  key: "untitled" | "text" | "frame" | "copy" | "notes" | "templateAssets",
   values?: { time: string } | { name: string },
 ) => string;
 
@@ -37,6 +39,7 @@ const namesFrom = (t: DefaultsTranslator): DefaultNames => ({
   frame: (time) => t("frame", { time }),
   copy: (name) => t("copy", { name }),
   notes: t("notes"),
+  templateAssets: t("templateAssets"),
 });
 
 // English ships in every bundle, so the sync read always has names.

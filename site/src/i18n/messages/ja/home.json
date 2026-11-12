@@ -1,7 +1,7 @@
 {
   "tabs": {
-    "projects": "プロジェクト",
-    "library": "ライブラリ",
+    "home": "ホーム",
+    "assets": "アセット",
     "templates": "テンプレート"
   },
   "newProject": {
@@ -17,6 +17,55 @@
     "create": "新規プロジェクトを作成",
     "limit": "このアカウントは無料プロジェクトの上限に達しています。さらに作成するにはDonkey CutでProにアップグレードしてください。",
     "failed": "プロジェクトを作成できませんでした。"
+  },
+  "start": {
+    "heading": "どんな動画を作成しますか？",
+    "promptLabel": "動画の説明",
+    "placeholder": "希望の編集内容を入力してください。ファイルをドロップするか、@でクリップ、フォルダ、ノート、テンプレートを追加できます。",
+    "placeholderFiles": "これらを使って何を作成しますか？",
+    "attach": "アセットから追加",
+    "voice": "音声入力",
+    "send": "作成",
+    "blankProject": "新規プロジェクト",
+    "projects": "プロジェクト",
+    "viewAllProjects": "すべてのプロジェクトを表示",
+    "previousProjects": "前のプロジェクト",
+    "nextProjects": "次のプロジェクト",
+    "projectsPage": "プロジェクト、ページ {page}",
+    "templates": "テンプレート",
+    "browseAll": "すべて見る",
+    "allCategories": "すべて",
+    "storageLabel": "新規プロジェクトの保存先",
+    "storageButton": "新規プロジェクトの保存先: {place}",
+    "dropTitle": "ドロップしてプロジェクトを開始",
+    "dropText": "ファイルはプロンプトに追加され、アセットに保存されます。動画、画像、音声、フォントに対応。",
+    "uploadsFolder": "アップロード",
+    "uploading": "アップロード中",
+    "uploadFailed": "アップロードできませんでした",
+    "retryUpload": "再試行",
+    "fromAssets": "Donkey Cut アセットからこれらを使用: {names}",
+    "removeFile": "{name}を削除",
+    "chipTemplate": "テンプレート",
+    "chipProject": "プロジェクト",
+    "startingFrom": "{name}から開始",
+    "createFailed": "プロジェクトを作成できませんでした。",
+    "at": {
+      "label": "参照タイプ",
+      "recent": "最近使った項目",
+      "noMatches": "一致する項目がありません",
+      "filterHint": "入力を続けて絞り込みます。",
+      "attachHint": "Enter で添付。",
+      "tabs": {
+        "all": "すべて",
+        "folders": "フォルダ",
+        "clips": "クリップ",
+        "images": "画像",
+        "audio": "オーディオ",
+        "notes": "ノート",
+        "projects": "プロジェクト",
+        "templates": "テンプレート"
+      }
+    }
   },
   "projects": {
     "badgeLocal": "これはローカルプロジェクトです",
@@ -48,6 +97,7 @@
     "foldersEmpty": "{count, plural, other {フォルダーは空です。}}",
     "deletesFolders": "{count, plural, =1 {メディアファイルや書き出しを含め、プロジェクトフォルダー全体が削除されます。} other {メディアファイルや書き出しを含め、各プロジェクトのフォルダー全体が削除されます。}}",
     "cannotUndo": "この操作は取り消せません。",
+    "failureOk": "OK",
     "deleteProjects": "{count, plural, other {プロジェクトを削除}}",
     "deleteFolder": "フォルダーを削除",
     "delete": "削除",
@@ -327,6 +377,34 @@
       "similar": "類似のテンプレート",
       "failed": "プロジェクトを作成できませんでした。",
       "missing": "このテンプレートは利用できなくなりました。"
+    }
+  },
+  "assets": {
+    "newFolder": "新規フォルダ",
+    "upload": "アップロード",
+    "search": "プロジェクト、クリップ、オーディオ、フォント、ノートを検索",
+    "clearSearch": "検索をクリア",
+    "types": {
+      "all": "すべて",
+      "projects": "プロジェクト",
+      "videos": "動画",
+      "images": "画像",
+      "audio": "オーディオ",
+      "fonts": "フォント",
+      "notes": "ノート"
+    },
+    "noMatches": "アセットに「{query}」と一致するものはありません。",
+    "emptyTitle": "アセットはまだありません",
+    "emptyHint": "動画、画像、オーディオ、フォントをアップロードするか、このページの任意の場所にドロップしてください。",
+    "projectStaysOnShelf": "プロジェクトは同じ保存場所にあるフォルダにのみ整理できます。先に「クラウドへ移動」または「ローカルへ移動」を使用してください。",
+    "picker": {
+      "title": "アセットから追加",
+      "cancel": "キャンセル",
+      "add": "プロンプトに追加",
+      "none": "何も選択されていません",
+      "count": "{count}件選択中",
+      "pick": "選択",
+      "empty": "まだ何もありません。"
     }
   }
 }

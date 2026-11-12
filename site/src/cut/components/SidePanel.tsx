@@ -1101,7 +1101,7 @@ function ProjectFilesPanel({
         {openFolder === null && (
           <div className="shrink-0 px-3.5">
             <FolderShelf
-              rows
+              layout="rows"
               folders={readOnly ? folders.map((f) => ({ ...f, locked: true })) : folders}
               mime={MEDIA_MOVE_MIME}
               referenceOf={projectId ? (f) => projectFolderRef(f, projectId) : undefined}
@@ -1950,7 +1950,7 @@ function LibraryPanel({ projectId, onImport }: {
           )}
           <div className="shrink-0 px-3.5">
             <FolderShelf
-              rows
+              layout="rows"
               folders={shelfFolders}
               referenceOf={(f) => libraryFolderRef(f, folders)}
               mime={LIBRARY_MOVE_MIME}

@@ -9,7 +9,7 @@ import { usePhoneInbox } from "@/cut/hooks/usePhoneInbox";
 import { useTabTitle } from "@/cut/hooks/useTabTitle";
 import { useHostCommands } from "@/cut/lib/hostCommands";
 import { useEnvironment } from "@/cut/lib/environment";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { Clapperboard, Laptop, Loader2, X } from "lucide-react";
 import { useTranslations } from "next-intl";
@@ -107,6 +107,7 @@ import { Timeline } from "./Timeline";
 import { StorageUpgradeDialog } from "./StorageUpgradeDialog";
 import { UpgradeDialog } from "./UpgradeDialog";
 import { TopBar } from "./TopBar";
+import { hasHomeHandoff } from "@/cut/lib/homeHandoff";
 import { ViewerTopBar } from "./ViewerTopBar";
 
 /** Bounds on the viewer's change poll. The server picks the interval inside
@@ -373,6 +374,17 @@ export function Editor({
 
     };
   }, [projectId, viewer]);
+
+  // A project made from Home's prompt opens with the chat showing, where its
+  // first message is about to send. Read during render: the chat takes the
+  // message in its own first effect, before this one would see it.
+  const fromHomePrompt = useMemo(() => hasHomeHandoff(projectId), [projectId]);
+  useEffect(() => {
+    if (!loaded || viewer || !fromHomePrompt) {
+      return;
+    }
+    useEditor.getState().setAiOpen(true);
+  }, [loaded, viewer, fromHomePrompt]);
 
   // A doc that carries `firstOpen` presents itself on its first open in this
   // browser: the editor reads the block and follows it — which side-panel tab

@@ -204,7 +204,7 @@ function useMoveOffCloud(surface: WallSurface): MoveOffCloud | null {
     moveOpenProject("cloud", to, (done, total) => setProgress({ done, total }))
       .then((newId) => {
         track("cut_storage_move_done", { to });
-        window.location.href = projectHref(base, newId, "projects", null);
+        window.location.href = projectHref(base, newId, "home", null);
       })
       .catch((e: unknown) => {
         track("cut_storage_move_failed", {

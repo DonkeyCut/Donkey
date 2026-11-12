@@ -1,96 +1,33 @@
 "use client";
 
 import { DonkeyMark } from "@/components/DonkeyMark";
-import { useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
-import { creatorNames } from "@/cut/lib/defaultNames";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
-import { Clapperboard, FolderOpen, LayoutTemplate, Loader2 } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { seedNewProjectDoc } from "@/cut/lib/docCache";
-import { patchProjects } from "@/cut/lib/queries";
-import { backendFor, type Residency } from "@/cut/lib/residency";
-import { track } from "@/lib/analytics";
+import { usePathname } from "next/navigation";
+import { FolderOpen, House, LayoutTemplate } from "lucide-react";
 import { NavStorage } from "@/cut/components/NavStorage";
-import { NewProjectButton } from "@/cut/components/NewProjectButton";
 import { NavUser } from "@/cut/components/NavUser";
-import { homeHref, projectHref, tabForPath, useCutBase, type CutTab } from "@/cut/lib/nav";
-import type { ProjectSummary } from "@/cut/lib/types";
-import { newProjectAllowed } from "@/cut/lib/projectLimit";
+import { homeHref, useCutBase, type CutTab } from "@/cut/lib/nav";
 import { cn } from "@/lib/utils";
 
 // Each tab's name is its key in the home catalog's tab names.
-type NavEntry = {
-  tab: CutTab;
-  label: "projects" | "library" | "templates";
-  icon: typeof Clapperboard;
-};
+type NavEntry = { tab: CutTab; icon: typeof House };
 
-// The person's own work, then a separator, then what Donkey offers to start from.
+// Where work starts, everything the person has, and what Donkey offers to
+// start from.
 const NAV: NavEntry[] = [
-  { tab: "projects", label: "projects", icon: Clapperboard },
-  { tab: "library", label: "library", icon: FolderOpen },
+  { tab: "home", icon: House },
+  { tab: "assets", icon: FolderOpen },
+  { tab: "templates", icon: LayoutTemplate },
 ];
-const START_NAV: NavEntry[] = [{ tab: "templates", label: "templates", icon: LayoutTemplate }];
 
 export function AppSidebar() {
   const t = useTranslations("home");
   const pathname = usePathname();
-  const router = useRouter();
   const base = useCutBase();
-  const client = useQueryClient();
-  // The residency the pending creation was launched for; null when the naming
-  // dialog is closed.
-  const [createIn, setCreateIn] = useState<Residency | null>(null);
-  const [name, setName] = useState("");
-  const [busy, setBusy] = useState(false);
-
-  const create = async (r: Residency) => {
-    setBusy(true);
-    try {
-      if (!(await newProjectAllowed(client))) {
-        setCreateIn(null);
-        return;
-      }
-      const res = await backendFor(r).fetch("/api/cut/projects", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: name.trim() || creatorNames().untitled }),
-      });
-      const project = (await res.json()) as ProjectSummary;
-      patchProjects(client, r, (s) => ({
-        ...s,
-        projects: [project, ...s.projects],
-      }));
-      // A brand-new project's document is empty, so the editor about to open
-      // needs no round trip to draw it.
-      seedNewProjectDoc(project.id, project.name, r);
-      track("project_created", { source: "sidebar" });
-      // The dialog closes here, before the editor opens: the page it sits on
-      // stays mounted behind the editor, and a dialog left open on it would
-      // still be open on the way back.
-      setCreateIn(null);
-      // The link carries no residency; the editor resolves it by asking which
-      // backend owns the id, so a cloud project created from a Mac still opens
-      // against the cloud.
-      router.push(projectHref(base, project.id, tabForPath(pathname), null));
-    } finally {
-      setBusy(false);
-    }
-  };
 
   // One sidebar row, lit while its page is open.
-  const navLink = ({ tab, label, icon: Icon }: NavEntry) => {
+  const navLink = ({ tab, icon: Icon }: NavEntry) => {
     const href = homeHref(base, tab);
     const active = pathname === href;
     return (
@@ -103,7 +40,7 @@ export function AppSidebar() {
         )}
       >
         <Icon className="size-4" />
-        <span className="truncate">{t(`tabs.${label}`)}</span>
+        <span className="truncate">{t(`tabs.${tab}`)}</span>
       </Link>
     );
   };
@@ -117,51 +54,11 @@ export function AppSidebar() {
         <span className="text-[17px] font-semibold tracking-tight">Donkey Cut</span>
       </div>
 
-      {/* The one place the shelf is chosen: everything else follows it. */}
-      <NewProjectButton
-        picker
-        className="mb-5 w-full"
-        onCreate={(r) => {
-          setName("");
-          setCreateIn(r);
-        }}
-      />
-
-      <nav className="flex flex-col gap-0.5">
-        {NAV.map(navLink)}
-        <div role="separator" className="mx-2.5 my-2 h-px bg-border" />
-        {START_NAV.map(navLink)}
-      </nav>
+      <nav className="flex flex-col gap-0.5">{NAV.map(navLink)}</nav>
       <div className="mt-auto flex flex-col">
         <NavStorage />
         <NavUser />
       </div>
-      <Dialog open={createIn !== null} onOpenChange={(o) => !o && setCreateIn(null)}>
-        <DialogContent className="sm:max-w-sm">
-          <DialogHeader>
-            <DialogTitle>{t("newProject.title")}</DialogTitle>
-          </DialogHeader>
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (createIn) void create(createIn);
-            }}
-          >
-            <Input
-              autoFocus
-              placeholder={t("newProject.placeholder")}
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-            />
-            <DialogFooter className="mt-4">
-              <Button type="submit" disabled={busy} className="w-full">
-                {busy && <Loader2 className="animate-spin" data-icon="inline-start" />}
-                {t("newProject.create")}
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
     </aside>
   );
 }

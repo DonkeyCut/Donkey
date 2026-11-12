@@ -425,7 +425,8 @@
     "text": "Dein Text",
     "frame": "Frame {time}",
     "copy": "{name} Kopie",
-    "notes": "Notizen"
+    "notes": "Notizen",
+    "templateAssets": "Vorlagen-Assets"
   },
   "template_missing": "Diese Vorlage ist nicht mehr verfügbar.",
   "template_search_failed": "Die Vorlagensuche ist gerade nicht verfügbar.",

@@ -222,6 +222,17 @@ export function useProjectApp() {
     } catch { setError({ key: "saveFailed", name }); }
   }, []);
 
+  /** A prompt written on the framed Home: the person's next message in the
+   * conversation, which the assistant answers with Donkey's tools. */
+  const promptFromFrame = useCallback(async (text: string) => {
+    const app = appRef.current;
+    if (!app) return;
+    try {
+      const result = await app.sendMessage({ role: "user", content: [{ type: "text", text }] });
+      if (result.isError) setError({ key: "promptFailed" });
+    } catch { setError({ key: "promptFailed" }); }
+  }, []);
+
   useEffect(() => {
     if (!ready || editorRequest === null || editor || requested.current === editorRequest) {
       return;
@@ -259,5 +270,5 @@ export function useProjectApp() {
       setHostInset(full ? (app.getHostContext()?.safeAreaInsets?.bottom ?? 120) : 0);
     } catch { /* the inline card still works */ }
   }, []);
-  return { ready, view, playback, editor, fullscreen, hostInset, edges, theme, error, busy, visible, run, playbackFailed, openDonkey, openFromFrame, saveFromFrame, requestFullscreen, retryEditor, createProject, framePage };
+  return { ready, view, playback, editor, fullscreen, hostInset, edges, theme, error, busy, visible, run, playbackFailed, openDonkey, openFromFrame, saveFromFrame, promptFromFrame, requestFullscreen, retryEditor, createProject, framePage };
 }

@@ -26,7 +26,8 @@
       "generic": "请求失败。",
       "videoFailed": "视频无法加载。请尝试重新打开项目。",
       "openFailed": "无法打开 Donkey Cut。",
-      "saveFailed": "无法保存 {name}。"
+      "saveFailed": "无法保存 {name}。",
+      "promptFailed": "无法将提示词发送至 ChatGPT。"
     }
   },
   "status": {

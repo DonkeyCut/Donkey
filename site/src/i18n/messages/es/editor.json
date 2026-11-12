@@ -333,7 +333,7 @@
     "fullscreen": "Pantalla completa",
     "chat": "Chat",
     "chatShortcut": "Chat ({key})",
-    "backTo": "{tab, select, library {Volver a la biblioteca} templates {Volver a las plantillas} other {Volver a los proyectos}}",
+    "backTo": "{tab, select, assets {Volver a recursos} templates {Volver a plantillas} other {Volver al inicio}}",
     "rename": "Renombrar proyecto",
     "importsFailed": "{count, plural, one {Falló # importación} other {Fallaron # importaciones}}",
     "retry": "Reintentar",
@@ -353,7 +353,7 @@
     "moving": "Moviendo…"
   },
   "editor": {
-    "backTo": "{tab, select, library {Volver a la biblioteca} templates {Volver a las plantillas} other {Volver a los proyectos}}",
+    "backTo": "{tab, select, assets {Volver a recursos} templates {Volver a plantillas} other {Volver al inicio}}",
     "needsApp": "Este es un proyecto local: está guardado en esta Mac. Abre la app de Donkey y se abrirá aquí.",
     "shareGone": "Este enlace compartido ya no está disponible.",
     "conflictReloaded": "Se recargó una versión más reciente guardada en otro lugar.",

@@ -12,8 +12,9 @@ import { wearHostTheme } from "@/lib/theme";
  * asks the card for fullscreen from its own toolbar. Outside the card nothing
  * is sent and the variable stays unset.
  *
- * The frame also asks the card for the two things a sandboxed frame cannot do
- * itself: open a page in a tab of its own, and save a file. ChatGPT sandboxes
+ * The frame also asks the card for what a sandboxed frame cannot do itself:
+ * open a page in a tab of its own, save a file, and say something in the
+ * conversation. ChatGPT sandboxes
  * the card without `allow-downloads`, and a popup opened from inside inherits
  * that sandbox, so the host has to carry both.
  */
@@ -62,6 +63,15 @@ export function openThroughHost(url: string): boolean {
 export function openExternal(url: string) {
   if (openThroughHost(url)) return;
   window.open(url, "_blank", "noopener,noreferrer");
+}
+
+/** Hand a prompt written on the card's Home to the conversation around it:
+ * the card sends it as the person's next message, and the assistant there
+ * makes the video through Donkey's tools. Answers whether the host took it. */
+export function promptThroughHost(text: string): boolean {
+  if (editorHost() !== "chatgpt") return false;
+  window.parent.postMessage({ type: "donkeycut:prompt", text }, "*");
+  return true;
 }
 
 /** Save text made in the frame — a captions file — through the host. */

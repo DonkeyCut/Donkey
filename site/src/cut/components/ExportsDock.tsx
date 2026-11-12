@@ -173,7 +173,7 @@ function ProjectName({ projectId, name }: { projectId: string; name?: string }) 
   const base = useCutBase();
   return (
     <Link
-      href={framedHref(projectHref(base, projectId, "projects"))}
+      href={framedHref(projectHref(base, projectId, "home"))}
       className="block truncate text-xs font-medium hover:underline"
       title={name || t("untitled")}
     >

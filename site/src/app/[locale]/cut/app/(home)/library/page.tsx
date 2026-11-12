@@ -1,17 +1,14 @@
 import { Suspense } from "react";
-import { LibraryView } from "@/cut/components/LibraryView";
-import { SessionGate } from "@/cut/components/SessionGate";
+import { LegacyAssetsRedirect } from "@/cut/components/assets/LegacyAssetsRedirect";
 
 export const instant = true;
 
-// Suspense: the view reads the open folder from ?folder=…, and useSearchParams
-// needs a boundary in a statically prerendered shell.
+// Library became Assets. Links and bookmarks to it, a folder or a note
+// inside it included, land on the same place there.
 export default function LibraryPage() {
   return (
     <Suspense>
-      <SessionGate>
-        <LibraryView />
-      </SessionGate>
+      <LegacyAssetsRedirect />
     </Suspense>
   );
 }

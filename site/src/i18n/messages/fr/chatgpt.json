@@ -26,7 +26,8 @@
       "generic": "Échec de la requête.",
       "videoFailed": "Impossible de charger la vidéo. Réessayez d'ouvrir le projet.",
       "openFailed": "Impossible d’ouvrir Donkey Cut.",
-      "saveFailed": "Impossible d’enregistrer {name}."
+      "saveFailed": "Impossible d’enregistrer {name}.",
+      "promptFailed": "Impossible d'envoyer votre prompt à ChatGPT."
     }
   },
   "status": {

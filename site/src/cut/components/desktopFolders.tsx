@@ -21,6 +21,7 @@ import { reportSwallowed } from "@/cut/lib/report";
 import { useDescribeError } from "@/i18n/describeError";
 import { formatBytes } from "@/lib/bytes";
 import { RefDropZone } from "./RefDropZone";
+import { ASSET_ROW, ASSET_ROW_PICKED } from "./assets/assetTable";
 import { cn } from "@/lib/utils";
 
 // A folder under a drag that would land in it, in the selection blue.
@@ -428,6 +429,10 @@ export function FolderMenuItems({
   );
 }
 
+/** How a shelf lays its folders out: the desktop tile grid, stacked rows for
+ * a narrow panel, or rows of the Assets list's table. */
+export type FolderLayout = "tiles" | "rows" | "table";
+
 /** The desktop-style folder shelf: each folder as a blue folder icon and a
  * drop target for dragged items. Folder creation is driven by the host (e.g.
  * a header button) through `creating`/`onCreatingChange`. A host that nests
@@ -455,7 +460,7 @@ export function FolderShelf<F extends DeskFolder>({
   onRefDrop,
   creating = false,
   onCreatingChange,
-  rows = false,
+  layout = "tiles",
 }: {
   folders: F[];
   statOf: (id: string) => { count: number; size?: number };
@@ -495,10 +500,13 @@ export function FolderShelf<F extends DeskFolder>({
   onRefDrop?: (ref: AssetRef, folderId: string) => void | false;
   creating?: boolean;
   onCreatingChange?: (creating: boolean) => void;
-  /** Stacked full-width rows — glyph left, then name over an item-count
-   * subtext — for narrow panels; default is the desktop tile grid. */
-  rows?: boolean;
+  /** Tiles by default; `rows` stacks full-width rows (glyph left, name over
+   * an item count) for narrow panels; `table` fills the Assets list's
+   * columns. */
+  layout?: FolderLayout;
 }) {
+  const rows = layout === "rows";
+  const table = layout === "table";
   // A folder tile accepts an internal selection (its MIME), another folder
   // tile when the host nests folders, and, when the host wires it up, OS
   // files dragged from the desktop.
@@ -556,28 +564,46 @@ export function FolderShelf<F extends DeskFolder>({
   // host keeps it mounted, so a name held for a create outlives the field.
   if (folders.length === 0 && !creating && !landing && !failed) return null;
 
-  const editRowClass = rows
-    ? "flex items-center gap-2.5 rounded-lg px-2 py-1.5"
-    : "flex w-[92px] flex-col items-start gap-1 px-2 pt-1.5";
-  const editGlyphClass = rows ? "size-7 shrink-0" : "size-[40px]";
+  // A folder being named or made: the glyph and the field, in the layout's
+  // own shape. In the table both sit in the name column.
+  const editRowClass = table
+    ? cn(ASSET_ROW, "cursor-default hover:bg-transparent")
+    : rows
+      ? "flex items-center gap-2.5 rounded-lg px-2 py-1.5"
+      : "flex w-[92px] flex-col items-start gap-1 px-2 pt-1.5";
+  const editGlyphClass = table ? "size-4 shrink-0" : rows ? "size-7 shrink-0" : "size-[40px]";
+  const editCell = (glyph: React.ReactNode, field: React.ReactNode) =>
+    table ? (
+      <span className="flex min-w-0 items-center gap-2.5">
+        {glyph}
+        {field}
+      </span>
+    ) : (
+      <>
+        {glyph}
+        {field}
+      </>
+    );
 
   return (
-    <div className={cn(rows ? "mb-4 flex flex-col" : "-ml-2 mb-7 flex flex-wrap gap-2")}>
+    <div className={cn(table ? undefined : rows ? "mb-4 flex flex-col" : "-ml-2 mb-7 flex flex-wrap gap-2")}>
       {folders.map((f) => {
         const s = statOf(f.id);
         const isOver = over === f.id;
         if (editingId === f.id) {
           return (
             <div key={f.id} className={editRowClass} data-no-marquee>
-              <FolderGlyph className={editGlyphClass} />
-              <RenameInput
-                value={f.name}
-                className={cn("text-[11px]", rows ? "flex-1" : "w-full")}
-                onDone={(name) => {
-                  closeRename();
-                  if (name) void onRename(f.id, name);
-                }}
-              />
+              {editCell(
+                <FolderGlyph className={editGlyphClass} />,
+                <RenameInput
+                  value={f.name}
+                  className={cn("text-[11px]", rows || table ? "flex-1" : "w-full")}
+                  onDone={(name) => {
+                    closeRename();
+                    if (name) void onRename(f.id, name);
+                  }}
+                />,
+              )}
             </div>
           );
         }
@@ -668,7 +694,7 @@ export function FolderShelf<F extends DeskFolder>({
                   aria-label={t("options")}
                   className={cn(
                     "size-6 opacity-0 group-hover/f:opacity-100 pointer-coarse:opacity-100 data-[state=open]:opacity-100",
-                    rows
+                    rows || table
                       ? "shrink-0 text-muted-foreground hover:text-foreground"
                       : "absolute top-1 right-1 bg-black/25 text-white hover:bg-black/40 hover:text-white"
                   )}
@@ -688,7 +714,29 @@ export function FolderShelf<F extends DeskFolder>({
             </DropdownMenuContent>
           </DropdownMenu>
         );
-        const tile = rows ? (
+        const tile = table ? (
+          // A row of the Assets list: the folder's name, its item count in
+          // the size column, and its menu.
+          <div
+            className={cn(ASSET_ROW, "group/f", isOver && DROP_OVER, isPicked && ASSET_ROW_PICKED)}
+            {...interact}
+          >
+            <span className="flex min-w-0 items-center gap-2.5">
+              <FolderGlyph
+                className={cn("size-4 shrink-0 transition-transform", isOver && "scale-110 brightness-110")}
+                data-drag-object="bare"
+              />
+              <span className="truncate font-medium">{f.name}</span>
+              <span className="flex shrink-0 text-muted-foreground">{badgeOf?.(f.id)}</span>
+            </span>
+            <span />
+            <span className="truncate text-xs text-muted-foreground tabular-nums">
+              {s.size != null ? formatBytes(s.size, locale) : t("items", { count: s.count })}
+            </span>
+            <span />
+            {menu ?? <span />}
+          </div>
+        ) : rows ? (
           <div
             className={cn(
               "group/f flex cursor-pointer items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-muted/60",
@@ -744,7 +792,7 @@ export function FolderShelf<F extends DeskFolder>({
           <RefDropZone
             key={f.id}
             onRef={(r) => onRefDrop(r, f.id)}
-            activeClassName={cn(DROP_OVER, rows ? "rounded-lg" : "rounded-xl")}
+            activeClassName={cn(DROP_OVER, table ? undefined : rows ? "rounded-lg" : "rounded-xl")}
           >
             {tile}
           </RefDropZone>
@@ -755,34 +803,44 @@ export function FolderShelf<F extends DeskFolder>({
 
       {landing && (
         <div className={editRowClass} data-no-marquee>
-          <FolderGlyph className={cn(editGlyphClass, "drop-shadow-sm")} />
-          <span className={cn("truncate text-xs font-medium leading-tight", !rows && "mt-0.5 max-w-full")}>
-            {landing.name}
-          </span>
+          {editCell(
+            <FolderGlyph className={cn(editGlyphClass, "drop-shadow-sm")} />,
+            <span
+              className={cn(
+                "truncate leading-tight font-medium",
+                table ? "text-sm" : "text-xs",
+                !rows && !table && "mt-0.5 max-w-full",
+              )}
+            >
+              {landing.name}
+            </span>,
+          )}
         </div>
       )}
 
       {creating && (
         <div className={editRowClass} data-no-marquee>
-          <FolderGlyph className={cn(editGlyphClass, "opacity-60")} />
-          <Input
-            autoFocus
-            value={draft}
-            placeholder={t("namePlaceholder")}
-            className={cn("h-6 text-[11px]", rows ? "flex-1" : "w-full")}
-            onChange={(e) => setDraft(e.target.value)}
-            onBlur={closeCreate}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && draft.trim()) {
-                commitCreate(draft.trim());
-              } else if (e.key === "Escape") closeCreate();
-            }}
-          />
+          {editCell(
+            <FolderGlyph className={cn(editGlyphClass, "opacity-60")} />,
+            <Input
+              autoFocus
+              value={draft}
+              placeholder={t("namePlaceholder")}
+              className={cn("h-6 text-[11px]", rows || table ? "flex-1" : "w-full")}
+              onChange={(e) => setDraft(e.target.value)}
+              onBlur={closeCreate}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && draft.trim()) {
+                  commitCreate(draft.trim());
+                } else if (e.key === "Escape") closeCreate();
+              }}
+            />,
+          )}
         </div>
       )}
 
       {failed && (
-        <p role="alert" className="w-full px-2 text-xs text-destructive">
+        <p role="alert" className={cn("w-full text-xs text-destructive", table ? "border-b border-border px-4 py-2.5" : "px-2")}>
           {failed}
         </p>
       )}

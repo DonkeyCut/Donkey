@@ -26,7 +26,8 @@
       "generic": "リクエストに失敗しました。",
       "videoFailed": "動画を読み込めませんでした。プロジェクトをもう一度開いてみてください。",
       "openFailed": "Donkey Cutを開けませんでした。",
-      "saveFailed": "{name}を保存できませんでした。"
+      "saveFailed": "{name}を保存できませんでした。",
+      "promptFailed": "ChatGPTにプロンプトを送信できませんでした。"
     }
   },
   "status": {

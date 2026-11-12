@@ -71,7 +71,7 @@ export function ViewerTopBar({ chatStatus }: { chatStatus: ChatStatus }) {
           error?: string;
         };
         if (job.state === "done" && job.newProjectId) {
-          window.location.href = projectHref(base, job.newProjectId, "projects");
+          window.location.href = projectHref(base, job.newProjectId, "home");
           return;
         }
         if (job.state === "error") throw errorFromBody(job, t("copyFailed"));

@@ -49,7 +49,7 @@ export async function tourHoldsCopy(userId: string, base: string): Promise<boole
     return false;
   }
   track("onboarding_tour_resumed");
-  window.location.href = projectHref(base, starterProjectId(userId), "projects");
+  window.location.href = projectHref(base, starterProjectId(userId), "home");
   return true;
 }
 
@@ -68,7 +68,7 @@ export function useTourLock(): { locked: boolean; resume: () => void } {
       return;
     }
     track("onboarding_tour_resumed");
-    router.push(projectHref(base, starterProjectId(userId), "projects"));
+    router.push(projectHref(base, starterProjectId(userId), "home"));
   }, [base, router, userId]);
 
   return { locked, resume };

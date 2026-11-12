@@ -1,7 +1,7 @@
 {
   "tabs": {
-    "projects": "Projects",
-    "library": "Library",
+    "home": "Home",
+    "assets": "Assets",
     "templates": "Templates"
   },
   "newProject": {
@@ -17,6 +17,55 @@
     "create": "Create New Project",
     "limit": "This account is at its free project limit. Upgrade to Pro in Donkey Cut to make more.",
     "failed": "Could not create the project."
+  },
+  "start": {
+    "heading": "What video are we making?",
+    "promptLabel": "Describe a video",
+    "placeholder": "Describe the edit you want. Drop in files or use @ to add clips, folders, notes or templates.",
+    "placeholderFiles": "What should I make with these?",
+    "attach": "Add from Assets",
+    "voice": "Voice input",
+    "send": "Create",
+    "blankProject": "Blank project",
+    "projects": "Projects",
+    "viewAllProjects": "View All Projects",
+    "previousProjects": "Previous projects",
+    "nextProjects": "Next projects",
+    "projectsPage": "Projects, page {page}",
+    "templates": "Templates",
+    "browseAll": "Browse all",
+    "allCategories": "All",
+    "storageLabel": "New projects save to",
+    "storageButton": "New projects save to {place}",
+    "dropTitle": "Drop to start a project",
+    "dropText": "Files go into your prompt and save to Assets. Video, images, audio and fonts.",
+    "uploadsFolder": "Uploads",
+    "uploading": "Uploading",
+    "uploadFailed": "Couldn't upload",
+    "retryUpload": "Try again",
+    "fromAssets": "Use these from my Donkey Cut assets: {names}",
+    "removeFile": "Remove {name}",
+    "chipTemplate": "Template",
+    "chipProject": "Project",
+    "startingFrom": "Starting from {name}",
+    "createFailed": "Could not create the project.",
+    "at": {
+      "label": "Reference type",
+      "recent": "Recent",
+      "noMatches": "Nothing matches",
+      "filterHint": "Keep typing to filter.",
+      "attachHint": "Enter to attach.",
+      "tabs": {
+        "all": "All",
+        "folders": "Folders",
+        "clips": "Clips",
+        "images": "Images",
+        "audio": "Audio",
+        "notes": "Notes",
+        "projects": "Projects",
+        "templates": "Templates"
+      }
+    }
   },
   "projects": {
     "badgeLocal": "This is a local project",
@@ -48,6 +97,7 @@
     "foldersEmpty": "{count, plural, =1 {The folder is empty.} other {The folders are empty.}}",
     "deletesFolders": "{count, plural, =1 {This deletes the whole project folder, including its media files and exports.} other {This deletes each project’s whole folder, including its media files and exports.}}",
     "cannotUndo": "This can’t be undone.",
+    "failureOk": "OK",
     "deleteProjects": "{count, plural, =1 {Delete project} other {Delete projects}}",
     "deleteFolder": "Delete folder",
     "delete": "Delete",
@@ -327,6 +377,34 @@
       "similar": "Similar templates",
       "failed": "Could not create the project.",
       "missing": "This template isn't available anymore."
+    }
+  },
+  "assets": {
+    "newFolder": "New folder",
+    "upload": "Upload",
+    "search": "Search projects, clips, audio, fonts, notes",
+    "clearSearch": "Clear search",
+    "types": {
+      "all": "All",
+      "projects": "Projects",
+      "videos": "Videos",
+      "images": "Images",
+      "audio": "Audio",
+      "fonts": "Fonts",
+      "notes": "Notes"
+    },
+    "noMatches": "Nothing in Assets matches “{query}”.",
+    "emptyTitle": "Nothing in Assets yet",
+    "emptyHint": "Upload video, images, audio and fonts, or drop them anywhere on this page.",
+    "projectStaysOnShelf": "A project files only into a folder in the same place it lives. Use Move to Cloud or Move to Local to move it first.",
+    "picker": {
+      "title": "Add from Assets",
+      "cancel": "Cancel",
+      "add": "Add to prompt",
+      "none": "Nothing selected",
+      "count": "{count} selected",
+      "pick": "Select",
+      "empty": "Nothing here yet."
     }
   }
 }

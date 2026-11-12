@@ -425,7 +425,8 @@
     "text": "텍스트 입력",
     "frame": "프레임 {time}",
     "copy": "{name} 사본",
-    "notes": "메모"
+    "notes": "메모",
+    "templateAssets": "템플릿 에셋"
   },
   "template_missing": "이 템플릿은 더 이상 사용할 수 없어요.",
   "template_search_failed": "지금은 템플릿 검색을 이용할 수 없어요.",

@@ -425,7 +425,8 @@
     "text": "Votre texte",
     "frame": "Image {time}",
     "copy": "{name} (copie)",
-    "notes": "Notes"
+    "notes": "Notes",
+    "templateAssets": "Ressources de modèle"
   },
   "template_missing": "Ce modèle n'est plus disponible.",
   "template_search_failed": "La recherche de modèles n'est pas disponible pour le moment.",

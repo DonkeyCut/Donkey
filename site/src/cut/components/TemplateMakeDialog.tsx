@@ -12,7 +12,7 @@ import { refetchProjects } from "@/cut/lib/queries";
 import type { Residency } from "@/cut/lib/residency";
 import { copyAsKind } from "@/cut/lib/templateUse";
 import type { ProjectSummary } from "@/cut/lib/types";
-import { CardPreview } from "./ProjectsHome";
+import { CardPreview } from "./assets/ProjectCard";
 import { CopyDialog, type CopyPhase } from "./TemplateUseView";
 
 // Projects without an aspect are 9:16.

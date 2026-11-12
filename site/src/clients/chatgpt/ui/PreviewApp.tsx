@@ -5,7 +5,7 @@ import { useProjectApp, type FramePage, type HostEdges, type HostTheme } from ".
 import "./preview.css";
 
 export function PreviewApp() {
-  const { ready, view, playback, editor, fullscreen, hostInset, edges, theme, error, busy, visible, run, playbackFailed, openDonkey, openFromFrame, saveFromFrame, requestFullscreen, retryEditor, createProject, framePage } = useProjectApp();
+  const { ready, view, playback, editor, fullscreen, hostInset, edges, theme, error, busy, visible, run, playbackFailed, openDonkey, openFromFrame, saveFromFrame, promptFromFrame, requestFullscreen, retryEditor, createProject, framePage } = useProjectApp();
   const project = view?.project;
   // An editable projects card is the projects home, framed like the editor.
   const home = view?.view === "projects" && view.canEdit;
@@ -36,7 +36,7 @@ export function PreviewApp() {
   if (view ? (project && view.canEdit) || home : !error) {
     const loading = !editor || shown !== editor.url;
     return <main className="editing" data-mode={fullscreen ? "fullscreen" : "inline"} style={edgePadding(edges)} aria-busy={loading}>
-      {editor && (project || home) && <EditorFrame key={editor.url} url={editor.url} label={project ? t("editing", { name: project.name }) : t("home")} inset={hostInset} theme={theme} fullscreen={fullscreen} onReady={() => setShown(editor.url)} onPage={framePage} onFullscreen={requestFullscreen} onOpen={openFromFrame} onSave={saveFromFrame} onDownloadError={setDownloadError} onReconnect={retryEditor} />}
+      {editor && (project || home) && <EditorFrame key={editor.url} url={editor.url} label={project ? t("editing", { name: project.name }) : t("home")} inset={hostInset} theme={theme} fullscreen={fullscreen} onReady={() => setShown(editor.url)} onPage={framePage} onFullscreen={requestFullscreen} onOpen={openFromFrame} onSave={saveFromFrame} onPrompt={(text) => void promptFromFrame(text)} onDownloadError={setDownloadError} onReconnect={retryEditor} />}
       {downloadError && <div className="download-error"><p role="alert">{downloadError}</p><button onClick={() => setDownloadError(null)}>{t("dismiss")}</button></div>}
       {error && (project || home) && !editor
         ? <div className="waiting">
@@ -112,7 +112,7 @@ function HomeSkeleton() {
  * asks; it says when it has something on screen, and its own toolbar asks
  * for fullscreen, for a tab on donkeycut.com, and for the saves the sandbox
  * blocks inside the frame. */
-function EditorFrame({ url, label, inset, theme, fullscreen, onReady, onPage, onFullscreen, onOpen, onSave, onDownloadError, onReconnect }: { url: string; label: string; inset: number; theme: HostTheme; fullscreen: boolean; onReady: () => void; onPage: (url: string, page: FramePage) => void; onFullscreen: () => void; onOpen: (url: string) => void; onSave: (text: string, name: string, mimeType: string) => void; onDownloadError: (message: string | null) => void; onReconnect: () => void }) {
+function EditorFrame({ url, label, inset, theme, fullscreen, onReady, onPage, onFullscreen, onOpen, onSave, onPrompt, onDownloadError, onReconnect }: { url: string; label: string; inset: number; theme: HostTheme; fullscreen: boolean; onReady: () => void; onPage: (url: string, page: FramePage) => void; onFullscreen: () => void; onOpen: (url: string) => void; onSave: (text: string, name: string, mimeType: string) => void; onPrompt: (text: string) => void; onDownloadError: (message: string | null) => void; onReconnect: () => void }) {
   const frame = useRef<HTMLIFrameElement>(null);
   const origin = new URL(url).origin;
   const tell = () => frame.current?.contentWindow?.postMessage({ type: "donkeycut:host", insetBottom: inset, theme, displayMode: fullscreen ? "fullscreen" : "inline" }, origin);
@@ -137,6 +137,8 @@ function EditorFrame({ url, label, inset, theme, fullscreen, onReady, onPage, on
         const target = URL.parse(event.data.url);
         if (target?.protocol === "https:" || target?.protocol === "http:") onOpen(target.toString());
       }
+      // Home's prompt, said in the conversation as the person's message.
+      if (event.data?.type === "donkeycut:prompt" && typeof event.data.text === "string" && event.data.text.trim()) onPrompt(event.data.text);
       if (event.data?.type === "donkeycut:save" && typeof event.data.text === "string") {
         const { text, name: file, mimeType } = event.data as { text: string; name?: unknown; mimeType?: unknown };
         if (typeof file === "string" && typeof mimeType === "string") onSave(text, file, mimeType);

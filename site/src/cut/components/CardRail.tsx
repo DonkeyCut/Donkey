@@ -3,16 +3,16 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { Clapperboard, FolderOpen } from "lucide-react";
+import { FolderOpen, House } from "lucide-react";
 import { AppSidebar } from "@/cut/components/AppSidebar";
 import { useEnvironment } from "@/cut/lib/environment";
 import { useHostReady } from "@/cut/lib/hostBridge";
 import { homeHref, useCutBase, type CutTab } from "@/cut/lib/nav";
 import { cn } from "@/lib/utils";
 
-const CARD_TABS: { tab: CutTab; label: "projects" | "library"; icon: typeof Clapperboard }[] = [
-  { tab: "projects", label: "projects", icon: Clapperboard },
-  { tab: "library", label: "library", icon: FolderOpen },
+const CARD_TABS: { tab: CutTab; icon: typeof House }[] = [
+  { tab: "home", icon: House },
+  { tab: "assets", icon: FolderOpen },
 ];
 
 // The editor rail's tile: an icon chip over a small label.
@@ -28,9 +28,9 @@ export function HomeNav() {
 }
 
 /**
- * The projects home inside the ChatGPT card. The host draws the app's name and
- * owns the account, so the rail carries only the two shelves, in the editor
- * rail's size; each shelf has its own New project.
+ * The home inside the ChatGPT card. The host draws the app's name and owns
+ * the account, so the rail carries only Home and Assets, in the editor rail's
+ * size.
  */
 function CardRail() {
   const t = useTranslations("home");
@@ -40,7 +40,7 @@ function CardRail() {
 
   return (
     <nav className="flex w-[68px] shrink-0 flex-col items-center gap-1 border-r border-border bg-card px-1 py-3">
-      {CARD_TABS.map(({ tab, label, icon: Icon }) => {
+      {CARD_TABS.map(({ tab, icon: Icon }) => {
         const href = homeHref(base, tab);
         const active = pathname === href;
         return (
@@ -48,7 +48,7 @@ function CardRail() {
             <span className={cn(CHIP, active ? "bg-foreground/10 text-foreground" : "hover:bg-muted/60")}>
               <Icon className="size-4.5" />
             </span>
-            <span className={cn(LABEL, active && "text-foreground")}>{t(`tabs.${label}`)}</span>
+            <span className={cn(LABEL, active && "text-foreground")}>{t(`tabs.${tab}`)}</span>
           </Link>
         );
       })}

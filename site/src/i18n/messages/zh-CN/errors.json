@@ -425,7 +425,8 @@
     "text": "你的文本",
     "frame": "帧 {time}",
     "copy": "{name} 副本",
-    "notes": "笔记"
+    "notes": "笔记",
+    "templateAssets": "模板素材"
   },
   "template_missing": "此模板已不可用。",
   "template_search_failed": "模板搜索暂不可用。",

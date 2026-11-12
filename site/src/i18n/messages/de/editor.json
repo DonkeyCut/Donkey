@@ -333,7 +333,7 @@
     "fullscreen": "Vollbild",
     "chat": "Chat",
     "chatShortcut": "Chat ({key})",
-    "backTo": "{tab, select, library {Zurück zur Mediathek} templates {Zurück zu den Vorlagen} other {Zurück zu den Projekten}}",
+    "backTo": "{tab, select, assets {Zurück zu Assets} templates {Zurück zu Vorlagen} other {Zurück zur Startseite}}",
     "rename": "Projekt umbenennen",
     "importsFailed": "{count, plural, one {# Import fehlgeschlagen} other {# Importe fehlgeschlagen}}",
     "retry": "Wiederholen",
@@ -353,7 +353,7 @@
     "moving": "Wird verschoben…"
   },
   "editor": {
-    "backTo": "{tab, select, library {Zurück zur Mediathek} templates {Zurück zu den Vorlagen} other {Zurück zu den Projekten}}",
+    "backTo": "{tab, select, assets {Zurück zu Assets} templates {Zurück zu Vorlagen} other {Zurück zur Startseite}}",
     "needsApp": "Das ist ein lokales Projekt – es liegt auf diesem Mac. Öffne die Donkey-App und es öffnet sich hier.",
     "shareGone": "Diese Freigabe ist nicht mehr verfügbar.",
     "conflictReloaded": "Eine neuere, andernorts gespeicherte Version wurde neu geladen.",

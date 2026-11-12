@@ -333,7 +333,7 @@
     "fullscreen": "フルスクリーン",
     "chat": "チャット",
     "chatShortcut": "チャット ({key})",
-    "backTo": "{tab, select, library {ライブラリに戻る} templates {テンプレートに戻る} other {プロジェクトに戻る}}",
+    "backTo": "{tab, select, assets {アセットに戻る} templates {テンプレートに戻る} other {ホームに戻る}}",
     "rename": "プロジェクト名を変更",
     "importsFailed": "{count, plural, other {#件のインポートに失敗しました}}",
     "retry": "再試行",
@@ -353,7 +353,7 @@
     "moving": "移動中…"
   },
   "editor": {
-    "backTo": "{tab, select, library {ライブラリに戻る} templates {テンプレートに戻る} other {プロジェクトに戻る}}",
+    "backTo": "{tab, select, assets {アセットに戻る} templates {テンプレートに戻る} other {ホームに戻る}}",
     "needsApp": "これはこのMac上にあるローカルプロジェクトです。Donkeyアプリを開くとここに表示されます。",
     "shareGone": "この共有は利用できなくなりました。",
     "conflictReloaded": "別の場所で保存された新しいバージョンを再読み込みしました。",

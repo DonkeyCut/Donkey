@@ -1,7 +1,7 @@
 {
   "tabs": {
-    "projects": "Proyectos",
-    "library": "Biblioteca",
+    "home": "Inicio",
+    "assets": "Recursos",
     "templates": "Plantillas"
   },
   "newProject": {
@@ -17,6 +17,55 @@
     "create": "Crear nuevo proyecto",
     "limit": "Esta cuenta alcanzó el límite de proyectos gratuitos. Pásate a Pro en Donkey Cut para crear más.",
     "failed": "No se pudo crear el proyecto."
+  },
+  "start": {
+    "heading": "¿Qué video vamos a hacer?",
+    "promptLabel": "Describe un video",
+    "placeholder": "Describe la edición que quieres. Arrastra archivos o usa @ para agregar clips, carpetas, notas o plantillas.",
+    "placeholderFiles": "¿Qué debería hacer con esto?",
+    "attach": "Agregar desde Recursos",
+    "voice": "Entrada de voz",
+    "send": "Crear",
+    "blankProject": "Proyecto en blanco",
+    "projects": "Proyectos",
+    "viewAllProjects": "Ver todos los proyectos",
+    "previousProjects": "Proyectos anteriores",
+    "nextProjects": "Proyectos siguientes",
+    "projectsPage": "Proyectos, página {page}",
+    "templates": "Plantillas",
+    "browseAll": "Explorar todo",
+    "allCategories": "Todo",
+    "storageLabel": "Los proyectos nuevos se guardan en",
+    "storageButton": "Los proyectos nuevos se guardan en {place}",
+    "dropTitle": "Suelta para iniciar un proyecto",
+    "dropText": "Los archivos van a tu prompt y se guardan en Recursos. Video, imágenes, audio y fuentes.",
+    "uploadsFolder": "Subidas",
+    "uploading": "Subiendo",
+    "uploadFailed": "No se pudo subir",
+    "retryUpload": "Reintentar",
+    "fromAssets": "Usa estos recursos de mi Donkey Cut: {names}",
+    "removeFile": "Quitar {name}",
+    "chipTemplate": "Plantilla",
+    "chipProject": "Proyecto",
+    "startingFrom": "A partir de {name}",
+    "createFailed": "No se pudo crear el proyecto.",
+    "at": {
+      "label": "Tipo de referencia",
+      "recent": "Recientes",
+      "noMatches": "No hay coincidencias",
+      "filterHint": "Sigue escribiendo para filtrar.",
+      "attachHint": "Enter para adjuntar.",
+      "tabs": {
+        "all": "Todo",
+        "folders": "Carpetas",
+        "clips": "Clips",
+        "images": "Imágenes",
+        "audio": "Audio",
+        "notes": "Notas",
+        "projects": "Proyectos",
+        "templates": "Plantillas"
+      }
+    }
   },
   "projects": {
     "badgeLocal": "Este es un proyecto local",
@@ -48,6 +97,7 @@
     "foldersEmpty": "{count, plural, =1 {La carpeta está vacía.} other {Las carpetas están vacías.}}",
     "deletesFolders": "{count, plural, =1 {Esto elimina toda la carpeta del proyecto, incluidos sus archivos multimedia y exportaciones.} other {Esto elimina toda la carpeta de cada proyecto, incluidos sus archivos multimedia y exportaciones.}}",
     "cannotUndo": "Esta acción no se puede deshacer.",
+    "failureOk": "Aceptar",
     "deleteProjects": "{count, plural, =1 {Eliminar proyecto} other {Eliminar proyectos}}",
     "deleteFolder": "Eliminar carpeta",
     "delete": "Eliminar",
@@ -327,6 +377,34 @@
       "similar": "Plantillas similares",
       "failed": "No se pudo crear el proyecto.",
       "missing": "Esta plantilla ya no está disponible."
+    }
+  },
+  "assets": {
+    "newFolder": "Nueva carpeta",
+    "upload": "Subir",
+    "search": "Buscar proyectos, clips, audio, fuentes, notas",
+    "clearSearch": "Borrar búsqueda",
+    "types": {
+      "all": "Todo",
+      "projects": "Proyectos",
+      "videos": "Videos",
+      "images": "Imágenes",
+      "audio": "Audio",
+      "fonts": "Fuentes",
+      "notes": "Notas"
+    },
+    "noMatches": "Nada en Recursos coincide con “{query}”.",
+    "emptyTitle": "Aún no hay nada en Recursos",
+    "emptyHint": "Sube video, imágenes, audio y fuentes, o suéltalos en cualquier parte de esta página.",
+    "projectStaysOnShelf": "Un proyecto solo se guarda en una carpeta de su misma ubicación. Usa Mover a la nube o Mover a local para moverlo primero.",
+    "picker": {
+      "title": "Agregar desde Recursos",
+      "cancel": "Cancelar",
+      "add": "Agregar al prompt",
+      "none": "Nada seleccionado",
+      "count": "{count} seleccionados",
+      "pick": "Seleccionar",
+      "empty": "Aún no hay nada aquí."
     }
   }
 }

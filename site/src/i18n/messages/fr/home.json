@@ -1,7 +1,7 @@
 {
   "tabs": {
-    "projects": "Projets",
-    "library": "Bibliothèque",
+    "home": "Accueil",
+    "assets": "Ressources",
     "templates": "Modèles"
   },
   "newProject": {
@@ -17,6 +17,55 @@
     "create": "Créer un nouveau projet",
     "limit": "Ce compte a atteint sa limite de projets gratuits. Passez à Pro dans Donkey Cut pour en créer d’autres.",
     "failed": "Impossible de créer le projet."
+  },
+  "start": {
+    "heading": "Quelle vidéo créons-nous ?",
+    "promptLabel": "Décrivez une vidéo",
+    "placeholder": "Décrivez le montage souhaité. Déposez des fichiers ou utilisez @ pour ajouter des clips, dossiers, notes ou modèles.",
+    "placeholderFiles": "Que dois-je créer avec ces fichiers ?",
+    "attach": "Ajouter depuis les ressources",
+    "voice": "Saisie vocale",
+    "send": "Créer",
+    "blankProject": "Projet vide",
+    "projects": "Projets",
+    "viewAllProjects": "Afficher tous les projets",
+    "previousProjects": "Projets précédents",
+    "nextProjects": "Projets suivants",
+    "projectsPage": "Projets, page {page}",
+    "templates": "Modèles",
+    "browseAll": "Tout parcourir",
+    "allCategories": "Toutes",
+    "storageLabel": "Enregistrer les nouveaux projets dans",
+    "storageButton": "Enregistrer les nouveaux projets dans {place}",
+    "dropTitle": "Déposez pour démarrer un projet",
+    "dropText": "Les fichiers sont ajoutés à votre invite et enregistrés dans les ressources. Vidéo, images, audio et polices.",
+    "uploadsFolder": "Téléversements",
+    "uploading": "Téléversement…",
+    "uploadFailed": "Échec du téléversement",
+    "retryUpload": "Réessayer",
+    "fromAssets": "Utiliser ces éléments de mes ressources Donkey Cut : {names}",
+    "removeFile": "Retirer {name}",
+    "chipTemplate": "Modèle",
+    "chipProject": "Projet",
+    "startingFrom": "À partir de {name}",
+    "createFailed": "Impossible de créer le projet.",
+    "at": {
+      "label": "Type de référence",
+      "recent": "Récents",
+      "noMatches": "Aucun résultat",
+      "filterHint": "Continuez à taper pour filtrer.",
+      "attachHint": "Entrée pour joindre.",
+      "tabs": {
+        "all": "Tout",
+        "folders": "Dossiers",
+        "clips": "Clips",
+        "images": "Images",
+        "audio": "Audio",
+        "notes": "Notes",
+        "projects": "Projets",
+        "templates": "Modèles"
+      }
+    }
   },
   "projects": {
     "badgeLocal": "Ceci est un projet local",
@@ -48,6 +97,7 @@
     "foldersEmpty": "{count, plural, =1 {Le dossier est vide.} other {Les dossiers sont vides.}}",
     "deletesFolders": "{count, plural, =1 {Cela supprime l'intégralité du dossier du projet, y compris ses fichiers multimédias et ses exportations.} other {Cela supprime l'intégralité du dossier de chaque projet, y compris ses fichiers multimédias et ses exportations.}}",
     "cannotUndo": "Cette action est irréversible.",
+    "failureOk": "OK",
     "deleteProjects": "{count, plural, =1 {Supprimer le projet} other {Supprimer les projets}}",
     "deleteFolder": "Supprimer le dossier",
     "delete": "Supprimer",
@@ -327,6 +377,34 @@
       "similar": "Modèles similaires",
       "failed": "Impossible de créer le projet.",
       "missing": "Ce modèle n'est plus disponible."
+    }
+  },
+  "assets": {
+    "newFolder": "Nouveau dossier",
+    "upload": "Importer",
+    "search": "Rechercher projets, clips, audio, polices, notes",
+    "clearSearch": "Effacer la recherche",
+    "types": {
+      "all": "Tout",
+      "projects": "Projets",
+      "videos": "Vidéos",
+      "images": "Images",
+      "audio": "Audio",
+      "fonts": "Polices",
+      "notes": "Notes"
+    },
+    "noMatches": "Aucun élément ne correspond à « {query} » dans les ressources.",
+    "emptyTitle": "Aucune ressource pour le moment",
+    "emptyHint": "Importez des vidéos, images, fichiers audio et polices, ou glissez-les n'importe où sur cette page.",
+    "projectStaysOnShelf": "Un projet ne peut être classé que dans un dossier situé au même endroit. Utilisez Déplacer vers le cloud ou Déplacer en local pour le déplacer d'abord.",
+    "picker": {
+      "title": "Ajouter depuis les ressources",
+      "cancel": "Annuler",
+      "add": "Ajouter au prompt",
+      "none": "Aucune sélection",
+      "count": "{count} sélectionné(s)",
+      "pick": "Sélectionner",
+      "empty": "Rien ici pour le moment."
     }
   }
 }

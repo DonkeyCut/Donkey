@@ -2,7 +2,7 @@
 
 import { Suspense } from "react";
 
-import { ProjectsHome } from "@/cut/components/ProjectsHome";
+import { HomeView } from "@/cut/components/home/HomeView";
 import { SessionGate } from "@/cut/components/SessionGate";
 
 // The welcome sequence's own address. The sequence is a full-window overlay
@@ -14,7 +14,7 @@ export default function OnboardingPage() {
   return (
     <Suspense>
       <SessionGate>
-        <ProjectsHome />
+        <HomeView />
       </SessionGate>
     </Suspense>
   );

@@ -1,7 +1,7 @@
 {
   "tabs": {
-    "projects": "项目",
-    "library": "素材库",
+    "home": "首页",
+    "assets": "资产",
     "templates": "模板"
   },
   "newProject": {
@@ -17,6 +17,55 @@
     "create": "创建新项目",
     "limit": "此账号已达到免费项目数量上限。在 Donkey Cut 中升级至 Pro 即可创建更多项目。",
     "failed": "无法创建项目。"
+  },
+  "start": {
+    "heading": "想制作什么视频？",
+    "promptLabel": "描述视频",
+    "placeholder": "描述你想要的剪辑。拖放文件，或使用 @ 添加片段、文件夹、笔记或模板。",
+    "placeholderFiles": "用这些内容做什么？",
+    "attach": "从资产添加",
+    "voice": "语音输入",
+    "send": "创建",
+    "blankProject": "空白项目",
+    "projects": "项目",
+    "viewAllProjects": "查看所有项目",
+    "previousProjects": "上一页项目",
+    "nextProjects": "下一页项目",
+    "projectsPage": "项目，第 {page} 页",
+    "templates": "模板",
+    "browseAll": "浏览全部",
+    "allCategories": "全部",
+    "storageLabel": "新项目保存至",
+    "storageButton": "新项目保存至 {place}",
+    "dropTitle": "拖放以创建项目",
+    "dropText": "文件将加入提示词并保存至资产。支持视频、图片、音频和字体。",
+    "uploadsFolder": "上传",
+    "uploading": "正在上传",
+    "uploadFailed": "上传失败",
+    "retryUpload": "重试",
+    "fromAssets": "使用我 Donkey Cut 资产中的以下内容：{names}",
+    "removeFile": "移除 {name}",
+    "chipTemplate": "模板",
+    "chipProject": "项目",
+    "startingFrom": "从 {name} 开始",
+    "createFailed": "无法创建项目。",
+    "at": {
+      "label": "引用类型",
+      "recent": "最近",
+      "noMatches": "无匹配项",
+      "filterHint": "继续输入以筛选。",
+      "attachHint": "按 Enter 附加。",
+      "tabs": {
+        "all": "全部",
+        "folders": "文件夹",
+        "clips": "片段",
+        "images": "图像",
+        "audio": "音频",
+        "notes": "笔记",
+        "projects": "项目",
+        "templates": "模板"
+      }
+    }
   },
   "projects": {
     "badgeLocal": "本地项目",
@@ -48,6 +97,7 @@
     "foldersEmpty": "{count, plural, =1 {文件夹为空。} other {这些文件夹为空。}}",
     "deletesFolders": "{count, plural, =1 {这会删除整个项目文件夹，包括其中的媒体文件和导出文件。} other {这会删除每个项目的整个文件夹，包括其中的媒体文件和导出文件。}}",
     "cannotUndo": "此操作无法撤销。",
+    "failureOk": "确定",
     "deleteProjects": "{count, plural, =1 {删除项目} other {删除项目}}",
     "deleteFolder": "删除文件夹",
     "delete": "删除",
@@ -327,6 +377,34 @@
       "similar": "相似模板",
       "failed": "无法创建项目。",
       "missing": "此模板已失效。"
+    }
+  },
+  "assets": {
+    "newFolder": "新建文件夹",
+    "upload": "上传",
+    "search": "搜索项目、片段、音频、字体、笔记",
+    "clearSearch": "清除搜索",
+    "types": {
+      "all": "全部",
+      "projects": "项目",
+      "videos": "视频",
+      "images": "图像",
+      "audio": "音频",
+      "fonts": "字体",
+      "notes": "笔记"
+    },
+    "noMatches": "资产中没有与“{query}”匹配的内容。",
+    "emptyTitle": "资产中暂无内容",
+    "emptyHint": "上传视频、图像、音频和字体，或将它们拖放至此页面的任意位置。",
+    "projectStaysOnShelf": "项目只能归入其所在位置的文件夹中。请先使用“移至云端”或“移至本地”进行移动。",
+    "picker": {
+      "title": "从资产添加",
+      "cancel": "取消",
+      "add": "添加到提示词",
+      "none": "未选择任何内容",
+      "count": "已选 {count} 项",
+      "pick": "选择",
+      "empty": "暂无内容。"
     }
   }
 }

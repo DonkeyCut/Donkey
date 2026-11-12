@@ -6,7 +6,7 @@
 // the bytes through the page, the same cross-backend copy a project move uses.
 // A person's own template is a project of theirs marked as one, so using it,
 // or making one, is a duplicate on the same shelf with the mark changed.
-import { creatorLocale } from "./defaultNames";
+import { creatorLocale, creatorNames } from "./defaultNames";
 import { cloudRequest, quotaError } from "./backend/cloud";
 import { templateBackendFor } from "./backend/shared";
 import { copyProjectAcross } from "./projectCopy";
@@ -22,7 +22,7 @@ import {
   type TemplateIndex,
   type TemplateMatch,
 } from "./templateGallery";
-import type { ProjectKind } from "./types";
+import { isLinkedAssetType, type MediaFolder, type ProjectDoc, type ProjectKind, type StoredAsset } from "./types";
 import { errorFromBody, UserError } from "./userError";
 
 /** How often a cloud duplicate's job is asked whether it has landed. */
@@ -65,15 +65,66 @@ export async function copyTemplate(
   name: string,
   onProgress?: (done: number, total: number) => void
 ): Promise<string> {
-  if (target === "cloud") {
-    return copyToCloud(template, name, onProgress);
-  }
   // A template carries no conversations, so none travel.
-  return copyProjectAcross(templateBackendFor(template.id), backendFor(target), template.id, {
-    rename: () => name,
-    onProgress,
-    chats: "skip",
+  const id =
+    target === "cloud"
+      ? await copyToCloud(template, name, onProgress)
+      : await copyProjectAcross(templateBackendFor(template.id), backendFor(target), template.id, {
+          rename: () => name,
+          onProgress,
+          chats: "skip",
+        });
+  await fileOrDrop(target, id);
+  return id;
+}
+
+/** Whether the Media panel lists an asset at its top level: a person's
+ * import (nothing made by the app) that no folder holds yet. Fonts and LUTs
+ * live in their own menus. */
+const unfiledMedia = (a: StoredAsset) => a.origin == null && !isLinkedAssetType(a.type) && !a.folderId;
+
+/**
+ * File a new project's template media in one Media folder, "Template Assets",
+ * so the person's own imports land beside it and never mix in. Media the
+ * template already kept in a folder stays there. The doc goes back through
+ * the same project route on every shelf, so the browser, the Mac and the
+ * cloud each write it their own way.
+ */
+async function fileTemplateMedia(r: Residency, projectId: string): Promise<void> {
+  const backend = backendFor(r);
+  const res = await backend.fetch(`/api/cut/projects/${projectId}`);
+  if (!res.ok) {
+    throw COPY_FAILED;
+  }
+  const doc = (await res.json()) as ProjectDoc;
+  if (!doc.assets.some(unfiledMedia)) {
+    return;
+  }
+  const folder: MediaFolder = { id: crypto.randomUUID(), name: creatorNames().templateAssets, createdAt: Date.now() };
+  const saved = await backend.fetch(`/api/cut/projects/${projectId}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      mediaFolders: [...(doc.mediaFolders ?? []), folder],
+      assets: doc.assets.map((a) => (unfiledMedia(a) ? { ...a, folderId: folder.id } : a)),
+    }),
   });
+  if (!saved.ok) {
+    throw COPY_FAILED;
+  }
+}
+
+/** File a fresh copy's template media, or delete the copy when that fails,
+ * so a half-made project never lists. */
+async function fileOrDrop(r: Residency, projectId: string): Promise<void> {
+  try {
+    await fileTemplateMedia(r, projectId);
+  } catch (e) {
+    await backendFor(r)
+      .fetch(`/api/cut/projects/${projectId}`, { method: "DELETE" })
+      .catch(() => undefined);
+    throw e;
+  }
 }
 
 /** Copy a gallery template into the account's cloud. The server copies the
@@ -197,6 +248,10 @@ export async function copyAsKind(r: Residency, id: string, kind: ProjectKind, na
   const copyId = await duplicateOnShelf(r, id);
   try {
     await markCopy(r, copyId, kind, name);
+    // A project made from a template keeps the template's media together.
+    if (kind === "project") {
+      await fileTemplateMedia(r, copyId);
+    }
   } catch (e) {
     await backendFor(r)
       .fetch(`/api/cut/projects/${copyId}`, { method: "DELETE" })

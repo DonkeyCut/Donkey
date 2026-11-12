@@ -449,7 +449,7 @@ function ShelfView({
           </p>
         )}
         <FolderShelf
-          rows
+          layout="rows"
           folders={folders.map((f) => ({ ...f, locked: true }))}
           mime={NO_DROP_MIME}
           statOf={(id) => ({ count: countOf(id) })}

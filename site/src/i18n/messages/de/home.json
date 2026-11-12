@@ -1,7 +1,7 @@
 {
   "tabs": {
-    "projects": "Projekte",
-    "library": "Mediathek",
+    "home": "Start",
+    "assets": "Assets",
     "templates": "Vorlagen"
   },
   "newProject": {
@@ -17,6 +17,55 @@
     "create": "Neues Projekt erstellen",
     "limit": "Projektlimit für kostenlose Konten erreicht. Hol dir Pro in Donkey Cut, um mehr zu erstellen.",
     "failed": "Projekt konnte nicht erstellt werden."
+  },
+  "start": {
+    "heading": "Welches Video machen wir?",
+    "promptLabel": "Beschreibe ein Video",
+    "placeholder": "Beschreibe den gewünschten Schnitt. Ziehe Dateien hierher oder nutze @, um Clips, Ordner, Notizen oder Vorlagen hinzuzufügen.",
+    "placeholderFiles": "Was soll ich daraus machen?",
+    "attach": "Aus Assets hinzufügen",
+    "voice": "Spracheingabe",
+    "send": "Erstellen",
+    "blankProject": "Leeres Projekt",
+    "projects": "Projekte",
+    "viewAllProjects": "Alle Projekte anzeigen",
+    "previousProjects": "Vorherige Projekte",
+    "nextProjects": "Nächste Projekte",
+    "projectsPage": "Projekte, Seite {page}",
+    "templates": "Vorlagen",
+    "browseAll": "Alle durchsuchen",
+    "allCategories": "Alle",
+    "storageLabel": "Neue Projekte speichern in",
+    "storageButton": "Neue Projekte speichern in {place}",
+    "dropTitle": "Hier ablegen, um ein Projekt zu starten",
+    "dropText": "Dateien werden dem Prompt hinzugefügt und in Assets gespeichert. Video, Bilder, Audio und Schriftarten.",
+    "uploadsFolder": "Uploads",
+    "uploading": "Wird hochgeladen",
+    "uploadFailed": "Upload fehlgeschlagen",
+    "retryUpload": "Erneut versuchen",
+    "fromAssets": "Verwende diese aus meinen Donkey Cut-Assets: {names}",
+    "removeFile": "{name} entfernen",
+    "chipTemplate": "Vorlage",
+    "chipProject": "Projekt",
+    "startingFrom": "Starten mit {name}",
+    "createFailed": "Projekt konnte nicht erstellt werden.",
+    "at": {
+      "label": "Referenztyp",
+      "recent": "Zuletzt verwendet",
+      "noMatches": "Keine Treffer",
+      "filterHint": "Tippe weiter zum Filtern.",
+      "attachHint": "Enter zum Anhängen.",
+      "tabs": {
+        "all": "Alle",
+        "folders": "Ordner",
+        "clips": "Clips",
+        "images": "Bilder",
+        "audio": "Audio",
+        "notes": "Notizen",
+        "projects": "Projekte",
+        "templates": "Vorlagen"
+      }
+    }
   },
   "projects": {
     "badgeLocal": "Lokales Projekt",
@@ -48,6 +97,7 @@
     "foldersEmpty": "{count, plural, =1 {Der Ordner ist leer.} other {Die Ordner sind leer.}}",
     "deletesFolders": "{count, plural, =1 {Dadurch wird der gesamte Projektordner samt Mediendateien und Exporten gelöscht.} other {Dadurch wird der gesamte Ordner jedes Projekts samt Mediendateien und Exporten gelöscht.}}",
     "cannotUndo": "Dies kann nicht rückgängig gemacht werden.",
+    "failureOk": "OK",
     "deleteProjects": "{count, plural, =1 {Projekt löschen} other {Projekte löschen}}",
     "deleteFolder": "Ordner löschen",
     "delete": "Löschen",
@@ -327,6 +377,34 @@
       "similar": "Ähnliche Vorlagen",
       "failed": "Das Projekt konnte nicht erstellt werden.",
       "missing": "Diese Vorlage ist nicht mehr verfügbar."
+    }
+  },
+  "assets": {
+    "newFolder": "Neuer Ordner",
+    "upload": "Hochladen",
+    "search": "Projekte, Clips, Audio, Schriften, Notizen durchsuchen",
+    "clearSearch": "Suche löschen",
+    "types": {
+      "all": "Alle",
+      "projects": "Projekte",
+      "videos": "Videos",
+      "images": "Bilder",
+      "audio": "Audio",
+      "fonts": "Schriften",
+      "notes": "Notizen"
+    },
+    "noMatches": "Nichts in Assets entspricht „{query}“.",
+    "emptyTitle": "Noch nichts in Assets",
+    "emptyHint": "Lade Videos, Bilder, Audio und Schriften hoch oder ziehe sie an eine beliebige Stelle auf dieser Seite.",
+    "projectStaysOnShelf": "Ein Projekt kann nur in einen Ordner am selben Speicherort abgelegt werden. Nutze zuerst „In Cloud verschieben“ oder „Lokal verschieben“.",
+    "picker": {
+      "title": "Aus Assets hinzufügen",
+      "cancel": "Abbrechen",
+      "add": "Zum Prompt hinzufügen",
+      "none": "Nichts ausgewählt",
+      "count": "{count} ausgewählt",
+      "pick": "Auswählen",
+      "empty": "Hier ist noch nichts."
     }
   }
 }

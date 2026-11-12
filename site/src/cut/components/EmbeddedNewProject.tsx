@@ -47,7 +47,7 @@ export function useCardCreate() {
       const project = (await res.json()) as ProjectSummary;
       seedNewProjectDoc(project.id, project.name, "cloud", aspect);
       track("project_created", { source: "chatgpt_card" });
-      router.push(framedHref(projectHref(base, project.id, "projects")));
+      router.push(framedHref(projectHref(base, project.id, "home")));
     } catch (e) {
       setError(describeError(e, t("failed")));
     }

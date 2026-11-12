@@ -74,14 +74,16 @@ export function TemplateSearch({
   };
 
   return (
-    <div className="-mx-4 flex items-center overflow-x-auto px-4 pt-1 pb-1 sm:-mx-1 sm:px-1">
-      {/* The box: a pill when idle, the whole row when open. */}
+    // The row scrolls sideways on a narrow screen without a bar, which would
+    // otherwise flash while the chips fold away.
+    <div className="-mx-4 flex items-center overflow-x-auto px-4 pt-1 pb-1 [scrollbar-width:none] sm:-mx-1 sm:px-1 [&::-webkit-scrollbar]:hidden">
+      {/* The box: a pill when idle, wider when open. */}
       <label
         className={cn(
           "flex h-8 shrink-0 cursor-text items-center gap-1.5 rounded-full border border-foreground/20 bg-background px-3 text-[13px] transition-[width,background-color] hover:bg-muted dark:border-foreground/25",
           "focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50 focus-within:hover:bg-background",
           MOTION,
-          open ? "w-full" : draft ? "w-48" : "w-40"
+          open ? "w-[360px] max-w-full" : draft ? "w-48" : "w-40"
         )}
       >
         <Search className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />

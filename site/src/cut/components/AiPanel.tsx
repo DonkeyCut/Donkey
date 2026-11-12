@@ -148,13 +148,15 @@ import { CHAT_TURN_LABEL, useEditor } from "@/cut/lib/store";
 import { reportActivity } from "@/cut/lib/tabActivity";
 import { cn } from "@/lib/utils";
 import { cardIconButton } from "@/cut/components/iconButton";
-import { MentionedText, MentionTextarea, RefChips, RefThumb, refHasCard, UnmentionedRefPills } from "./AssetRefs";
+import { MentionedText, MentionTextarea, RefChips, RefFace, refHasCard, UnmentionedRefCards } from "./AssetRefs";
+import { ATTACHMENT_CARD } from "./AttachmentFaces";
 import { ComposerQueue, type QueuedMessage } from "./ComposerQueue";
 import { DictationBody } from "./MicDictation";
 import { RECORD_RUNNING_TTL_MS, ToolOutputAssets } from "./ChatAssets";
 import { attachedRefKeys, cardIsAttached } from "@/cut/lib/chatCards";
 import { HostedErrorText, openCreditsWall } from "./hostedError";
 import { useMicTranscription } from "@/cut/lib/micTranscribe";
+import { takeHomeHandoff } from "@/cut/lib/homeHandoff";
 import { registerLanguageSink } from "@/cut/lib/interfaceLanguage";
 import { UserError } from "@/cut/lib/userError";
 import { useChatError } from "./chatError";
@@ -166,7 +168,7 @@ import { useUpdateLocale } from "@/queries/accountProfile";
 // the stock catalog. They arrive by drag (media cards, library clips, stock
 // tiles, timeline clips, the preview) or as @name mentions in the message.
 
-interface ModelsInfo {
+export interface ModelsInfo {
   // A CLI provider's group lists only on `installed` true — unknown (probe
   // still out, or no engine) reads as absent. A provider that is installed
   // but unavailable (e.g. signed out) still lists with its note.
@@ -486,6 +488,77 @@ const SUGGESTIONS = [
   "writeCaption",
 ] as const;
 
+/** The model the chat sends with, kept on this browser. A saved id that was
+ * retired moves to its replacement and the move is written back; an id the
+ * catalog has never known falls back to the default, since passed through
+ * the hosted route rejects it. Home and the editor read the same choice, so a
+ * pick made on Home carries into the editor. */
+export function useChatModel(): [string, (id: string) => void] {
+  const [model, setModel] = useState<string>(() => {
+    if (typeof window === "undefined") return DEFAULT_CHAT_MODEL;
+    const saved = localStorage.getItem(MODEL_KEY);
+    const current = saved ? currentChatModel(saved) : undefined;
+    if (!current) return DEFAULT_CHAT_MODEL;
+    if (current !== saved) localStorage.setItem(MODEL_KEY, current);
+    return current;
+  });
+  const selectModel = useCallback((id: string) => {
+    setModel(id);
+    localStorage.setItem(MODEL_KEY, id);
+  }, []);
+  return [model, selectModel];
+}
+
+/** Which providers the picker can offer: the engine's CLI probe, with Gemini
+ * answered by the sign-in. Null while the probe is still out. */
+export function useChatModelsInfo(): ModelsInfo | null {
+  const t = useTranslations("chat.panel");
+  const engineUp = useLocalCompute();
+  const signedIn = useSignedIn();
+  const [info, setInfo] = useState<ModelsInfo | null>(null);
+
+  useEffect(() => {
+    // The models probe asks the engine which CLIs are installed. The CLIs live
+    // on this Mac, so the engine being reachable is what decides — whatever
+    // backend holds the project. Without one there is no engine to ask
+    // (mergedInfo synthesizes the Gemini-only provider set instead).
+    if (!engineUp) return;
+    let alive = true;
+    void localBackend
+      .fetch("/api/cut/ai/models")
+      .then((r) => {
+        // An error body carries no provider list.
+        if (!r.ok) throw new Error(`models probe answered ${r.status}`);
+        return r.json();
+      })
+      .then((d: ModelsInfo) => alive && setInfo(d))
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [engineUp]);
+
+  // Gemini runs on the user's Donkey account, so its availability is the
+  // sign-in probe, not the engine's CLI checks. Signed-in state (or a probe
+  // still in flight) leaves it usable; a definite signed-out disables it.
+  return useMemo<ModelsInfo | null>(() => {
+    const gemini =
+      signedIn === false
+        ? { available: false, note: t("signInToChat"), installed: true }
+        : (info?.providers.gemini ?? { available: true, note: "", installed: true });
+    // With no engine on this Mac the CLI providers don't exist: their groups
+    // hide, and the saved-model fallback effect moves a CLI selection over to
+    // Gemini.
+    if (!engineUp) {
+      const off = { available: false, note: "", installed: false };
+      const providers: ModelsInfo["providers"] = { claude: off, codex: off, test: off, gemini };
+      return { providers };
+    }
+    if (!info) return null;
+    return { ...info, providers: { ...info.providers, gemini } };
+  }, [info, signedIn, engineUp, t]);
+}
+
 export function AiPanel({
   projectId,
   visible,
@@ -499,21 +572,9 @@ export function AiPanel({
 }) {
   const t = useTranslations("chat.panel");
   const format = useFormatter();
-  const [info, setInfo] = useState<ModelsInfo | null>(null);
   const engineUp = useLocalCompute();
   const readOnly = useEditor((s) => s.readOnly);
-  const signedIn = useSignedIn();
-  // A saved id that was retired moves to its replacement and the move is
-  // written back; an id the catalog has never known falls back to the
-  // default, since passed through the hosted route rejects it.
-  const [model, setModel] = useState<string>(() => {
-    if (typeof window === "undefined") return DEFAULT_CHAT_MODEL;
-    const saved = localStorage.getItem(MODEL_KEY);
-    const current = saved ? currentChatModel(saved) : undefined;
-    if (!current) return DEFAULT_CHAT_MODEL;
-    if (current !== saved) localStorage.setItem(MODEL_KEY, current);
-    return current;
-  });
+  const [model, selectModel] = useChatModel();
   // One chat is active at a time; every past chat lives in the Threads panel.
   // The id persists so closing and reopening the panel resumes the same chat.
   const [activeChat, setActiveChat] = useState<string>(() =>
@@ -531,6 +592,23 @@ export function AiPanel({
     setSeeds((all) => ({ ...all, [id]: seed }));
     return id;
   }, []);
+  // A project made from Home's prompt arrives with its first message waiting.
+  // It becomes a seeded thread on screen, sent the moment its session mounts;
+  // taking it clears it, so a reload never sends it twice. The model rides
+  // the seed and becomes the panel's pick, the one Home showed.
+  useEffect(() => {
+    if (readOnly) {
+      return;
+    }
+    const handoff = takeHomeHandoff(projectId);
+    if (!handoff) {
+      return;
+    }
+    selectModel(handoff.model);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- the handoff lives in session storage and is read once, on arrival
+    const id = spawnThread(handoff);
+    setActiveChat(id);
+  }, [projectId, readOnly, selectModel, spawnThread]);
   const onSeedTaken = useCallback((id: string, turnModel: string) => {
     setSeeds((all) => {
       if (!all[id]) return all;
@@ -686,27 +764,6 @@ export function AiPanel({
     return list[0].id;
   }, [readOnly, chatsReady, projectId, activeChat]);
 
-  useEffect(() => {
-    // The models probe asks the engine which CLIs are installed. The CLIs live
-    // on this Mac, so the engine being reachable is what decides — whatever
-    // backend holds the project. Without one there is no engine to ask
-    // (mergedInfo synthesizes the Gemini-only provider set instead).
-    if (!engineUp) return;
-    let alive = true;
-    void localBackend
-      .fetch("/api/cut/ai/models")
-      .then((r) => {
-        // An error body carries no provider list.
-        if (!r.ok) throw new Error(`models probe answered ${r.status}`);
-        return r.json();
-      })
-      .then((d: ModelsInfo) => alive && setInfo(d))
-      .catch(() => {});
-    return () => {
-      alive = false;
-    };
-  }, [engineUp]);
-
   const newChat = () => {
     setActiveChat(crypto.randomUUID());
     setHistoryOpen(false);
@@ -764,30 +821,7 @@ export function AiPanel({
     if (activeChat === id) setActiveChat(crypto.randomUUID());
   };
 
-  const selectModel = (id: string) => {
-    setModel(id);
-    localStorage.setItem(MODEL_KEY, id);
-  };
-
-  // Gemini runs on the user's Donkey account, so its availability is the
-  // sign-in probe, not the engine's CLI checks. Signed-in state (or a probe
-  // still in flight) leaves it usable; a definite signed-out disables it.
-  const mergedInfo = useMemo<ModelsInfo | null>(() => {
-    const gemini =
-      signedIn === false
-        ? { available: false, note: t("signInToChat"), installed: true }
-        : (info?.providers.gemini ?? { available: true, note: "", installed: true });
-    // With no engine on this Mac the CLI providers don't exist: their groups
-    // hide, and the saved-model fallback effect moves a CLI selection over to
-    // Gemini.
-    if (!engineUp) {
-      const off = { available: false, note: "", installed: false };
-      const providers: ModelsInfo["providers"] = { claude: off, codex: off, test: off, gemini };
-      return { providers };
-    }
-    if (!info) return null;
-    return { ...info, providers: { ...info.providers, gemini } };
-  }, [info, signedIn, engineUp, t]);
+  const mergedInfo = useChatModelsInfo();
 
   return (
     // A column beside the editor, as it has always been. Docking costs the
@@ -2540,16 +2574,21 @@ function MessageAssetCard({ asset }: { asset: AssetRef }) {
   return (
     <div
       ref={copyRef}
-      className={cn(
-        "ai-msg-asset group/chip relative",
-        // Audio gets the wide timeline-pill treatment; the row still wraps
-        // inside the message's max width.
-        asset.kind === "audio" ? "w-44 max-w-full" : "w-16",
-      )}
+      className="ai-msg-asset group/chip relative"
     >
-      <button
-        className="flex w-full flex-col gap-1 text-left"
+      {/* The card the Home prompt box shows for the same thing. A div with a
+          button's role: an audio card carries its own play button. */}
+      <div
+        role="button"
+        tabIndex={0}
+        className={cn(ATTACHMENT_CARD, "cursor-pointer text-left transition-colors group-hover/chip:border-input")}
         title={t("assetCardHint", { name: asset.name })}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            revealRef(asset);
+          }
+        }}
         draggable
         onDragStart={(e) => {
           // Project assets keep the timeline-placement payload; the ref rides
@@ -2567,17 +2606,8 @@ function MessageAssetCard({ asset }: { asset: AssetRef }) {
           useLightbox.getState().open(lightboxItemFromRef(asset));
         }}
       >
-        <RefThumb
-          item={asset}
-          className={cn(
-            asset.kind === "audio" ? "h-12 w-full" : "size-16",
-            "transition-colors group-hover/chip:border-input",
-          )}
-        />
-        <span className="w-full truncate text-[10px] text-muted-foreground">
-          {asset.name}
-        </span>
-      </button>
+        <RefFace item={asset} />
+      </div>
       <DropdownMenu>
         <DropdownMenuTrigger
           render={
@@ -2947,14 +2977,14 @@ const MessageView = memo(function MessageView({
     const cards = attachments.filter(refHasCard);
     return (
       <div className="ai-msg-user group mb-3 flex flex-col items-end gap-1">
-        {cards.length > 0 && (
-          <div className="flex max-w-[85%] flex-wrap justify-end gap-1.5">
-            {cards.map((a) => (
-              <MessageAssetCard key={`${a.scope}:${a.id}`} asset={a} />
-            ))}
-          </div>
-        )}
-        <UnmentionedRefPills text={text} refs={attachments} className="max-w-[85%] justify-end" />
+        {/* Every attachment as a card in one row: the ones a click reveals,
+            then the notes and folders the text doesn't name. */}
+        <div className="flex max-w-[85%] flex-wrap justify-end gap-1.5 empty:hidden">
+          {cards.map((a) => (
+            <MessageAssetCard key={`${a.scope}:${a.id}`} asset={a} />
+          ))}
+          <UnmentionedRefCards text={text} refs={attachments} className="contents" />
+        </div>
         {text && (
           <div className="max-w-[85%] rounded-2xl rounded-br-md bg-neutral-900 px-3 py-2 text-[12.5px] leading-relaxed break-words whitespace-pre-wrap text-white">
             <MentionedText text={text} attachments={attachments} onDark />
@@ -3130,14 +3160,17 @@ function ThreadRenders({ threadId }: { threadId: string }) {
   );
 }
 
-function ModelSelector({
+export function ModelSelector({
   info,
   model,
   onSelect,
+  className,
 }: {
   info: ModelsInfo | null;
   model: string;
   onSelect: (id: string) => void;
+  /** The trigger's size where it sits beside larger buttons. */
+  className?: string;
 }) {
   const t = useTranslations("chat.panel");
   // Model names are product names; the hidden test model is described.
@@ -3195,7 +3228,12 @@ function ModelSelector({
 
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger className="ai-model-trigger flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
+      <DropdownMenuTrigger
+        className={cn(
+          "ai-model-trigger flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
+          className,
+        )}
+      >
         <Sparkles className="size-3" />
         {currentLabel}
         <ChevronDown className="size-3" />

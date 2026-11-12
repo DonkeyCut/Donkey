@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import Link from "next/link";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
@@ -19,7 +19,7 @@ import {
 } from "@/cut/lib/assetRef";
 import { MEDIA_CORS } from "@/cut/lib/mediaCors";
 import { isCollectionRef, useRefFor, useRefCandidates } from "@/cut/lib/assetRef";
-import { refreshMentionSources } from "@/cut/lib/queries";
+import { refreshMentionSources, useNotes } from "@/cut/lib/queries";
 import { payloadFromHtml, payloadRefsIn } from "@/cut/lib/cutClipboard";
 import { reportSwallowed } from "@/cut/lib/report";
 import { useInView } from "@/cut/hooks/useInView";
@@ -48,12 +48,13 @@ import {
 import { parseTimeInput } from "@/cut/components/ScrubValue";
 import { ValueSlider } from "@/cut/components/ValueSlider";
 import { cn } from "@/lib/utils";
+import { ATTACHMENT_CARD, AudioFace, extensionOf, FolderFace, NoteFace, TextFace } from "./AttachmentFaces";
 
 function CollectionLink({ item, children, className }: { item: AssetRef; children: ReactNode; className?: string }) {
   // A note or another project opens in its own tab; a folder reveals in place.
   const href = item.scope === "note"
-    ? `${homeHref(CUT_APP_BASE, "library")}?note=${encodeURIComponent(item.id)}`
-    : item.scope === "projectDoc" ? projectHref(CUT_APP_BASE, item.id, "projects") : null;
+    ? `${homeHref(CUT_APP_BASE, "assets")}?type=notes&note=${encodeURIComponent(item.id)}`
+    : item.scope === "projectDoc" ? projectHref(CUT_APP_BASE, item.id, "home") : null;
   return href
     ? <Link href={href} target="_blank" title={item.name} className={className}>{children}</Link>
     : <button type="button" onClick={() => revealRef(item)} title={item.name} className={className}>{children}</button>;
@@ -409,6 +410,79 @@ export function UnmentionedRefPills({
       {pills.map((r) => (
         <RefTokenChip key={`${r.scope}:${r.id}`} item={r} />
       ))}
+    </div>
+  );
+}
+
+// The last step of a ref's path name: "Notes / Script" reads as "Script".
+const leafName = (name: string) => name.split(" / ").at(-1) ?? name;
+
+/**
+ * A sent ref's face, read from the ref itself: the chat keeps refs, so the
+ * face is what a ref can tell — its media, a note's paper from the notes
+ * list, a folder's name, and otherwise its name and type.
+ */
+export function RefFace({ item }: { item: AssetRef }) {
+  const t = useTranslations("home.start");
+  const notes = useNotes(item.scope === "note");
+  if (item.scope === "note") {
+    const note = notes.data?.notes.find((n) => n.id === item.id);
+    return <NoteFace title={note?.title || leafName(item.name)} body={note?.body ?? ""} colorIndex={note?.colorIndex ?? 0} />;
+  }
+  if (item.scope === "folder") {
+    return <FolderFace name={leafName(item.name)} />;
+  }
+  if (item.scope === "projectDoc") {
+    return <TextFace name={leafName(item.name)} badge={t("chipProject")} />;
+  }
+  if (item.kind === "audio") {
+    return <AudioFace url={item.url} duration={item.duration ?? 0} name={leafName(item.name)} />;
+  }
+  if (item.kind === "video" || item.kind === "image") {
+    return <RefThumb item={item} className="absolute inset-0 size-full rounded-none border-0" />;
+  }
+  if (item.entityKind === "template") {
+    return <TextFace name={item.name} badge={t("chipTemplate")} />;
+  }
+  if (item.preview) {
+    // eslint-disable-next-line @next/next/no-img-element -- refs point at engine/static files, not Next-optimizable images
+    return <img src={item.preview} alt="" className="absolute inset-0 size-full object-contain p-3" />;
+  }
+  return <TextFace name={item.name} badge={extensionOf(item.name)} />;
+}
+
+/** The card-less refs a sent message carries without naming them in its
+ * text, as attachment cards: a note opens, a folder reveals, a project opens
+ * in its own tab. */
+export function UnmentionedRefCards({
+  text,
+  refs,
+  className,
+}: {
+  text: string;
+  refs: AssetRef[];
+  className?: string;
+}) {
+  const named = splitMentions(text, refs).filter((p): p is AssetRef => typeof p !== "string");
+  const cards = refs.filter((r) => !refHasCard(r) && !named.some((n) => sameRef(n, r)));
+
+  if (cards.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className={cn("flex flex-wrap gap-1.5", className)}>
+      {cards.map((r) =>
+        isCollectionRef(r) ? (
+          <CollectionLink key={`${r.scope}:${r.id}`} item={r} className={ATTACHMENT_CARD}>
+            <RefFace item={r} />
+          </CollectionLink>
+        ) : (
+          <span key={`${r.scope}:${r.id}`} className={ATTACHMENT_CARD}>
+            <RefFace item={r} />
+          </span>
+        ),
+      )}
     </div>
   );
 }
@@ -1058,6 +1132,42 @@ function mentionAtCaret(value: string, caret: number): { start: number; query: s
   return { start: at, query };
 }
 
+/** Where a menu opened at character `at` of the composer goes: just under
+ * that character's line, in `root`'s coordinates, kept `width` inside the
+ * root's right edge. The mirror's plain-text spans name their offsets, so
+ * the character is found in the layout without measuring the textarea. */
+function caretAnchor(
+  mirror: HTMLElement | null,
+  root: HTMLElement | null,
+  at: number,
+  width: number
+): { left: number; top: number } | null {
+  if (!mirror || !root) {
+    return null;
+  }
+
+  // The plain span holding `at`, and the text node inside it.
+  const spans = Array.from(mirror.querySelectorAll<HTMLElement>("[data-seg-start]"));
+  const span = spans.findLast((el) => Number(el.dataset.segStart) <= at);
+  const node = span?.firstChild;
+  if (!span || !node || node.nodeType !== Node.TEXT_NODE) {
+    return null;
+  }
+
+  // One character's box: the `@` itself.
+  const offset = Math.min(at - Number(span.dataset.segStart), (node.textContent ?? "").length);
+  const range = document.createRange();
+  range.setStart(node, offset);
+  range.setEnd(node, Math.min(offset + 1, (node.textContent ?? "").length));
+  const box = range.getBoundingClientRect();
+  const frame = root.getBoundingClientRect();
+  const maxLeft = Math.max(0, frame.width - width);
+  return {
+    left: Math.min(Math.max(0, box.left - frame.left), maxLeft),
+    top: box.bottom - frame.top + MENU_GAP,
+  };
+}
+
 /** The preview's moment on the `@` menu's playhead row. Mounted only while
  * the menu is open, and reading the clock a few times a second: the composer
  * itself never re-renders on the playhead. */
@@ -1268,6 +1378,30 @@ function MentionPill({
  * Submit behavior is the caller's: `submitKey` picks plain Enter (chat) or
  * ⌘/Ctrl+Enter (creators).
  */
+/** A key the composer hands a custom `@` menu while it is open. */
+export type MentionMenuKey = "up" | "down" | "pick";
+
+/** A custom menu's answer to a key: whether it used it. */
+export type MentionKeyHandler = (key: MentionMenuKey) => boolean;
+
+/** What a custom `@` menu is given: the text typed after `@`, the way to
+ * write a ref into the composer, and where to hand its key handler (null
+ * takes it back). */
+export type MentionMenu = {
+  query: string;
+  pick: (ref: AssetRef) => void;
+  bindKeys: (handler: MentionKeyHandler | null) => void;
+};
+
+/** A caller's `@` menu, drawn as its own component so it renders with
+ * the props it is handed. */
+function CustomMenu({ render, ...menu }: MentionMenu & { render: (menu: MentionMenu) => ReactNode }) {
+  return render(menu);
+}
+
+/** How far below the caret's line a custom menu opens, in pixels. */
+const MENU_GAP = 6;
+
 export function MentionTextarea({
   value,
   onChange,
@@ -1285,6 +1419,9 @@ export function MentionTextarea({
   onPasteFiles,
   onRemoveLastRef,
   onInsertTime,
+  renderMenu,
+  menuWidth = 0,
+  onPickRef,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -1320,6 +1457,15 @@ export function MentionTextarea({
    * preview is sitting on; the mark comes with it so the caller can re-read
    * the moment if the cut moves before the message goes out. */
   onInsertTime?: (mark: TimeMark) => void;
+  /** A menu of the caller's own in place of the built-in list: opened by any
+   * `@` (before anything is typed after it too), placed under the `@` itself,
+   * and driven by the arrow keys and Enter through `keys`. */
+  renderMenu?: (menu: MentionMenu) => ReactNode;
+  /** The custom menu's width, so it is kept inside the composer. */
+  menuWidth?: number;
+  /** Take a ref picked off the `@` menu as an attachment: the typed `@query`
+   * goes and no token is written. */
+  onPickRef?: (ref: AssetRef) => void;
 }) {
   const t = useTranslations("chat.assetRefs");
   const taRef = useRef<HTMLTextAreaElement>(null);
@@ -1478,7 +1624,20 @@ export function MentionTextarea({
     !inResolved &&
     [PLAYHEAD_HANDLE, PLAYHEAD_NAME].some((n) => n.startsWith(mention.query.toLowerCase()));
   const rowCount = matches.length + (timeRow ? 1 : 0);
-  const open = rowCount > 0;
+  // A custom menu opens on any live mention and owns its own list.
+  const customOpen = !!renderMenu && !!mention && dismissed !== mention.start && !inResolved;
+  const open = renderMenu ? customOpen : rowCount > 0;
+  const menuKeys = useRef<MentionKeyHandler | null>(null);
+  const bindKeys = useCallback((handler: MentionKeyHandler | null) => {
+    menuKeys.current = handler;
+  }, []);
+  // Where the custom menu sits: under the `@` being typed, measured off the
+  // mirror's text, in the root's coordinates.
+  const [anchor, setAnchor] = useState<{ left: number; top: number } | null>(null);
+  const anchorAt = customOpen && mention ? mention.start : null;
+  useLayoutEffect(() => {
+    setAnchor(anchorAt === null ? null : caretAnchor(backdropRef.current, rootRef.current, anchorAt, menuWidth));
+  }, [anchorAt, menuWidth, value]);
   // Each keystroke re-ranks the list, so a highlight chosen under a previous
   // query derives back to the best (first) match instead of holding a stale
   // arrow/hover position.
@@ -1581,6 +1740,11 @@ export function MentionTextarea({
   };
 
   const pick = (ref: AssetRef) => {
+    if (onPickRef) {
+      writeToken("");
+      onPickRef(ref);
+      return;
+    }
     if (isCollectionRef(ref)) onUpsertRef?.(ref);
     writeToken(refToken(ref) + " ");
   };
@@ -1617,7 +1781,12 @@ export function MentionTextarea({
 
   return (
     <div ref={rootRef} className="relative min-w-0">
-      {open && (
+      {customOpen && mention && anchor && renderMenu && (
+        <div className="absolute z-30" style={{ left: anchor.left, top: anchor.top }}>
+          <CustomMenu render={renderMenu} query={mention.query} pick={pick} bindKeys={bindKeys} />
+        </div>
+      )}
+      {open && !renderMenu && (
         <div
           className={cn(
             "ref-mention-menu absolute inset-x-0 z-30 flex max-h-56 flex-col overflow-y-auto rounded-lg border border-border bg-popover p-1 shadow-lg",
@@ -1828,7 +1997,20 @@ export function MentionTextarea({
               }
             }
           }
-          if (open) {
+          if (customOpen) {
+            const key: MentionMenuKey | null =
+              e.key === "ArrowDown" ? "down" : e.key === "ArrowUp" ? "up" : e.key === "Enter" || e.key === "Tab" ? "pick" : null;
+            if (key && menuKeys.current?.(key)) {
+              e.preventDefault();
+              return;
+            }
+            if (e.key === "Escape") {
+              e.preventDefault();
+              setDismissed(mention?.start ?? null);
+              return;
+            }
+          }
+          if (open && !renderMenu) {
             if (e.key === "ArrowDown" || e.key === "ArrowUp") {
               e.preventDefault();
               setSel((selIndex + (e.key === "ArrowDown" ? 1 : rowCount - 1)) % rowCount);
@@ -1888,7 +2070,7 @@ export function MentionTextarea({
               />
             );
           }
-          if (!seg.ref) return <span key={i}>{seg.text}</span>;
+          if (!seg.ref) return <span key={i} data-seg-start={seg.start}>{seg.text}</span>;
           // A side facing another pill across a single space keeps its bleed
           // off — two bleeds would swallow the only gap between the pills.
           // A moment counts as a pill here too.

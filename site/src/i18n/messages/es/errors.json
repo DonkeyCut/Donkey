@@ -425,7 +425,8 @@
     "text": "Tu texto",
     "frame": "Fotograma {time}",
     "copy": "Copia de {name}",
-    "notes": "Notas"
+    "notes": "Notas",
+    "templateAssets": "Recursos de plantilla"
   },
   "template_missing": "Esta plantilla ya no está disponible.",
   "template_search_failed": "La búsqueda de plantillas no está disponible en este momento.",

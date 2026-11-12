@@ -160,6 +160,7 @@ export function LibraryCard({
   onShare,
   onRename,
   onDragStartExtra,
+  corner = "actions",
 }: {
   asset: LibraryAsset;
   sharedMedia?: SharedMedia;
@@ -185,6 +186,9 @@ export function LibraryCard({
   /** A refusal shows on the card with its reason. */
   onRename?: (name: string) => Promise<unknown>;
   onDragStartExtra?: (e: React.DragEvent) => void;
+  /** What the top-right corner holds: the shelf badge and the actions menu,
+   * or nothing, for a picker that puts its checkbox there. */
+  corner?: "actions" | "pick";
 }) {
   const t = useTranslations("home.card");
   const locale = useLocale();
@@ -482,7 +486,7 @@ export function LibraryCard({
                 {formatBytes(sizeBytes, locale)}
               </span>
             )}
-            {bothShelves && (
+            {bothShelves && corner === "actions" && (
               <ShelfBadge
                 residency={a.residency}
                 offline={offline}
@@ -494,7 +498,7 @@ export function LibraryCard({
                 )}
               />
             )}
-            <CardActionsMenu
+            {corner === "actions" && <CardActionsMenu
               sheet={font}
               className="absolute top-1.5 right-1.5"
               onUse={onUse}
@@ -506,7 +510,7 @@ export function LibraryCard({
               downloadDisabled={offline}
               onOpenOriginal={a.source?.url ? () => openExternal(a.source!.url) : undefined}
               onDelete={onDelete}
-            />
+            />}
             {renameError && (
               <TooltipProvider>
                 <Tooltip>

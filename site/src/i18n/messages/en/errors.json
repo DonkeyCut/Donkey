@@ -425,7 +425,8 @@
     "text": "Your text",
     "frame": "Frame {time}",
     "copy": "{name} copy",
-    "notes": "Notes"
+    "notes": "Notes",
+    "templateAssets": "Template Assets"
   },
   "template_missing": "This template isn't available anymore.",
   "template_search_failed": "Template search isn't available right now.",

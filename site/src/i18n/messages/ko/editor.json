@@ -333,7 +333,7 @@
     "fullscreen": "전체 화면",
     "chat": "채팅",
     "chatShortcut": "채팅 ({key})",
-    "backTo": "{tab, select, library {라이브러리로 돌아가기} templates {템플릿으로 돌아가기} other {프로젝트로 돌아가기}}",
+    "backTo": "{tab, select, assets {에셋으로 돌아가기} templates {템플릿으로 돌아가기} other {홈으로 돌아가기}}",
     "rename": "프로젝트 이름 바꾸기",
     "importsFailed": "{count, plural, other {#개 가져오기 실패}}",
     "retry": "다시 시도",
@@ -353,7 +353,7 @@
     "moving": "이동 중…"
   },
   "editor": {
-    "backTo": "{tab, select, library {라이브러리로 돌아가기} templates {템플릿으로 돌아가기} other {프로젝트로 돌아가기}}",
+    "backTo": "{tab, select, assets {에셋으로 돌아가기} templates {템플릿으로 돌아가기} other {홈으로 돌아가기}}",
     "needsApp": "로컬 프로젝트예요 — 이 Mac에 저장되어 있어요. Donkey 앱을 열면 여기서 열려요.",
     "shareGone": "더 이상 유효하지 않은 공유 링크예요.",
     "conflictReloaded": "다른 곳에서 저장된 최신 버전을 다시 불러왔어요.",

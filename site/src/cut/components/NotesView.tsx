@@ -3,7 +3,7 @@
 import { useEffect, useImperativeHandle, useRef, useState, type Ref } from "react";
 import { useSearchParams } from "next/navigation";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { Trash2 } from "lucide-react";
 import { useDeleteKey } from "@/cut/hooks/useDeleteKey";
 import { useTabTitle } from "@/cut/hooks/useTabTitle";
@@ -18,6 +18,7 @@ import {
   saveNote,
   saveNoteLabel,
   type CutNote,
+  NOTE_INK,
 } from "@/cut/lib/notes";
 import { homeHref, useCutBase } from "@/cut/lib/nav";
 import { CUT_NOTES } from "@/cut/lib/chatRuntime";
@@ -27,6 +28,8 @@ import { cn } from "@/lib/utils";
 import { setObjectDragImage } from "@/cut/lib/assetDrag";
 import { additiveClick } from "@/cut/lib/hostKeys";
 import { PICKED_RING } from "@/cut/lib/assetPick";
+import { formatDate } from "@/cut/lib/time";
+import { ASSET_ROW, ASSET_ROW_PICKED } from "./assets/assetTable";
 import { Marquee, useTilePicks } from "./desktopFolders";
 import { CardActionsMenu } from "./CardActionsMenu";
 import { DeleteConfirm, SelectionMenu, usePickWords, useSelectionMenu } from "./selectionMenu";
@@ -35,7 +38,6 @@ import { NoteComposer, noteChanged, type NoteDraft } from "./NoteComposer";
 import { NoteBodyPreview } from "./NoteBodyPreview";
 
 // The note paper's ink, matching the iOS app.
-const NOTE_INK = "#201a0d";
 
 // A dragged selection of notes rides the Library's own move: a JSON array of
 // ids, filed by the Library's folder tiles and crumb.
@@ -144,12 +146,29 @@ const noteWrite = (d: NoteDraft): NoteWrite => ({
  * teleprompter, so a script drafted at the desk is on the camera by the time
  * the phone is in hand. The Library's folders hold notes beside its files. */
 export type NotesViewHandle = { create: () => void };
+
+/** The notes a folder lists: the ones filed in it, or with a search, every
+ * note whose title or text holds it. */
+export function notesShownIn(list: CutNote[], library: Props["library"], query: string): CutNote[] {
+  const search = query.trim().toLowerCase();
+  if (search) {
+    return list.filter((n) => `${n.title}\n${n.body}`.toLowerCase().includes(search));
+  }
+  return list.filter((n) =>
+    noteInLibraryFolder(n, library.folderId, library.folderId === null ? undefined : library.residency));
+}
 type Props = {
   library: { folderId: string | null; residency: Residency; name: string };
+  /** A search: when set, every note whose title or text holds it shows,
+   * whatever folder it is filed in. */
+  query?: string;
+  /** Paper tiles by default; `rows` fills the Assets list's columns. */
+  layout?: "tiles" | "rows";
   ref?: Ref<NotesViewHandle>;
 };
-export function NotesView({ library, ref }: Props) {
+export function NotesView({ library, query = "", layout = "tiles", ref }: Props) {
   const t = useTranslations("home");
+  const locale = useLocale();
   const { pickLabel } = usePickWords();
   const client = useQueryClient();
   const base = useCutBase();
@@ -182,8 +201,7 @@ export function NotesView({ library, ref }: Props) {
   const params = useSearchParams();
   const openNoteId = params.get("note");
   // What is filed right here: the notes the open Library folder holds.
-  const shown = list.filter((n) =>
-    noteInLibraryFolder(n, library.folderId, library.folderId === null ? undefined : library.residency));
+  const shown = notesShownIn(list, library, query);
   // Notes pick the way every tile grid does, and a pick reaches only the
   // notes on screen: a note picked in another folder never rides a delete.
   const shownIds = shown.map((n) => n.id);
@@ -204,12 +222,14 @@ export function NotesView({ library, ref }: Props) {
   useTabTitle(draft ? draft.title.trim() || t("notes.untitled") : null);
 
   const reload = () => void client.invalidateQueries({ queryKey: notesKey });
+  // The page's own query rides along (the open folder, the type tab), so
+  // closing a note comes back to the same view.
   const notesHref = (note?: string | null) => {
-    const q = new URLSearchParams();
-    if (library.folderId) q.set("folder", library.folderId);
+    const q = new URLSearchParams(params.toString());
+    q.delete("note");
     if (note) q.set("note", note);
-    const query = q.toString();
-    return query ? `${homeHref(base, "library")}?${query}` : homeHref(base, "library");
+    const qs = q.toString();
+    return qs ? `${homeHref(base, "assets")}?${qs}` : homeHref(base, "assets");
   };
   // Opening a note only changes this page's query, so it goes through the
   // history API. This page is prefetched as a static shell, and a router push
@@ -466,7 +486,7 @@ export function NotesView({ library, ref }: Props) {
   return (
     <div
       ref={pageRef}
-      className={shown.length > 0 ? "mb-6" : undefined}
+      className={shown.length > 0 && layout === "tiles" ? "mb-6" : undefined}
       onContextMenu={ctx.onContextMenu}
     >
       {failedDraft && <p role="alert" className="py-3 text-sm text-destructive">{t("notes.saveFailed")} <button className="underline" onClick={() => { edit(failedDraft); openAt(failedDraft.id); setFailedDraft(null); }}>{t("notes.reopen")}</button></p>}
@@ -488,7 +508,44 @@ export function NotesView({ library, ref }: Props) {
         />
       )}
       {notes.isError && <p role="alert" className="py-3 text-sm text-destructive">{t("notes.loadFailed")} <button onClick={reload} className="underline">{t("notes.retry")}</button></p>}
-      {shown.length > 0 && (
+      {/* A row per note in the Assets list: its paper colour, its title, and
+          when it was last written. */}
+      {layout === "rows" &&
+        shown.map((n) => (
+          <div
+            key={n.id}
+            data-sel-id={n.id}
+            draggable
+            onDragStart={(e) => onCardDragStart(e, n.id)}
+            onDragEnd={clearRefDrag}
+            className={cn(ASSET_ROW, "group", selected.has(n.id) && ASSET_ROW_PICKED)}
+            onClick={(e) => {
+              if (!additiveClick(e)) {
+                openNote(n);
+                return;
+              }
+              e.preventDefault();
+              pickTile(e, n.id, shownIds);
+            }}
+          >
+            <span className="flex min-w-0 items-center gap-2.5">
+              <span
+                aria-hidden
+                className="size-4 shrink-0 rounded-[4px] border border-black/10 dark:border-white/15"
+                style={{ backgroundColor: noteColor(n.colorIndex).background }}
+              />
+              <span className="truncate font-medium">{n.title.trim() || t("notes.untitledNote")}</span>
+            </span>
+            <span />
+            <span />
+            <span className="text-xs text-muted-foreground">{formatDate(n.updatedAt, locale, t("justNow"))}</span>
+            <CardActionsMenu
+              className="bg-transparent text-muted-foreground hover:bg-muted hover:text-foreground"
+              onDelete={() => setDeletingNotes(setOf(n).map((m) => m.id))}
+            />
+          </div>
+        ))}
+      {layout === "tiles" && shown.length > 0 && (
         <Marquee
           className="flex flex-wrap items-start gap-4"
           // The notes are one row among the Library's files, sized to what

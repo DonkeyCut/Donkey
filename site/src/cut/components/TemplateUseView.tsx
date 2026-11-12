@@ -68,7 +68,7 @@ function useTemplateCopy(template: GalleryTemplate | undefined, run: string): Co
       return;
     }
     started.current = true;
-    const open = (projectId: string) => router.replace(projectHref(base, projectId, "projects"));
+    const open = (projectId: string) => router.replace(projectHref(base, projectId, "home"));
     const earlier = run ? madeFor(run) : null;
     if (earlier) {
       open(earlier);

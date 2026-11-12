@@ -425,7 +425,8 @@
     "text": "テキスト",
     "frame": "フレーム {time}",
     "copy": "{name}のコピー",
-    "notes": "ノート"
+    "notes": "ノート",
+    "templateAssets": "テンプレートアセット"
   },
   "template_missing": "このテンプレートは利用できなくなりました。",
   "template_search_failed": "現在、テンプレート検索を利用できません。",

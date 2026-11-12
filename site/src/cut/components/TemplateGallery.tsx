@@ -64,9 +64,14 @@ import { formatTime } from "@/cut/lib/time";
 import type { ProjectSummary } from "@/cut/lib/types";
 import { errorFromBody } from "@/cut/lib/userError";
 import { track } from "@/lib/analytics";
-import { CardPreview } from "./ProjectsHome";
+import { CardPreview } from "./assets/ProjectCard";
 import { DeleteConfirm } from "./selectionMenu";
-import { GalleryTile, type PanelNav } from "./GalleryTile";
+import {
+  GalleryTile,
+  TemplateCaption,
+  TemplateFacts,
+  type PanelNav,
+} from "./GalleryTile";
 import { TemplateDetail } from "./TemplateDetail";
 import { TemplateSearch } from "./TemplateSearch";
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
@@ -74,7 +79,13 @@ import { Dialog, DialogPortal } from "@/components/ui/dialog";
 
 // The gallery's filters, each a URL param so Back and reload keep the view.
 // Source shows Donkey's templates by default, or the person's own.
-const FILTER_KEYS = ["source", "category", "aspect", "length", "style"] as const;
+const FILTER_KEYS = [
+  "source",
+  "category",
+  "aspect",
+  "length",
+  "style",
+] as const;
 type FilterKey = (typeof FILTER_KEYS)[number];
 
 const TEMPLATE_SOURCES = ["mine"] as const;
@@ -96,7 +107,9 @@ const OPTIONS: Record<FilterKey, readonly string[]> = {
 const DEFAULT_ASPECT = "9:16";
 
 type OwnTemplate = { project: ProjectSummary; residency: Residency };
-type Card = { kind: "own"; template: OwnTemplate } | { kind: "gallery"; template: GalleryTemplate };
+type Card =
+  | { kind: "own"; template: OwnTemplate }
+  | { kind: "gallery"; template: GalleryTemplate };
 
 // Cards per page, and the URL param that holds the page so Back and reload
 // keep it.
@@ -115,7 +128,6 @@ function pageFrom(raw: string | null): number {
   const n = Number(raw);
   return Number.isInteger(n) && n > 1 ? n : 1;
 }
-
 
 /** The filter a URL asks for, ignoring values the gallery doesn't know. */
 function filterFrom(params: URLSearchParams): Filter {
@@ -141,7 +153,7 @@ function filterOwn(all: OwnTemplate[], f: Filter): OwnTemplate[] {
   return all.filter(
     ({ project: p }) =>
       (!f.aspect || (p.aspect ?? DEFAULT_ASPECT) === f.aspect) &&
-      (!f.length || lengthOf(p.duration) === f.length)
+      (!f.length || lengthOf(p.duration) === f.length),
   );
 }
 
@@ -154,12 +166,18 @@ function ownCandidate({ project: p }: OwnTemplate): TemplateCandidate {
 }
 
 /** The items a search kept, best fit first; every item when nothing is searched. */
-function byFit<T>(items: T[], idOf: (item: T) => string, matches: TemplateMatch[] | null): T[] {
+function byFit<T>(
+  items: T[],
+  idOf: (item: T) => string,
+  matches: TemplateMatch[] | null,
+): T[] {
   if (!matches) {
     return items;
   }
   const fit = new Map(matches.map((m) => [m.id, m.fit]));
-  return items.filter((i) => fit.has(idOf(i))).sort((a, b) => fit.get(idOf(b))! - fit.get(idOf(a))!);
+  return items
+    .filter((i) => fit.has(idOf(i)))
+    .sort((a, b) => fit.get(idOf(b))! - fit.get(idOf(a))!);
 }
 
 /** One grid of templates, Donkey's or the person's own, under one row of
@@ -191,17 +209,24 @@ export function TemplateGallery() {
   const query = new URLSearchParams(view).get(QUERY_PARAM)?.trim() ?? "";
 
   // A search reads the person's own templates too while they are the source.
-  const ownCandidates = useMemo(() => (filter.source === "mine" ? mine.map(ownCandidate) : []), [filter.source, mine]);
+  const ownCandidates = useMemo(
+    () => (filter.source === "mine" ? mine.map(ownCandidate) : []),
+    [filter.source, mine],
+  );
   const search = useTemplateSearch(query, ownCandidates);
   const matches = query ? (search.data ?? []) : null;
 
   const own = byFit(filterOwn(mine, filter), (o) => o.project.id, matches);
   const gallery = byFit(
-    filter.source === "mine" ? [] : filterTemplates(index.data?.templates ?? [], filter),
+    filter.source === "mine"
+      ? []
+      : filterTemplates(index.data?.templates ?? [], filter),
     (tpl) => tpl.id,
-    matches
+    matches,
   );
-  const loading = (filter.source !== "mine" && index.isPending) || (!!query && search.isPending);
+  const loading =
+    (filter.source !== "mine" && index.isPending) ||
+    (!!query && search.isPending);
 
   // One page of the grid: the source's templates.
   // A page past the end, after a filter narrows the list, shows the last one.
@@ -210,7 +235,10 @@ export function TemplateGallery() {
     ...gallery.map((tpl): Card => ({ kind: "gallery", template: tpl })),
   ];
   const pages = Math.max(1, Math.ceil(cards.length / PAGE_SIZE));
-  const page = Math.min(pageFrom(new URLSearchParams(view).get(PAGE_PARAM)), pages);
+  const page = Math.min(
+    pageFrom(new URLSearchParams(view).get(PAGE_PARAM)),
+    pages,
+  );
   const shown = cards.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   // Open another page and start it at the top of the gallery.
@@ -255,7 +283,7 @@ export function TemplateGallery() {
       const qs = next.toString();
       router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
     },
-    [router, pathname]
+    [router, pathname],
   );
 
   const label = (key: FilterKey, value: string): string => {
@@ -285,7 +313,7 @@ export function TemplateGallery() {
       const id = await copyAsKind(r, p.id, "project", p.name);
       void refetchProjects(client, r);
       track("project_created", { source: "template" });
-      router.push(projectHref(base, id, "projects"));
+      router.push(projectHref(base, id, "home"));
     } catch (e) {
       setError(describeError(e, t("detail.failed")));
     } finally {
@@ -300,9 +328,15 @@ export function TemplateGallery() {
     const { project, residency } = deleting;
     setBusy(project.id);
     try {
-      const res = await backendFor(residency).fetch(`/api/cut/projects/${project.id}`, { method: "DELETE" });
+      const res = await backendFor(residency).fetch(
+        `/api/cut/projects/${project.id}`,
+        { method: "DELETE" },
+      );
       if (!res.ok) {
-        throw errorFromBody(await apiJson<object>(res), tp("deleteProjectFailed"));
+        throw errorFromBody(
+          await apiJson<object>(res),
+          tp("deleteProjectFailed"),
+        );
       }
       forgetProject(project.id, residency);
       void refetchProjects(client, residency);
@@ -315,9 +349,14 @@ export function TemplateGallery() {
   };
 
   const active = FILTER_KEYS.some((k) => filter[k]) || !!query;
-  const searchError = query && search.isError ? describeError(search.error, t("searchFailed")) : null;
+  const searchError =
+    query && search.isError
+      ? describeError(search.error, t("searchFailed"))
+      : null;
 
-  const open = openId ? (index.data?.templates.find((tpl) => tpl.id === openId) ?? null) : null;
+  const open = openId
+    ? (index.data?.templates.find((tpl) => tpl.id === openId) ?? null)
+    : null;
 
   // The panel slides out with the last template still in it.
   const [panelTemplate, setShown] = useState<GalleryTemplate | null>(open);
@@ -328,7 +367,9 @@ export function TemplateGallery() {
   // Whether the open template's history entry is ours to take back off the
   // stack. One reached by the forward button already had its own.
   const pushed = useRef(false);
-  const galleryHref = view ? `${homeHref(base, "templates")}?${view}` : homeHref(base, "templates");
+  const galleryHref = view
+    ? `${homeHref(base, "templates")}?${view}`
+    : homeHref(base, "templates");
   const panel: PanelNav = {
     open: (id) => {
       // A similar template swaps in place, so closing still returns to the grid.
@@ -369,15 +410,28 @@ export function TemplateGallery() {
           <div className="mx-auto flex w-full max-w-7xl flex-col gap-2 px-4 py-3 sm:px-10">
             {/* The search, then one row of filter chips it folds away while
                 it is open; on a phone the row scrolls sideways. */}
-            <TemplateSearch query={query} busy={!!query && search.isFetching} onSearch={setQuery}>
+            <TemplateSearch
+              query={query}
+              busy={!!query && search.isFetching}
+              onSearch={setQuery}
+            >
               {FILTER_KEYS.map((key) => (
-                <Select key={key} value={filter[key] ?? ANY} onValueChange={(v) => setFilter(key, String(v))}>
-                  <SelectTrigger className="h-8 shrink-0 rounded-full border-foreground/20 px-3 text-[13px] hover:bg-muted dark:border-foreground/25" aria-label={t(`filters.${key}`)}>
+                <Select
+                  key={key}
+                  value={filter[key] ?? ANY}
+                  onValueChange={(v) => setFilter(key, String(v))}
+                >
+                  <SelectTrigger
+                    className="h-8 shrink-0 rounded-full border-foreground/20 px-3 text-[13px] hover:bg-muted dark:border-foreground/25"
+                    aria-label={t(`filters.${key}`)}
+                  >
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value={ANY} className="text-[13px]">
-                      {key === "source" ? t("sources.default") : `${t(`filters.${key}`)}: ${t("all")}`}
+                      {key === "source"
+                        ? t("sources.default")
+                        : `${t(`filters.${key}`)}: ${t("all")}`}
                     </SelectItem>
                     {OPTIONS[key].map((v) => (
                       <SelectItem key={v} value={v} className="text-[13px]">
@@ -399,21 +453,32 @@ export function TemplateGallery() {
               )}
             </TemplateSearch>
 
-            {(error ?? searchError) && <p className="text-[13px] text-destructive">{error ?? searchError}</p>}
+            {(error ?? searchError) && (
+              <p className="text-[13px] text-destructive">
+                {error ?? searchError}
+              </p>
+            )}
           </div>
         </div>
 
-        <div className={cn("mx-auto w-full max-w-7xl px-4 sm:px-10", pages > 1 ? "pb-24" : "pb-6")}>
+        <div
+          className={cn(
+            "mx-auto w-full max-w-7xl px-4 sm:px-10",
+            pages > 1 ? "pb-24" : "pb-6",
+          )}
+        >
           {loading && own.length === 0 ? (
-            <div className="grid grid-cols-1 gap-3 pt-1 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="grid grid-cols-1 gap-x-6 gap-y-10 pt-1 sm:grid-cols-2 lg:grid-cols-3">
               {Array.from({ length: SKELETON_TILES }, (_, i) => (
-                <Skeleton key={i} className="aspect-video rounded-xl" />
+                <Skeleton key={i} className="aspect-video rounded-2xl" />
               ))}
             </div>
           ) : cards.length === 0 ? (
-            <p className="py-16 text-center text-sm text-muted-foreground">{query ? t("noMatches") : t("empty")}</p>
+            <p className="py-16 text-center text-sm text-muted-foreground">
+              {query ? t("noMatches") : t("empty")}
+            </p>
           ) : (
-            <div className="grid grid-cols-1 gap-3 pt-1 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="grid grid-cols-1 gap-x-6 gap-y-10 pt-1 sm:grid-cols-2 lg:grid-cols-3">
               {shown.map((card) =>
                 card.kind === "own" ? (
                   <OwnTemplateCard
@@ -424,8 +489,12 @@ export function TemplateGallery() {
                     onDelete={() => setDeleting(card.template)}
                   />
                 ) : (
-                  <GalleryTile key={card.template.id} template={card.template} panel={panel} />
-                )
+                  <GalleryTile
+                    key={card.template.id}
+                    template={card.template}
+                    panel={panel}
+                  />
+                ),
               )}
             </div>
           )}
@@ -442,7 +511,14 @@ export function TemplateGallery() {
         </div>
       )}
 
-      {panelTemplate && <TemplatePanel template={panelTemplate} open={!!open} closeHref={galleryHref} panel={panel} />}
+      {panelTemplate && (
+        <TemplatePanel
+          template={panelTemplate}
+          open={!!open}
+          closeHref={galleryHref}
+          panel={panel}
+        />
+      )}
 
       <DeleteConfirm
         open={!!deleting}
@@ -468,12 +544,24 @@ const CURRENT_PAGE =
   "border-transparent bg-foreground/10 font-semibold hover:bg-foreground/10 dark:border-transparent dark:bg-foreground/15 dark:hover:bg-foreground/15";
 
 /** The page bar floating over the grid. */
-function GalleryPages({ page, pages, onPage }: { page: number; pages: number; onPage: (n: number) => void }) {
+function GalleryPages({
+  page,
+  pages,
+  onPage,
+}: {
+  page: number;
+  pages: number;
+  onPage: (n: number) => void;
+}) {
   return (
     <Pagination className="w-auto">
       <PaginationContent>
         <PaginationItem>
-          <PaginationPrevious className="rounded-full" disabled={page === 1} onClick={() => onPage(page - 1)} />
+          <PaginationPrevious
+            className="rounded-full"
+            disabled={page === 1}
+            onClick={() => onPage(page - 1)}
+          />
         </PaginationItem>
         {pageWindow(page, pages).map((n, i) =>
           n === null ? (
@@ -490,10 +578,14 @@ function GalleryPages({ page, pages, onPage }: { page: number; pages: number; on
                 {n}
               </PaginationLink>
             </PaginationItem>
-          )
+          ),
         )}
         <PaginationItem>
-          <PaginationNext className="rounded-full" disabled={page === pages} onClick={() => onPage(page + 1)} />
+          <PaginationNext
+            className="rounded-full"
+            disabled={page === pages}
+            onClick={() => onPage(page + 1)}
+          />
         </PaginationItem>
       </PaginationContent>
     </Pagination>
@@ -518,8 +610,11 @@ function OwnTemplateCard({
   const base = useCutBase();
   return (
     <div className="group relative">
-      <Link href={projectHref(base, p.id, "templates")} aria-label={p.name} className="block outline-none">
-        <div className="relative grid aspect-video place-items-center overflow-hidden rounded-xl bg-black group-has-focus-visible:ring-3 group-has-focus-visible:ring-ring/50">
+      <Link
+        href={projectHref(base, p.id, "templates")}
+        className="flex min-w-0 flex-col gap-3 outline-none"
+      >
+        <div className="relative grid aspect-video place-items-center overflow-hidden rounded-2xl border border-border bg-black transition-shadow group-hover:shadow-[0_6px_28px_rgba(0,0,0,0.12)] group-has-focus-visible:ring-3 group-has-focus-visible:ring-ring/50">
           {/* The project's own frame shape, whole in the tile, as gallery
               tiles stand their stills. */}
           <div
@@ -535,13 +630,9 @@ function OwnTemplateCard({
               <Loader2 className="size-5 animate-spin text-white" />
             </span>
           )}
-          <span className="absolute bottom-2 left-2 max-w-[70%] truncate rounded-md bg-black/65 px-1.5 py-0.5 text-[11px] font-medium text-white opacity-0 transition-opacity group-hover:opacity-100 group-has-focus-visible:opacity-100 pointer-coarse:opacity-100">
-            {p.name} · {t("sources.mine")}
-          </span>
-          <span className="absolute right-2 bottom-2 rounded-md bg-black/65 px-1.5 py-0.5 font-mono text-[10px] text-white tabular-nums">
-            {formatTime(p.duration)}
-          </span>
+          <TemplateFacts facts={[t("sources.mine"), formatTime(p.duration)]} />
         </div>
+        <TemplateCaption name={p.name} />
       </Link>
       <DropdownMenu>
         <DropdownMenuTrigger
@@ -572,7 +663,7 @@ function OwnTemplateCard({
 }
 
 // The template id in a template page's path, e.g. "/templates/surf-session".
-function templateAt(pathname: string): string | null {
+export function templateAt(pathname: string): string | null {
   const prefix = templatePage("");
   if (!pathname.startsWith(prefix) || pathname.length === prefix.length) {
     return null;
@@ -583,7 +674,7 @@ function templateAt(pathname: string): string | null {
 /** A template over the gallery: a panel that slides in from the right edge
  * and holds the template's player, timeline and details, the grid dimmed on
  * its left. */
-function TemplatePanel({
+export function TemplatePanel({
   template,
   open,
   closeHref,
@@ -600,8 +691,14 @@ function TemplatePanel({
       <DialogPortal>
         <DialogPrimitive.Backdrop className="fixed inset-0 z-50 bg-black/60 transition-opacity duration-300 ease-out supports-backdrop-filter:backdrop-blur-xs data-ending-style:opacity-0 data-starting-style:opacity-0" />
         <DialogPrimitive.Popup className="app-surface fixed inset-y-0 right-0 z-50 w-full max-w-[1600px] overflow-hidden border-border bg-background text-foreground shadow-2xl outline-none transition-transform duration-300 ease-out data-ending-style:translate-x-full data-starting-style:translate-x-full md:w-[calc(100vw-3rem)] md:rounded-l-2xl md:border-l">
-          <DialogPrimitive.Title className="sr-only">{localized(template.name, locale)}</DialogPrimitive.Title>
-          <TemplateDetail template={template} closeHref={closeHref} panel={panel} />
+          <DialogPrimitive.Title className="sr-only">
+            {localized(template.name, locale)}
+          </DialogPrimitive.Title>
+          <TemplateDetail
+            template={template}
+            closeHref={closeHref}
+            panel={panel}
+          />
         </DialogPrimitive.Popup>
       </DialogPortal>
     </Dialog>

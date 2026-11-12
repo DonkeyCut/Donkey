@@ -129,7 +129,7 @@ export function TemplateInfo({ template, panel }: { template: GalleryTemplate; p
       {similar.length > 0 && (
         <div className="flex flex-col gap-3 border-t border-border pt-4">
           <h2 className="text-[13px] font-semibold">{t("detail.similar")}</h2>
-          <div className="grid grid-cols-1 gap-2">
+          <div className="grid grid-cols-1 gap-6">
             {similar.map((s) => (
               <GalleryTile key={s.id} template={s} panel={panel} />
             ))}

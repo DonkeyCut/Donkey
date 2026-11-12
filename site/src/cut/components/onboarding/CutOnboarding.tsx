@@ -297,7 +297,7 @@ export function CutOnboarding() {
       return;
     }
     openedStarter.current = true;
-    const href = projectHref(base, starterProjectId(userId), "projects");
+    const href = projectHref(base, starterProjectId(userId), "home");
     if (underneath.current === href) {
       return;
     }

@@ -336,7 +336,7 @@ export function TopBar({
       const newId = await moveOpenProject(cutMode === "browser" ? "browser" : "local", "cloud", (done, total) =>
         setMoveProgress(t("movingMedia", { done, total }))
       );
-      window.location.href = projectHref(base, newId, "projects", null);
+      window.location.href = projectHref(base, newId, "home", null);
     } catch (e) {
       setMoveError(describeError(e, t("moveFailed")));
       setMoving(false);

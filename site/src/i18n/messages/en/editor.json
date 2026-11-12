@@ -333,7 +333,7 @@
     "fullscreen": "Fullscreen",
     "chat": "Chat",
     "chatShortcut": "Chat ({key})",
-    "backTo": "{tab, select, library {Back to library} templates {Back to templates} other {Back to projects}}",
+    "backTo": "{tab, select, assets {Back to assets} templates {Back to templates} other {Back to home}}",
     "rename": "Rename project",
     "importsFailed": "{count, plural, one {# import failed} other {# imports failed}}",
     "retry": "Retry",
@@ -353,7 +353,7 @@
     "moving": "Moving…"
   },
   "editor": {
-    "backTo": "{tab, select, library {Back to library} templates {Back to templates} other {Back to projects}}",
+    "backTo": "{tab, select, assets {Back to assets} templates {Back to templates} other {Back to home}}",
     "needsApp": "This is a local project — it lives on this Mac. Open the Donkey app and it opens here.",
     "shareGone": "This share is no longer available.",
     "conflictReloaded": "Reloaded a newer version saved elsewhere.",

@@ -1,7 +1,7 @@
 {
   "tabs": {
-    "projects": "Projetos",
-    "library": "Biblioteca",
+    "home": "Início",
+    "assets": "Ativos",
     "templates": "Modelos"
   },
   "newProject": {
@@ -17,6 +17,55 @@
     "create": "Criar novo projeto",
     "limit": "Esta conta atingiu o limite de projetos gratuitos. Faça upgrade para o Pro no Donkey Cut para criar mais.",
     "failed": "Não foi possível criar o projeto."
+  },
+  "start": {
+    "heading": "Qual vídeo vamos criar?",
+    "promptLabel": "Descreva um vídeo",
+    "placeholder": "Descreva a edição que você deseja. Arraste arquivos ou use @ para adicionar clipes, pastas, notas ou modelos.",
+    "placeholderFiles": "O que devo criar com isso?",
+    "attach": "Adicionar de Ativos",
+    "voice": "Entrada de voz",
+    "send": "Criar",
+    "blankProject": "Projeto em branco",
+    "projects": "Projetos",
+    "viewAllProjects": "Ver todos os projetos",
+    "previousProjects": "Projetos anteriores",
+    "nextProjects": "Próximos projetos",
+    "projectsPage": "Projetos, página {page}",
+    "templates": "Modelos",
+    "browseAll": "Explorar tudo",
+    "allCategories": "Tudo",
+    "storageLabel": "Novos projetos são salvos em",
+    "storageButton": "Novos projetos são salvos em {place}",
+    "dropTitle": "Solte para iniciar um projeto",
+    "dropText": "Os arquivos entram no seu prompt e são salvos em Ativos. Vídeo, imagens, áudio e fontes.",
+    "uploadsFolder": "Uploads",
+    "uploading": "Enviando",
+    "uploadFailed": "Não foi possível enviar",
+    "retryUpload": "Tentar novamente",
+    "fromAssets": "Usar estes dos meus ativos do Donkey Cut: {names}",
+    "removeFile": "Remover {name}",
+    "chipTemplate": "Modelo",
+    "chipProject": "Projeto",
+    "startingFrom": "Iniciando a partir de {name}",
+    "createFailed": "Não foi possível criar o projeto.",
+    "at": {
+      "label": "Tipo de referência",
+      "recent": "Recentes",
+      "noMatches": "Nenhum resultado",
+      "filterHint": "Continue digitando para filtrar.",
+      "attachHint": "Enter para anexar.",
+      "tabs": {
+        "all": "Tudo",
+        "folders": "Pastas",
+        "clips": "Clipes",
+        "images": "Imagens",
+        "audio": "Áudio",
+        "notes": "Notas",
+        "projects": "Projetos",
+        "templates": "Modelos"
+      }
+    }
   },
   "projects": {
     "badgeLocal": "Este é um projeto local",
@@ -48,6 +97,7 @@
     "foldersEmpty": "{count, plural, =1 {A pasta está vazia.} other {As pastas estão vazias.}}",
     "deletesFolders": "{count, plural, =1 {Isso exclui toda a pasta do projeto, incluindo seus arquivos de mídia e exportações.} other {Isso exclui toda a pasta de cada projeto, incluindo seus arquivos de mídia e exportações.}}",
     "cannotUndo": "Isso não pode ser desfeito.",
+    "failureOk": "OK",
     "deleteProjects": "{count, plural, =1 {Excluir projeto} other {Excluir projetos}}",
     "deleteFolder": "Excluir pasta",
     "delete": "Excluir",
@@ -327,6 +377,34 @@
       "similar": "Modelos semelhantes",
       "failed": "Não foi possível criar o projeto.",
       "missing": "Este modelo não está mais disponível."
+    }
+  },
+  "assets": {
+    "newFolder": "Nova pasta",
+    "upload": "Fazer upload",
+    "search": "Buscar projetos, clipes, áudio, fontes e notas",
+    "clearSearch": "Limpar busca",
+    "types": {
+      "all": "Tudo",
+      "projects": "Projetos",
+      "videos": "Vídeos",
+      "images": "Imagens",
+      "audio": "Áudio",
+      "fonts": "Fontes",
+      "notes": "Notas"
+    },
+    "noMatches": "Nada em Recursos corresponde a “{query}”.",
+    "emptyTitle": "Nada em Recursos ainda",
+    "emptyHint": "Faça upload de vídeos, imagens, áudio e fontes ou arraste-os para qualquer lugar desta página.",
+    "projectStaysOnShelf": "Um projeto só pode ser colocado em uma pasta no mesmo local onde está salvo. Use Mover para a nuvem ou Mover para o local para movê-lo primeiro.",
+    "picker": {
+      "title": "Adicionar de Recursos",
+      "cancel": "Cancelar",
+      "add": "Adicionar ao prompt",
+      "none": "Nada selecionado",
+      "count": "{count} selecionados",
+      "pick": "Selecionar",
+      "empty": "Nada aqui ainda."
     }
   }
 }
