@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { stubModule } from "@/lib/testing/stubModule";
 import { ConnectionLostError } from "./network";
 import type { PendingImport } from "./media";
-import { serializeDoc, useEditor } from "./store";
+import { serializeDoc, uploadsPending, useEditor } from "./store";
 import type { MediaAsset } from "./types";
 
 await stubModule<typeof import("./mediaSync")>("./mediaSync", import.meta.url, {
@@ -43,6 +43,8 @@ test("a headless save waits for the project's copies to land, so the clip they c
   let land: (name: string) => void = () => {};
   startUpload("q", { asset, localUrl: asset.url, send: () => new Promise<string>((r) => { land = r; }) });
   expect(serializeDoc(useEditor.getState()).assets).toEqual([]);
+  // A preview render waits too: the file it would name does not exist yet.
+  expect(uploadsPending(useEditor.getState().assets)).toBe(true);
 
   let settled = false;
   const waiting = uploadsSettled("q").then(() => { settled = true; });
@@ -51,6 +53,7 @@ test("a headless save waits for the project's copies to land, so the clip they c
   land("dog.mp4");
   await waiting;
   expect(serializeDoc(useEditor.getState()).assets?.map((a) => a.fileName)).toEqual(["dog.mp4"]);
+  expect(uploadsPending(useEditor.getState().assets)).toBe(false);
 });
 
 test("every file of a long drop is held at once while its uploads wait their turn", async () => {

@@ -5810,6 +5810,10 @@ function pendingKey(assets: MediaAsset[]): string {
   return key;
 }
 
+/** Whether any asset's bytes are still on their way from this tab: the saved
+ * document leaves it out, and a render naming its file would find none. */
+export const uploadsPending = (assets: MediaAsset[]): boolean => pendingKey(assets) !== "";
+
 /** Clips are held back from the document while their asset is still uploading
  * from tab-scoped bytes: one pointing at bytes this tab never finished sending
  * would reopen broken. Memoized, so autosave's change detector can compare the

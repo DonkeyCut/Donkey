@@ -86,7 +86,7 @@ import {
   shortcutReached,
 } from "@/cut/lib/shortcutGate";
 import { DOC_SAVE_HEADER } from "@/cut/lib/backend/docSave";
-import { docFieldsEdited, personAssets, projectDuration, serializeDoc, storedAssets, timelineHMax, useEditor, clipLen, type VideoTrackPlacement } from "@/cut/lib/store";
+import { docFieldsEdited, personAssets, projectDuration, serializeDoc, storedAssets, timelineHMax, uploadsPending, useEditor, clipLen, type VideoTrackPlacement } from "@/cut/lib/store";
 import { fileLandingAt } from "@/cut/lib/timelineDrop";
 import { landOnRow } from "@/cut/lib/laneTracks";
 import { playheadAt, previewAt, skimAt, stepFrame } from "@/cut/lib/playhead";
@@ -616,6 +616,9 @@ export function Editor({
       // A cut of titles and shapes over the background has a picture to show;
       // only an empty project has nothing to render a card from.
       if (projectDuration(s) <= 0) return;
+      // A file still copying in has no stored bytes for the render to read;
+      // its landing is an asset change, which stages the cut again.
+      if (uploadsPending(s.assets)) return;
       queue.stage({ operation: projectOperation(projectId), doc: renderDoc(s) });
     });
     return () => {
