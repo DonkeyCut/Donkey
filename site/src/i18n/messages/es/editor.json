@@ -182,23 +182,6 @@
     "preparing": "Preparando…",
     "startFailed": "No se pudo iniciar la exportación"
   },
-  "recordDialog": {
-    "deviceFallback": "No se pudo iniciar ese dispositivo; se volvió al predeterminado.",
-    "cameraBlocked": "Se bloqueó el acceso a la cámara. Permite la cámara y el micrófono para este sitio en Chrome y vuelve a intentarlo.",
-    "micBlocked": "Se bloqueó el acceso al micrófono. Permite el micrófono para este sitio en Chrome y vuelve a intentarlo.",
-    "cameraStartFailed": "Este navegador no pudo iniciar la grabación de la cámara. Verifica que ninguna otra app esté usando la cámara y vuelve a intentarlo.",
-    "startFailed": "Este navegador no pudo iniciar la grabación. Vuelve a intentarlo.",
-    "saveFailed": "No se pudo guardar la grabación. Intenta de nuevo.",
-    "emptyRecording": "La grabación quedó vacía. Verifica que ninguna otra app esté usando la cámara e intenta de nuevo.",
-    "cameraN": "Cámara {n}",
-    "micN": "Micrófono {n}",
-    "titleCamera": "Grabar cámara",
-    "titleAudio": "Grabar audio",
-    "close": "Cerrar",
-    "waiting": "Esperando permiso…",
-    "start": "Iniciar grabación",
-    "stop": "Detener y usar grabación"
-  },
   "exportDialog": {
     "title": "Exportar",
     "presetGroup": "Preajuste de exportación",
@@ -345,9 +328,6 @@
     "width": "Ancho",
     "height": "Alto",
     "aspectPresets": "Ajustes de relación de aspecto",
-    "record": "Grabar",
-    "recordCamera": "Grabar cámara",
-    "recordAudio": "Grabar audio",
     "moreActions": "Más acciones",
     "moveBody": "{from, select, browser {Copia este proyecto y su multimedia a la nube y luego lo elimina de este navegador. Las exportaciones renderizadas aquí se quedan.} other {Copia este proyecto y su multimedia a la nube y luego lo elimina de este Mac. Las exportaciones renderizadas aquí se quedan.}}",
     "moving": "Moviendo…"

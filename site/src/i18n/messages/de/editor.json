@@ -182,23 +182,6 @@
     "preparing": "Vorbereiten…",
     "startFailed": "Export konnte nicht gestartet werden"
   },
-  "recordDialog": {
-    "deviceFallback": "Dieses Gerät konnte nicht gestartet werden – zurück zum Standard gewechselt.",
-    "cameraBlocked": "Kamerazugriff wurde blockiert. Erlaube Kamera und Mikrofon für diese Website in Chrome und versuche es erneut.",
-    "micBlocked": "Mikrofonzugriff wurde blockiert. Erlaube das Mikrofon für diese Website in Chrome und versuche es erneut.",
-    "cameraStartFailed": "Dieser Browser konnte die Kameraaufnahme nicht starten. Prüfe, ob eine andere App die Kamera verwendet, und versuche es erneut.",
-    "startFailed": "Dieser Browser konnte die Aufnahme nicht starten. Versuche es erneut.",
-    "saveFailed": "Die Aufnahme konnte nicht gespeichert werden. Versuche es erneut.",
-    "emptyRecording": "Die Aufnahme ist leer. Prüfe, ob eine andere App die Kamera verwendet, und versuche es erneut.",
-    "cameraN": "Kamera {n}",
-    "micN": "Mikrofon {n}",
-    "titleCamera": "Kamera aufnehmen",
-    "titleAudio": "Audio aufnehmen",
-    "close": "Schließen",
-    "waiting": "Warte auf Berechtigung…",
-    "start": "Aufnahme starten",
-    "stop": "Stoppen und Aufnahme verwenden"
-  },
   "exportDialog": {
     "title": "Exportieren",
     "presetGroup": "Export-Voreinstellung",
@@ -345,9 +328,6 @@
     "width": "Breite",
     "height": "Höhe",
     "aspectPresets": "Seitenverhältnis-Vorlagen",
-    "record": "Aufnehmen",
-    "recordCamera": "Kamera aufnehmen",
-    "recordAudio": "Audio aufnehmen",
     "moreActions": "Weitere Aktionen",
     "moveBody": "{from, select, browser {Kopiert dieses Projekt und dessen Medien in die Cloud und entfernt es dann aus diesem Browser. Hier gerenderte Exporte bleiben erhalten.} other {Kopiert dieses Projekt und dessen Medien in die Cloud und entfernt es dann von diesem Mac. Hier gerenderte Exporte bleiben erhalten.}}",
     "moving": "Wird verschoben…"

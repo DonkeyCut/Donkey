@@ -182,23 +182,6 @@
     "preparing": "Préparation…",
     "startFailed": "Impossible de lancer l'exportation"
   },
-  "recordDialog": {
-    "deviceFallback": "Impossible de démarrer cet appareil — retour au périphérique par défaut.",
-    "cameraBlocked": "L'accès à la caméra a été bloqué. Autorisez la caméra et le micro pour ce site dans Chrome, puis réessayez.",
-    "micBlocked": "L'accès au microphone a été bloqué. Autorisez le micro pour ce site dans Chrome, puis réessayez.",
-    "cameraStartFailed": "Ce navigateur n'a pas pu démarrer l'enregistrement de la caméra. Vérifiez qu'aucune autre application ne l'utilise, puis réessayez.",
-    "startFailed": "Ce navigateur n'a pas pu démarrer l'enregistrement. Réessayez.",
-    "saveFailed": "Impossible d’enregistrer l’enregistrement. Réessayez.",
-    "emptyRecording": "L’enregistrement est vide. Vérifiez qu’aucune autre application n’utilise la caméra, puis réessayez.",
-    "cameraN": "Caméra {n}",
-    "micN": "Microphone {n}",
-    "titleCamera": "Enregistrer la caméra",
-    "titleAudio": "Enregistrer l’audio",
-    "close": "Fermer",
-    "waiting": "En attente d’autorisation…",
-    "start": "Lancer l’enregistrement",
-    "stop": "Arrêter et utiliser l’enregistrement"
-  },
   "exportDialog": {
     "title": "Exporter",
     "presetGroup": "Préréglage d’exportation",
@@ -345,9 +328,6 @@
     "width": "Largeur",
     "height": "Hauteur",
     "aspectPresets": "Préréglages de format",
-    "record": "Enregistrer",
-    "recordCamera": "Enregistrer la caméra",
-    "recordAudio": "Enregistrer l'audio",
     "moreActions": "Autres actions",
     "moveBody": "{from, select, browser {Copie ce projet et ses médias sur le cloud, puis le supprime de ce navigateur. Les exports rendus ici sont conservés.} other {Copie ce projet et ses médias sur le cloud, puis le supprime de ce Mac. Les exports rendus ici sont conservés.}}",
     "moving": "Déplacement…"

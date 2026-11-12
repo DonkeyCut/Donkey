@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { useQueryClient } from "@tanstack/react-query";
-import { Check, ChevronDown, ChevronLeft, CloudUpload, ExternalLink, Loader2, Maximize2, Mic, Monitor, MoreHorizontal, Ratio, Share2, Smartphone, Sparkles, Square, Upload, Video } from "lucide-react";
+import { Check, ChevronDown, ChevronLeft, CloudUpload, ExternalLink, Loader2, Maximize2, Monitor, MoreHorizontal, Ratio, Share2, Smartphone, Sparkles, Square, Upload } from "lucide-react";
 import { ChatStatusBadge, type ChatStatus } from "./ChatStatusBadge";
 import { Button } from "@/components/ui/button";
 import {
@@ -46,7 +46,6 @@ import { COLOR_PRESETS, ColorPicker } from "@/cut/components/ColorField";
 import type { Messages } from "@/i18n/namespaces";
 import { cn } from "@/lib/utils";
 import { CreditsPill } from "./CreditsPill";
-import { RecordDialog, type RecordMode } from "./RecordDialog";
 import { ShareDialog } from "./ShareDialog";
 import { StoragePill } from "./StoragePill";
 import { SubscribeBonusPill } from "./SubscribeBonusPill";
@@ -83,14 +82,12 @@ function ActionTip({ label, children }: { label: string; children: React.ReactNo
 
 export function TopBar({
   chatStatus,
-  onImport,
   from,
   folder,
   uploading = 0,
   copying = 0,
 }: {
   chatStatus: ChatStatus;
-  onImport: (files: File[], opts?: { origin?: "recording" }) => void;
   from?: string | null;
   folder?: string | null;
   /** Media files currently importing; on a cloud project the save indicator
@@ -119,7 +116,6 @@ export function TopBar({
   const aiOpen = useEditor((s) => s.aiOpen);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
-  const [recordMode, setRecordMode] = useState<RecordMode | null>(null);
   const { chatgpt } = useEnvironment();
   const hostMode = useHostDisplayMode();
   // The right-hand actions step down as the bar tightens: full labels →
@@ -709,29 +705,7 @@ export function TopBar({
             </DropdownMenu>
           );
         })()}
-        {!chatgpt && <DropdownMenu>
-          <DropdownMenuTrigger className="record-switch flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-xs font-medium text-muted-foreground shadow-xs transition-colors hover:text-foreground">
-            <span className="size-2 rounded-full bg-red-500" aria-hidden />
-            {t("record")}
-            <ChevronDown className="size-3" />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" style={{ width: "12rem" }}>
-            <DropdownMenuItem onClick={() => setRecordMode("camera")}>
-              <Video /> {t("recordCamera")}
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => setRecordMode("audio")}>
-              <Mic /> {t("recordAudio")}
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>}
       </div>
-      {recordMode && (
-        <RecordDialog
-          mode={recordMode}
-          onClose={() => setRecordMode(null)}
-          onUse={(file) => onImport([file], { origin: "recording" })}
-        />
-      )}
       <div className="min-w-2 flex-1" />
       {/* No clipping on the rail: stepping down is what keeps it inside the
           bar, and the hidden measuring rows need no help staying out of

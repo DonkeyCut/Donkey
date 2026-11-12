@@ -182,23 +182,6 @@
     "preparing": "正在准备…",
     "startFailed": "无法开始导出"
   },
-  "recordDialog": {
-    "deviceFallback": "无法启动该设备，已切回默认设备。",
-    "cameraBlocked": "摄像头权限被阻止。请在 Chrome 中允许此网站访问摄像头和麦克风，然后重试。",
-    "micBlocked": "麦克风权限被阻止。请在 Chrome 中允许此网站访问麦克风，然后重试。",
-    "cameraStartFailed": "此浏览器无法启动摄像头录制。请检查没有其他应用正在使用摄像头，然后重试。",
-    "startFailed": "此浏览器无法启动录制。请重试。",
-    "saveFailed": "录制内容无法保存。请重试。",
-    "emptyRecording": "录制内容为空。请检查是否有其他应用正在使用摄像头，然后重试。",
-    "cameraN": "摄像头 {n}",
-    "micN": "麦克风 {n}",
-    "titleCamera": "录制摄像头",
-    "titleAudio": "录制音频",
-    "close": "关闭",
-    "waiting": "正在等待权限…",
-    "start": "开始录制",
-    "stop": "停止并使用录制内容"
-  },
   "exportDialog": {
     "title": "导出",
     "presetGroup": "导出预设",
@@ -345,9 +328,6 @@
     "width": "宽度",
     "height": "高度",
     "aspectPresets": "宽高比预设",
-    "record": "录制",
-    "recordCamera": "录制摄像头",
-    "recordAudio": "录制音频",
     "moreActions": "更多操作",
     "moveBody": "{from, select, browser {将此项目及其媒体复制到云端，然后从此浏览器中移除。在此渲染的导出文件仍会保留。} other {将此项目及其媒体复制到云端，然后从此 Mac 中移除。在此渲染的导出文件仍会保留。}}",
     "moving": "正在移动…"

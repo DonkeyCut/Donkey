@@ -182,23 +182,6 @@
     "preparing": "Preparing…",
     "startFailed": "Couldn't start export"
   },
-  "recordDialog": {
-    "deviceFallback": "That device could not be started — switched back to the default.",
-    "cameraBlocked": "Camera access was blocked. Allow camera and microphone for this site in Chrome, then try again.",
-    "micBlocked": "Microphone access was blocked. Allow the microphone for this site in Chrome, then try again.",
-    "cameraStartFailed": "This browser could not start a camera recording. Check that no other app is using the camera, then try again.",
-    "startFailed": "This browser could not start a recording. Try again.",
-    "saveFailed": "The recording could not be saved. Try again.",
-    "emptyRecording": "The recording came back empty. Check that no other app is using the camera, then try again.",
-    "cameraN": "Camera {n}",
-    "micN": "Microphone {n}",
-    "titleCamera": "Record camera",
-    "titleAudio": "Record audio",
-    "close": "Close",
-    "waiting": "Waiting for permission…",
-    "start": "Start recording",
-    "stop": "Stop and use recording"
-  },
   "exportDialog": {
     "title": "Export",
     "presetGroup": "Export preset",
@@ -345,9 +328,6 @@
     "width": "Width",
     "height": "Height",
     "aspectPresets": "Aspect ratio presets",
-    "record": "Record",
-    "recordCamera": "Record camera",
-    "recordAudio": "Record audio",
     "moreActions": "More actions",
     "moveBody": "{from, select, browser {Copies this project and its media to the cloud, then removes it from this browser. Exports rendered here stay behind.} other {Copies this project and its media to the cloud, then removes it from this Mac. Exports rendered here stay behind.}}",
     "moving": "Moving…"

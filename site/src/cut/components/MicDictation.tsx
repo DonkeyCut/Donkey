@@ -6,7 +6,7 @@ import { useTranslations } from "next-intl";
 import { cn } from "@/lib/utils";
 import { useCutCaps } from "@/cut/lib/backend/hooks";
 import { useMicTranscription, type MicController } from "@/cut/lib/micTranscribe";
-import { LiveWaveform } from "./RecordDialog";
+import { LiveWaveform } from "./LiveWaveform";
 import { useChatError } from "./chatError";
 
 // Shared voice-dictation UI, used by every prompt input (the AI chat composer

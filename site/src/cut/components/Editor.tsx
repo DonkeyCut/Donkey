@@ -1489,7 +1489,6 @@ export function Editor({
         ) : (
           <TopBar
             chatStatus={chatStatus}
-            onImport={importFiles}
             from={from}
             folder={folder}
             uploading={importing + sending}

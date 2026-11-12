@@ -182,23 +182,6 @@
     "preparing": "준비 중…",
     "startFailed": "내보내기를 시작할 수 없어요"
   },
-  "recordDialog": {
-    "deviceFallback": "해당 장치를 시작할 수 없어 기본 장치로 전환했어요.",
-    "cameraBlocked": "카메라 액세스가 차단되었어요. Chrome에서 이 사이트의 카메라와 마이크 권한을 허용한 뒤 다시 시도해 주세요.",
-    "micBlocked": "마이크 액세스가 차단되었어요. Chrome에서 이 사이트의 마이크 권한을 허용한 뒤 다시 시도해 주세요.",
-    "cameraStartFailed": "이 브라우저에서 카메라 녹화를 시작할 수 없어요. 다른 앱이 카메라를 사용 중인지 확인하고 다시 시도해 주세요.",
-    "startFailed": "이 브라우저에서 녹화를 시작할 수 없어요. 다시 시도해 주세요.",
-    "saveFailed": "녹화를 저장하지 못했어요. 다시 시도해 보세요.",
-    "emptyRecording": "녹화된 내용이 없어요. 다른 앱에서 카메라를 사용 중인지 확인하고 다시 시도해 보세요.",
-    "cameraN": "카메라 {n}",
-    "micN": "마이크 {n}",
-    "titleCamera": "카메라 녹화",
-    "titleAudio": "오디오 녹음",
-    "close": "닫기",
-    "waiting": "권한 대기 중…",
-    "start": "녹화 시작",
-    "stop": "중지하고 녹화본 사용"
-  },
   "exportDialog": {
     "title": "내보내기",
     "presetGroup": "내보내기 프리셋",
@@ -345,9 +328,6 @@
     "width": "너비",
     "height": "높이",
     "aspectPresets": "화면비 프리셋",
-    "record": "녹화/녹음",
-    "recordCamera": "카메라 녹화",
-    "recordAudio": "오디오 녹음",
     "moreActions": "추가 작업",
     "moveBody": "{from, select, browser {이 프로젝트와 미디어를 클라우드로 복사한 다음 이 브라우저에서 삭제해요. 여기서 렌더링된 내보내기 파일은 유지돼요.} other {이 프로젝트와 미디어를 클라우드로 복사한 다음 이 Mac에서 삭제해요. 여기서 렌더링된 내보내기 파일은 유지돼요.}}",
     "moving": "이동 중…"
