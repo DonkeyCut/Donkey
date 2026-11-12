@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
+import type { UIMessage } from "ai";
 import { CUT_JUDGE } from "../chatRuntime";
 import { briefMeasures, briefSteer, type BriefItem } from "../turnBrief";
 import type { CutAgentDeps } from "./cutAgent";
+import { EngineGate } from "./engineTurn";
 import { TurnGate } from "./turnGate";
 
 // The brief hold: a turn handed a guide in a note, or a long pasted ask, is
@@ -184,6 +186,36 @@ describe("TurnGate brief hold", () => {
     const live = { ...CONTEXT, overlays: [{ kind: "shape", name: "Bar", start: 0, end: 71.12, anim: { in: "pop" } }] };
     const verdict = await gate.hold("Done.", { ...d, editorNow: () => live }, CUT_JUDGE);
     expect(verdict?.steer).toContain("Graphics now cover 71.12s of the 71.12s cut");
+  });
+
+  test("a resumed turn keeps the notes the lost turn read", async () => {
+    const { deps: d, splits } = deps({ item2: 0.1 });
+    const gate = new TurnGate("Continue from where that turn stopped.", "complex");
+    const read = { type: "tool-read_note", toolCallId: "c1", state: "output-available", input: {}, output: { id: "n1", title: "Editor", body: GUIDE } };
+    const messages = [
+      { id: "u1", role: "user", parts: [{ type: "text", text: "follow this guide" }] },
+      { id: "a1", role: "assistant", parts: [read] },
+      { id: "u2", role: "user", metadata: { resume: true }, parts: [{ type: "text", text: "Continue" }] },
+    ] as unknown as UIMessage[];
+    gate.carryNotes(messages);
+    gate.record("add_title", { id: "t1" }, undefined);
+    await gate.hold("Done.", d, CUT_JUDGE);
+    expect(splits[0]).toContain(GUIDE);
+  });
+
+  test("a resumed engine turn keeps the notes the lost turn read", async () => {
+    const { deps: d, splits } = deps({ item2: 0.1 });
+    const gate = new EngineGate("follow this guide", "simple");
+    const read = { type: "tool-read_note", toolCallId: "c1", state: "output-available", input: {}, output: { id: "n1", title: "Editor", body: GUIDE } };
+    const messages = [
+      { id: "u1", role: "user", parts: [{ type: "text", text: "follow this guide" }] },
+      { id: "a1", role: "assistant", parts: [read] },
+      { id: "u2", role: "user", metadata: { resume: true }, parts: [{ type: "text", text: "Continue" }] },
+    ] as unknown as UIMessage[];
+    gate.carryNotes(messages);
+    gate.record("add_title", { id: "t1" }, undefined);
+    await gate.steer("g1", "Done.", d);
+    expect(splits[0]).toContain(GUIDE);
   });
 
   test("a split that fails lets the turn close", async () => {

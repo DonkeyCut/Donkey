@@ -759,6 +759,7 @@ export function streamCutChat({
           let extensions = 0;
           // What this turn ran and looked at, judged when it signs off.
           const gate = new TurnGate(askText);
+          gate.carryNotes(messages);
 
           // The catalog this run declares. The speculative run waits a bounded
           // moment for the route; a route that has landed narrows the tools

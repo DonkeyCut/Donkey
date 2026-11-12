@@ -112,6 +112,11 @@ export class EngineGate {
     this.gate = new TurnGate(ask, intent);
   }
 
+  /** The notes the lost turn this one continues had already read. */
+  carryNotes(messages: UIMessage[]): void {
+    this.gate.carryNotes(messages);
+  }
+
   /** One tool call the page ran for the turn. */
   record(name: string, output: unknown, errorText: string | undefined): void {
     const response = errorText === undefined ? toToolResult(name, output).details?.response : undefined;

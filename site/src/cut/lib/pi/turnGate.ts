@@ -1,3 +1,5 @@
+import type { UIMessage } from "ai";
+import { isResumeMessage } from "../chatResume";
 import { askJudge } from "../judge";
 import { briefMeasures, briefSteer, openItems, splitBrief, type BriefItem, type BriefNote } from "../turnBrief";
 import { editorSlice, type CutJudgeSettings, type TurnIntent } from "../turnJudge";
@@ -113,11 +115,32 @@ export class TurnGate {
       return;
     }
     recordLook(this.looks, name, response);
+    if (name === NOTE_READ) {
+      this.noteRead(response);
+    }
+  }
 
-    // A note the turn read joins its brief: a guide @-mentioned beside a
-    // one-line ask is most of what the turn was told to do.
+  /** The notes the turn this run continues had already read. A turn the page
+   * lost resumes in a fresh run, and keeps the brief it was given. */
+  carryNotes(messages: UIMessage[]): void {
+    const since = messages.findLastIndex((m) => m.role === "user" && !isResumeMessage(m));
+    for (const message of messages.slice(since + 1)) {
+      if (message.role !== "assistant") {
+        continue;
+      }
+      for (const part of message.parts as { type: string; state?: string; output?: unknown }[]) {
+        if (part.type === `tool-${NOTE_READ}` && part.state === "output-available") {
+          this.noteRead(part.output);
+        }
+      }
+    }
+  }
+
+  // A note the turn read joins its brief: a guide @-mentioned beside a
+  // one-line ask is most of what the turn was told to do.
+  private noteRead(response: unknown): void {
     const note = response as { id?: unknown; title?: unknown; body?: unknown } | undefined;
-    if (name !== NOTE_READ || typeof note?.body !== "string" || !note.body.trim()) {
+    if (typeof note?.body !== "string" || !note.body.trim()) {
       return;
     }
     const id = typeof note.id === "string" ? note.id : note.body;
