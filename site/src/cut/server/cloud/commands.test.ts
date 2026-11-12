@@ -59,6 +59,7 @@ globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
   if (String(url).endsWith("/wake") && init?.method === "POST") { woken.count++; return new Response("ok"); }
   return realFetch(url, init);
 }) as typeof fetch;
+const { CHATGPT_POLLING } = await import("@/cut/lib/chatRuntime");
 const { claimEditorBatch, CLAIM_QUIET_MS, heartbeatEditorBatch, NO_CARD_OPEN, queueCommands, settleEditorBatch, waitForJob, WORKER_BATCH } = await import("./commands");
 afterAll(() => { globalThis.fetch = realFetch; });
 beforeEach(() => { rows.splice(0); woken.count = 0; });
@@ -84,7 +85,7 @@ test("a batch contends with a chat turn on the same project", async () => {
 test("a batch no card claims in time is dismissed with the answer the tool gives", async () => {
   const queued = await queueCommands("u", "p", { commands: [{ name: "undo", input: {} }] });
   const id = (queued as { id: string }).id;
-  rows[0].createdAt = new Date(Date.now() - 5000);
+  rows[0].createdAt = new Date(Date.now() - 10_000);
   const row = await waitForJob("u", id, 50, { editorClaimMs: 1000 });
   expect(row?.state).toBe("dismissed");
   expect(row?.error).toBe(NO_CARD_OPEN);
@@ -95,7 +96,7 @@ test("a batch no card claims in time is dismissed with the answer the tool gives
 test("a batch no card claims in time goes to the cloud worker, and the card waits behind it", async () => {
   // A host with no card, Codex's for one: the read runs headless.
   const read = await queueCommands("u", "p", { commands: [{ name: "get_state", input: {} }], readOnly: true });
-  rows[0].createdAt = new Date(Date.now() - 5000);
+  rows[0].createdAt = new Date(Date.now() - 10_000);
   const row = await waitForJob("u", (read as { id: string }).id, 50, { editorClaimMs: 1000 });
   expect(row).toMatchObject({ kind: WORKER_BATCH, state: "queued" });
   expect(woken.count).toBeGreaterThan(0);
@@ -108,6 +109,15 @@ test("a batch no card claims in time goes to the cloud worker, and the card wait
   expect((await claimEditorBatch("u", "p"))?.id).toBe(rows[1].id);
 });
 
+test("a batch waits out a hidden card's gap between polls", async () => {
+  // A card in a window the person looked away from polls every few seconds;
+  // handing its batch to the worker inside that gap saves under the card.
+  const queued = await queueCommands("u", "p", { commands: [{ name: "set_aspect", input: { aspect: "1:1" } }] });
+  rows[0].createdAt = new Date(Date.now() - CHATGPT_POLLING.hiddenPollMs - 500);
+  const row = await waitForJob("u", (queued as { id: string }).id, 50, { editorClaimMs: 3000, editorOpen: async () => true });
+  expect(row).toMatchObject({ kind: "commands", state: "queued" });
+});
+
 test("a connection with no editor open hands its batch to the worker at once", async () => {
   // Codex never frames a card, so nothing could claim within the window.
   const read = await queueCommands("u", "p", { commands: [{ name: "get_state", input: {} }], readOnly: true });
@@ -118,7 +128,7 @@ test("a connection with no editor open hands its batch to the worker at once", a
 test("a batch waits past the claim window for a card that is still booting its editor", async () => {
   const queued = await queueCommands("u", "p", { commands: [{ name: "set_aspect", input: { aspect: "1:1" } }] });
   const id = (queued as { id: string }).id;
-  rows[0].createdAt = new Date(Date.now() - 5000);
+  rows[0].createdAt = new Date(Date.now() - 10_000);
 
   // The card framed a moment ago; its editor claims and settles the batch
   // while the tool waits.
@@ -131,7 +141,7 @@ test("a batch waits past the claim window for a card that is still booting its e
 
   // Once the boot allowance is spent, an unclaimed batch is dismissed.
   await queueCommands("u", "p", { commands: [{ name: "undo", input: {} }] });
-  rows[1].createdAt = new Date(Date.now() - 5000);
+  rows[1].createdAt = new Date(Date.now() - 10_000);
   const late = await waitForJob("u", rows[1].id, 50, { editorClaimMs: 1000, editorBootDeadline: async () => Date.now() - 1 });
   expect(late?.state).toBe("dismissed");
 });

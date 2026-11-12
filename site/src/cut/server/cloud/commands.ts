@@ -9,6 +9,7 @@
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import type { CommandJobResult, CommandJobSpec, CommandOutcome } from "@/cut/lib/commandBatch";
+import { CHATGPT_POLLING } from "@/cut/lib/chatRuntime";
 import { EDITOR_BATCH, WORKER_BATCH } from "./batchKinds";
 import { needsWorker } from "./jobs";
 import { liveJobCheck } from "./limits";
@@ -70,6 +71,11 @@ export async function queueCommands(
 
 const TERMINAL = new Set(["done", "error", "canceled", "dismissed"]);
 
+/** The longest a live card leaves between claims: its cadence while its
+ * window is hidden, plus one slow claim round trip. A shorter window hands a
+ * hidden card's batch to the worker, which then saves under the card. */
+const CARD_POLL_GAP_MS = CHATGPT_POLLING.hiddenPollMs + 2000;
+
 /** A queued batch older than the claim window: no card picked it up. The
  * window is measured from the row's age, the one clock the card's polling
  * and this wait share. */
@@ -113,7 +119,7 @@ export async function waitForJob(
   opts: { editorClaimMs?: number; editorBootDeadline?: () => Promise<number>; editorOpen?: () => Promise<boolean> } = {}
 ): Promise<JobRow | null> {
   const deadline = Date.now() + budgetMs;
-  const claimMs = opts.editorClaimMs ?? 3000;
+  const claimMs = Math.max(opts.editorClaimMs ?? 3000, CARD_POLL_GAP_MS);
   for (;;) {
     const row = await prisma.cutRenderJob.findFirst({ where: { id: jobId, userId } });
     if (!row) return null;
