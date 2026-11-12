@@ -6,6 +6,13 @@ import type { MediaAsset } from "./types";
 await stubModule<typeof import("./mediaSync")>("./mediaSync", import.meta.url, {
   storedMediaUrl: async (_projectId: string, fileName: string) => `stored:${fileName}`,
 });
+
+// An id the project lacks is looked up in the Library first. An empty shelf
+// keeps the lookup off whatever engine or cloud the machine running the suite
+// can reach.
+await stubModule<typeof import("./library")>("./library", import.meta.url, {
+  fetchLibrary: async () => ({ assets: [], folders: [], templates: [] }),
+});
 const { runAiTool } = await import("./aiTools");
 const { startUpload } = await import("./importQueue");
 
