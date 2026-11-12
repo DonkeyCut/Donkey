@@ -18,6 +18,7 @@ import { localized, templatePoster, type GalleryTemplate } from "@/cut/lib/templ
 import { useEditor } from "@/cut/lib/store";
 import { copyTemplate } from "@/cut/lib/templateUse";
 import { cueTemplateTour } from "@/cut/lib/onboarding";
+import { copyBarShare } from "@/cut/lib/copyBar";
 import { track } from "@/lib/analytics";
 
 // Each visit of the template page's "Use" link carries a fresh run id; the run
@@ -145,19 +146,15 @@ function CopyProgress({
         </div>
       </div>
 
-      {/* One row, one height: the bar while the copy runs, sweeping until
+      {/* One row, one height: the bar while the copy runs, a sliver until
           the first count arrives; the way on once it stops. */}
       <div className="flex h-9 items-center justify-end gap-2">
         {copying ? (
           <div className="relative h-2 w-full overflow-hidden rounded-full bg-muted">
-            {counted ? (
-              <div
-                className="h-full rounded-full bg-foreground transition-[width] duration-300 ease-out"
-                style={{ width: `${(phase.done / phase.total) * 100}%` }}
-              />
-            ) : (
-              <div className="absolute inset-y-0 w-1/3 animate-[cut-progress-sweep_1.2s_ease-in-out_infinite] rounded-full bg-foreground motion-reduce:hidden" />
-            )}
+            <div
+              className="h-full rounded-full bg-foreground transition-[width] duration-300 ease-out"
+              style={{ width: `${copyBarShare(phase.done, phase.total) * 100}%` }}
+            />
           </div>
         ) : (
           back
