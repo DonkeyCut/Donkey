@@ -36,7 +36,7 @@ const server = Bun.serve({ port: 0, fetch(request) {
   }
   if (url.pathname === "/preview.mp4") return new Response(Bun.file(video));
   if (url.pathname === "/embed" && url.searchParams.get("code") === "signed-out") return new Response('<!doctype html><div id="session"></div><script type="module" src="/session.js"></script>', { headers: { "Content-Type": "text/html" } });
-  if (url.pathname === "/embed") return new Response(`<!doctype html><title>editor</title><p id="editor">Editor for ${url.searchParams.get("project")} via ${url.searchParams.get("code")}</p><p id="inset"></p><p id="mode"></p><p id="theme"></p><button id="full" onclick="parent.postMessage({ type: 'donkeycut:fullscreen' }, '*')">Fullscreen</button><script>addEventListener('message', (e) => { if (e.source === parent && e.data.type === 'donkeycut:host') { document.getElementById('inset').textContent = String(e.data.insetBottom); document.getElementById('mode').textContent = e.data.displayMode; document.getElementById('theme').textContent = e.data.theme; } }); parent.postMessage({ type: 'donkeycut:host?' }, '*'); setTimeout(() => parent.postMessage({ type: 'donkeycut:ready' }, '*'), parent.parent.readyMs);</script><script type="module">import { downloadFromUrl, downloadFile } from '/download.js'; window.downloadFromUrl = downloadFromUrl; window.downloadFile = downloadFile;</script>`, { headers: { "Content-Type": "text/html", "Set-Cookie": "editor-session=fixture; Path=/api/cut-cloud/; HttpOnly; SameSite=Lax" } });
+  if (url.pathname === "/embed") return new Response(`<!doctype html><title>editor</title><p id="editor">Editor for ${url.searchParams.get("project")} via ${url.searchParams.get("code")}</p><p id="inset"></p><p id="mode"></p><p id="theme"></p><p id="show"></p><button id="full" onclick="parent.postMessage({ type: 'donkeycut:fullscreen' }, '*')">Fullscreen</button><script>addEventListener('message', (e) => { if (e.source === parent && e.data.type === 'donkeycut:host') { document.getElementById('inset').textContent = String(e.data.insetBottom); document.getElementById('mode').textContent = e.data.displayMode; document.getElementById('theme').textContent = e.data.theme; } if (e.source === parent && e.data.type === 'donkeycut:show') document.getElementById('show').textContent = e.data.projectId; }); parent.postMessage({ type: 'donkeycut:host?' }, '*'); setTimeout(() => parent.postMessage({ type: 'donkeycut:ready' }, '*'), parent.parent.readyMs);</script><script type="module">import { downloadFromUrl, downloadFile } from '/download.js'; window.downloadFromUrl = downloadFromUrl; window.downloadFile = downloadFile;</script>`, { headers: { "Content-Type": "text/html", "Set-Cookie": "editor-session=fixture; Path=/api/cut-cloud/; HttpOnly; SameSite=Lax" } });
   if (url.pathname.startsWith("/clients/chatgpt/")) return new Response(Bun.file(path.join(root, "public/clients/chatgpt", path.basename(url.pathname))));
   return new Response(hostHtml, { headers: { "Content-Type": "text/html" } });
 } });
@@ -44,7 +44,7 @@ const hostHtml = `<!doctype html><html><body><iframe title="Donkey Cut preview" 
 const frame = document.querySelector('iframe');
 const project = {id:'project',name:'Launch film',revision:'cloud:2',url:'https://donkeycut.com/app/p/project'};
 let count = 0, renewals = 0;
-window.calls = []; window.contexts = []; window.links = []; window.modes = []; window.editable = false; window.holdMs = 0; window.readyMs = 0; window.freshCard = false; window.signedOut = false; window.failOpen = false; window.missing = false; window.editorCodes = 0;
+window.calls = []; window.contexts = []; window.said = []; window.links = []; window.modes = []; window.editable = false; window.holdMs = 0; window.readyMs = 0; window.freshCard = false; window.signedOut = false; window.failOpen = false; window.missing = false; window.editorCodes = 0;
 const view = (selected, preview = null) => ({view:selected?'project':'projects',projects:selected?[]:[project],nextCursor:null,project:selected?project:null,preview,canRender:true,canEdit:window.editable,export:null,job:null,results:[],changed:false,account:null,missing:null});
 const missingView = () => ({...view(false),view:'missing',projects:[],missing:{id:project.id}});
 const editorLink = () => ({url:location.origin+'/embed?embed=chatgpt&code=one-use-'+ ++window.editorCodes +'&project=project',expiresAt:Date.now()+60000});
@@ -56,11 +56,14 @@ const reply = (id, result) => frame.contentWindow.postMessage({jsonrpc:'2.0',id,
 // preview with an expired playback link, and an editor link whose minute is
 // spent unless the fixture says the card was just opened.
 const cardResult = () => !window.editable ? result(view(true)) : result(view(true,{id:'job',status:'done',progress:1,revision:'cloud:1'}),{url:location.origin+'/preview.mp4?stale',expiresAt:Date.now()-1},window.freshCard ? {url:location.origin+'/embed?embed=chatgpt&code='+ (window.signedOut ? 'signed-out' : 'card') +'&project=project',expiresAt:Date.now()+60000} : {url:location.origin+'/embed?embed=chatgpt&code=spent&project=project',expiresAt:Date.now()-1});
+// A tool result the host hands the card after it is open, for a project the
+// assistant made on its own.
+window.showOther = () => frame.contentWindow.postMessage({jsonrpc:'2.0',method:'ui/notifications/tool-result',params:result({...view(true),project:{...project,id:'dogs',name:'Dogs'}},null,editorLink())},'*');
 // A tool result the host hands the card after it is open: the projects view.
 window.showProjects = () => frame.contentWindow.postMessage({jsonrpc:'2.0',method:'ui/notifications/tool-result',params:result(view(false),null,window.editable ? {url:location.origin+'/embed?embed=chatgpt&code=one-use-'+ ++window.editorCodes,expiresAt:Date.now()+60000} : null)},'*');
 window.addEventListener('message', ({source,data}) => {
  if(source !== frame.contentWindow || !data.method) return;
- if(data.method === 'ui/initialize') reply(data.id,{protocolVersion:data.params.protocolVersion,hostInfo:{name:'fixture',version:'1'},hostCapabilities:{serverTools:{},openLinks:{},updateModelContext:{text:{},structuredContent:{}}},hostContext:{theme:'light',displayMode:'inline',availableDisplayModes:['inline','fullscreen'],safeAreaInsets:{top:0,right:0,bottom:120,left:0}}});
+ if(data.method === 'ui/initialize') reply(data.id,{protocolVersion:data.params.protocolVersion,hostInfo:{name:'fixture',version:'1'},hostCapabilities:{serverTools:{},openLinks:{},message:{text:{}},updateModelContext:{text:{},structuredContent:{}}},hostContext:{theme:'light',displayMode:'inline',availableDisplayModes:['inline','fullscreen'],safeAreaInsets:{top:0,right:0,bottom:120,left:0}}});
  if(data.method === 'ui/notifications/initialized') frame.contentWindow.postMessage({jsonrpc:'2.0',method:'ui/notifications/tool-result',params:cardResult()},'*');
  if(data.method === 'tools/call') {
   const name = data.params.name; window.calls.push(name);
@@ -73,7 +76,8 @@ window.addEventListener('message', ({source,data}) => {
    reply(data.id,result(view(true,{id:'job',status:done?'done':'running',progress:done?1:count/3,revision:'cloud:2'}),done?{url:location.origin+'/preview.mp4?v='+renewals++,expiresAt:Date.now()+3600000}:null));
   }
  }
- if(data.method === 'ui/update-model-context') { window.contexts.push(data.params); reply(data.id,{}); }
+ if(data.method === 'ui/update-model-context') { window.contexts.push(data.params); window.said.push('context'); reply(data.id,{}); }
+ if(data.method === 'ui/message') { window.said.push('message:' + data.params.content[0].text); reply(data.id,{}); }
  if(data.method === 'ui/open-link') { window.links.push(data.params.url); reply(data.id,{}); }
  if(data.method === 'ui/request-display-mode') { window.modes.push(data.params.mode); reply(data.id,{mode:data.params.mode}); }
 });
@@ -122,6 +126,20 @@ try {
   await homeFrame.evaluate(() => parent.postMessage({ type: "donkeycut:page", projectId: "project", name: "Launch film" }, "*"));
   await page.waitForFunction(() => (window as unknown as Contexts).contexts.at(-1)?.structuredContent?.projectId === "project");
   assert.equal(await page.evaluate(() => (window as unknown as Contexts).contexts.at(-1)?.structuredContent?.name), "Launch film", "the model knows which project the frame shows");
+  // A prompt from the framed Home arrives with the project Home opened for it:
+  // the model learns that project first, then hears the words.
+  type Said = Contexts & { said: string[] };
+  await homeFrame.evaluate(() => parent.postMessage({ type: "donkeycut:prompt", text: "a 10s video about dogs", projectId: "started" }, "*"));
+  await page.waitForFunction(() => (window as unknown as Said).said.includes("message:a 10s video about dogs"));
+  const said = await page.evaluate(() => (window as unknown as Said).said);
+  assert.deepEqual(said.slice(-2), ["context", "message:a 10s video about dogs"], "the started project reaches the model before the prompt");
+  assert.equal(await page.evaluate(() => (window as unknown as Said).contexts.at(-1)?.structuredContent?.projectId), "started", "the model builds in the started project");
+  // A project the assistant makes on its own opens in the frame, as a new
+  // card would on the web, and the frame keeps its link.
+  const editorUrl = await app.locator("iframe.editor").getAttribute("src");
+  await page.evaluate(() => (window as unknown as { showOther: () => void }).showOther());
+  await app.frameLocator("iframe.editor").locator("#show").filter({ hasText: /^dogs$/ }).waitFor();
+  assert.equal(await app.locator("iframe.editor").getAttribute("src"), editorUrl, "the frame moves in place");
   assert.equal(await app.locator("button").count(), 0, "the editor card has no controls of its own");
   assert.equal(await app.locator("main.editing").evaluate((m) => getComputedStyle(m).borderTopWidth), "0px", "an inline card keeps the host's own border");
   await app.frameLocator("iframe.editor").locator("#inset").filter({ hasText: /^0$/ }).waitFor();
@@ -240,7 +258,7 @@ try {
   await app.locator(".skeleton").waitFor({ state: "detached" });
   assert.deepEqual(await page.evaluate(() => (window as unknown as Host).calls), ["open_project", "create_project"], "a deleted project creates a new one in its place");
   assert.deepEqual(errors, []);
-  console.log("PASS: project selection, repeated polling, native playback, URL recovery, hidden pause, Open in Donkey Cut, editor in the card, authenticated download redirects, download errors, skeleton until ready, waking editor card, session renewal and retry, deleted project, decoder teardown, lazy HLS.");
+  console.log("PASS: project selection, prompt into a started project, frame follows the assistant, repeated polling, native playback, URL recovery, hidden pause, Open in Donkey Cut, editor in the card, authenticated download redirects, download errors, skeleton until ready, waking editor card, session renewal and retry, deleted project, decoder teardown, lazy HLS.");
 } finally {
   await browser.close(); server.stop(true); mediaServer.stop(true); await rm(scratch, { recursive: true, force: true });
 }

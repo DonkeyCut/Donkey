@@ -47,16 +47,15 @@ alike.
 Opening a project plays the proxy the editor already rendered for it, so
 nobody waits on a render to watch. A
 render is for a revision with no current proxy, such as one edited from
-ChatGPT; it uses the existing headless renderer and a captured document, and
-repeated requests for the same saved revision reuse a queued, running, or
-completed preview. Only cloud projects reach ChatGPT.
+ChatGPT; it uses the headless renderer, and repeat requests for one saved
+revision reuse its preview. Only cloud projects reach ChatGPT.
 
-The widget polls while visible and renews expiring playback URLs through the
-host bridge; it holds no account cookie or OAuth token.
+The widget polls while visible, renews playback URLs through the host bridge,
+and holds no account cookie or token.
 
-Editable cards frame the editor or Home through a one-use,
-one-minute link that creates a partitioned session cookie. Reconnect mints a
-fresh link. Revoking the connection ends its sessions, and `frameDomains` permits the app's own domain.
+Editable cards frame the editor or Home through a one-use, one-minute session
+link. The frame opens each tool result's project, and Home's prompt starts one
+before ChatGPT hears it. Revoking the connection ends the sessions.
 
 ## Account linking
 

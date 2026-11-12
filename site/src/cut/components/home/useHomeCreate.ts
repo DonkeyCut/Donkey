@@ -23,8 +23,9 @@ import { useDescribeError } from "@/i18n/describeError";
 import { track } from "@/lib/analytics";
 import type { StartTemplate } from "./atRows";
 
-/** What started a project on Home, for the creation event. */
-type HomeSource = "home_prompt" | "home_blank";
+/** What started a project on Home, for the creation event; `chatgpt_card` is
+ * a prompt Home's box sends to the conversation around the card. */
+type HomeSource = "home_prompt" | "home_blank" | "chatgpt_card";
 
 /** Whether a template copy cues the template tour: `quiet` when the chat
  * starts working in the project on arrival. */
@@ -89,27 +90,29 @@ export function useHomeCreate(residency: Residency) {
   };
 
   /** Make the project, park the first message for its chat, and open it.
-   * Resolves true once the editor is on its way. */
-  const start = async (source: HomeSource, first: HomeHandoff | null, template: StartTemplate | null): Promise<boolean> => {
+   * Resolves to the project's id once the editor is on its way. */
+  const start = async (source: HomeSource, first: HomeHandoff | null, template: StartTemplate | null): Promise<string | null> => {
     if (busy) {
-      return false;
+      return null;
     }
     setBusy(true);
     setError(null);
     try {
       if (!(await newProjectAllowed(client))) {
-        return false;
+        return null;
       }
-      const id = template ? await templateProject(template, first ? "quiet" : "tour") : await emptyProject();
+      // A message riding along, here or in ChatGPT, means the chat works in it.
+      const tour: TourCue = first || source === "chatgpt_card" ? "quiet" : "tour";
+      const id = template ? await templateProject(template, tour) : await emptyProject();
       if (first) {
         saveHomeHandoff(id, first);
       }
       track("project_created", { source });
       router.push(framedHref(projectHref(base, id, "home")));
-      return true;
+      return id;
     } catch (e) {
       setError(describeError(e, t("createFailed")));
-      return false;
+      return null;
     } finally {
       setBusy(false);
       setProgress(null);

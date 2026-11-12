@@ -58,6 +58,10 @@ export function useProjectApp() {
   const requested = useRef<string | null>(null);
   const reconnecting = useRef(false);
   const [error, setError] = useState<CardProblem | null>(null);
+  // The project a tool result named, which the frame opens until it reports
+  // that page. The assistant works where the person watches, as on the web,
+  // where every result is a card of its own.
+  const [follow, setFollow] = useState<string | null>(null);
   const t = useTranslations("chatgpt.widget");
   const setLocale = useSetWidgetLocale();
   const [busy, setBusy] = useState(false);
@@ -89,6 +93,7 @@ export function useProjectApp() {
     }
     setEditorRequest(editable !== null && !link ? editable : null);
     setError(null);
+    return editable;
   }, []);
 
   useEffect(() => {
@@ -100,7 +105,10 @@ export function useProjectApp() {
       epoch.current++;
       recoveries.current = 0;
       setBusy(false);
-      try { receive(result, "card"); } catch (e) { setError({ key: e instanceof CardError ? e.problem : "generic" }); }
+      try {
+        const target = receive(result, "card");
+        if (target) setFollow(target);
+      } catch (e) { setError({ key: e instanceof CardError ? e.problem : "generic" }); }
     };
     // ChatGPT overlays its composer on the bottom of a fullscreen card and
     // reports the covered band as a safe-area inset; the editor frame gets
@@ -174,7 +182,10 @@ export function useProjectApp() {
   const reported = page && page.url === editor?.url ? page : null;
   const shownId = reported ? reported.projectId : projectId ?? null;
   const shownName = reported ? reported.name ?? (shownId === projectId ? view?.project?.name : null) : view?.project?.name;
-  const framePage = useCallback((url: string, next: FramePage) => { setPage({ url, ...next }); }, []);
+  const framePage = useCallback((url: string, next: FramePage) => {
+    setPage({ url, ...next });
+    setFollow((target) => (target === next.projectId ? null : target));
+  }, []);
   useEffect(() => {
     const app = appRef.current;
     if (!app || !ready || !view || !app.getHostCapabilities()?.updateModelContext) {
@@ -223,11 +234,17 @@ export function useProjectApp() {
   }, []);
 
   /** A prompt written on the framed Home: the person's next message in the
-   * conversation, which the assistant answers with Donkey's tools. */
-  const promptFromFrame = useCallback(async (text: string) => {
+   * conversation, which the assistant answers with Donkey's tools in the
+   * project Home just opened for it. The assistant learns that project
+   * before the words arrive, so it builds there. */
+  const promptFromFrame = useCallback(async (text: string, projectId: string) => {
     const app = appRef.current;
     if (!app) return;
     try {
+      if (app.getHostCapabilities()?.updateModelContext) {
+        const started = `The person started the Donkey Cut project with projectId ${projectId} from the card for the request that follows, and the card shows it. Make the request in this project.`;
+        await app.updateModelContext({ content: [{ type: "text", text: started }], structuredContent: { projectId, name: null } }).catch(() => {});
+      }
       const result = await app.sendMessage({ role: "user", content: [{ type: "text", text }] });
       if (result.isError) setError({ key: "promptFailed" });
     } catch { setError({ key: "promptFailed" }); }
@@ -270,5 +287,5 @@ export function useProjectApp() {
       setHostInset(full ? (app.getHostContext()?.safeAreaInsets?.bottom ?? 120) : 0);
     } catch { /* the inline card still works */ }
   }, []);
-  return { ready, view, playback, editor, fullscreen, hostInset, edges, theme, error, busy, visible, run, playbackFailed, openDonkey, openFromFrame, saveFromFrame, promptFromFrame, requestFullscreen, retryEditor, createProject, framePage };
+  return { ready, view, playback, editor, fullscreen, hostInset, edges, theme, error, busy, visible, run, playbackFailed, openDonkey, openFromFrame, saveFromFrame, promptFromFrame, requestFullscreen, retryEditor, createProject, framePage, follow };
 }

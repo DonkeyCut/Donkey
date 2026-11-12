@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useSyncExternalStore } from "react";
+import { useEffect, useRef, useSyncExternalStore } from "react";
 import { editorHost } from "@/cut/lib/environment";
 import { wearHostTheme } from "@/lib/theme";
 
@@ -65,12 +65,13 @@ export function openExternal(url: string) {
   window.open(url, "_blank", "noopener,noreferrer");
 }
 
-/** Hand a prompt written on the card's Home to the conversation around it:
- * the card sends it as the person's next message, and the assistant there
- * makes the video through Donkey's tools. Answers whether the host took it. */
-export function promptThroughHost(text: string): boolean {
+/** Hand a prompt written on the card's Home to the conversation around it,
+ * with the project Home just opened for it: the card tells the assistant
+ * that project is the one on screen, then sends the words as the person's
+ * next message. Answers whether the host took it. */
+export function promptThroughHost(text: string, projectId: string): boolean {
   if (editorHost() !== "chatgpt") return false;
-  window.parent.postMessage({ type: "donkeycut:prompt", text }, "*");
+  window.parent.postMessage({ type: "donkeycut:prompt", text, projectId }, "*");
   return true;
 }
 
@@ -119,14 +120,27 @@ export function projectPageUrl(): string {
   return url.toString();
 }
 
-export function useHostBridge() {
+/** The card's line in: the host's bands and theme, and `onShow` for a
+ * project the assistant just worked on, which the frame opens. */
+export function useHostBridge(onShow: (projectId: string) => void) {
+  const show = useRef(onShow);
+  useEffect(() => {
+    show.current = onShow;
+  });
+
   useEffect(() => {
     if (editorHost() !== "chatgpt") {
     return;
   }
     const onMessage = (event: MessageEvent) => {
       if (event.source !== window.parent) return;
-      const data = event.data as { type?: unknown; insetBottom?: unknown; theme?: unknown; displayMode?: unknown } | null;
+      const data = event.data as { type?: unknown; insetBottom?: unknown; theme?: unknown; displayMode?: unknown; projectId?: unknown } | null;
+
+      // A tool result named this project: the frame follows the assistant.
+      if (data?.type === "donkeycut:show" && typeof data.projectId === "string" && data.projectId) {
+        show.current(data.projectId);
+        return;
+      }
       if (data?.type !== "donkeycut:host") return;
       if (typeof data.insetBottom === "number") {
         const px = Math.max(0, Math.min(400, Math.round(data.insetBottom)));

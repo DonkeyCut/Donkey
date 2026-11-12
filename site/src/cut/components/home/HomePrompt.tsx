@@ -106,28 +106,15 @@ export function HomePrompt({
     uploads.clear();
   };
 
-  // The prompt goes out: to ChatGPT inside its card, otherwise into a new
-  // project whose chat sends it on arrival. Picked things and dropped files
-  // ride as chips; a token typed by hand still picks its ref.
+  // The prompt goes out into a new project: its chat sends it on arrival, or
+  // inside ChatGPT's card, ChatGPT's conversation does. Picked things and
+  // dropped files ride as chips; a token typed by hand still picks its ref.
   const deliver = async () => {
     const { refs, text: plain } = collectRefs(
       text.trim(),
       [...attachments, ...uploads.refs],
       candidates,
     );
-
-    // Inside ChatGPT the conversation is ChatGPT's: it gets the words, with
-    // every picked and uploaded thing named so its tools can find it.
-    if (chatgpt) {
-      const names = refs.map((r) => r.name).join(", ");
-      const message = [plain.trim(), names ? t("fromAssets", { names }) : ""]
-        .filter(Boolean)
-        .join("\n\n");
-      if (message && promptThroughHost(message)) {
-        reset();
-      }
-      return;
-    }
 
     // A picked template is the starting point and leaves the message.
     // Example: the Recap template chip with "cut it to 30s" starts from Recap
@@ -138,6 +125,25 @@ export function HomePrompt({
     );
     const body = plain.trim();
     const rest = refs.filter((r) => !isStartTemplateRef(r));
+
+    // Inside ChatGPT the conversation is ChatGPT's. The project opens in the
+    // card as on the web, then ChatGPT gets the words, with every picked and
+    // uploaded thing named so its tools can find it, and edits it on screen.
+    if (chatgpt) {
+      const names = rest.map((r) => r.name).join(", ");
+      const message = [body, names ? t("fromAssets", { names }) : ""]
+        .filter(Boolean)
+        .join("\n\n");
+      if (!message) {
+        return;
+      }
+      const id = await create.start("chatgpt_card", null, startRow?.start ?? null);
+      if (id && promptThroughHost(message, id)) {
+        reset();
+      }
+      return;
+    }
+
     const first =
       body || rest.length > 0 ? { text: body, attachments: rest, model } : null;
     if (!first && !startRow?.start) {
