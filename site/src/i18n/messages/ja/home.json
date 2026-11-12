@@ -70,6 +70,19 @@
         "snippets": "スニペット",
         "projects": "プロジェクト",
         "templates": "テンプレート"
+      },
+      "items": "{count, plural, other {#個のアイテム}}",
+      "kinds": {
+        "folder": "フォルダ",
+        "video": "動画",
+        "image": "画像",
+        "audio": "音声",
+        "note": "ノート",
+        "snippet": "スニペット",
+        "project": "プロジェクト",
+        "template": "テンプレート",
+        "font": "フォント",
+        "lut": "LUT"
       }
     }
   },

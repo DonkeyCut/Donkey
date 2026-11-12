@@ -113,6 +113,7 @@ import {
   cardArea,
   cardBox,
   entryOnTab,
+  folderItemCount,
   mergeFolders,
   nameMatches,
   projectFrame,
@@ -962,12 +963,7 @@ export function AssetsView() {
       onCreatingChange={setFolderCreating}
       statOf={(id) => {
         const f = folderOf(id);
-        return {
-          count:
-            entries.filter((e) => e.folderId === id).length +
-            childrenOf(folders, id).length +
-            (f ? noteList.filter((n) => n.libraryLocation?.folderId === id && n.libraryLocation.residency === f.residency).length : 0),
-        };
+        return { count: f ? folderItemCount(f, { entries, folders, notes: noteList }) : 0 };
       }}
       badgeOf={(id) => {
         const r = folderOf(id)?.residency;

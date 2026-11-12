@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
-import { AudioLines, FileText, Folder, StickyNote } from "lucide-react";
+import { AudioLines, FileText, Film, Folder, StickyNote } from "lucide-react";
 import { CardPreview } from "@/cut/components/assets/ProjectCard";
 import type { MentionMenu } from "@/cut/components/AssetRefs";
 import { useInView } from "@/cut/hooks/useInView";
@@ -18,8 +18,9 @@ import { formatTime } from "@/cut/lib/time";
 import type { ProjectSummary } from "@/cut/lib/types";
 import { cn } from "@/lib/utils";
 import {
-  AT_TABS,
   filterAtRows,
+  rowKind,
+  tabsWithRows,
   type AtPreview,
   type AtRow,
   type AtTab,
@@ -44,7 +45,11 @@ const ICONS = { folder: Folder, note: StickyNote, file: FileText } as const;
  */
 export function AtPicker({ menu, rows }: { menu: MentionMenu; rows: AtRow[] }) {
   const t = useTranslations("home.start.at");
-  const [tab, setTab] = useState<AtTab>("all");
+  // A type with nothing in it gets no tab; a tab whose rows are gone falls
+  // back to All.
+  const tabs = tabsWithRows(rows);
+  const [picked, setTab] = useState<AtTab>("all");
+  const tab = tabs.includes(picked) ? picked : "all";
   const [active, setActive] = useState(0);
   const listRef = useRef<HTMLDivElement>(null);
   const shown = filterAtRows(rows, tab, menu.query);
@@ -94,7 +99,7 @@ export function AtPicker({ menu, rows }: { menu: MentionMenu; rows: AtRow[] }) {
         aria-label={t("label")}
         className="mb-1 flex flex-wrap gap-1 border-b border-border px-1 pt-1 pb-2"
       >
-        {AT_TABS.map((key) => (
+        {tabs.map((key) => (
           <button
             key={key}
             type="button"
@@ -141,19 +146,37 @@ export function AtPicker({ menu, rows }: { menu: MentionMenu; rows: AtRow[] }) {
               role="option"
               aria-selected={i === index}
               data-row={i}
-              onMouseEnter={() => setActive(i)}
+              // Only a real pointer move picks a row: arrow keys scroll the
+              // list under a resting pointer, and that must not steal the
+              // highlight.
+              onMouseMove={() => {
+                if (i !== index) {
+                  setActive(i);
+                }
+              }}
               onMouseDown={(e) => {
                 e.preventDefault();
                 menu.pick(row.ref);
               }}
               className={cn(
                 "flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors",
-                i === index ? "bg-muted" : "hover:bg-muted/60",
+                i === index && "bg-muted",
               )}
             >
               <AtThumb preview={row.preview} active={i === index} />
-              <span className="min-w-0 flex-1 truncate text-sm">
-                {row.label}
+              <span className="flex min-w-0 flex-1 flex-col">
+                <span className="truncate text-sm">{row.label}</span>
+                {row.items !== undefined ? (
+                  <span className="truncate text-xs text-muted-foreground">
+                    {t("items", { count: row.items })}
+                  </span>
+                ) : (
+                  rowKind(row) && (
+                    <span className="truncate text-xs text-muted-foreground">
+                      {t(`kinds.${rowKind(row)!}`)}
+                    </span>
+                  )
+                )}
               </span>
               {!!row.ref.duration && (
                 <span className="shrink-0 font-mono text-xs text-muted-foreground tabular-nums">
@@ -311,9 +334,7 @@ function LibraryThumb({
   }
   return (
     <span ref={ref} className="absolute inset-0">
-      {active ? (
-        <PlayingVideo src={src} />
-      ) : poster ? (
+      {poster ? (
         // eslint-disable-next-line @next/next/no-img-element -- a shelf file, not a Next asset
         <img
           crossOrigin={MEDIA_CORS}
@@ -334,6 +355,7 @@ function LibraryThumb({
           />
         )
       )}
+      {active && <PlayingVideo src={src} />}
     </span>
   );
 }
@@ -349,20 +371,30 @@ function ProjectThumb({
   residency: Parameters<typeof backendFor>[0];
   active: boolean;
 }) {
-  if (active && p.hasPreview) {
-    return (
-      <PlayingVideo
-        src={backendFor(residency).url(`/api/cut/projects/${p.id}/preview`)}
-      />
-    );
+  // A project with nothing to show yet reads as a film, sized like the
+  // other rows' icons.
+  if (!p.previewFile && !p.hasPreview) {
+    return <Film className="size-4" />;
   }
-  return <CardPreview project={p} residency={residency} />;
+  return (
+    <>
+      <CardPreview project={p} residency={residency} />
+      {active && p.hasPreview && (
+        <PlayingVideo
+          src={backendFor(residency).url(`/api/cut/projects/${p.id}/preview`)}
+        />
+      )}
+    </>
+  );
 }
 
-/** A clip playing muted in a thumbnail, with a thin bar for how far along it
- * is. Mounted only while its row is active, so leaving the row releases it. */
+/** A clip playing muted over a thumbnail's still, with a thin bar for how far
+ * along it is. It stays clear until its first frame plays, so the still holds
+ * the picture meanwhile. Mounted only while its row is active, so leaving the
+ * row releases it and the still is already there. */
 function PlayingVideo({ src }: { src: string }) {
   const [at, setAt] = useState(0);
+  const [playing, setPlaying] = useState(false);
   return (
     <>
       <video
@@ -379,9 +411,10 @@ function PlayingVideo({ src }: { src: string }) {
               : 0,
           )
         }
-        className="absolute inset-0 size-full object-cover"
+        onPlaying={() => setPlaying(true)}
+        className={cn("absolute inset-0 size-full object-cover", !playing && "opacity-0")}
       />
-      <ProgressBar at={at} tone="media" />
+      {playing && <ProgressBar at={at} tone="media" />}
     </>
   );
 }

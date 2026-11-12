@@ -1,5 +1,8 @@
 import type { LibraryAsset, LibraryData, LibraryFolder, LibraryTemplateItem } from "@/cut/lib/library";
+import { childrenOf, type TreeFolder } from "@/cut/lib/folderTree";
 import type { AssetTypeTab } from "@/cut/lib/nav";
+import { noteInLibraryFolder } from "@/cut/lib/noteReference";
+import type { CutNote } from "@/cut/lib/notes";
 import type { Residency } from "@/cut/lib/residency";
 import { parseRatio, type ProjectFolder, type ProjectSummary } from "@/cut/lib/types";
 
@@ -90,6 +93,24 @@ export function assetEntries(library: LibraryData, shelves: ProjectShelf[]): Ass
     template: t,
   }));
   return [...projects, ...media, ...templates].sort((a, b) => b.at - a.at);
+}
+
+/** How many things a folder holds directly: its projects, files and saved
+ * templates, its subfolders, and the notes filed in it, e.g. 3 for a folder
+ * with two clips and a subfolder. */
+export function folderItemCount(
+  folder: { id: string; residency: Residency },
+  held: {
+    entries: readonly Pick<AssetEntry, "folderId">[];
+    folders: readonly TreeFolder[];
+    notes: readonly Pick<CutNote, "libraryLocation">[];
+  },
+): number {
+  return (
+    held.entries.filter((e) => e.folderId === folder.id).length +
+    childrenOf(held.folders, folder.id).length +
+    held.notes.filter((n) => noteInLibraryFolder(n, folder.id, folder.residency)).length
+  );
 }
 
 /** Whether a card belongs on a type tab. Saved templates list under All only. */

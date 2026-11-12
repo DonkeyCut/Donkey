@@ -70,6 +70,19 @@
         "snippets": "Extraits",
         "projects": "Projets",
         "templates": "Modèles"
+      },
+      "items": "{count, plural, one {# élément} other {# éléments}}",
+      "kinds": {
+        "folder": "Dossier",
+        "video": "Vidéo",
+        "image": "Image",
+        "audio": "Audio",
+        "note": "Note",
+        "snippet": "Extrait",
+        "project": "Projet",
+        "template": "Modèle",
+        "font": "Police",
+        "lut": "LUT"
       }
     }
   },

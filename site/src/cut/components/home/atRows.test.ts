@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { filterAtRows, isStartTemplateRef, libraryTab, RECENT_ROWS, startTemplateRef, uniqueNames, type AtRow } from "./atRows";
+import { filterAtRows, isStartTemplateRef, libraryTab, RECENT_ROWS, rowKind, startTemplateRef, tabsWithRows, uniqueNames, type AtRow } from "./atRows";
 import { projectTileSize } from "./projectTile";
 import type { GalleryTemplate } from "@/cut/lib/templateGallery";
 
@@ -31,6 +31,18 @@ describe("@ picker rows", () => {
     expect(filterAtRows(rows, "all", "bea").map((r) => r.ref.name)).toEqual(["beach", "Beach song", "sunset beach"]);
     expect(filterAtRows(rows, "images", "bea").map((r) => r.ref.name)).toEqual(["sunset beach"]);
     expect(filterAtRows(rows, "all", "zzz")).toEqual([]);
+  });
+
+  test("only types that hold something get a tab", () => {
+    expect(tabsWithRows(rows)).toEqual(["all", "clips", "images", "audio", "templates"]);
+    expect(tabsWithRows([])).toEqual(["all"]);
+  });
+
+  test("each row says what it is, so a project and a clip of one name read apart", () => {
+    expect(rowKind(row("Untitled", "projects", 1))).toBe("project");
+    expect(rowKind(row("Untitled", "clips", 1))).toBe("video");
+    const lut = { ...row("film look", null, 9), preview: { kind: "file", asset: { type: "lut" } } } as AtRow;
+    expect(rowKind(lut)).toBe("lut");
   });
 
   test("a row with no tab lists under All only", () => {

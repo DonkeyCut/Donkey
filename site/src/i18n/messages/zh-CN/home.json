@@ -70,6 +70,19 @@
         "snippets": "片段",
         "projects": "项目",
         "templates": "模板"
+      },
+      "items": "{count, plural, other {# 项}}",
+      "kinds": {
+        "folder": "文件夹",
+        "video": "视频",
+        "image": "图片",
+        "audio": "音频",
+        "note": "笔记",
+        "snippet": "片段",
+        "project": "项目",
+        "template": "模板",
+        "font": "字体",
+        "lut": "LUT"
       }
     }
   },

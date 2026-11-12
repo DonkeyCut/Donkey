@@ -44,8 +44,45 @@ export interface AtRow {
   /** When it last changed, for the recent list; 0 keeps it out. */
   at: number;
   preview: AtPreview;
+  /** How many things a folder holds, said under its name in place of its
+   * kind. */
+  items?: number;
   /** Set on a template that becomes the new project's starting structure. */
   start?: StartTemplate;
+}
+
+/** The tabs worth offering: All, and each tab with at least one row. */
+export function tabsWithRows(rows: readonly AtRow[]): AtTab[] {
+  return AT_TABS.filter((key) => key === "all" || rows.some((r) => r.tab === key));
+}
+
+/** What a row is, said under its name so a project and a clip of the same
+ * name read apart. */
+export type AtKind = "folder" | "video" | "image" | "audio" | "note" | "snippet" | "project" | "template" | "font" | "lut";
+
+// The kind each tab's rows are.
+const TAB_KIND: Record<Exclude<AtTab, "all">, AtKind> = {
+  folders: "folder",
+  clips: "video",
+  images: "image",
+  audio: "audio",
+  notes: "note",
+  snippets: "snippet",
+  projects: "project",
+  templates: "template",
+};
+
+/** A row's kind: its tab's, or for a file with no tab (a font, a LUT) its own
+ * file type. */
+export function rowKind(row: AtRow): AtKind | null {
+  if (row.tab) {
+    return TAB_KIND[row.tab];
+  }
+  if (row.preview.kind === "file") {
+    const type = row.preview.asset.type;
+    return type === "font" || type === "lut" ? type : null;
+  }
+  return null;
 }
 
 /** How many recent rows show before anything is typed. */

@@ -70,6 +70,19 @@
         "snippets": "Snippets",
         "projects": "Projekte",
         "templates": "Vorlagen"
+      },
+      "items": "{count, plural, one {# Element} other {# Elemente}}",
+      "kinds": {
+        "folder": "Ordner",
+        "video": "Video",
+        "image": "Bild",
+        "audio": "Audio",
+        "note": "Notiz",
+        "snippet": "Snippet",
+        "project": "Projekt",
+        "template": "Vorlage",
+        "font": "Schriftart",
+        "lut": "LUT"
       }
     }
   },

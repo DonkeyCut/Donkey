@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { LibraryAsset, LibraryData, LibraryFolder, LibraryTemplateItem } from "@/cut/lib/library";
 import type { ProjectSummary } from "@/cut/lib/types";
-import { assetEntries, cardArea, cardBox, entryOnTab, mergeFolders, nameMatches } from "./assetsListing";
+import { assetEntries, cardArea, cardBox, entryOnTab, folderItemCount, mergeFolders, nameMatches } from "./assetsListing";
 
 const folder = (id: string, residency: LibraryFolder["residency"] = "cloud"): LibraryFolder => ({
   id,
@@ -74,4 +74,20 @@ describe("Assets listing", () => {
     expect(width({ w: 16, h: 9 })).toBe(320);
     expect(width({ w: 9, h: 16 })).toBe(180);
   });
+});
+
+// A folder's count is what opening it shows: its cards, its subfolders, and
+// the notes filed in it on its own shelf.
+test("a folder counts its cards, subfolders and notes", () => {
+  const folder = { id: "f1", residency: "cloud" as const };
+  const count = folderItemCount(folder, {
+    entries: [{ folderId: "f1" }, { folderId: "f1" }, { folderId: null }],
+    folders: [{ id: "f2", parentId: "f1" }, { id: "f3", parentId: null }],
+    notes: [
+      { libraryLocation: { folderId: "f1", residency: "cloud" } },
+      { libraryLocation: { folderId: "f1", residency: "local" } },
+      { libraryLocation: null },
+    ],
+  });
+  expect(count).toBe(4);
 });

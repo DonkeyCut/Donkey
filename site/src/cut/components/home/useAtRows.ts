@@ -9,6 +9,8 @@ import { noteRef } from "@/cut/lib/noteReference";
 import { projectDocRef } from "@/cut/lib/projectLink";
 import { useLibrary, useNotes, useOwnTemplates, useTemplateIndex } from "@/cut/lib/queries";
 import { localized, templatePoster } from "@/cut/lib/templateGallery";
+import { assetEntries, folderItemCount } from "@/cut/components/assets/assetsListing";
+import type { Residency } from "@/cut/lib/residency";
 import { libraryTab, startTemplateRef, uniqueNames, type AtRow } from "./atRows";
 import type { HomeProject } from "./useHomeProjects";
 
@@ -46,9 +48,28 @@ export function useAtRows(open: boolean, projects: HomeProject[]): AtRow[] {
     }
 
     // Folders, by their own name; the ref carries the path the chat reads.
+    // Each says how many things it holds, counted the way Assets counts them.
     const folders = library?.folders ?? [];
+    const shelves = (["browser", "local", "cloud"] as const satisfies readonly Residency[]).map((residency) => ({
+      residency,
+      projects: projects.filter((p) => p.residency === residency).map((p) => p.project),
+      folders: [],
+    }));
+    const held = {
+      entries: library ? assetEntries(library, shelves) : [],
+      folders,
+      notes: notes?.notes ?? [],
+    };
     libraryFolderRefs(folders).forEach((ref, i) => {
-      rows.push({ ref, label: folders[i].name, tab: "folders", at: folders[i].createdAt, preview: { kind: "icon", icon: "folder" } });
+      const f = folders[i];
+      rows.push({
+        ref,
+        label: f.name,
+        tab: "folders",
+        at: f.createdAt,
+        preview: { kind: "icon", icon: "folder" },
+        items: folderItemCount(f, held),
+      });
     });
 
     // Notes, newest edit first among the recents.

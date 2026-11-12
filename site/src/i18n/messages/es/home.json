@@ -70,6 +70,19 @@
         "snippets": "Fragmentos",
         "projects": "Proyectos",
         "templates": "Plantillas"
+      },
+      "items": "{count, plural, one {# elemento} other {# elementos}}",
+      "kinds": {
+        "folder": "Carpeta",
+        "video": "Video",
+        "image": "Imagen",
+        "audio": "Audio",
+        "note": "Nota",
+        "snippet": "Fragmento",
+        "project": "Proyecto",
+        "template": "Plantilla",
+        "font": "Fuente",
+        "lut": "LUT"
       }
     }
   },
