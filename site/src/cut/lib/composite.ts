@@ -19,7 +19,7 @@
  * it was reached by playing there or by rendering the 135th frame.
  */
 
-import { applyClipEffects, applyDetail, applyLutToImageData, applyMaskToCanvas, detailActive, drawStreak, elementLook, grainTile, hexToHlgHex, lookCssFilter, lookPost, maskComposite, paintStrokeInk, removalActive, type ClipColorRecipe, type OutputSpace } from "@donkeycut/effects-kit";
+import { applyClipEffects, applyDetail, applyLutToImageData, applyMaskToCanvas, detailActive, drawStreak, elementLook, grainTile, hexToHlgHex, lookCssFilter, lookPost, maskComposite, paintGrain, paintStrokeInk, removalActive, type ClipColorRecipe, type OutputSpace } from "@donkeycut/effects-kit";
 import { cameraCardLayout, traceCardPath, type CardLayout } from "./cameraCard";
 import { applyDetailGpu } from "./detailGpu";
 import { applyLutGpu } from "./gradeGpu";
@@ -89,9 +89,6 @@ export interface CrossJoin {
 /** Canvas kinds the compositor can draw onto and allocate beside. */
 type Surface = HTMLCanvasElement | OffscreenCanvas;
 type Ctx = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
-
-/** The grain tile advances on this cadence, in seconds per step. */
-const GRAIN_STEP = 0.08;
 
 /** The source every clip renders as when nothing says otherwise: Rec.709
  * display values, which need no conversion. */
@@ -701,16 +698,9 @@ export class FrameCompositor {
       ctx.fillRect(rx, ry, rw, rh);
     }
     if (post.grain) {
-      const tile = grainTile(Math.floor(at / GRAIN_STEP));
-      if (tile) {
-        ctx.globalAlpha = post.grain * alpha;
-        ctx.globalCompositeOperation = "overlay";
-        for (let y = ry; y < ry + rh; y += tile.height) {
-          for (let x = rx; x < rx + rw; x += tile.width) {
-            ctx.drawImage(tile, x, y);
-          }
-        }
-      }
+      ctx.globalAlpha = post.grain * alpha;
+      ctx.globalCompositeOperation = "overlay";
+      paintGrain(ctx, rx, ry, rw, rh, Math.min(W, H), at, grainTile);
     }
     if (post.vignette) {
       // Cached radial gradient, rebuilt only when the footprint size changes.

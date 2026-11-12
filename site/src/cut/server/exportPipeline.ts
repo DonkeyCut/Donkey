@@ -2701,7 +2701,7 @@ async function renderPass(
       // the effects can treat the looked picture there, as the preview does.
       const lookAt = (at: string) => {
         if (!c.look || rmIn) return at;
-        const lines = lookFilterLines(`lki${j}`, `lko${j}`, c.look, c.lookAmount, H, clipFmt, `c${j}`, depth);
+        const lines = lookFilterLines(`lki${j}`, `lko${j}`, c.look, c.lookAmount, W, H, clipFmt, `c${j}`, depth);
         if (!lines) return at;
         filters.push(`${at}[lki${j}]`);
         filters.push(...lines);
@@ -2812,7 +2812,7 @@ async function renderPass(
         );
         if (flatOut !== segCore) {
           // The removal clip's look, over the flattened opaque segment.
-          const lines = lookFilterLines(`vrl${j}`, segCore, c.look!, c.lookAmount, H, clipFmt, `cr${j}`, depth);
+          const lines = lookFilterLines(`vrl${j}`, segCore, c.look!, c.lookAmount, W, H, clipFmt, `cr${j}`, depth);
           if (lines) filters.push(...lines);
           else filters.push(`[vrl${j}]null[${segCore}]`);
         }
@@ -3206,7 +3206,7 @@ async function renderPass(
     // the look chain's internal filters would flatten onto black over the
     // tracks beneath. The alpha fades stay safe: they apply after the look.
     if (oc.look && !oc.image && !orIn) {
-      const lines = lookFilterLines(`olki${k}`, `olko${k}`, oc.look, oc.lookAmount, H, lookFmt, `o${k}`, depth);
+      const lines = lookFilterLines(`olki${k}`, `olko${k}`, oc.look, oc.lookAmount, W, H, lookFmt, `o${k}`, depth);
       if (lines) {
         filters.push(`${core}[olki${k}]`);
         filters.push(...lines);

@@ -10,6 +10,7 @@
 
 import type { OverlayBase } from "./types";
 import { AUDIO_EFFECT_IDS, AUDIO_EFFECT_LABELS, type AudioEffectId } from "./audioFx";
+import { grainFilterLines, paintGrain } from "./grain";
 import { LOOK_LABELS, lookCssFilter, lookFilterLines, lookPost, type LookStyle } from "./looks";
 import { kitCanvas } from "./surface";
 import { easeAt, easeExpr, type EaseId } from "./ease";
@@ -291,6 +292,17 @@ export const EFFECT_LABELS: Record<EffectId, string> = {
 };
 
 const clampAmount = (k: number | undefined) => Math.max(0.05, Math.min(1, k ?? 0.5));
+
+/** Film grain's overlay opacity at full amount; it runs straight down to none
+ * at 0. The default amount, 0.5, grains mid-gray by a std dev of 17 codes. */
+const GRAIN_STRENGTH = 0.95;
+
+/** The grain effect's overlay opacity for `amount`. */
+const grainAlpha = (amount: number | undefined) => GRAIN_STRENGTH * Math.max(0, Math.min(1, amount ?? 0.5));
+
+/** The grain a glitch's smear and split hits carry. */
+const GLITCH_DUST = 0.3;
+
 const fmt = (n: number) => (Math.round(n * 1000) / 1000).toString();
 
 /** The CSS background of a leak's bloom at (x, y) frame fractions — the DOM
@@ -1028,7 +1040,7 @@ function glitchState(hit: GlitchHit | null): EffectPreviewState {
       return {
         cssFilter: "brightness(0.6) contrast(1.25) blur(1.5px)",
         stretch: { row: hit.row, scale: GLITCH_STRETCH },
-        grain: 0.3,
+        grain: GLITCH_DUST,
       };
     case "split":
       return {
@@ -1036,7 +1048,7 @@ function glitchState(hit: GlitchHit | null): EffectPreviewState {
         dx: hit.shift * 1080,
         ghost: GLITCH_GHOST,
         leak: { ...GLITCH_BURN, streaks: [] },
-        grain: 0.35,
+        grain: GLITCH_DUST,
       };
     case "tint":
       return {
@@ -1100,7 +1112,7 @@ export function effectPreviewState(
         origin: focusOf(focus),
       };
     case "grain":
-      return { cssFilter: "", grain: 0.25 + 0.55 * k };
+      return { cssFilter: "", grain: grainAlpha(amount) };
     case "vhs":
       return {
         cssFilter: `saturate(${fmt(1 - 0.35 * k)}) contrast(${fmt(1 - 0.05 * k)}) blur(${fmt(0.6 * k)}px)`,
@@ -1196,8 +1208,8 @@ function splitPlane(scratch: HTMLCanvasElement | OffscreenCanvas, w: number, h: 
 
 /**
  * Apply one effect to the composited frame in place. `scratch` is a reusable
- * canvas the caller owns (same size as `canvas`); `grainTile` supplies the
- * shared noise tile (see looks.ts).
+ * canvas the caller owns (same size as `canvas`); `grainTileFor` deals the
+ * grain tiles (`grainTile`, see grain.ts).
  */
 export function applyEffectToCanvas(
   canvas: HTMLCanvasElement | OffscreenCanvas,
@@ -1205,7 +1217,7 @@ export function applyEffectToCanvas(
   effect: string,
   amount: number | undefined,
   tLocal: number,
-  grainTileFor: (tick: number) => CanvasImageSource | null,
+  grainTileFor: (n: number) => CanvasImageSource | null,
   focus?: { x: number; y: number },
   ramp?: number,
   dur?: number,
@@ -1426,14 +1438,7 @@ export function applyEffectToCanvas(
   }
 
   if (state.grain) {
-    const tile = grainTileFor(Math.floor(tLocal * 30));
-    if (tile) {
-      over("overlay", state.grain, (c) => {
-        for (let y = 0; y < H; y += 256) {
-          for (let x = 0; x < W; x += 256) c.drawImage(tile, x, y);
-        }
-      });
-    }
+    over("overlay", state.grain, (c) => paintGrain(c, 0, 0, W, H, Math.min(W, H), tLocal, grainTileFor));
   }
 
   if (state.vignette && state.vignette > 0) {
@@ -1527,7 +1532,7 @@ export function applyClipEffects(
   scratch: HTMLCanvasElement | OffscreenCanvas,
   effects: readonly ClipEffect[],
   tLocal: number,
-  grainTileFor: (tick: number) => CanvasImageSource | null,
+  grainTileFor: (n: number) => CanvasImageSource | null,
   /** The clip's length on the same clock, which a flash's fade runs across. */
   dur?: number
 ): void {
@@ -1604,7 +1609,7 @@ const code = (v: number, depth: 8 | 10 | undefined): string => fmt(v * codeScale
  *   unmoved frame lightened over it, then the burn glowing up from the bottom.
  * - blowout: a lift and desaturate of the whole frame.
  *
- * Smear and split carry dust, the preview's grain.
+ * Smear and split carry the preview's grain.
  */
 function glitchFilterLines(
   inLabel: string,
@@ -1680,8 +1685,8 @@ function glitchFilterLines(
       `${gateOf("split")}:eof_action=pass${chroma.overlay}[gpm${tag}]`,
     `[gpm${tag}][gpo${tag}]blend=c0_mode=lighten:c1_mode=average:c2_mode=average:all_opacity=${fmt(GLITCH_GHOST)}:${gateOf("split")},` +
       `geq=lum='lum(X,Y)+(${code(235, chroma.depth)}-lum(X,Y))*${G}':cb='cb(X,Y)-${code(40, chroma.depth)}*${G}':` +
-      `cr='cr(X,Y)+${code(30, chroma.depth)}*${G}':${gateOf("split")},` +
-      `noise=alls=28:allf=t+u:${gateOf("smear", "split")}[gpo2${tag}]`
+      `cr='cr(X,Y)+${code(30, chroma.depth)}*${G}':${gateOf("split")}[gpd${tag}]`,
+    ...grainFilterLines(`gpd${tag}`, `gpo2${tag}`, GLITCH_DUST, px, gateOf("smear", "split"), `gd${tag}`, chroma.pixFmt)
   );
 
   // Blowout: the preview's brightness and desaturate as one lookup.
@@ -1745,7 +1750,7 @@ export function effectFilterLines(
     // The graded copy renders on its own branch and replaces the frame only
     // inside the window, the same shape the shake recipe uses — a look chain
     // is several filters deep and not all of them take a timeline gate.
-    const lines = lookFilterLines(`lkfi${tag}`, `lkfo${tag}`, look, k, height, chroma.pixFmt, tag, chroma.depth);
+    const lines = lookFilterLines(`lkfi${tag}`, `lkfo${tag}`, look, k, width, height, chroma.pixFmt, tag, chroma.depth);
     if (!lines) return null;
     return [
       `[${inLabel}]split[lkfb${tag}][lkfi${tag}]`,
@@ -1795,7 +1800,7 @@ export function effectFilterLines(
       ];
     }
     case "grain":
-      return [`[${inLabel}]noise=alls=${Math.round(12 + 40 * k)}:allf=t+u:${en}[${outLabel}]`];
+      return grainFilterLines(inLabel, outLabel, grainAlpha(amount), h, en, tag, chroma.pixFmt);
     case "vhs":
       return [
         `[${inLabel}]rgbashift=rh=${Math.round(3 * k)}:bh=${-Math.round(3 * k)}:${en},` +

@@ -25,6 +25,7 @@ export * from "./removal";
 export * from "./strokeInk";
 export * from "./lottie";
 export * from "./looks";
+export { GRAIN_URL_SIDE, grainShiftAt, grainTile, grainTileUrl, paintGrain } from "./grain";
 export * from "./colorGrade";
 export * from "./colorSpace";
 export * from "./acesOutput";
