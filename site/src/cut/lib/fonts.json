@@ -77,6 +77,14 @@
     "weights": [400]
   },
   {
+    "id": "libre-baskerville",
+    "kind": "serif",
+    "look": "warm book serif for headlines and body",
+    "family": "Libre Baskerville",
+    "weights": [400, 500, 600, 700],
+    "italics": [400, 700]
+  },
+  {
     "family": "Roboto",
     "weights": [400, 500, 600, 700],
     "aliases": [
