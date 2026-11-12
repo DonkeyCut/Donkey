@@ -10,6 +10,7 @@ import type { LibraryAsset } from "@/cut/server/library";
 import { prisma, registerObjectIn, storageTransaction, type ClaimedJob } from "@/cut/worker/db";
 import { deleteObjects, downloadToFile, libraryKey, uploadFile } from "@/cut/worker/r2";
 import { UserError } from "@/cut/lib/userError";
+import { assetFolderScope } from "@/cut/server/cloud/assetFolders";
 
 const dependencies = {
   db: prisma, download: downloadToFile, upload: uploadFile, remove: deleteObjects,
@@ -74,7 +75,7 @@ export async function runLibraryUploadJob(
       const active = await tx.cutRenderJob.findFirst({ where: { id: job.id, userId: job.userId, state: "running" } });
       if (!active) throw new UserError("import_canceled", "Import canceled.");
       if (input.folderId && !(await tx.cutFolder.findFirst({
-        where: { id: input.folderId, userId: job.userId, scope: "library" },
+        where: { id: input.folderId, userId: job.userId, scope: assetFolderScope },
       }))) throw new UserError("destination_folder_deleted", "The destination folder was deleted.");
       const sourceId = await io.register(tx, {
         userId: job.userId, projectId: null, r2Key: source.r2Key, fileName: source.fileName,

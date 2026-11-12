@@ -3,7 +3,6 @@ import { isDeliveryName } from "../lib/exportDelivery";
 import { cp, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { defaultNames } from "@/cut/lib/defaultNames";
-import { resolveParent, settleParents, subtreeOf } from "@/cut/lib/folderTree";
 import { timelineEnd } from "@/cut/lib/timelineEnd";
 import type { Aspect, ProjectDoc, ProjectFolder, ProjectSummary } from "@/cut/lib/types";
 import { DEFAULT_LOCALE, type Locale } from "@/i18n/locales";
@@ -376,7 +375,7 @@ export async function createProject(
   const now = Date.now();
   // A folder that no longer exists just falls back to the root.
   const folder =
-    folderId && (await readFolders()).some((f) => f.id === folderId) ? folderId : null;
+    folderId && (await folderExists(folderId)) ? folderId : null;
   const doc: ProjectDoc = {
     version: 1,
     id,
@@ -461,8 +460,9 @@ async function summarize(id: string, doc: ProjectDoc): Promise<ProjectSummary> {
   };
 }
 
-// --- Project folders: named groups that file into each other; each project's
-// doc carries its folderId, so grouping travels with the project. ---
+// --- Project folders: each project's doc carries its folderId, so grouping
+// travels with the project. The folders themselves are the library's; the
+// file below only holds ones written before that, until they are adopted. ---
 
 async function readFolders(): Promise<ProjectFolder[]> {
   try {
@@ -478,9 +478,8 @@ async function writeFolders(folders: ProjectFolder[]) {
   await writeJsonAtomic(foldersIndex(), { folders });
 }
 
-// Serialize read-modify-write cycles on the folder list, so two folder changes
-// in flight at once can't write each other's out. Each mutation reads the
-// freshly-written list, applies its change, and writes.
+// Serialize read-modify-write cycles on the legacy folder list, so taking
+// folders out of it never races another take.
 let foldersLock: Promise<unknown> = Promise.resolve();
 async function mutateFolders<T>(fn: (idx: { folders: ProjectFolder[] }) => T): Promise<T> {
   const run = foldersLock.then(async () => {
@@ -496,65 +495,42 @@ async function mutateFolders<T>(fn: (idx: { folders: ProjectFolder[] }) => T): P
   return run;
 }
 
-export async function listProjectFolders(): Promise<ProjectFolder[]> {
-  return settleParents(await readFolders()).sort((a, b) => a.createdAt - b.createdAt);
+/** Project folders written before projects shared the library's folders. The
+ * library adopts them (library.ts) and then takes them out of this file. */
+export async function legacyProjectFolders(): Promise<ProjectFolder[]> {
+  return readFolders();
 }
 
-export async function createProjectFolder(
-  name: string,
-  parentId: string | null = null
-): Promise<ProjectFolder> {
-  const trimmed = name.trim();
-  if (!trimmed) throw new UserError("folder_name_required", "Folder name required.");
-  const id = crypto.randomUUID().slice(0, 8);
-  return mutateFolders(({ folders }) => {
-    const folder: ProjectFolder = {
-      id,
-      name: trimmed.slice(0, 80),
-      parentId: resolveParent(folders, id, parentId),
-      createdAt: Date.now(),
-    };
-    folders.push(folder);
-    return folder;
-  });
-}
-
-/** Rename a folder, file it under another (null for the top level), or
- * both; a key left undefined keeps what the folder has. */
-export async function updateProjectFolder(
-  id: string,
-  patch: { name?: string; parentId?: string | null }
-): Promise<ProjectFolder> {
-  const trimmed = patch.name?.trim();
-  if (patch.name !== undefined && !trimmed) throw new UserError("folder_name_required", "Folder name required.");
-  return mutateFolders(({ folders }) => {
-    const folder = folders.find((f) => f.id === id);
-    if (!folder) throw new UserError("folder_not_found", "Folder not found.");
-    if (trimmed) folder.name = trimmed.slice(0, 80);
-    if (patch.parentId !== undefined) folder.parentId = resolveParent(folders, id, patch.parentId);
-    return folder;
-  });
-}
-
-/** Delete a folder and everything in it: the folders filed under it, however
- * deep, and every project they hold, each the way its own delete goes. The
- * projects go first and the folders last, so a run that stops partway leaves
- * the rest where a retry finds it. */
-export async function deleteProjectFolder(id: string) {
-  const folders = await readFolders();
-  if (!folders.some((f) => f.id === id)) return;
-  const tree = new Set(subtreeOf(folders, id));
-  for (const { id: projectId, doc } of await readProjectEntries())
-    if (doc.folderId && tree.has(doc.folderId)) await deleteProject(projectId);
+/** Take adopted folders out of the legacy file. Only the ids adopted go, so a
+ * folder written here meanwhile waits for the next adoption. */
+export async function dropLegacyFolders(ids: ReadonlySet<string>): Promise<void> {
   await mutateFolders((idx) => {
-    idx.folders = idx.folders.filter((f) => !tree.has(f.id));
+    idx.folders = idx.folders.filter((f) => !ids.has(f.id));
   });
+}
+
+/** Delete every project filed in one of `folders`, each the way its own
+ * delete goes: what a folder delete takes before the folders themselves. */
+export async function deleteProjectsFiledIn(folders: ReadonlySet<string>): Promise<void> {
+  // A saved template is not listed in its folder, so the folder never takes it.
+  for (const { id, doc } of await readProjectEntries()) {
+    if (doc.folderId && folders.has(doc.folderId) && doc.kind !== "template") {
+      await deleteProject(id);
+    }
+  }
+}
+
+/** Whether `folderId` names a folder projects can be filed in: one of the
+ * library's folders, which hold projects and files alike. */
+async function folderExists(folderId: string): Promise<boolean> {
+  const { assetFolderIds } = await import("./library");
+  return (await assetFolderIds()).has(folderId);
 }
 
 export async function moveProjectToFolder(id: string, folderId: string | null) {
   const doc = await readProject(id);
   if (!doc) throw new UserError("project_not_found", "Project not found.");
-  if (folderId && !(await readFolders()).some((f) => f.id === folderId)) {
+  if (folderId && !(await folderExists(folderId))) {
     throw new UserError("folder_not_found", "Folder not found.");
   }
   doc.folderId = folderId;

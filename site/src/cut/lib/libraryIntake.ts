@@ -44,11 +44,20 @@ subscribeEngineUser(() => useLibraryImports.setState({ items: [] }));
 let tail = Promise.resolve();
 const accepts = (file: File) => isMediaFile(file) || isLinkedFile(file);
 
+/** A caller following its own drop: each arrival as it is published (an
+ * archive's files arrive in its place), and each asset as it lands. Home's
+ * prompt turns them into chips that become attachments. */
+export type IntakeWatch = {
+  prepared: (arrival: LibraryArrival) => void;
+  landed: (arrivalId: string, asset: LibraryAsset) => void;
+};
+
 /** Publish the whole drop synchronously, then save it through the selected backend. */
 export function importLibraryFiles(
   files: FileList | File[],
   target: { residency: Residency; folderId: string | null },
   client: QueryClient,
+  watch?: IntakeWatch,
 ): Promise<void> {
   const owner = currentEngineUser();
   const wanted = (id: string) => currentEngineUser() === owner && useLibraryImports.getState().items.some((item) => item.id === id);
@@ -89,17 +98,20 @@ export function importLibraryFiles(
         const landed = asset;
         patchLibrary(client, (data) => ({ ...data, assets: [landed, ...data.assets.filter((item) => item.id !== landed.id)] }));
         if (isLinkedType(asset.type)) void syncLinkedLibrary();
+        watch?.landed(id, landed);
         dismissLibraryImport(id);
       } catch (error) {
         if (wanted(id)) update((items) => items.map((item) => item.id === id ? { ...item, ...errorFields(error, new UserError("file_import_failed", "Could not import this file.")) } : item));
       }
     };
-    return {
+    const arrival: LibraryArrival = {
       id, name: file.name, file, ...target,
       mediaType: assetTypeOf(file) ?? linkedTypeOfFile(file) ?? undefined,
       stage: "queued", startStage: "queued", startedAt: Date.now(),
       run: () => running ??= work().finally(() => { running = undefined; }),
     };
+    watch?.prepared(arrival);
+    return arrival;
   };
   const batch = Array.from(files).filter((file) => accepts(file) || isFontArchive(file)).map(prepare);
   update((items) => [...items, ...batch]);

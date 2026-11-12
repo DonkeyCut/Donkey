@@ -45,7 +45,7 @@ describe("synced Library notes", () => {
     }
     const { api, db } = harness();
     expect((await api.put("owner", "n1", request({ updatedAt: 2, libraryLocation: { ...location, residency: "cloud" } }))).status).toBe(404);
-    expect(db.cutFolder.findFirst.mock.calls[0][0]).toMatchObject({ where: { userId: "owner", id: "brand", scope: "library" } });
+    expect(db.cutFolder.findFirst.mock.calls[0][0]).toMatchObject({ where: { userId: "owner", id: "brand", scope: { in: ["library", "project"] } } });
     expect(db.cutNote.update.mock.calls.length).toBe(0);
     db.cutFolder.findFirst.mockResolvedValue({ id: "brand" });
     expect((await api.put("owner", "n1", request({ updatedAt: 2, libraryLocation: { ...location, residency: "cloud" } }))).status).toBe(200);

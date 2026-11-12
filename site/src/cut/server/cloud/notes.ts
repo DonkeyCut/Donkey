@@ -15,6 +15,7 @@ import { NOTE_LABELS_MAX } from "@/cut/lib/types";
 import { prisma } from "@/lib/prisma";
 import { UserError } from "@/cut/lib/userError";
 import { caught, err } from "./util";
+import { assetFolderScope } from "./assetFolders";
 
 export interface NoteView {
   libraryLocation: unknown;
@@ -167,7 +168,7 @@ export function createNotesCloud(db: typeof prisma = prisma) {
       const { placements } = parsed.data;
       const folderIds = [...new Set(placements.flatMap((p) => (p.libraryLocation.folderId ? [p.libraryLocation.folderId] : [])))];
       const owned = new Set(
-        (await db.cutFolder.findMany({ where: { id: { in: folderIds }, userId, scope: "library" }, select: { id: true } })).map((f) => f.id)
+        (await db.cutFolder.findMany({ where: { id: { in: folderIds }, userId, scope: assetFolderScope }, select: { id: true } })).map((f) => f.id)
       );
       const fits = placements.filter(
         (p) => p.libraryLocation.residency !== "cloud" || p.libraryLocation.folderId === null || owned.has(p.libraryLocation.folderId)
@@ -242,7 +243,7 @@ export function createNotesCloud(db: typeof prisma = prisma) {
       if (parsedLocation && !parsedLocation.success) return err("Invalid Library location.", 400);
       const location = body.libraryLocation === undefined ? undefined
         : parsedLocation?.success ? parsedLocation.data : null;
-      if (location?.residency === "cloud" && location.folderId !== null && !await db.cutFolder.findFirst({ where: { id: location.folderId, userId, scope: "library" }, select: { id: true } })) {
+      if (location?.residency === "cloud" && location.folderId !== null && !await db.cutFolder.findFirst({ where: { id: location.folderId, userId, scope: assetFolderScope }, select: { id: true } })) {
         return err(new UserError("library_folder_not_found", "Library folder not found."), 404);
       }
       // Over the cap the write is refused outright: truncating here would

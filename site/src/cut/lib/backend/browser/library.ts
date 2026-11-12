@@ -21,6 +21,7 @@ import type {
   TemplateLayer,
   TemplateMedia,
 } from "../../types";
+import { roleFolderId, isFolderRole, type FolderRole } from "../../folderRole";
 import * as store from "./opfs";
 import { registerBlobFile, registeredUrl, revokeRegistered } from "./registry";
 import { caught, err, json, serveFile } from "./respond";
@@ -81,19 +82,21 @@ type LibraryIndex = {
   templates: LibraryTemplate[];
 };
 
-const EMPTY: LibraryIndex = {
+// A fresh empty shelf each time: writers mutate what readIndex hands them,
+// so a shared one would carry one account's items into the next.
+const emptyIndex = (): LibraryIndex => ({
   version: 1,
   assets: [],
   folders: [],
   templates: [],
-};
+});
 
 async function readIndex(): Promise<LibraryIndex> {
   const idx = await store.readJson<LibraryIndex>(
     await store.libraryDir(),
     INDEX_FILE,
   );
-  if (!idx) return EMPTY;
+  if (!idx) return emptyIndex();
   return {
     version: 1,
     assets: Array.isArray(idx.assets) ? idx.assets : [],
@@ -137,6 +140,7 @@ async function register(fileName: string, file?: File | null): Promise<void> {
 /** The whole shelf, with every file it holds registered so cards, players and
  * download links resolve synchronously. */
 async function list(): Promise<Response> {
+  await adoptProjectFolders();
   const idx = await readIndex();
   for (const name of new Set([
     ...idx.assets.map((a) => a.fileName),
@@ -363,6 +367,7 @@ async function move(req: Request): Promise<Response> {
       id: string;
       folderId: string | null;
     };
+    await adoptProjectFolders();
     await mutateIndex((idx) => {
       const item =
         idx.assets.find((a) => a.id === id) ??
@@ -379,21 +384,58 @@ async function move(req: Request): Promise<Response> {
   }
 }
 
-async function createFolder(req: Request): Promise<Response> {
+/** Move folders written into the store's root index before projects and
+ * files shared one tree into the shelf's, ids and nesting intact. Runs ahead
+ * of every folder read and write; a folder already here is kept, and only the
+ * folders adopted leave the root index, so a run cut off between the two
+ * writes, or a folder an older tab writes meanwhile, waits for the next one. */
+async function adoptProjectFolders(): Promise<void> {
+  const legacy = (await store.readIndex()).folders;
+  if (legacy.length === 0) return;
+  await mutateIndex((idx) => {
+    const have = new Set(idx.folders.map((f) => f.id));
+    for (const f of legacy) {
+      if (have.has(f.id)) continue;
+      idx.folders.push({ id: f.id, name: f.name, parentId: f.parentId ?? null, createdAt: f.createdAt });
+    }
+  });
+  const adopted = new Set(legacy.map((f) => f.id));
+  await store.updateIndex((idx) => ({ ...idx, folders: idx.folders.filter((f) => !adopted.has(f.id)) }));
+}
+
+/** Every folder, projects and files alike file under, settled into a tree. */
+export async function listFolders(): Promise<StoredFolder[]> {
+  await adoptProjectFolders();
+  return settleParents((await readIndex()).folders).sort((a, b) => a.createdAt - b.createdAt);
+}
+
+/** Whether `id` names a folder a project can be filed in. */
+export async function folderExists(id: string): Promise<boolean> {
+  await adoptProjectFolders();
+  return (await readIndex()).folders.some((f) => f.id === id);
+}
+
+export async function createFolder(req: Request): Promise<Response> {
   try {
-    const { name, parentId } = (await req.json()) as {
+    const { name, parentId, role } = (await req.json()) as {
       name?: string;
       parentId?: string | null;
+      role?: unknown;
     };
     const trimmed = (name ?? "").trim();
     if (!trimmed) return err(new UserError("folder_name_required", "Folder name required."), 500);
-    const id = crypto.randomUUID().slice(0, 8);
+    const asked: FolderRole | null = isFolderRole(role) ? role : null;
+    const id = asked ? roleFolderId(asked, "browser") : crypto.randomUUID().slice(0, 8);
+    await adoptProjectFolders();
     return json(
       await mutateIndex((idx) => {
+        // A role's folder is made once; every later ask answers with it.
+        const held = asked ? idx.folders.find((f) => f.id === id) : undefined;
+        if (held) return held;
         const folder: StoredFolder = {
           id,
           name: trimmed.slice(0, 80),
-          parentId: resolveParent(idx.folders, id, parentId),
+          parentId: asked ? null : resolveParent(idx.folders, id, parentId),
           createdAt: Date.now(),
         };
         idx.folders.push(folder);
@@ -407,7 +449,7 @@ async function createFolder(req: Request): Promise<Response> {
 
 /** Rename a folder, file it under another (null for the top level), or
  * both; a key left out keeps what the folder has. */
-async function updateFolder(req: Request, id: string): Promise<Response> {
+export async function updateFolder(req: Request, id: string): Promise<Response> {
   try {
     const { name, parentId } = (await req.json()) as {
       name?: string;
@@ -415,6 +457,7 @@ async function updateFolder(req: Request, id: string): Promise<Response> {
     };
     const trimmed = name?.trim();
     if (name !== undefined && !trimmed) return err(new UserError("folder_name_required", "Folder name required."), 500);
+    await adoptProjectFolders();
     return json(
       await mutateIndex((idx) => {
         const folder = idx.folders.find((f) => f.id === id);
@@ -431,12 +474,32 @@ async function updateFolder(req: Request, id: string): Promise<Response> {
   }
 }
 
+/** Delete a project and release the files it registered for playback. */
+export async function dropProject(id: string): Promise<void> {
+  await store.deleteProject(id);
+  revokeRegistered(`/api/cut/projects/${id}/`);
+}
+
 /** Delete a folder and everything in it: the folders filed under it, however
- * deep, and every asset and template they hold, in one write of the index. */
-async function deleteFolder(id: string): Promise<Response> {
+ * deep, and every project, asset and template they hold. The projects go
+ * first and the folders last, so a run that stops partway leaves the rest
+ * where a retry finds it. */
+export async function deleteFolder(id: string): Promise<Response> {
   try {
+    await adoptProjectFolders();
+    const folders = (await readIndex()).folders;
+    if (!folders.some((f) => f.id === id)) return json({ ok: true });
+    const held = new Set(subtreeOf(folders, id));
+    // A saved template is not listed in its folder, so the folder never
+    // takes it.
+    for (const projectId of await store.listProjectIds()) {
+      const doc = await store.readDoc(projectId);
+      if (!doc?.folderId || !held.has(doc.folderId) || doc.kind === "template") {
+        continue;
+      }
+      await dropProject(projectId);
+    }
     const files = await mutateIndex((idx) => {
-      if (!idx.folders.some((f) => f.id === id)) return [];
       const tree = new Set(subtreeOf(idx.folders, id));
       const filed = (x: { folderId?: string | null }) => !!x.folderId && tree.has(x.folderId);
       const assets = new Set(idx.assets.filter(filed).map((a) => a.id));

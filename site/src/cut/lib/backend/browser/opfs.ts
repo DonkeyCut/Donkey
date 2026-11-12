@@ -151,13 +151,15 @@ type StoreIndex = {
   opens: Record<string, number>;
 };
 
-const EMPTY_INDEX: StoreIndex = { version: 1, folders: [], pendingUploads: [], opens: {} };
+// A fresh empty index each time: writers mutate what readIndex hands them, so
+// a shared one would carry one account's entries into the next.
+const emptyIndex = (): StoreIndex => ({ version: 1, folders: [], pendingUploads: [], opens: {} });
 
 export async function readIndex(): Promise<StoreIndex> {
   const idx = await readJson<StoreIndex>(await dirAt(userParts(), false), "index.json");
   return idx && Array.isArray(idx.folders)
-    ? { ...EMPTY_INDEX, ...idx, pendingUploads: idx.pendingUploads ?? [], opens: idx.opens ?? {} }
-    : EMPTY_INDEX;
+    ? { ...emptyIndex(), ...idx, pendingUploads: idx.pendingUploads ?? [], opens: idx.opens ?? {} }
+    : emptyIndex();
 }
 
 export async function updateIndex(mutate: (idx: StoreIndex) => StoreIndex | void): Promise<StoreIndex> {

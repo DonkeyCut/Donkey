@@ -6,26 +6,23 @@ import { isProjectKind, isTimelineId, normalizeAspect, sanitizeTimelines, type P
 import { detectSilence, extractAudio, makeFreezeFrame, probeDims, probeDuration } from "../frames";
 import {
   createProject,
-  createProjectFolder,
   deleteExport,
   deleteMedia,
   deleteProject,
-  deleteProjectFolder,
   duplicateProject,
   exportPath,
   listExports,
-  listProjectFolders,
   listProjects,
   mediaPath,
   moveProjectToFolder,
   previewPath,
   readProject,
   projectFileRevision,
-  updateProjectFolder,
   saveMedia,
   sweepOrphanMedia,
   writeProject,
 } from "../projects";
+import { createFolder, deleteFolder, listFolders, updateFolder } from "../library";
 import { convertToMp4, mp4NameFor } from "../convert";
 import { convertModeIn } from "@/cut/lib/convertMode";
 import { requestedLocale } from "@/cut/lib/defaultNames";
@@ -49,14 +46,17 @@ export const projectsApi = {
     return Response.json(await listProjects());
   },
 
+  // The folder routes under /projects answer from the library's folders,
+  // which hold projects and files alike; pages from before the two shared a
+  // tree still call them.
   async folders() {
-    return Response.json(await listProjectFolders());
+    return Response.json(await listFolders());
   },
 
   async createFolder(req: Request) {
     try {
       const { name, parentId } = (await req.json()) as { name?: string; parentId?: string | null };
-      return Response.json(await createProjectFolder(name ?? "", parentId ?? null));
+      return Response.json(await createFolder(name ?? "", parentId ?? null));
     } catch (e) {
       return caught(e, new UserError("folder_create_failed", "Could not create folder."));
     }
@@ -66,7 +66,7 @@ export const projectsApi = {
   async updateFolder(req: Request, { id }: { id: string }) {
     try {
       const { name, parentId } = (await req.json()) as { name?: string; parentId?: string | null };
-      return Response.json(await updateProjectFolder(id, { name, parentId }));
+      return Response.json(await updateFolder(id, { name, parentId }));
     } catch (e) {
       return caught(e, new UserError("folder_update_failed", "Could not update folder."));
     }
@@ -74,7 +74,7 @@ export const projectsApi = {
 
   async deleteFolder(_req: Request, { id }: { id: string }) {
     try {
-      await deleteProjectFolder(id);
+      await deleteFolder(id);
       return Response.json({ ok: true });
     } catch (e) {
       return caught(e, new UserError("folder_delete_failed", "Could not delete folder."));
@@ -184,6 +184,7 @@ export const projectsApi = {
 
   async remove(_req: Request, { id }: { id: string }) {
     try {
+      if (!(await readProject(id))) return err(PROJECT_NOT_FOUND, 404);
       await deleteProject(id);
       return Response.json({ ok: true });
     } catch (e) {

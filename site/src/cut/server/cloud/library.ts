@@ -18,7 +18,9 @@ import type { StoredAsset } from "@/cut/lib/types";
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { MEDIA_REDIRECT_HEADERS, mediaObjectUrl, mediaUrlLifetime } from "./mediaCdn";
-import { getProject, takenMediaNames } from "./projects";
+import { deleteProjectCascade, getProject, takenMediaNames } from "./projects";
+import { ASSET_FOLDER_SCOPE, assetFolderScope, roleFolderIdOf } from "./assetFolders";
+import { isFolderRole } from "@/cut/lib/folderRole";
 import { copy, del, head, libraryKey, presignPut, projectMediaKey } from "./r2";
 import { addUsage, quotaCheck } from "./usage";
 import { renderJobCheck } from "./limits";
@@ -353,7 +355,7 @@ export const libraryCloud = {
           })
         : Promise.resolve([]),
       prisma.cutFolder.findMany({
-        where: { userId, scope: "library" },
+        where: { userId, scope: assetFolderScope },
         orderBy: { createdAt: "asc" },
       }),
       prisma.cutTemplate.findMany({
@@ -458,7 +460,7 @@ export const libraryCloud = {
         destFolder = await ensureInspirationFolder(userId);
       } else if (folderId) {
         const folder = await prisma.cutFolder.findFirst({
-          where: { id: folderId, userId, scope: "library" },
+          where: { id: folderId, userId, scope: assetFolderScope },
         });
         if (!folder) return err(new UserError("folder_not_found", "Folder not found."), 404);
         destFolder = folderId;
@@ -669,7 +671,7 @@ export const libraryCloud = {
       };
       if (folderId) {
         const folder = await prisma.cutFolder.findFirst({
-          where: { id: folderId, userId, scope: "library" },
+          where: { id: folderId, userId, scope: assetFolderScope },
         });
         if (!folder) throw new UserError("folder_not_found", "Folder not found.");
       }
@@ -809,25 +811,47 @@ export const libraryCloud = {
     }
   },
 
-  // --- Folders (scope "library") ---
+  // --- Folders: the Assets tree (assetFolders.ts), holding projects and
+  // files alike. The /projects/folders routes answer from here too. ---
 
+  /** The Assets folders alone, for the routes under /projects/folders. */
+  async folders(userId: string) {
+    const rows = await prisma.cutFolder.findMany({
+      where: { userId, scope: assetFolderScope },
+      orderBy: { createdAt: "asc" },
+    });
+    return Response.json(rows.map(libraryFolderView));
+  },
+
+  /** Make a folder. With a role, the role's folder is made once at the top
+   * level and every later ask answers with it. */
   async createFolder(userId: string, req: Request) {
     try {
-      const { name, parentId } = (await req.json()) as {
+      const { name, parentId, role } = (await req.json()) as {
         name?: string;
         parentId?: string | null;
+        role?: unknown;
       };
       const trimmed = (name ?? "").trim();
       if (!trimmed) throw new UserError("folder_name_required", "Folder name required.");
+      if (isFolderRole(role)) {
+        const id = roleFolderIdOf(role, userId);
+        const row = await prisma.cutFolder.upsert({
+          where: { id },
+          create: { id, userId, name: trimmed.slice(0, 80), scope: ASSET_FOLDER_SCOPE },
+          update: {},
+        });
+        return Response.json(libraryFolderView(row));
+      }
       const folders = await prisma.cutFolder.findMany({
-        where: { userId, scope: "library" },
+        where: { userId, scope: assetFolderScope },
         select: { id: true, parentId: true },
       });
       const row = await prisma.cutFolder.create({
         data: {
           userId,
           name: trimmed.slice(0, 80),
-          scope: "library",
+          scope: ASSET_FOLDER_SCOPE,
           parentId: resolveParent(folders, "", parentId),
         },
       });
@@ -848,7 +872,7 @@ export const libraryCloud = {
       const trimmed = name?.trim();
       if (name !== undefined && !trimmed) throw new UserError("folder_name_required", "Folder name required.");
       const folders = await prisma.cutFolder.findMany({
-        where: { userId, scope: "library" },
+        where: { userId, scope: assetFolderScope },
         select: { id: true, parentId: true },
       });
       if (!folders.some((f) => f.id === id)) throw new UserError("folder_not_found", "Folder not found.");
@@ -868,19 +892,31 @@ export const libraryCloud = {
   },
 
   /** Delete a folder and everything in it: the folders filed under it,
-   * however deep, and every asset and template they hold, each through the
-   * cascade its own delete runs — an asset leaves a tombstone for the phone
-   * like any other delete. The items go first and the
-   * folders last, so a run that stops partway leaves the rest where a retry
-   * finds it. */
+   * however deep, and every project, asset, template and placed note they
+   * hold, each through the cascade its own delete runs — an asset leaves a
+   * tombstone for the phone like any other delete. The items go first and
+   * the folders last, so a run that stops partway leaves the rest where a
+   * retry finds it. */
   async deleteFolder(userId: string, id: string) {
     try {
       const folders = await prisma.cutFolder.findMany({
-        where: { userId, scope: "library" },
+        where: { userId, scope: assetFolderScope },
         select: { id: true, parentId: true },
       });
       if (!folders.some((f) => f.id === id)) return Response.json({ ok: true });
       const tree = subtreeOf(folders, id);
+      // A saved template is not listed in its folder, so the folder never
+      // takes it.
+      const projects = await prisma.cutProject.findMany({
+        where: { userId, folderId: { in: tree } },
+        select: { id: true, doc: true },
+      });
+      for (const p of projects) {
+        if ((p.doc as { kind?: string } | null)?.kind === "template") {
+          continue;
+        }
+        await deleteProjectCascade(userId, p.id);
+      }
       const assets = await prisma.cutLibraryAsset.findMany({
         where: { userId, folderId: { in: tree }, deletedAt: null },
         select: { id: true },
@@ -895,7 +931,7 @@ export const libraryCloud = {
       }
       await notesCloud.deleteLibraryFolderNotes(userId, "cloud", tree);
       await prisma.cutFolder.deleteMany({
-        where: { userId, scope: "library", id: { in: tree } },
+        where: { userId, scope: assetFolderScope, id: { in: tree } },
       });
       return Response.json({ ok: true });
     } catch (e) {
@@ -1174,7 +1210,7 @@ export async function ensureInspirationFolder(userId: string): Promise<string> {
   const id = inspirationFolderId(userId);
   await prisma.cutFolder.upsert({
     where: { id },
-    create: { id, userId, name: "Inspiration", scope: "library" },
+    create: { id, userId, name: "Inspiration", scope: ASSET_FOLDER_SCOPE },
     update: {},
   });
   return id;
@@ -1184,6 +1220,6 @@ export async function seedFontsFolder(userId: string): Promise<void> {
   const id = fontsFolderId(userId);
   if (await prisma.cutFolder.findUnique({ where: { id } })) return;
   await prisma.cutFolder.create({
-    data: { id, userId, name: "Fonts", scope: "library" },
+    data: { id, userId, name: "Fonts", scope: ASSET_FOLDER_SCOPE },
   });
 }

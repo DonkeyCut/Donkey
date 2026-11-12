@@ -7,16 +7,15 @@
 // (answered with blob URLs), exports, the export-jobs feed, and the library
 // shelf (./library.ts). Everything else is the driver's cloud proxy.
 import { creatorNames } from "../../defaultNames";
-import { resolveParent, settleParents, subtreeOf } from "../../folderTree";
 import { sanitizeGuideLines, sanitizeGuides } from "../../guides";
 import { OUTPUT_SPACES } from "@donkeycut/effects-kit";
-import { isProjectKind, isTimelineId, normalizeAspect, sanitizeTimelines, type ProjectDoc, type ProjectFolder } from "../../types";
+import { isProjectKind, isTimelineId, normalizeAspect, sanitizeTimelines, type ProjectDoc } from "../../types";
 import {
   getBrowserExportJob,
   listBrowserExportJobs,
   removeBrowserExportJob,
 } from "./exportJobs";
-import { dispatchLibraryRoute } from "./library";
+import { createFolder, deleteFolder, dispatchLibraryRoute, dropProject, folderExists, listFolders, updateFolder } from "./library";
 import * as store from "./opfs";
 import { registerBlobFile, registeredUrl, revokeRegistered } from "./registry";
 import { caught, err, json, serveFile } from "./respond";
@@ -25,7 +24,6 @@ import { UserError } from "../../userError";
 // Refusals the page reads, coded so it words them; the engine answers the same.
 const PROJECT_NOT_FOUND = new UserError("project_not_found", "Project not found.");
 const FOLDER_NOT_FOUND = new UserError("folder_not_found", "Folder not found.");
-const FOLDER_NAME_REQUIRED = new UserError("folder_name_required", "Folder name required.");
 const EXPORT_NOT_READY = new UserError("export_not_ready", "Export not ready.");
 
 const mediaApiPath = (id: string, fileName: string) =>
@@ -56,8 +54,7 @@ async function createProject(req: Request): Promise<Response> {
     const id = crypto.randomUUID().slice(0, 10);
     // This backend runs in the page, so it names in the page's language.
     const displayName = name?.trim() || creatorNames().untitled;
-    const folders = (await store.readIndex()).folders;
-    const folder = folderId && folders.some((f) => f.id === folderId) ? folderId : null;
+    const folder = folderId && (await folderExists(folderId)) ? folderId : null;
     const frame = normalizeAspect(aspect);
     const now = Date.now();
     const doc: ProjectDoc = {
@@ -162,7 +159,7 @@ async function moveProject(req: Request, id: string): Promise<Response> {
     const { folderId } = (await req.json()) as { folderId: string | null };
     const doc = await store.readDoc(id);
     if (!doc) return err(PROJECT_NOT_FOUND, 404);
-    if (folderId && !(await store.readIndex()).folders.some((f) => f.id === folderId)) {
+    if (folderId && !(await folderExists(folderId))) {
       return err(FOLDER_NOT_FOUND, 404);
     }
     doc.folderId = folderId ?? null;
@@ -173,85 +170,7 @@ async function moveProject(req: Request, id: string): Promise<Response> {
   }
 }
 
-async function createFolder(req: Request): Promise<Response> {
-  try {
-    const { name, parentId } = (await req.json()) as { name?: string; parentId?: string | null };
-    const trimmed = (name ?? "").trim();
-    if (!trimmed) return err(FOLDER_NAME_REQUIRED, 500);
-    const id = crypto.randomUUID().slice(0, 8);
-    let folder: ProjectFolder | null = null;
-    await store.updateIndex((idx) => {
-      folder = {
-        id,
-        name: trimmed.slice(0, 80),
-        parentId: resolveParent(idx.folders, id, parentId),
-        createdAt: Date.now(),
-      };
-      return { ...idx, folders: [...idx.folders, folder] };
-    });
-    return json(folder);
-  } catch (e) {
-    return caught(e, new UserError("folder_create_failed", "Could not create folder."));
-  }
-}
-
-/** Rename a folder, file it under another (null for the top level), or
- * both; a key left out keeps what the folder has. */
-async function updateFolder(req: Request, fid: string): Promise<Response> {
-  try {
-    const { name, parentId } = (await req.json()) as { name?: string; parentId?: string | null };
-    const trimmed = name?.trim();
-    if (name !== undefined && !trimmed) return err(FOLDER_NAME_REQUIRED, 500);
-    let updated: ProjectFolder | null = null;
-    await store.updateIndex((idx) => ({
-      ...idx,
-      folders: idx.folders.map((f) =>
-        f.id === fid
-          ? (updated = {
-              ...f,
-              ...(trimmed ? { name: trimmed.slice(0, 80) } : {}),
-              ...(parentId !== undefined
-                ? { parentId: resolveParent(idx.folders, fid, parentId) }
-                : {}),
-            })
-          : f
-      ),
-    }));
-    return updated ? json(updated) : err(FOLDER_NOT_FOUND, 500);
-  } catch (e) {
-    return caught(e, new UserError("folder_update_failed", "Could not update folder."));
-  }
-}
-
-/** Delete a folder and everything in it: the folders filed under it, however
- * deep, and every project they hold, each the way its own delete goes. The
- * projects go first and the folders last, so a run that stops partway leaves
- * the rest where a retry finds it. */
-async function deleteFolder(fid: string): Promise<Response> {
-  try {
-    const { folders } = await store.readIndex();
-    if (!folders.some((f) => f.id === fid)) return json({ ok: true });
-    const tree = new Set(subtreeOf(folders, fid));
-    for (const id of await store.listProjectIds()) {
-      const doc = await store.readDoc(id);
-      if (doc?.folderId && tree.has(doc.folderId)) await dropProject(id);
-    }
-    await store.updateIndex((idx) => ({
-      ...idx,
-      folders: idx.folders.filter((f) => !tree.has(f.id)),
-    }));
-    return json({ ok: true });
-  } catch (e) {
-    return caught(e, new UserError("folder_delete_failed", "Could not delete folder."));
-  }
-}
-
 /** Delete a project: its directory, and the blob URLs minted for its files. */
-async function dropProject(id: string): Promise<void> {
-  await store.deleteProject(id);
-  revokeRegistered(`/api/cut/projects/${id}/`);
-}
-
 async function uploadMedia(req: Request, id: string): Promise<Response> {
   try {
     if (!(await store.readDoc(id))) return err(PROJECT_NOT_FOUND, 404);
@@ -381,13 +300,11 @@ export async function dispatchBrowserRoute(
       if (method === "POST") return createProject(req());
       return err("Method not allowed.", 405);
     }
-    // /projects/folders[/:fid]
+    // /projects/folders[/:fid]: the shelf's folders, which hold projects and
+    // files alike; pages from before the two shared a tree still call these.
     if (rest[1] === "folders") {
       if (rest.length === 2) {
-        if (method === "GET") {
-          const { folders } = await store.readIndex();
-          return json(settleParents(folders).sort((a, b) => a.createdAt - b.createdAt));
-        }
+        if (method === "GET") return json(await listFolders());
         if (method === "POST") return createFolder(req());
         return err("Method not allowed.", 405);
       }

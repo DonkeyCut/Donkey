@@ -6,6 +6,7 @@ import { head } from "@/cut/server/cloud/r2";
 import { err } from "@/cut/server/cloud/util";
 import { UserError } from "@/cut/lib/userError";
 import { wakeRenderWorker } from "@/cut/server/cloud/wake";
+import { assetFolderScope } from "@/cut/server/cloud/assetFolders";
 import { prisma } from "@/lib/prisma";
 
 export function createLibraryUploadPreparation({
@@ -28,7 +29,7 @@ export function createLibraryUploadPreparation({
     const type = libraryTypeOf(object.fileName);
     if (type !== "video" && type !== "audio") return err(new UserError("upload_no_video_audio", "This upload has no video or audio."), 400);
     if (input.folderId && !(await db.cutFolder.findFirst({
-      where: { id: input.folderId, userId, scope: "library" }, select: { id: true },
+      where: { id: input.folderId, userId, scope: assetFolderScope }, select: { id: true },
     }))) return err(new UserError("folder_not_found", "Folder not found."), 404);
 
     const id = libraryUploadId(object.id);

@@ -9,7 +9,8 @@ import { itemName } from "@/cut/lib/itemName";
 import { isLinkedAssetType, type AssetType } from "@/cut/lib/types";
 import { cutDataRoot } from "./dataDir";
 import { assertLocalRuntime } from "./local-only";
-import { mediaPath as projectMediaPath, readProject } from "./projects";
+import { deleteProjectsFiledIn, dropLegacyFolders, legacyProjectFolders, mediaPath as projectMediaPath, readProject } from "./projects";
+import { roleFolderId, type FolderRole } from "@/cut/lib/folderRole";
 import { makeProxy, proxyNameFor } from "./proxy";
 import { templateExtras } from "./templateExtras";
 import { exists, uniqueName, writeJsonAtomic } from "./util";
@@ -489,26 +490,55 @@ export function getAsset(id: string) {
   return readIndex().then((idx) => idx.assets.find((a) => a.id === id));
 }
 
-// --- Folders: named groups that file into each other; assets carry a
-// folderId, folders a parentId. ---
+// --- Folders: named groups that file into each other; assets, templates and
+// projects carry a folderId, folders a parentId. One tree holds every kind. ---
+
+/** Move folders written into the projects' own folder file before the two
+ * kinds shared one tree into the library's, ids and nesting intact. Runs
+ * ahead of every folder read and write; a folder already here is kept, so a
+ * run cut off between the two writes repeats harmlessly. */
+async function adoptProjectFolders(): Promise<void> {
+  const legacy = await legacyProjectFolders();
+  if (legacy.length === 0) return;
+  await mutateIndex((idx) => {
+    const have = new Set((idx.folders ?? []).map((f) => f.id));
+    const adopted = legacy
+      .filter((f) => !have.has(f.id))
+      .map((f) => ({ id: f.id, name: f.name, parentId: f.parentId ?? null, createdAt: f.createdAt }));
+    idx.folders = [...(idx.folders ?? []), ...adopted];
+  });
+  await dropLegacyFolders(new Set(legacy.map((f) => f.id)));
+}
 
 export async function listFolders(): Promise<LibraryFolder[]> {
+  await adoptProjectFolders();
   const idx = await readIndex();
   return settleParents(idx.folders ?? []).sort((a, b) => a.createdAt - b.createdAt);
+}
+
+/** Every folder id items and projects can be filed under. */
+export async function assetFolderIds(): Promise<Set<string>> {
+  await adoptProjectFolders();
+  return new Set(((await readIndex()).folders ?? []).map((f) => f.id));
 }
 
 export async function createFolder(
   name: string,
   parentId: string | null = null,
+  role: FolderRole | null = null,
 ): Promise<LibraryFolder> {
   const trimmed = name.trim();
   if (!trimmed) throw new UserError("folder_name_required", "Folder name required.");
-  const id = crypto.randomUUID().slice(0, 8);
+  await adoptProjectFolders();
+  const id = role ? roleFolderId(role, "mac") : crypto.randomUUID().slice(0, 8);
   return mutateIndex((idx) => {
+    // A role's folder is made once; every later ask answers with it.
+    const held = role ? (idx.folders ?? []).find((f) => f.id === id) : undefined;
+    if (held) return held;
     const folder: LibraryFolder = {
       id,
       name: trimmed.slice(0, 80),
-      parentId: resolveParent(idx.folders ?? [], id, parentId),
+      parentId: role ? null : resolveParent(idx.folders ?? [], id, parentId),
       createdAt: Date.now(),
     };
     idx.folders = [...(idx.folders ?? []), folder];
@@ -524,6 +554,7 @@ export async function updateFolder(
 ): Promise<LibraryFolder> {
   const trimmed = patch.name?.trim();
   if (patch.name !== undefined && !trimmed) throw new UserError("folder_name_required", "Folder name required.");
+  await adoptProjectFolders();
   return mutateIndex((idx) => {
     const folder = (idx.folders ?? []).find((f) => f.id === id);
     if (!folder) throw new UserError("folder_not_found", "Folder not found.");
@@ -536,16 +567,20 @@ export async function updateFolder(
 }
 
 /** Delete a folder and everything in it: the folders filed under it, however
- * deep, and every asset and template they hold, in one write of the index. */
+ * deep, and every project, asset and template they hold. The projects go
+ * first and the folders last, so a run that stops partway leaves the rest
+ * where a retry finds it. */
 export async function deleteFolder(id: string) {
+  await adoptProjectFolders();
+  const folders = (await readIndex()).folders ?? [];
+  if (!folders.some((f) => f.id === id)) return;
+  await deleteProjectsFiledIn(new Set(subtreeOf(folders, id)));
   const files = await mutateIndex((idx) => {
-    const folders = idx.folders ?? [];
-    if (!folders.some((f) => f.id === id)) return [];
-    const tree = new Set(subtreeOf(folders, id));
+    const tree = new Set(subtreeOf(idx.folders ?? [], id));
     const filed = (x: { folderId?: string | null }) => !!x.folderId && tree.has(x.folderId);
     const assets = new Set(idx.assets.filter(filed).map((a) => a.id));
     const templates = new Set((idx.templates ?? []).filter(filed).map((t) => t.id));
-    idx.folders = folders.filter((f) => !tree.has(f.id));
+    idx.folders = (idx.folders ?? []).filter((f) => !tree.has(f.id));
     return [...takeAssets(idx, assets), ...takeTemplates(idx, templates)];
   });
   await removeFiles(files);
@@ -553,6 +588,7 @@ export async function deleteFolder(id: string) {
 
 /** File a library item — an asset or a template — into a folder (`null` ungroups). */
 export async function moveItem(id: string, folderId: string | null) {
+  await adoptProjectFolders();
   await mutateIndex((idx) => {
     const item =
       idx.assets.find((a) => a.id === id) ??

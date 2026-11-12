@@ -19,8 +19,8 @@ function harness() {
       deleteMany: mock(async (args: unknown) => { void args; return { count: 1 }; }),
     },
     cutFolder: {
-      findFirst: mock(async (args: { where: { id: string; userId: string; scope: string } }) =>
-        rows.find((row) => row.id === args.where.id && row.userId === args.where.userId && row.scope === args.where.scope) ?? null),
+      findFirst: mock(async (args: { where: { id: string; userId: string; scope: { in: string[] } } }) =>
+        rows.find((row) => row.id === args.where.id && row.userId === args.where.userId && args.where.scope.in.includes(row.scope)) ?? null),
       findMany: mock(async (args: unknown) => { void args; return [folder("child", "root")]; }),
     },
     cutLibraryAsset: {

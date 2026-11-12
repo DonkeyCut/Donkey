@@ -10,6 +10,7 @@ import {
 import { libraryShareAccess, sharedFolderTrail } from "@/cut/server/cloud/libraryShareAccess";
 import { assetView, templateView } from "@/cut/server/cloud/library";
 import { mediaObjectUrl } from "@/cut/server/cloud/mediaCdn";
+import { assetFolderScope } from "@/cut/server/cloud/assetFolders";
 import { UserError, errorBody } from "@/cut/lib/userError";
 
 const privateHeaders = { "Cache-Control": "private, no-store", Vary: "Cookie" };
@@ -29,7 +30,7 @@ export function createLibrarySharing(
 ) {
   async function ownedTarget(userId: string, target: LibraryShareTarget) {
     return target.kind === "folder"
-      ? db.cutFolder.findFirst({ where: { id: target.id, userId, scope: "library" } })
+      ? db.cutFolder.findFirst({ where: { id: target.id, userId, scope: assetFolderScope } })
       : db.cutLibraryAsset.findFirst({ where: { id: target.id, userId, deletedAt: null } });
   }
 
@@ -66,7 +67,7 @@ export function createLibrarySharing(
       const { folder, offset } = parsed.data;
       const pageSize = await getPageSize();
       const readFolder = (id: string) => db.cutFolder.findFirst({
-        where: { id, userId: share.userId, scope: "library" },
+        where: { id, userId: share.userId, scope: assetFolderScope },
         select: { id: true, name: true, parentId: true },
       });
       const trail = target.kind === "folder"
@@ -76,7 +77,7 @@ export function createLibrarySharing(
       const folderId = trail.at(-1)?.id;
       const [folders, assets, templates] = await Promise.all([
         folderId ? db.cutFolder.findMany({
-          where: { userId: share.userId, scope: "library", parentId: folderId },
+          where: { userId: share.userId, scope: assetFolderScope, parentId: folderId },
           select: { id: true, name: true }, orderBy: { id: "asc" }, skip: offset, take: pageSize + 1,
         }) : [],
         db.cutLibraryAsset.findMany({
@@ -167,7 +168,7 @@ export function createLibrarySharing(
       }
       if (target.kind === "folder") {
         if (!folderId || !(await sharedFolderTrail(target.id, folderId, (id) =>
-          db.cutFolder.findFirst({ where: { id, userId: share.userId, scope: "library" },
+          db.cutFolder.findFirst({ where: { id, userId: share.userId, scope: assetFolderScope },
             select: { id: true, name: true, parentId: true } })))) return err("Not found.", 404);
       }
       const object = await db.cutMediaObject.findFirst({

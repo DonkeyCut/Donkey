@@ -65,6 +65,10 @@ export function libraryFolderRefs(folders: LibraryFolder[]): AssetRef[] {
   });
 }
 
+// The pages that name a Library folder in ?folder=…: Assets, and the Library
+// and projects home from before Assets held both, whose links still circulate.
+const LIBRARY_PATHS = ["/app/assets", "/app/library", "/app"];
+
 /** Called on a tool's URL argument after the model chooses what to open. */
 export function parseFolderLink(value: string): FolderReference | null {
   let url: URL;
@@ -76,7 +80,7 @@ export function parseFolderLink(value: string): FolderReference | null {
   const share = /^\/s\/library\/([^/]+)$/.exec(path);
   const project = /^\/app\/p\/([^/]+)$/.exec(path);
   const candidate = share ? { scope: "shared", shareToken: share[1], folderId }
-    : path === "/app/library" ? { scope: "library", folderId }
+    : LIBRARY_PATHS.includes(path) && folderId ? { scope: "library", folderId }
       : project ? { scope: "project", projectId: project[1], folderId } : null;
   const parsed = folderReferenceSchema.safeParse(candidate);
   return parsed.success ? parsed.data : null;

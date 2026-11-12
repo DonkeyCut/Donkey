@@ -1,11 +1,10 @@
 // Cloud twin of the engine's project CRUD (server/projects.ts + http/projects.ts):
 // docs and metadata in Postgres, media bytes in R2. Every query scopes by userId.
 import { sanitizeGuideLines, sanitizeGuides } from "@/cut/lib/guides";
-import { resolveParent, subtreeOf } from "@/cut/lib/folderTree";
 import { timelineEnd } from "@/cut/lib/timelineEnd";
 import { DOC_SEQ_HEADER, DOC_WRITER_HEADER, HTTP_CONFLICT } from "@/cut/lib/backend/types";
 import { OUTPUT_SPACES } from "@donkeycut/effects-kit";
-import { isProjectKind, isTimelineId, normalizeAspect, sanitizeTimelines, type ProjectDoc, type ProjectFolder, type ProjectSummary } from "@/cut/lib/types";
+import { isProjectKind, isTimelineId, normalizeAspect, sanitizeTimelines, type ProjectDoc, type ProjectSummary } from "@/cut/lib/types";
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { defaultNames } from "@/cut/lib/defaultNames";
@@ -16,18 +15,7 @@ import { del, deletePrefix, projectPrefix, projectMediaKey } from "./r2";
 import { addUsage } from "./usage";
 import { UserError } from "@/cut/lib/userError";
 import { caught, decodeFileParam, err, redirect } from "./util";
-
-const projectFolderView = (row: {
-  id: string;
-  name: string;
-  parentId: string | null;
-  createdAt: Date;
-}): ProjectFolder => ({
-  id: row.id,
-  name: row.name,
-  parentId: row.parentId,
-  createdAt: row.createdAt.getTime(),
-});
+import { assetFolderScope } from "./assetFolders";
 
 const HTTP_BAD_REQUEST = 400;
 const HTTP_NOT_FOUND = 404;
@@ -35,7 +23,6 @@ const HTTP_NOT_FOUND = 404;
 // Refusals the projects home reads, coded so the page words them.
 const PROJECT_NOT_FOUND = new UserError("project_not_found", "Project not found.");
 const FOLDER_NOT_FOUND = new UserError("folder_not_found", "Folder not found.");
-const FOLDER_NAME_REQUIRED = new UserError("folder_name_required", "Folder name required.");
 
 // Writer ids are the transport's crypto.randomUUID().
 const WRITER_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -253,7 +240,7 @@ export const projectsCloud = {
       };
       const untitled = name?.trim() ? "" : (await defaultNames(await creatorLocaleOf(userId, locale))).untitled;
       const folder = folderId
-        ? await prisma.cutFolder.findFirst({ where: { id: folderId, userId, scope: "project" } })
+        ? await prisma.cutFolder.findFirst({ where: { id: folderId, userId, scope: assetFolderScope } })
         : null;
       const frame = normalizeAspect(aspect);
       const now = Date.now();
@@ -373,7 +360,7 @@ export const projectsCloud = {
       if (!row) return err(PROJECT_NOT_FOUND, 404);
       if (folderId) {
         const folder = await prisma.cutFolder.findFirst({
-          where: { id: folderId, userId, scope: "project" },
+          where: { id: folderId, userId, scope: assetFolderScope },
         });
         if (!folder) return err(FOLDER_NOT_FOUND, 500);
       }
@@ -381,88 +368,6 @@ export const projectsCloud = {
       return Response.json({ ok: true });
     } catch (e) {
       return caught(e, new UserError("project_move_failed", "Could not move project."));
-    }
-  },
-
-  async folders(userId: string) {
-    const rows = await prisma.cutFolder.findMany({
-      where: { userId, scope: "project" },
-      orderBy: { createdAt: "asc" },
-    });
-    return Response.json(rows.map(projectFolderView));
-  },
-
-  async createFolder(userId: string, req: Request) {
-    try {
-      const { name, parentId } = (await req.json()) as { name?: string; parentId?: string | null };
-      const trimmed = (name ?? "").trim();
-      if (!trimmed) return err(FOLDER_NAME_REQUIRED, 500);
-      const folders = await prisma.cutFolder.findMany({
-        where: { userId, scope: "project" },
-        select: { id: true, parentId: true },
-      });
-      const row = await prisma.cutFolder.create({
-        data: {
-          userId,
-          name: trimmed.slice(0, 80),
-          scope: "project",
-          parentId: resolveParent(folders, "", parentId),
-        },
-      });
-      return Response.json(projectFolderView(row));
-    } catch (e) {
-      return caught(e, new UserError("folder_create_failed", "Could not create folder."));
-    }
-  },
-
-  /** Rename a folder, file it under another (null for the top level), or
-   * both; a key left out keeps what the folder has. */
-  async updateFolder(userId: string, id: string, req: Request) {
-    try {
-      const { name, parentId } = (await req.json()) as { name?: string; parentId?: string | null };
-      const trimmed = name?.trim();
-      if (name !== undefined && !trimmed) return err(FOLDER_NAME_REQUIRED, 500);
-      const folders = await prisma.cutFolder.findMany({
-        where: { userId, scope: "project" },
-        select: { id: true, parentId: true },
-      });
-      if (!folders.some((f) => f.id === id)) return err(FOLDER_NOT_FOUND, 500);
-      const updated = await prisma.cutFolder.update({
-        where: { id },
-        data: {
-          ...(trimmed ? { name: trimmed.slice(0, 80) } : {}),
-          ...(parentId !== undefined ? { parentId: resolveParent(folders, id, parentId) } : {}),
-        },
-      });
-      return Response.json(projectFolderView(updated));
-    } catch (e) {
-      return caught(e, new UserError("folder_update_failed", "Could not update folder."));
-    }
-  },
-
-  /** Delete a folder and everything in it: the folders filed under it,
-   * however deep, and every project they hold, each through the cascade its
-   * own delete runs. The projects go first and the folders last, so a run
-   * that stops partway leaves the rest where a retry finds it. */
-  async deleteFolder(userId: string, id: string) {
-    try {
-      const folders = await prisma.cutFolder.findMany({
-        where: { userId, scope: "project" },
-        select: { id: true, parentId: true },
-      });
-      if (!folders.some((f) => f.id === id)) return Response.json({ ok: true });
-      const tree = subtreeOf(folders, id);
-      const projects = await prisma.cutProject.findMany({
-        where: { userId, folderId: { in: tree } },
-        select: { id: true },
-      });
-      for (const p of projects) await deleteProjectCascade(userId, p.id);
-      await prisma.cutFolder.deleteMany({
-        where: { userId, scope: "project", id: { in: tree } },
-      });
-      return Response.json({ ok: true });
-    } catch (e) {
-      return caught(e, new UserError("folder_delete_failed", "Could not delete folder."));
     }
   },
 

@@ -40,10 +40,12 @@ interface CloudRoute extends RouteEntry {
 const CUT_CLOUD_ROUTES: CloudRoute[] = [
   { method: "GET", path: "/api/cut-cloud/projects", handler: (_r, u) => projectsCloud.list(u) },
   { method: "POST", path: "/api/cut-cloud/projects", handler: (r, u) => projectsCloud.create(u, r) },
-  { method: "GET", path: "/api/cut-cloud/projects/folders", handler: (_r, u) => projectsCloud.folders(u) },
-  { method: "POST", path: "/api/cut-cloud/projects/folders", handler: (r, u) => projectsCloud.createFolder(u, r) },
-  { method: "PUT", path: "/api/cut-cloud/projects/folders/:id", handler: (r, u, p) => projectsCloud.updateFolder(u, p.id, r) },
-  { method: "DELETE", path: "/api/cut-cloud/projects/folders/:id", handler: (_r, u, p) => projectsCloud.deleteFolder(u, p.id) },
+  // Projects file into the Assets folders the library keeps; pages from
+  // before the two shared one tree still call these.
+  { method: "GET", path: "/api/cut-cloud/projects/folders", handler: (_r, u) => libraryCloud.folders(u) },
+  { method: "POST", path: "/api/cut-cloud/projects/folders", handler: (r, u) => libraryCloud.createFolder(u, r) },
+  { method: "PUT", path: "/api/cut-cloud/projects/folders/:id", handler: (r, u, p) => libraryCloud.updateFolder(u, p.id, r) },
+  { method: "DELETE", path: "/api/cut-cloud/projects/folders/:id", handler: (_r, u, p) => libraryCloud.deleteFolder(u, p.id) },
   { method: "POST", path: "/api/cut-cloud/projects/:id/move", handler: (r, u, p) => projectsCloud.move(u, p.id, r) },
   { method: "GET", path: "/api/cut-cloud/projects/:id", handler: (r, u, p) => projectsCloud.get(u, p.id, r) },
   { method: "PUT", path: "/api/cut-cloud/projects/:id", handler: (r, u, p) => projectsCloud.put(u, p.id, r) },

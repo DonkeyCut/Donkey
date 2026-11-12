@@ -6,6 +6,8 @@ import { assetTypeOf } from "@/cut/lib/media";
 import { CUT_COLOR } from "@/cut/lib/colorSettings";
 import { lutFacts, parseLutFile } from "@donkeycut/effects-kit";
 import { apiJson, getBackend } from "./backend";
+import { engineFeatures } from "./api";
+import type { FolderRole } from "./folderRole";
 import { cloudBackend } from "./backend/cloud";
 import { readSnapshot, writeSnapshot } from "./cache";
 import { contentKey } from "./contentKey";
@@ -515,6 +517,33 @@ export async function createLibraryFolder(
   return { ...body, residency };
 }
 
+/** The shelf's Uploads folder, where Home files what is dropped into its
+ * prompt: made at the top level the first time, the same folder after. `name`
+ * names it only when it is made. A Mac app from before one folder tree has no
+ * Uploads folder, and null files the drop at the top level. */
+export async function ensureUploadsFolder(residency: Residency, name: string): Promise<LibraryFolder | null> {
+  if (!(await unifiedFolders(residency))) {
+    return null;
+  }
+  const role: FolderRole = "uploads";
+  const res = await backendFor(residency).fetch("/api/cut/library/folders", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, role }),
+  });
+  const body = await apiJson<LibraryFolder>(res);
+  if (!res.ok) throw errorFromBody(body, new UserError("folder_create_failed", "Could not create folder."));
+  return { ...body, residency };
+}
+
+/** Whether a shelf keeps one folder tree for projects and files, so either
+ * kind can be filed in any folder. The Mac's does from the engine build that
+ * says so; an older Donkey app keeps them apart until it updates. */
+export async function unifiedFolders(residency: Residency): Promise<boolean> {
+  if (residency !== "local") return true;
+  return (await engineFeatures()).has("folders.unified");
+}
+
 /** Rename a folder, move it under another (null for the top level), or
  * both. A key left out keeps what the folder has. The shelf answers with the
  * folder as stored: a parent it could not honor reads back as the top level. */
@@ -536,18 +565,20 @@ export async function updateLibraryFolder(
 }
 
 /** What a delete of `folders` takes off the shelf: those folders and the ones
- * filed under them, however deep, and the assets and templates filed in any
- * of them. */
-export function folderDeleteTakes(
+ * filed under them, however deep, and the assets, templates and — given the
+ * shelf's project listing — projects filed in any of them. */
+export function folderDeleteTakes<P extends { folderId?: string | null }>(
   data: LibraryData,
   folders: readonly { id: string }[],
-): { tree: Set<string>; assets: LibraryAsset[]; templates: LibraryTemplateItem[] } {
+  projects: readonly P[] = [],
+): { tree: Set<string>; assets: LibraryAsset[]; templates: LibraryTemplateItem[]; projects: P[] } {
   const tree = new Set(folders.flatMap((f) => subtreeOf(data.folders, f.id)));
   const filed = (x: { folderId?: string | null }) => !!x.folderId && tree.has(x.folderId);
   return {
     tree,
     assets: data.assets.filter(filed),
     templates: data.templates.filter(filed),
+    projects: projects.filter(filed),
   };
 }
 

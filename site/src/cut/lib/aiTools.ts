@@ -394,6 +394,9 @@ import {
   WATCH_DETAILS,
   type WatchDetail,
 } from "./types";
+import type { ProjectSummary } from "./types";
+import { backendFor } from "./residency";
+import { forgetProject } from "./projectPurge";
 import { BAND_STYLES, clampBand, clampFeather, takesBand } from "./transitionShape";
 import { importEach } from "./urlBatch";
 import { findMedia } from "./findMedia";
@@ -5801,7 +5804,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       // template; one from the gallery lands where this project lives.
       const projectLink = (projectId: string) => ({
         project_id: projectId,
-        link: `${CUT_HOSTED_ORIGIN}${projectHref(CUT_APP_BASE, projectId, "projects")}`,
+        link: `${CUT_HOSTED_ORIGIN}${projectHref(CUT_APP_BASE, projectId, "home")}`,
       });
       if (target === "new_project" && own) {
         await requireProjectRoom();
@@ -5942,19 +5945,24 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
           const id = String(input.folder_id ?? "");
           const r = folderShelf(id);
           if (!r) throw new ToolError(`No library folder with id ${id}.`);
-          const takes = folderDeleteTakes(lib, [{ id }]);
+          // A folder holds the shelf's projects too, and they go with it.
+          const listed = await backendFor(r).fetch("/api/cut/projects");
+          const shelfProjects = listed.ok ? ((await listed.json()) as ProjectSummary[]) : [];
+          const takes = folderDeleteTakes(lib, [{ id }], shelfProjects);
           const notes = (await fetchNotes()).notes.filter((n) =>
             [...takes.tree].some((f) => noteInLibraryFolder(n, f, r)),
           ).length;
           forgetLinkedCopies(takes.assets);
           await deleteLibraryFolder(r, id);
+          for (const p of takes.projects) forgetProject(p.id, r);
           const phone = takes.assets.filter((a) => !!a.origin).length;
           return {
             deleted: true,
             items: takes.assets.length + takes.templates.length,
+            ...(takes.projects.length > 0 ? { projects: takes.projects.length } : {}),
             ...(notes > 0 ? { notes } : {}),
             ...(phone > 0 ? { removedFromPhone: phone } : {}),
-            note: "Everything in it — folders, items and notes — was deleted too. A camera clip filed there stays in Camera Roll.",
+            note: "Everything in it — folders, projects, items and notes — was deleted too. A camera clip filed there stays in Camera Roll.",
           };
         }
         case "move_asset": {

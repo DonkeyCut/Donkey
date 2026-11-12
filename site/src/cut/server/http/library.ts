@@ -24,6 +24,7 @@ import {
   type LinkedMeta,
   type TemplateInput,
 } from "../library";
+import { isFolderRole } from "@/cut/lib/folderRole";
 import { serveFileRange, wantsDownload } from "../serveFile";
 import { importFromUrl } from "../urlImport";
 import { UserError } from "../../lib/userError";
@@ -177,8 +178,8 @@ export const libraryApi = {
 
   async createFolder(req: Request) {
     try {
-      const { name, parentId } = (await req.json()) as { name?: string; parentId?: string | null };
-      return Response.json(await createFolder(name ?? "", parentId ?? null));
+      const { name, parentId, role } = (await req.json()) as { name?: string; parentId?: string | null; role?: unknown };
+      return Response.json(await createFolder(name ?? "", parentId ?? null, isFolderRole(role) ? role : null));
     } catch (e) {
       return caught(e, new UserError("folder_create_failed", "Could not create folder."));
     }

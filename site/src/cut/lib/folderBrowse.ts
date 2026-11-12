@@ -8,7 +8,7 @@ import type { SharedLibraryPage } from "@/cut/lib/librarySharing";
 import { openReference } from "@/cut/lib/projectReference";
 import { backendFor } from "@/cut/lib/residency";
 import { useEditor } from "@/cut/lib/store";
-import type { LibraryTemplate, StoredAsset } from "@/cut/lib/types";
+import type { LibraryTemplate, ProjectSummary, StoredAsset } from "@/cut/lib/types";
 
 
 export async function sharedFolderPage(reference: Extract<FolderReference, { scope: "shared" }>, offset: number): Promise<SharedLibraryPage> {
@@ -36,6 +36,7 @@ export async function readFolder(raw: unknown) {
   let assets: (Pick<StoredAsset, "id" | "name" | "type" | "duration" | "folderId"> & Partial<Pick<LibraryAsset, "title">>)[];
   let templates: LibraryTemplate[];
   let notes: Awaited<ReturnType<typeof fetchNotes>>["notes"] = [];
+  let projects: Pick<ProjectSummary, "id" | "name" | "folderId" | "kind">[] = [];
   if (reference.scope === "project") {
     const doc = reference.projectId === state.projectId ? state
       : (await openReference({ kind: "project", id: reference.projectId })).doc;
@@ -57,6 +58,12 @@ export async function readFolder(raw: unknown) {
     templates = lib.templates;
     const residency = reference.residency ?? lib.folders.find((f) => f.id === reference.folderId)?.residency;
     notes = (await fetchNotes()).notes.filter((n) => n.libraryLocation?.folderId === reference.folderId && n.libraryLocation.residency === residency);
+    // A Library folder holds projects too; they live on the folder's shelf.
+    if (residency) {
+      const res = await backendFor(residency).fetch("/api/cut/projects");
+      const listed: unknown = res.ok ? await res.json() : null;
+      if (Array.isArray(listed)) projects = listed as ProjectSummary[];
+    }
   }
   const folder = folders.find((f) => f.id === reference.folderId);
   if (!folder) throw new Error("This folder was deleted or is unavailable on this surface.");
@@ -68,11 +75,12 @@ export async function readFolder(raw: unknown) {
       ...(linkIdForAsset(a.id) ? { linkedId: linkIdForAsset(a.id) } : {}),
     })),
     ...templates.filter((t) => t.folderId === folder.id).map((t) => ({ kind: "template", id: t.id, name: t.name, duration: t.duration })),
+    ...projects.filter((p) => p.folderId === folder.id && p.kind !== "template").map((p) => ({ kind: "project", id: p.id, name: p.name, tool: "read_project" })),
   ].sort((a, b) => a.id.localeCompare(b.id));
   const end = input.offset + input.limit;
   return { reference, name: folder.name, entries: entries.slice(input.offset, end), total: entries.length,
     next: end < entries.length ? end : null,
-    usage: reference.scope === "library" ? "Use read_note for notes; use library_add for chosen media or to resolve a linked item id; restore templates with template_add."
+    usage: reference.scope === "library" ? "Use read_note for notes; use read_project with a project's id; use library_add for chosen media or to resolve a linked item id; restore templates with template_add."
       : reference.projectId === state.projectId ? "Use asset ids directly; restore templates with template_add."
         : `Use copy_project_media with link ${reference.projectId} for chosen assets.` };
 }

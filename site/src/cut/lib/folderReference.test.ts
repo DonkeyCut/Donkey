@@ -51,6 +51,8 @@ describe("folder references", () => {
 
   test("folder URLs accept known routes and reject lookalikes", () => {
     expect(parseFolderLink("donkeycut.com/app/library?folder=brand")).toEqual({ scope: "library", folderId: "brand" });
+    expect(parseFolderLink("donkeycut.com/app/assets?folder=brand")).toEqual({ scope: "library", folderId: "brand" });
+    expect(parseFolderLink("https://donkeycut.com/app?folder=brand")).toEqual({ scope: "library", folderId: "brand" });
     expect(parseFolderLink("http://cut.localhost:3000/cut/app/p/p1?folder=brand")).toEqual({ scope: "project", projectId: "p1", folderId: "brand" });
     expect(parseFolderLink(`https://donkeycut.com/s/library/${token}?folder=child`)).toEqual({ scope: "shared", shareToken: token, folderId: "child" });
     for (const url of ["https://evil.test/app/library?folder=brand", "https://donkeycut.com/app/library", "https://donkeycut.com/app/p/p1", "javascript:alert(1)", "https://donkeycut.com/s/library/invalid"]) {
@@ -84,10 +86,16 @@ describe("folder references", () => {
   for (const residency of ["browser", "local", "cloud"] as const) {
     test(`library folder reads use the ${residency} backend and expose child references`, async () => {
       const lib: LibraryData = { folders: [{ ...folder, residency }, { ...folder, id: "child", parentId: "brand", residency }], assets: [], templates: [] };
-      const fetch = spyOn(backendFor(residency), "fetch").mockResolvedValue(Response.json(lib));
+      // A Library folder holds the shelf's projects too.
+      const projects = [{ id: "p9", name: "Filed cut", folderId: "brand" }, { id: "p8", name: "Loose", folderId: null }];
+      const fetch = spyOn(backendFor(residency), "fetch").mockImplementation(async (path: string) =>
+        Response.json(path === "/api/cut/projects" ? projects : lib));
       const noteFetch = spyOn(notes, "fetchNotes").mockResolvedValue({ notes: [], folders: [], labels: [] });
       try {
-        expect(await readFolder({ reference: { scope: "library", folderId: "brand", residency }, limit: 10 })).toMatchObject({ entries: [{ kind: "folder", reference: { scope: "library", folderId: "child", residency } }] });
+        expect(await readFolder({ reference: { scope: "library", folderId: "brand", residency }, limit: 10 })).toMatchObject({ entries: [
+          { kind: "folder", reference: { scope: "library", folderId: "child", residency } },
+          { kind: "project", id: "p9", name: "Filed cut", tool: "read_project" },
+        ], total: 2 });
         expect(fetch.mock.calls[0][0]).toBe("/api/cut/library");
       } finally { fetch.mockRestore(); noteFetch.mockRestore(); }
     });

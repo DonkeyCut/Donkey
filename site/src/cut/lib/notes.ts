@@ -69,6 +69,9 @@ export const NOTE_COLORS = [
   { name: "Lilac", background: "#e6dcf7", accent: "#a988e0" },
 ] as const;
 
+/** The ink every note is written in, on any paper color. */
+export const NOTE_INK = "#201a0d";
+
 export const noteColor = (index: number) =>
   NOTE_COLORS[((index % NOTE_COLORS.length) + NOTE_COLORS.length) % NOTE_COLORS.length];
 
