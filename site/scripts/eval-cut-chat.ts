@@ -69,6 +69,17 @@ const CANDIDATES: { label: string; simple: string; complex: string }[] = [
     simple: geminiModels.flashLite,
     complex: geminiModels.flashLite,
   },
+  // The chat picker's reasoning picks on complex turns.
+  {
+    label: "argon",
+    simple: geminiModelRoles.chatSimple,
+    complex: geminiModelRoles.chatPro,
+  },
+  {
+    label: "carbon",
+    simple: geminiModelRoles.chatSimple,
+    complex: geminiModelRoles.chatMax,
+  },
 ];
 
 const args = process.argv.slice(2);

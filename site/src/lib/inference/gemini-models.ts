@@ -10,6 +10,10 @@
 export const geminiModels = {
   flash: "gemini-3.8-flash",
   flashLite: "gemini-3.1-flash-lite",
+  // Gemini 4 reasoning models the chat picker offers: Argon answers faster on
+  // fewer tokens, Carbon reasons deepest.
+  argon: "gemini-4-argon",
+  carbon: "gemini-4-carbon",
   // Generative image editing/generation ("nano banana 2.1"). Bump here when
   // adopting a newer image model.
   flashImage: "gemini-nano-banana-2.1",
@@ -117,6 +121,9 @@ export type GeminiMusicModel = (typeof geminiMusicModels)[keyof typeof geminiMus
 export const geminiModelRoles = {
   // General chat and non-decision Responses calls — the latest full flash.
   chat: geminiModels.flash,
+  // The chat picker's reasoning picks, run on complex chat turns.
+  chatPro: geminiModels.argon,
+  chatMax: geminiModels.carbon,
   // Chat turns the gate judges simple — one self-contained ask runs on the
   // light chat model; complex turns stay on `chat`.
   chatSimple: geminiModels.flashLite,
@@ -143,6 +150,20 @@ export type GeminiModelRole = keyof typeof geminiModelRoles;
 export const geminiModelRoleNames = Object.fromEntries(
   Object.keys(geminiModelRoles).map((role) => [role, role]),
 ) as { [K in GeminiModelRole]: K };
+
+// The name the chat picker shows for each model it offers.
+const geminiChatModelNames: Record<(typeof geminiModelRoles)["chat" | "chatPro" | "chatMax"], string> = {
+  [geminiModels.flash]: "Gemini 3.8 Flash",
+  [geminiModels.argon]: "Gemini 4 Argon",
+  [geminiModels.carbon]: "Gemini 4 Carbon",
+};
+
+/** The Gemini models the chat picker offers, as role names with their display
+ * names, strongest first. Pages carry the role, never the id. */
+export const geminiChatPicks = (["chatMax", "chatPro", "chat"] as const).map((role) => ({
+  role,
+  label: geminiChatModelNames[geminiModelRoles[role]],
+}));
 
 /** A role name becomes its registry id; anything else is an id already. */
 export function resolveGeminiModel(value: string): string {

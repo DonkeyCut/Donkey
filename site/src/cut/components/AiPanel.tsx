@@ -132,9 +132,10 @@ import { putCloudThread } from "@/cut/lib/chatCloud";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import {
   AI_MODELS,
-  accountRuns,
   aiModelProvider as provider,
   currentChatModel,
+  DEFAULT_CHAT_MODEL,
+  pickerOffers,
   runnableChatModel,
   type ChatProvider,
 } from "@/cut/lib/aiModels";
@@ -459,11 +460,6 @@ function readStoredQueue(
     return [];
   }
 }
-// A fresh user starts on Gemini — it runs on their signed-in Donkey account, so
-// it works without a local CLI. Claude/Codex show up automatically once the
-// engine probes them installed. The choice persists, so this is first-run only.
-const DEFAULT_MODEL =
-  AI_MODELS.find((m) => m.provider === "gemini" && !m.hidden)?.id ?? "gemini";
 const PROVIDER_LABEL: Record<string, string> = {
   claude: "Claude Code",
   codex: "Codex",
@@ -511,10 +507,10 @@ export function AiPanel({
   // written back; an id the catalog has never known falls back to the
   // default, since passed through the hosted route rejects it.
   const [model, setModel] = useState<string>(() => {
-    if (typeof window === "undefined") return DEFAULT_MODEL;
+    if (typeof window === "undefined") return DEFAULT_CHAT_MODEL;
     const saved = localStorage.getItem(MODEL_KEY);
     const current = saved ? currentChatModel(saved) : undefined;
-    if (!current) return DEFAULT_MODEL;
+    if (!current) return DEFAULT_CHAT_MODEL;
     if (current !== saved) localStorage.setItem(MODEL_KEY, current);
     return current;
   });
@@ -3162,7 +3158,7 @@ function ModelSelector({
     localStorage.getItem("cut-ai-test") === "1";
   // A model the provider's account doesn't run stays out of the list.
   const models = AI_MODELS.filter(
-    (m) => (!m.hidden || showTest) && (!info || accountRuns(m.id, info.providers)),
+    (m) => (!m.hidden || showTest) && pickerOffers(m, info?.providers ?? {}),
   );
   const groups = [
     "claude",

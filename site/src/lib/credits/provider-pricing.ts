@@ -300,6 +300,25 @@ const geminiFlashStandardPricing = textAudioTokenPricing({
   inputAudio: "1.5",
 });
 
+// Gemini 4 (Argon and Carbon, one price) runs introductory pricing through
+// 2026-11-30; standard pricing starts 2026-12-01 UTC. Audio input bills at the
+// text rate.
+const gemini4StandardPricingStartMs = Date.UTC(2026, 11, 1);
+const gemini4IntroPricing = textAudioTokenPricing({
+  input: "2",
+  cachedInput: "0.1",
+  output: "10",
+  inputAudio: "2",
+});
+const gemini4StandardPricing = textAudioTokenPricing({
+  input: "4",
+  cachedInput: "0.2",
+  output: "20",
+  inputAudio: "4",
+});
+const gemini4Pricing = () =>
+  Date.now() >= gemini4StandardPricingStartMs ? gemini4StandardPricing : gemini4IntroPricing;
+
 // Every Gemini model we run must appear here: the Record is keyed by the GeminiModel union,
 // so adding a model to gemini-models.ts without a price fails the type-check (and the build).
 const geminiModelPricing: Record<GeminiModel, ProviderCreditPricing> = {
@@ -314,6 +333,12 @@ const geminiModelPricing: Record<GeminiModel, ProviderCreditPricing> = {
     output: "1.5",
     inputAudio: "0.5",
   }),
+  get [geminiModels.argon]() {
+    return gemini4Pricing();
+  },
+  get [geminiModels.carbon]() {
+    return gemini4Pricing();
+  },
   // Generative image editing/generation ("nano banana 2.1") bills per output
   // image: $0.0336 at 1K, the size the scripts render.
   [geminiModels.flashImage]: { generationCostMicros: usdWithMargin("0.0336") },

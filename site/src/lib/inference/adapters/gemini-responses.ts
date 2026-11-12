@@ -64,11 +64,13 @@ export function createGeminiResponsesProvider(
       return [];
     }
 
-    // The full flash model serves general Responses; the fast-decision model
-    // (flash-lite) is the only other entry.
+    // The full flash model serves general Responses; beside it run the
+    // fast-decision model (flash-lite) and the chat picker's reasoning picks.
     return [
       staticModel(geminiModelRoles.fastDecision),
       staticModel(defaultVertexResponsesModel),
+      staticModel(geminiModelRoles.chatPro),
+      staticModel(geminiModelRoles.chatMax),
     ];
   }
 
