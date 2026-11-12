@@ -4,6 +4,10 @@
     "assets": "资产",
     "templates": "模板"
   },
+  "sidebar": {
+    "open": "打开侧边栏",
+    "close": "关闭侧边栏"
+  },
   "newProject": {
     "button": "新建项目",
     "title": "新建项目",

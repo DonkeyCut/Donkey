@@ -4,6 +4,10 @@
     "assets": "Assets",
     "templates": "Templates"
   },
+  "sidebar": {
+    "open": "Open sidebar",
+    "close": "Close sidebar"
+  },
   "newProject": {
     "button": "New project",
     "title": "New project",

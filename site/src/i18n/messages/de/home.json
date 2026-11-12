@@ -4,6 +4,10 @@
     "assets": "Assets",
     "templates": "Vorlagen"
   },
+  "sidebar": {
+    "open": "Seitenleiste öffnen",
+    "close": "Seitenleiste schließen"
+  },
   "newProject": {
     "button": "Neues Projekt",
     "title": "Neues Projekt",

@@ -4,6 +4,10 @@
     "assets": "アセット",
     "templates": "テンプレート"
   },
+  "sidebar": {
+    "open": "サイドバーを開く",
+    "close": "サイドバーを閉じる"
+  },
   "newProject": {
     "button": "新規プロジェクト",
     "title": "新規プロジェクト",

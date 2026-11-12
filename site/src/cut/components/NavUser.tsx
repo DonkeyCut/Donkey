@@ -28,6 +28,7 @@ import { openOnboarding } from "@/cut/lib/onboarding";
 import { useCutBase } from "@/cut/lib/nav";
 import { resetAnalytics } from "@/lib/analytics";
 import { authClient, useSession } from "@/lib/auth-client";
+import { cn } from "@/lib/utils";
 import { useAccountProfile, visibleName } from "@/queries/accountProfile";
 
 // Signed-in user row pinned to the sidebar bottom; the whole row opens the
@@ -40,7 +41,10 @@ import { useAccountProfile, visibleName } from "@/queries/accountProfile";
 // sidebar and put it back a moment later. The session is read here only for
 // the name and picture the provider gave us, and only until the profile —
 // which holds both, and is cached — answers.
-export function NavUser() {
+export function NavUser({ face = "row" }: {
+  /** The full row, or the avatar alone for a closed sidebar. */
+  face?: "row" | "avatar";
+}) {
   const t = useTranslations("home.navUser");
   const router = useRouter();
   const base = useCutBase();
@@ -56,9 +60,9 @@ export function NavUser() {
   // painting the provider's name and swapping it out a beat later.
   if (isPending) {
     return (
-      <div className="flex w-full items-center gap-2.5 px-2 py-1.5">
+      <div className="flex w-full items-center gap-2.5 px-0.5 py-1.5">
         <Skeleton className="size-8 rounded-lg" />
-        <Skeleton className="h-3.5 w-24" />
+        {face === "row" && <Skeleton className="h-3.5 w-24" />}
       </div>
     );
   }
@@ -99,10 +103,20 @@ export function NavUser() {
 
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger className="flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-muted data-[popup-open]:bg-muted">
+      <DropdownMenuTrigger
+        aria-label={face === "avatar" ? name : undefined}
+        className={cn(
+          "flex w-full cursor-pointer items-center gap-2.5 rounded-lg py-1.5 text-left transition-colors hover:bg-muted data-[popup-open]:bg-muted",
+          face === "row" ? "px-2" : "justify-center px-0"
+        )}
+      >
         <UserAvatar name={name} image={image} />
-        <span className="min-w-0 flex-1 truncate text-sm font-medium">{name}</span>
-        <EllipsisVertical className="size-4 shrink-0 text-muted-foreground" />
+        {face === "row" && (
+          <>
+            <span className="min-w-0 flex-1 truncate text-sm font-medium">{name}</span>
+            <EllipsisVertical className="size-4 shrink-0 text-muted-foreground" />
+          </>
+        )}
       </DropdownMenuTrigger>
       <DropdownMenuContent side="top" align="start" className="w-56">
         {/* The identity row is the way into the profile, where the account's

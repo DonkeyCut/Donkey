@@ -4,6 +4,10 @@
     "assets": "Ativos",
     "templates": "Modelos"
   },
+  "sidebar": {
+    "open": "Abrir barra lateral",
+    "close": "Fechar barra lateral"
+  },
   "newProject": {
     "button": "Novo projeto",
     "title": "Novo projeto",

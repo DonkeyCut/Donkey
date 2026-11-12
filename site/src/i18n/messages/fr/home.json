@@ -4,6 +4,10 @@
     "assets": "Ressources",
     "templates": "Modèles"
   },
+  "sidebar": {
+    "open": "Ouvrir la barre latérale",
+    "close": "Fermer la barre latérale"
+  },
   "newProject": {
     "button": "Nouveau projet",
     "title": "Nouveau projet",
