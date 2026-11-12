@@ -54,7 +54,7 @@ completed preview. Only cloud projects reach ChatGPT.
 The widget polls while visible and renews expiring playback URLs through the
 host bridge; it holds no account cookie or OAuth token.
 
-Editable cards frame the editor or the projects home through a one-use,
+Editable cards frame the editor or Home through a one-use,
 one-minute link that creates a partitioned session cookie. Reconnect mints a
 fresh link. Revoking the connection ends its sessions, and `frameDomains` permits the app's own domain.
 
