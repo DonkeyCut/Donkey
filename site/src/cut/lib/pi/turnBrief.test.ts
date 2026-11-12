@@ -70,6 +70,24 @@ describe("briefMeasures", () => {
     expect(m.publish.characters).toBe(40);
     expect(m.mediaOffTimeline).toEqual(["spare.mov"]);
   });
+
+  test("carries how each text is set and how loud the clips play", () => {
+    const styled = {
+      ...CONTEXT,
+      videoTrack: [
+        { asset: "a.mov", start: 0, len: 30, volume: 1.2 },
+        { asset: "b.mov", start: 30, len: 41.12 },
+        { asset: "c.mov", start: 71.12, len: 5, muted: true },
+      ],
+      overlays: [
+        { kind: "text", name: "Hook", text: "Hook", start: 0, end: 2, y: 0.21, size: 88, font: "sf", color: "#FFFFFF", plate: false },
+        { kind: "text", name: "Old", text: "Old", start: 2, end: 4, hidden: true },
+      ],
+    };
+    const m = briefMeasures(styled) as { texts: unknown[]; clipVolumes: number[] };
+    expect(m.texts).toEqual([{ text: "Hook", start: 0, end: 2, y: 0.21, size: 88, font: "sf", color: "#FFFFFF", plate: false }]);
+    expect(m.clipVolumes).toEqual([0, 1, 1.2]);
+  });
 });
 
 describe("briefSteer", () => {

@@ -30,6 +30,9 @@ const ITEMS_MAX = 24;
 const LISTED_MAX = 40;
 const OFF_TIMELINE_MAX = 20;
 
+// The style fields a text's measure carries, as the editor context names them.
+const TEXT_STYLE = ["start", "end", "x", "y", "size", "font", "weight", "color", "shadow", "plate", "wrapWidth", "anim"] as const;
+
 const SPLIT_INSTRUCTIONS = [
   "You read the brief a person gave the AI assistant inside a video editor and list every requirement the finished project has to meet.",
   "The brief is the person's ask, as they typed it, and any notes the assistant read for it. A note's steps are requirements only when the ask tells the assistant to follow or apply that note; otherwise the note is material the ask's own requirements draw on.",
@@ -207,6 +210,20 @@ export function briefMeasures(context: unknown): Entry {
   const used = new Set(
     [...track, ...soundtrack, ...(Array.isArray(c.overlayVideo) ? c.overlayVideo.filter(isRec) : [])].map((i) => i.asset)
   );
+  // The values a brief names most often: how its shown text is set, and how
+  // loud its clips play. Clips at 100% carry no volume; a muted clip plays at 0.
+  const overlays = Array.isArray(c.overlays) ? c.overlays.filter(isRec) : [];
+  const texts = overlays
+    .filter((o) => o.kind === "text" && !o.hidden)
+    .slice(0, LISTED_MAX)
+    .map((o) => ({
+      text: typeof o.text === "string" ? o.text.slice(0, 80) : "",
+      ...Object.fromEntries(TEXT_STYLE.filter((k) => o[k] !== undefined).map((k) => [k, o[k]])),
+    }));
+  const clipVolumes = [...new Set(track.map((t) => (t.muted ? 0 : t.volume === undefined ? 1 : num(t.volume))))].sort(
+    (a, b) => a - b
+  );
+
   const caption = typeof publish.caption === "string" ? publish.caption : "";
   const tags = typeof publish.tags === "string" ? publish.tags : "";
 
@@ -226,6 +243,8 @@ export function briefMeasures(context: unknown): Entry {
         moving: g.moving,
       })),
     },
+    texts,
+    clipVolumes,
     soundtrack: soundtrack.slice(0, LISTED_MAX).map((a) => ({
       asset: typeof a.asset === "string" ? a.asset : "",
       start: num(a.start),
@@ -253,19 +272,31 @@ interface BriefWork {
 
 const REPLY_CAP = 1500;
 
+// What meets an item of each kind. Each question carries only its own kind's
+// test, so a judgment of one item never weighs another kind's bar.
+const ITEM_MET: Record<BriefKind, { true: string; false: string }> = {
+  once: {
+    true: "`editor` shows it in place with the values it names. Where `editor` has no field for it, `ran` holds the call that makes it.",
+    false: "Nothing in `editor` or `ran` shows it, or its values in `editor` differ from the ones it names.",
+  },
+  throughout: {
+    true: "It holds over nearly all of `editor.duration`: graphics through `editor.graphics` (seconds covered and moving close to the duration, no long stretch without), sound through `editor.soundtrack`, other work through `ran`.",
+    false: "It covers only a slice of the cut, leaves a long stretch without, or nothing in `editor` or `ran` shows it.",
+  },
+  verify: {
+    true: "`ran` holds watch or listen calls over the cut.",
+    false: "No watch or listen call ran.",
+  },
+};
+
 /** One question per item: is it met in the editor and the calls behind it? */
 function itemQuestions(items: BriefItem[]) {
   return Object.fromEntries(
     items.map((item) => [
       item.id,
       noul(
-        `Is brief item \`${item.id}\` met by the project as it stands? Judge \`editor\` and \`ran\`; the reply's account counts for nothing on its own.`,
-        {
-          true:
-            "The measured editor and the calls that ran show it done: a once item exists with the values it names; a throughout item holds across the cut, with graphics or sound over nearly all of `editor.duration` and no long stretch without; a verify item has watch or listen calls behind it.",
-          false:
-            "It is missing, partly done, holds over only a slice of the cut, has values other than the ones it names, or rests on the reply alone.",
-        }
+        `Is this brief item met by the project as it stands? "${item.what}" Judge \`editor\` and \`ran\`; the reply's account counts for nothing on its own.`,
+        ITEM_MET[item.kind]
       ),
     ])
   );
