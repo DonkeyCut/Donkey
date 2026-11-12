@@ -6,6 +6,7 @@
 // wake starts the worker as a child of the dev server (devWorker.ts).
 import { prisma } from "@/lib/prisma";
 import { CUT_WORKER_WAKE_URL } from "@/cut/lib/hosts";
+import { EDITOR_BATCH } from "./batchKinds";
 import { startDevWorker } from "./devWorker";
 
 const wakeSecret = () => process.env.CUT_RENDER_WAKE_SECRET;
@@ -48,10 +49,10 @@ export function wakeRenderWorker(): void {
 // an idle box. A burst that arrives inside the wake window is picked up by the
 // next status poll's wake, which counts again.
 async function wake(secret: string): Promise<void> {
-  // Command batches run in the editor inside the ChatGPT card, never here.
+  // A batch the editor in the ChatGPT card claims never runs here.
   const [queued, running] = await Promise.all([
-    prisma.cutRenderJob.count({ where: { state: "queued", kind: { not: "commands" } } }),
-    prisma.cutRenderJob.count({ where: { state: "running", kind: { not: "commands" } } }),
+    prisma.cutRenderJob.count({ where: { state: "queued", kind: { not: EDITOR_BATCH } } }),
+    prisma.cutRenderJob.count({ where: { state: "running", kind: { not: EDITOR_BATCH } } }),
   ]);
   const res = await fetch(CUT_WORKER_WAKE_URL, {
     method: "POST",

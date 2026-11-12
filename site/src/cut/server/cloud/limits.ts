@@ -3,6 +3,7 @@ import { getActiveSubscription } from "@/lib/billing/pro-subscription";
 import { getGlobalSetting } from "@/lib/config/effective";
 import { isDonkeySuperUser } from "@/lib/super-user";
 import { prisma } from "@/lib/prisma";
+import { EDITOR_BATCH, WORKER_BATCH } from "./batchKinds";
 
 // Cut web mode's cost ceilings by account tier. Storage bounds R2; the daily
 // render cap bounds worker CPU (exports + URL imports — hover previews are
@@ -110,7 +111,7 @@ export async function liveJobCheck(userId: string): Promise<Response | null> {
   const live = await prisma.cutRenderJob.count({
     where: {
       userId,
-      kind: { in: [...COUNTED_JOB_KINDS, "agent_turn", "commands"] },
+      kind: { in: [...COUNTED_JOB_KINDS, "agent_turn", EDITOR_BATCH, WORKER_BATCH] },
       state: { in: ["queued", "running"] },
     },
   });

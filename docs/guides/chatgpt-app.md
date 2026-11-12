@@ -22,7 +22,7 @@ Captured document → worker renderer → signed media
 
 ## Editing from ChatGPT
 
-Each editor command is its own tool, annotated by its effect; the editor in the card runs it on the document the user sees as one undo step, saves, and reports. With no card open the tool asks for the project to be opened, and undo and redo step the card's own history, which the user's edits share. Editing, previews and exports
+Each editor command is its own tool, annotated by its effect; the editor in the card runs it on the document the user sees as one undo step, saves, and reports. With no card open, as in Codex, the cloud worker runs it on the saved project; undo and redo need the card. Editing, previews and exports
 spend no credits; commands that generate media spend the account's credits, and
 imports and exports use its storage allowance; the server instructions and
 tool descriptions say so.

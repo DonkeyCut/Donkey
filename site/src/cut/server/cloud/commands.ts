@@ -2,12 +2,14 @@
 // conversation — the ChatGPT app — sends typed tool calls with no model of
 // ours in the loop. The editor open in the ChatGPT card claims the batch,
 // runs it on the document in front of the user through the same executors
-// the chat uses, saves, and reports back. Nothing else runs a batch: one no
-// card claims in time is dismissed, and the tool call says the project has to
-// be open in the card.
+// the chat uses, saves, and reports back. A host that shows no card, such as
+// Codex, still gets its batch run: one no card claims in time goes to the
+// cloud worker, which runs it on the saved project. Undo and redo step the
+// card's own history, so those alone wait for a card.
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import type { CommandJobResult, CommandJobSpec, CommandOutcome } from "@/cut/lib/commandBatch";
+import { EDITOR_BATCH, WORKER_BATCH } from "./batchKinds";
 import { needsWorker } from "./jobs";
 import { liveJobCheck } from "./limits";
 import { queueLeasedJob } from "./lease";
@@ -16,8 +18,12 @@ import { err } from "./util";
 import { wakeRenderWorker } from "./wake";
 
 export type { CommandCall, CommandJobResult, CommandJobSpec, CommandOutcome } from "@/cut/lib/commandBatch";
+export { EDITOR_BATCH, WORKER_BATCH };
 
 export const MAX_COMMANDS_PER_BATCH = 40;
+
+/** Commands that step the card's undo history; no other runner has one. */
+const CARD_ONLY_COMMANDS = new Set(["undo", "redo"]);
 
 /** How long a claimed batch may go without a heartbeat before the editor
  * that claimed it counts as gone. The card beats every ten seconds. */
@@ -36,7 +42,7 @@ const resultJson = (result: CommandJobResult) => result as unknown as Prisma.Inp
  * project's lease or a job slot. Runs on every queue and claim. */
 async function expireQuietBatches(userId: string, projectId: string): Promise<void> {
   await prisma.cutRenderJob.updateMany({
-    where: { userId, projectId, kind: "commands", state: "running", updatedAt: { lt: new Date(Date.now() - CLAIM_QUIET_MS) } },
+    where: { userId, projectId, kind: EDITOR_BATCH, state: "running", updatedAt: { lt: new Date(Date.now() - CLAIM_QUIET_MS) } },
     data: { state: "error", error: "The editor in the card stopped responding." },
   });
 }
@@ -54,12 +60,12 @@ export async function queueCommands(
   if (capped) return capped;
   if (spec.readOnly) {
     // A read never saves, so it runs beside whatever holds the write lease.
-    const row = await prisma.cutRenderJob.create({ data: { userId, projectId, kind: "commands", spec: specJson(spec) } });
+    const row = await prisma.cutRenderJob.create({ data: { userId, projectId, kind: EDITOR_BATCH, spec: specJson(spec) } });
     return { id: row.id };
   }
   // The card runs batches one after another, so they queue behind each
   // other and contend only with a chat turn editing the same document.
-  return queueLeasedJob(userId, projectId, "commands", specJson(spec), { wake: false, contendsWith: ["agent_turn"] });
+  return queueLeasedJob(userId, projectId, EDITOR_BATCH, specJson(spec), { wake: false, contendsWith: ["agent_turn"] });
 }
 
 const TERMINAL = new Set(["done", "error", "canceled", "dismissed"]);
@@ -70,11 +76,21 @@ const TERMINAL = new Set(["done", "error", "canceled", "dismissed"]);
 const claimWindowClosed = (row: Pick<JobRow, "createdAt">, claimMs: number) =>
   Date.now() - row.createdAt.getTime() > claimMs;
 
-async function dismissBatch(row: Pick<JobRow, "id">): Promise<void> {
-  await prisma.cutRenderJob.updateMany({
-    where: { id: row.id, state: "queued" },
-    data: { state: "dismissed", error: NO_CARD_OPEN },
+/** A batch no card claimed in time: the worker runs it on the saved
+ * project, unless it steps the card's history. */
+async function handOffBatch(row: Pick<JobRow, "id" | "spec">): Promise<void> {
+  if (specOf(row).commands?.some((c) => CARD_ONLY_COMMANDS.has(c.name))) {
+    await prisma.cutRenderJob.updateMany({
+      where: { id: row.id, state: "queued" },
+      data: { state: "dismissed", error: NO_CARD_OPEN },
+    });
+    return;
+  }
+  const { count } = await prisma.cutRenderJob.updateMany({
+    where: { id: row.id, kind: EDITOR_BATCH, state: "queued" },
+    data: { kind: WORKER_BATCH },
   });
+  if (count === 1) wakeRenderWorker();
 }
 
 async function expireBatch(row: Pick<JobRow, "id">): Promise<void> {
@@ -86,8 +102,8 @@ async function expireBatch(row: Pick<JobRow, "id">): Promise<void> {
 
 /** Poll a job row until it settles or the budget runs out. The row comes back
  * either way; the caller reads its state. A command batch no card claims
- * within `editorClaimMs` is dismissed, unless `editorBootDeadline` says a
- * card is still booting its editor; one whose editor stops beating ends in
+ * within `editorClaimMs` goes to the worker, unless `editorBootDeadline` says
+ * a card is still booting its editor; one whose editor stops beating ends in
  * error. Any other kind of job is the worker's, which is woken as needed. */
 export async function waitForJob(
   userId: string,
@@ -101,11 +117,11 @@ export async function waitForJob(
     const row = await prisma.cutRenderJob.findFirst({ where: { id: jobId, userId } });
     if (!row) return null;
     if (TERMINAL.has(row.state)) return row;
-    if (row.kind === "commands") {
+    if (row.kind === EDITOR_BATCH) {
       // A card that framed a moment ago claims once its editor boots.
       const booting = row.state === "queued" && opts.editorBootDeadline && Date.now() < (await opts.editorBootDeadline());
       if (row.state === "queued" && claimWindowClosed(row, claimMs) && !booting) {
-        await dismissBatch(row);
+        await handOffBatch(row);
         continue;
       }
       if (row.state === "running" && Date.now() - row.updatedAt.getTime() > CLAIM_QUIET_MS) {
@@ -120,14 +136,20 @@ export async function waitForJob(
   }
 }
 
-/** The editor in the card asks for the project's oldest waiting batch. */
+/** The editor in the card asks for the project's oldest waiting batch. A
+ * batch the worker holds goes first, so edits land in the order sent. */
 export async function claimEditorBatch(
   userId: string,
   projectId: string
 ): Promise<{ id: string; spec: CommandJobSpec } | null> {
   await expireQuietBatches(userId, projectId);
+  const workerBatch = await prisma.cutRenderJob.findFirst({
+    where: { userId, projectId, kind: WORKER_BATCH, state: { in: ["queued", "running"] } },
+    select: { id: true },
+  });
+  if (workerBatch) return null;
   const candidates = await prisma.cutRenderJob.findMany({
-    where: { userId, projectId, kind: "commands", state: "queued" },
+    where: { userId, projectId, kind: EDITOR_BATCH, state: "queued" },
     orderBy: [{ createdAt: "asc" }, { id: "asc" }],
     select: { id: true, spec: true },
     take: 5,
@@ -146,7 +168,7 @@ export async function claimEditorBatch(
  * is no longer running — expired, canceled — so the editor stops. */
 export async function heartbeatEditorBatch(userId: string, jobId: string, progress: number | null): Promise<boolean> {
   const { count } = await prisma.cutRenderJob.updateMany({
-    where: { id: jobId, userId, kind: "commands", state: "running" },
+    where: { id: jobId, userId, kind: EDITOR_BATCH, state: "running" },
     data: { updatedAt: new Date(), ...(progress !== null ? { progress: Math.max(0, Math.min(1, progress)) } : {}) },
   });
   return count === 1;
@@ -160,7 +182,7 @@ export type EditorReport =
  * running, so a late report after an expiry changes nothing. */
 export async function settleEditorBatch(userId: string, jobId: string, report: EditorReport): Promise<boolean> {
   const row = await prisma.cutRenderJob.findFirst({
-    where: { id: jobId, userId, kind: "commands", state: "running" },
+    where: { id: jobId, userId, kind: EDITOR_BATCH, state: "running" },
     select: { spec: true },
   });
   if (!row) return false;

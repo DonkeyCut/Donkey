@@ -189,6 +189,15 @@ test("a running project preview prevents a second preview claim while other work
   expect(rows[1].state).toBe("queued");
 });
 
+test("a batch no card claimed runs here, one per project at a time", async () => {
+  const rows = queueHarness(["commands", "worker_commands", "worker_commands"]);
+  expect((await claimNextJob())?.id).toBe(rows[1].id);
+  expect(await claimNextJob()).toBeNull();
+  rows[1].state = "done";
+  expect((await claimNextJob())?.id).toBe(rows[2].id);
+  expect(rows[0].state).toBe("queued");
+});
+
 test("an export waits behind no proxy: proxies take the tier after the watched work", async () => {
   // Opening a cloud project queues a proxy for every heavy clip; an export
   // asked for a moment later used to wait behind all of them.

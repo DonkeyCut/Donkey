@@ -7,6 +7,8 @@ import { runConvertJob } from "./convertJob";
 import { runProxyJob } from "./proxyJob";
 import { runImportUrlJob } from "./importUrlJob";
 import { runTurnJob } from "./turnJob";
+import { runCommandJob } from "./commandJob";
+import { EDITOR_BATCH, WORKER_BATCH } from "../server/cloud/batchKinds";
 import { describeRuntime, installHeadlessRuntime } from "../lib/headless/runtime";
 import { deleteObjects } from "./r2";
 import { failedJobFate, InputFault, staleRunningFate, TAB_EXPORT_SILENCE_MS } from "./settle";
@@ -65,6 +67,7 @@ const MAX_RUNTIME_MS: Record<string, number> = {
   convert: 60 * 60_000,
   proxy: 60 * 60_000,
   agent_turn: 20 * 60_000,
+  [WORKER_BATCH]: 10 * 60_000,
 };
 const DEFAULT_MAX_RUNTIME_MS = 60 * 60_000;
 
@@ -97,9 +100,9 @@ async function sweepStaleRunning(): Promise<void> {
       state: "running",
       updatedAt: { lt: new Date(now - STALE_RUNNING_MS) },
       id: { notIn: [...active.keys()] },
-      // A command batch belongs to the editor in the ChatGPT card; the hosted
-      // API expires one whose editor went quiet.
-      kind: { not: "commands" },
+      // A batch the editor in the ChatGPT card claimed is the card's; the
+      // hosted API expires one whose editor went quiet.
+      kind: { not: EDITOR_BATCH },
     },
     select: { id: true, spec: true, updatedAt: true },
   });
@@ -210,6 +213,12 @@ async function runJob(job: ClaimedJob): Promise<void> {
       });
     } else if (job.kind === "proxy") {
       const result = await runProxyJob(job, handle, () => entry.canceled);
+      await prisma.cutRenderJob.updateMany({
+        where: { id: job.id, state: "running" },
+        data: { state: "done", progress: 1, result: result as unknown as Prisma.InputJsonValue },
+      });
+    } else if (job.kind === WORKER_BATCH) {
+      const result = await runCommandJob(job, handle, () => entry.canceled);
       await prisma.cutRenderJob.updateMany({
         where: { id: job.id, state: "running" },
         data: { state: "done", progress: 1, result: result as unknown as Prisma.InputJsonValue },

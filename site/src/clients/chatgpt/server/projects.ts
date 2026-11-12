@@ -8,7 +8,7 @@ import { normalizeAspect, type ProjectDoc } from "@/cut/lib/types";
 import { defaultNames } from "@/cut/lib/defaultNames";
 import { DEFAULT_LOCALE, type Locale } from "@/i18n/locales";
 import { ADOPT_COMMAND, type AdoptedAsset } from "@/cut/lib/commandBatch";
-import { NO_CARD_OPEN, queueCommands, waitForJob, type CommandCall, type CommandJobResult, type JobRow } from "@/cut/server/cloud/commands";
+import { EDITOR_BATCH, NO_CARD_OPEN, queueCommands, waitForJob, WORKER_BATCH, type CommandCall, type CommandJobResult, type JobRow } from "@/cut/server/cloud/commands";
 import { needsWorker, queueDocExport, queueImportUrl } from "@/cut/server/cloud/jobs";
 import type { DocExportAudio } from "@/cut/lib/exportPresets";
 import { jobWantsStems, stemsArchiveName } from "@/cut/lib/exportDelivery";
@@ -263,12 +263,15 @@ export function projectTools(
     if (row.kind === "preview" && row.projectId) return getPreviewStatus(row.projectId, row.id);
     if (!row.projectId) throw new ProjectToolError("Job not found.");
     if (row.kind === "import_url" && row.state === "done") return importView(row);
-    if (row.kind === "commands" && row.state === "dismissed") throw new ProjectToolError(NO_CARD_OPEN);
+    if (row.kind === EDITOR_BATCH && row.state === "dismissed") throw new ProjectToolError(NO_CARD_OPEN);
     const view = await projectView(row.projectId);
     const status = jobStatus(row);
-    view.job = { id: row.id, kind: row.kind, status, progress: Math.max(0, Math.min(1, row.progress)), ...(jobError(row) ? { error: jobError(row) } : {}) };
-    if (row.kind !== "commands" && needsWorker(row)) wakeRenderWorker();
-    if (status === "done" && row.kind === "commands") {
+    // A batch reads as one kind whichever runner took it.
+    const batch = row.kind === EDITOR_BATCH || row.kind === WORKER_BATCH;
+    const kind = batch ? EDITOR_BATCH : row.kind;
+    view.job = { id: row.id, kind, status, progress: Math.max(0, Math.min(1, row.progress)), ...(jobError(row) ? { error: jobError(row) } : {}) };
+    if (row.kind !== EDITOR_BATCH && needsWorker(row)) wakeRenderWorker();
+    if (status === "done" && batch) {
       const result = row.result as CommandJobResult | null;
       view.results = result?.results ?? [];
       view.changed = result?.changed ?? false;
@@ -276,8 +279,8 @@ export function projectTools(
     return { view, playback: null };
   }
 
-  /** A finished import as a result: its files become assets through a batch
-   * the editor in the card runs, and the import counts as done once they have. */
+  /** A finished import as a result: its files become assets through a batch,
+   * and the import counts as done once they have. */
   async function importView(row: JobRow): Promise<ProjectResult> {
     const adoption = await adoptImport(row);
     const view = await projectView(row.projectId!);
@@ -306,12 +309,11 @@ export function projectTools(
     });
   }
 
-  /** Queue the batch that adopts a finished import's files, once. A batch
-   * dismissed because no card was open is queued again on the next poll. */
+  /** Queue the batch that adopts a finished import's files, once. */
   async function adoptionBatch(row: JobRow, record: ImportRecord): Promise<{ id: string } | Response> {
     if (record.adoptJobId) {
       const previous = await db.cutRenderJob.findFirst({ where: { id: record.adoptJobId, userId: identity.userId }, select: { id: true, state: true } });
-      if (previous && previous.state !== "dismissed") return { id: previous.id };
+      if (previous) return { id: previous.id };
     }
     const files = record.files ?? [];
     const name = (row.spec as { name?: string } | null)?.name;
@@ -323,9 +325,9 @@ export function projectTools(
     return queued;
   }
 
-  /** Turn a finished import's files into project assets, through a batch the
-   * editor in the card runs. Once the batch lands, the assets are written
-   * back to the import row and every poll after reads them from there. */
+  /** Turn a finished import's files into project assets, through a batch.
+   * Once the batch lands, the assets are written back to the import row and
+   * every poll after reads them from there. */
   async function adoptImport(row: JobRow): Promise<Adoption> {
     const record = importRecord(row);
     if (record.assets) return { state: "adopted", assets: record.assets };
@@ -335,7 +337,6 @@ export function projectTools(
     const batch = await waitForJob(identity.userId, queued.id, config.commandWaitMs, claimWait);
     if (!batch) return { state: "failed", error: "The import could not be added to the project." };
     if (batch.state === "queued" || batch.state === "running") return { state: "pending" };
-    if (batch.state === "dismissed") return { state: "failed", error: NO_CARD_OPEN };
     const result = batch.result as CommandJobResult | null;
     const outcome = result?.results?.[0];
     if (batch.state !== "done" || !outcome?.ok)
@@ -365,8 +366,8 @@ export function projectTools(
     return row;
   }
 
-  /** Queue a batch for the editor in the card and wait on it within the
-   * call's budget. */
+  /** Queue a batch for the editor in the card, or the worker when no card
+   * claims it, and wait on it within the call's budget. */
   async function runBatch(projectId: string, commands: CommandCall[], opts: { readOnly?: boolean; label?: string }): Promise<ProjectResult> {
     await getOwnedProject(projectId);
     const unknown = unknownCommandNames(commands.map((c) => c.name));

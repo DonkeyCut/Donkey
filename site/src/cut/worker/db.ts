@@ -3,6 +3,7 @@ import { artifactLifecycle, artifactUsageBytes } from "../lib/artifactPolicy";
 import { cutLimitsFor, quotaMarginFor, storageCeiling } from "../server/cloud/limits";
 import { STORAGE_FULL } from "../lib/operationFailure";
 import { prisma } from "@/lib/prisma";
+import { WORKER_BATCH } from "../server/cloud/batchKinds";
 import { Prisma } from "@/generated/prisma/client";
 import { resolveSettings } from "@/lib/config/resolve";
 
@@ -36,10 +37,14 @@ export interface ClaimedJob {
   outName: string | null;
 }
 
-/** The kinds someone is watching happen: an export, a URL import, or a chat
- * turn has a progress surface on screen, while a hover proxy and a share card
- * are background polish nobody is waiting on. */
-const WATCHED_KINDS = ["export", "import_url", "convert", "agent_turn"];
+/** The kinds someone is watching happen: an export, a URL import, a chat
+ * turn or a command batch has someone waiting on it, while a hover proxy and
+ * a share card are background polish nobody is waiting on. */
+const WATCHED_KINDS = ["export", "import_url", "convert", "agent_turn", WORKER_BATCH];
+
+/** The kinds that run one at a time per project: renders of the same
+ * project, and batches that each save its document in the order sent. */
+const ONE_PER_PROJECT = ["preview", "card", "hls", WORKER_BATCH];
 
 /** Atomically claim the next queued job: the updateMany's state guard makes
  * exactly one worker win each row, so replicas never double-run a job.
@@ -49,7 +54,7 @@ const WATCHED_KINDS = ["export", "import_url", "convert", "agent_turn"];
  * at — the wait was invisible in the UI, because the export's elapsed clock
  * only starts once it is claimed. */
 export async function claimNextJob(): Promise<ClaimedJob | null> {
-  // Editor command batches stay queued for the card that owns their document.
+  // A batch the editor in the card claims stays queued for it.
   // Proxies come next: opening a cloud project queues one for every heavy
   // clip, and an export asked for a moment later must not wait behind them.
   for (const kind of [{ in: WATCHED_KINDS }, { in: ["proxy"] }, { in: ["preview", "card", "hls"] }]) {
@@ -61,7 +66,7 @@ export async function claimNextJob(): Promise<ClaimedJob | null> {
     });
     for (const c of candidates) {
       const claimed = await prisma.$transaction(async (tx) => {
-        if (["preview", "card", "hls"].includes(c.kind)) {
+        if (ONE_PER_PROJECT.includes(c.kind)) {
           const running = await tx.cutRenderJob.findFirst({
             where: { userId: c.userId, projectId: c.projectId, kind: c.kind, state: "running" },
             select: { id: true },

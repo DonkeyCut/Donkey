@@ -5,13 +5,14 @@
  * footage, inspect it, make a vertical cut, preview, undo, redo, export — and
  * assert every step landed in the stored document and the export downloads.
  *
- * Every batch runs in the editor open in the ChatGPT card, so this script
- * stands that card in: it opens the project in the same editor store the page
- * uses, claims batches through the card's routes, runs them through the
- * headless executors, saves through the versioned PUT and reports back.
+ * A batch runs in the editor open in the ChatGPT card, so this script stands
+ * that card in: it opens the project in the same editor store the page uses,
+ * claims batches through the card's routes, runs them through the headless
+ * executors, saves through the versioned PUT and reports back. Before the
+ * card opens, a batch runs in the worker, as it does for a host with no card.
  *
- * Run with the site dev server up (it starts the worker):
- *   bun run scripts/eval-chatgpt-workflow.ts [--base http://localhost:3000] [--keep]
+ * Run with the site dev server up; the first wake starts the worker:
+ *   NODE_ENV=development bun run scripts/eval-chatgpt-workflow.ts [--base http://localhost:3000] [--keep]
  */
 
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
@@ -24,6 +25,8 @@ import { openCloudProject, pushCloudProject } from "../src/cut/lib/headless/docS
 import { headlessDeps } from "../src/cut/lib/pi/serverDeps";
 import { serializeDoc, useEditor } from "../src/cut/lib/store";
 import { deleteProjectCascade } from "../src/cut/server/cloud/projects";
+import type { ClaimedJob } from "../src/cut/worker/db";
+import { runnerSession } from "../src/cut/worker/session";
 import { prisma } from "../src/lib/prisma";
 
 const arg = (name: string): string | undefined => {
@@ -43,8 +46,13 @@ const fail = (msg: string): never => {
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 const config = SETTINGS.chatgptApp.schema.parse({ ...SETTINGS.chatgptApp.default, enabled: true, commandWaitMs: 120_000 });
+// A connection of its own: opening a project mints the card's editor link
+// against it. Deleted at the end, with its tokens.
+const grant = await prisma.chatgptGrant.create({
+  data: { userId: USER_ID, clientId: "eval", resource: base, scope: "projects:read previews:render projects:write", redirectUri: base, challenge: "eval", expiresAt: new Date(Date.now() + 60 * 60_000) },
+});
 const server = createChatgptServer(
-  { userId: USER_ID, scopes: ["projects:read", "previews:render", "projects:write"], grantId: "eval" },
+  { userId: USER_ID, scopes: ["projects:read", "previews:render", "projects:write"], grantId: grant.id },
   config
 );
 const client = new Client({ name: "eval", version: "1" });
@@ -78,7 +86,8 @@ async function settle(first: Called, tool: "get_job_status" | "get_export_status
 /** The card, stood in for: claim the project's batches and run them on the
  * open document until the signal ends it. */
 async function hostCard(projectId: string, signal: AbortSignal): Promise<void> {
-  const session: HeadlessSession = { base, headers: { "x-donkey-client-id": "eval-card", "x-donkey-dev-auth-bypass": "1" } };
+  // The card speaks for the account the way the worker does.
+  const session: HeadlessSession = { ...runnerSession({ userId: USER_ID } as ClaimedJob), base };
   bindHeadlessSession(session);
   const deps = headlessDeps(session);
   const open = await openCloudProject(session, projectId);
@@ -130,11 +139,13 @@ try {
   projectId = created.view.project?.id ?? fail("create_project returned no project");
   console.log(`created ${projectId}`);
 
-  // An edit before the card is open is refused, and says so.
-  const closed = await client.callTool({ name: "set_aspect", arguments: { projectId, aspect: "9:16" } });
-  if (!closed.isError || !JSON.stringify(closed.content).includes("open_project")) fail(`an edit with no card open should ask for open_project: ${JSON.stringify(closed.content)}`);
-  console.log("no card open: the edit asks for open_project");
-  hosting = hostCard(projectId, card.signal).catch((e) => { if (!card.signal.aborted) console.error("card failed:", e); });
+  // With no card open, an edit runs in the worker on the saved project, and
+  // undo, which steps the card's history, asks for the card.
+  await settle(await call("set_aspect", { projectId, aspect: "1:1" }), "get_job_status", "headless edit");
+  if ((await doc(projectId)).aspect !== "1:1") fail(`the edit with no card open did not save: ${(await doc(projectId)).aspect}`);
+  const closed = await client.callTool({ name: "undo", arguments: { projectId } });
+  if (!closed.isError || !JSON.stringify(closed.content).includes("open_project")) fail(`undo with no card open should ask for open_project: ${JSON.stringify(closed.content)}`);
+  console.log("no card open: the edit runs in the worker, undo asks for open_project");
 
   const imported = await settle(await call("import_media", { projectId, urls: [FOOTAGE] }), "get_job_status", "import");
   const importAssets = imported.view.results.flatMap((r) => ((r.output as { assets?: { assetId: string; name: string; duration: number }[] })?.assets ?? []));
@@ -147,16 +158,25 @@ try {
   if (!state || !Array.isArray(state.media) || state.media.length !== 1) fail(`inspect_project state has no media list: ${inspected.text.slice(0, 200)}`);
   console.log("inspected: state carries the footage");
 
-  // Each command is its own tool and its own undo step.
+  // Each command is its own tool. The worker has the media runtime, so the
+  // frame is captured there, before the card opens.
   const edit = async (name: string, input: Record<string, unknown>) => {
     const result = await settle(await call(name, { projectId, ...input }), "get_job_status", name);
     if (result.view.results.some((r) => !r.ok)) fail(`${name} failed: ${result.text}`);
     return result;
   };
-  const before = await doc(projectId);
-  await edit("set_aspect", { aspect: "9:16" });
   const placed = await edit("add_clip", { asset_id: asset.assetId });
   const clipId = (placed.view.results[0].output as { id?: string })?.id ?? fail("add_clip returned no clip id");
+  const frame = await settle(await call("capture_frame", { projectId, t: 0.5 }), "get_job_status", "capture");
+  if (frame.images < 1) {
+    fail("capture_frame returned no image block");
+  }
+  console.log("no card open: clip placed and a frame captured in the worker");
+
+  // From here the card is open, and each edit is one step of its history.
+  hosting = hostCard(projectId, card.signal).catch((e) => { if (!card.signal.aborted) console.error("card failed:", e); });
+  const before = await doc(projectId);
+  await edit("set_aspect", { aspect: "9:16" });
   const after = await doc(projectId);
   if (after.aspect !== "9:16") fail(`aspect did not save: ${after.aspect}`);
   if (!(after.clips?.length === 1)) fail(`clip did not save: ${JSON.stringify(after.clips)}`);
@@ -168,14 +188,10 @@ try {
 
   await edit("trim_clip", { clipId, in: 0, out: Math.min(3, asset.duration) });
   await edit("add_title", { text: "MADE IN CHATGPT", start: 0, end: 2 });
-  const frame = await settle(await call("capture_frame", { projectId, t: 0.5 }), "get_job_status", "capture");
-  if (frame.images < 1) {
-    fail("capture_frame returned no image block");
-  }
   const titled = await doc(projectId);
   if (!(titled.overlays ?? []).some((o) => o.text === "MADE IN CHATGPT")) fail("the title did not save");
   if (!(titled.clips![0].out - titled.clips![0].in <= 3.001)) fail("the trim did not save");
-  console.log("edited: aspect, clip, trim, title and a captured frame");
+  console.log("edited in the card: aspect, trim and title");
 
   const undone = await call("undo", { projectId });
   if (!undone.view.changed) fail(`undo changed nothing: ${undone.text}`);
@@ -204,5 +220,6 @@ try {
   await client.close().catch(() => {});
   await server.close().catch(() => {});
   if (projectId && !keep) await deleteProjectCascade(USER_ID, projectId).catch((e) => console.error("cleanup failed:", e));
+  await prisma.chatgptGrant.delete({ where: { id: grant.id } }).catch((e) => console.error("grant cleanup failed:", e));
   await prisma.$disconnect().catch(() => {});
 }

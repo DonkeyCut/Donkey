@@ -59,7 +59,7 @@ globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
   if (String(url).endsWith("/wake") && init?.method === "POST") { woken.count++; return new Response("ok"); }
   return realFetch(url, init);
 }) as typeof fetch;
-const { claimEditorBatch, CLAIM_QUIET_MS, heartbeatEditorBatch, NO_CARD_OPEN, queueCommands, settleEditorBatch, waitForJob } = await import("./commands");
+const { claimEditorBatch, CLAIM_QUIET_MS, heartbeatEditorBatch, NO_CARD_OPEN, queueCommands, settleEditorBatch, waitForJob, WORKER_BATCH } = await import("./commands");
 afterAll(() => { globalThis.fetch = realFetch; });
 beforeEach(() => { rows.splice(0); woken.count = 0; });
 
@@ -90,6 +90,22 @@ test("a batch no card claims in time is dismissed with the answer the tool gives
   expect(row?.error).toBe(NO_CARD_OPEN);
   expect(woken.count).toBe(0);
   expect(await claimEditorBatch("u", "p")).toBeNull();
+});
+
+test("a batch no card claims in time goes to the cloud worker, and the card waits behind it", async () => {
+  // A host with no card, Codex's for one: the read runs headless.
+  const read = await queueCommands("u", "p", { commands: [{ name: "get_state", input: {} }], readOnly: true });
+  rows[0].createdAt = new Date(Date.now() - 5000);
+  const row = await waitForJob("u", (read as { id: string }).id, 50, { editorClaimMs: 1000 });
+  expect(row).toMatchObject({ kind: WORKER_BATCH, state: "queued" });
+  expect(woken.count).toBeGreaterThan(0);
+
+  // A card that opens now takes no batch until the worker's is done, so
+  // edits land in the order they were sent.
+  await queueCommands("u", "p", { commands: [{ name: "set_aspect", input: { aspect: "1:1" } }] });
+  expect(await claimEditorBatch("u", "p")).toBeNull();
+  rows[0].state = "done";
+  expect((await claimEditorBatch("u", "p"))?.id).toBe(rows[1].id);
 });
 
 test("a batch waits past the claim window for a card that is still booting its editor", async () => {

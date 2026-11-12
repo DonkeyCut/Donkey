@@ -3,12 +3,13 @@
 // batch on the same project never race through the versioned PUT.
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
+import { EDITOR_BATCH, WORKER_BATCH } from "./batchKinds";
 import { err } from "./util";
 import { wakeRenderWorker } from "./wake";
 
 /** The job kinds that hold the lease. An import only lands files; the batch
  * that adopts them into the document is a commands job of its own. */
-export const LEASE_KINDS = ["agent_turn", "commands"];
+export const LEASE_KINDS = ["agent_turn", EDITOR_BATCH, WORKER_BATCH];
 
 /** The live lease holders on a project, oldest first. A read-only command
  * batch never saves, so it holds nothing. */
