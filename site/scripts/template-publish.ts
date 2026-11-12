@@ -10,11 +10,15 @@
  *   bun run scripts/template-publish.ts frames <id>
  *   bun run scripts/template-publish.ts peaks <id>
  *   bun run scripts/template-publish.ts render "<project folder>" <meta.json> <out.mp4> [--draft]
+ *   bun run scripts/template-publish.ts translate
  *
  * The project folder is a Mac library folder (project.json + media/). The
  * meta file holds the gallery entry the document cannot say:
  *   { "id", "name": { "en", … }, "description": { "en", … }, "category",
  *     "style", "fps", "tags"? }
+ * A publish translates the name and description into every language the meta
+ * leaves out; `translate` does the same for the templates already live. The
+ * words inside the video stay as made.
  * The gallery plays the template live, so nothing is rendered ahead but the
  * card's still: one frame of it, exported here through the same pipeline a
  * download takes. Footage past 1080p or 8 Mbps ships re-encoded. The gallery
@@ -38,6 +42,10 @@ import { statSync } from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { GoogleGenAI, Type } from "@google/genai";
+import { LOCALES, LOCALE_NAMES, type Locale } from "../src/i18n/locales";
+import { geminiClientConfig } from "../src/lib/inference/adapters/gemini-client";
+import { geminiModels } from "../src/lib/inference/gemini-models";
 import { footageSlots } from "../src/cut/lib/templateFill";
 import {
   TEMPLATE_ASPECTS,
@@ -107,6 +115,67 @@ const ID_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const MAKER_FIELDS = ["renders", "genvideo", "publish", "notes", "firstOpen", "ui", "kind"] as const;
 
 type Meta = Pick<GalleryTemplate, "id" | "name" | "description" | "category" | "style" | "fps" | "tags">;
+
+// A template's gallery text: its card's name and the sentence under it.
+type TemplateText = Pick<GalleryTemplate, "name" | "description">;
+
+// How many templates translate at once.
+const TEXT_CONCURRENCY = 6;
+
+function translator(): GoogleGenAI {
+  const config = geminiClientConfig(process.env);
+  if (!config.configured) {
+    throw new Error("GOOGLE_APPLICATION_CREDENTIALS_JSON is missing; translating template text needs Vertex credentials.");
+  }
+  return new GoogleGenAI(config.options);
+}
+
+/** The text with every shipped language filled in. A language the text
+ * already has keeps its own words. */
+async function translateText(ai: GoogleGenAI, text: TemplateText): Promise<TemplateText> {
+  const missing = LOCALES.filter((l): l is Exclude<Locale, "en"> => l !== "en" && (!text.name[l] || !text.description[l]));
+  if (missing.length === 0) {
+    return text;
+  }
+  const prompt = [
+    "Translate a video template's gallery text in Donkey Cut, a video editor, from English into each language listed.",
+    "The name is a short title on the template's card; the description is the sentence under it.",
+    "Keep the English's length and tone. Keep brand, product and holiday names as people in that language say them, and keep numbers and units as they are.",
+    `Languages: ${missing.map((l) => `${l} (${LOCALE_NAMES[l]})`).join(", ")}.`,
+    "Return one row per language code.",
+    "",
+    JSON.stringify({ name: text.name.en, description: text.description.en }),
+  ].join("\n");
+  const response = await ai.models.generateContent({
+    model: geminiModels.flash,
+    contents: prompt,
+    config: {
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: Type.ARRAY,
+        items: {
+          type: Type.OBJECT,
+          properties: { locale: { type: Type.STRING }, name: { type: Type.STRING }, description: { type: Type.STRING } },
+          required: ["locale", "name", "description"],
+        },
+      },
+    },
+  });
+  const rows = JSON.parse(response.text ?? "[]") as { locale: string; name: string; description: string }[];
+
+  // Every missing language comes back, or the template keeps none of them.
+  const name = { ...text.name };
+  const description = { ...text.description };
+  for (const locale of missing) {
+    const row = rows.find((r) => r.locale === locale);
+    if (!row?.name.trim() || !row.description.trim()) {
+      throw new Error(`No ${locale} text came back for "${text.name.en}".`);
+    }
+    name[locale] ??= row.name.trim();
+    description[locale] ??= row.description.trim();
+  }
+  return { name, description };
+}
 
 // Publishes on this machine take turns at the index: each holds this lock
 // directory while it reads and writes the index, so two at once never drop
@@ -630,6 +699,7 @@ async function publish(dir: string, metaPath: string) {
 
   const entry: GalleryTemplate = {
     ...meta,
+    ...(await translateText(translator(), meta)),
     aspect,
     seconds: Math.round(timelineEnd(doc) * 10) / 10,
     slots: footageSlots(doc.clips, doc.assets).length,
@@ -678,6 +748,30 @@ async function order(file: string) {
   console.log(`ordered ${ids.length} of ${total} templates`);
 }
 
+/** Fill every language the live templates' names and descriptions lack. The
+ * translations run outside the lock and land in one change. */
+async function translate() {
+  const ai = translator();
+  const { templates } = await readIndex();
+  const texts = new Map<string, TemplateText>();
+  const queue = [...templates];
+  const work = async () => {
+    for (let next = queue.shift(); next; next = queue.shift()) {
+      texts.set(next.id, await translateText(ai, next));
+    }
+  };
+  await Promise.all(Array.from({ length: TEXT_CONCURRENCY }, work));
+
+  // A template republished meanwhile keeps the text its publish wrote.
+  await changeIndex((index) => ({
+    templates: index.templates.map((t) => {
+      const text = texts.get(t.id);
+      return text && t.name.en === text.name.en && t.description.en === text.description.en ? { ...t, ...text } : t;
+    }),
+  }));
+  console.log(`translated ${texts.size} templates into ${LOCALES.length - 1} languages`);
+}
+
 if (command === "publish" && args.length === 2) {
   await publish(args[0], args[1]);
 } else if (command === "remove" && args.length === 1) {
@@ -692,8 +786,10 @@ if (command === "publish" && args.length === 2) {
   await render(args[0], args[1], args[2], "full");
 } else if (command === "render" && args.length === 4 && args[3] === "--draft") {
   await render(args[0], args[1], args[2], "draft");
+} else if (command === "translate" && args.length === 0) {
+  await translate();
 } else {
-  console.error("usage: template-publish.ts publish <project folder> <meta.json> | remove <id> | order <ids.json> | frames <id> | peaks <id> | render <project folder> <meta.json> <out.mp4> [--draft]");
+  console.error("usage: template-publish.ts publish <project folder> <meta.json> | remove <id> | order <ids.json> | frames <id> | peaks <id> | render <project folder> <meta.json> <out.mp4> [--draft] | translate");
   process.exit(1);
 }
 process.exit(0);
