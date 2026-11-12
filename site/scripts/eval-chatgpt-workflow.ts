@@ -18,6 +18,7 @@
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { SETTINGS } from "../src/lib/config/registry";
 import { createChatgptServer, SERVER_INSTRUCTIONS } from "../src/clients/chatgpt/server/mcp";
+import { recordEditorSession } from "../src/clients/chatgpt/server/oauthTokens";
 import type { ProjectView } from "../src/clients/chatgpt/contracts";
 import { runCommandBatch, type CommandJobSpec } from "../src/cut/lib/commandBatch";
 import { bindHeadlessSession, type HeadlessSession } from "../src/cut/lib/headless/bind";
@@ -86,6 +87,9 @@ async function settle(first: Called, tool: "get_job_status" | "get_export_status
 /** The card, stood in for: claim the project's batches and run them on the
  * open document until the signal ends it. */
 async function hostCard(projectId: string, signal: AbortSignal): Promise<void> {
+  // A real card signs its editor in through a one-use link; the session it
+  // records tells the server a card can claim this connection's batches.
+  await recordEditorSession(grant.id, { id: `eval-card-${Date.now()}`, expiresAt: new Date(Date.now() + 3_600_000) });
   // The card speaks for the account the way the worker does.
   const session: HeadlessSession = { ...runnerSession({ userId: USER_ID } as ClaimedJob), base };
   bindHeadlessSession(session);
@@ -172,6 +176,16 @@ try {
     fail("capture_frame returned no image block");
   }
   console.log("no card open: clip placed and a frame captured in the worker");
+
+  // A stock add copies its file behind the placement; the worker saves once
+  // the copy lands, so the asset and its clip are in the saved document.
+  const found = await settle(await call("stock_search", { projectId, query: "dog", kind: "image" }), "get_job_status", "stock_search");
+  const stockId = (found.view.results[0]?.output as { results?: { id: string }[] })?.results?.[0]?.id ?? fail(`stock_search found nothing: ${found.text.slice(0, 200)}`);
+  const stocked = await edit("stock_add", { id: stockId, add_to_timeline: false });
+  const stockAsset = (stocked.view.results[0].output as { assetId?: string })?.assetId ?? fail("stock_add returned no asset id");
+  const saved = await doc(projectId);
+  if (!saved.assets?.some((a) => a.id === stockAsset)) fail("the stock add with no card open did not save its asset");
+  console.log("no card open: a stock add saves its asset once the copy lands");
 
   // From here the card is open, and each edit is one step of its history.
   hosting = hostCard(projectId, card.signal).catch((e) => { if (!card.signal.aborted) console.error("card failed:", e); });
