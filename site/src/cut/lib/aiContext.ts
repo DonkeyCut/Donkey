@@ -662,6 +662,8 @@ function describeState(
       // label reads as a clip's name and a shell of a cut looks finished.
       ...(sp.asset.block ? { emptyShot: true } : {}),
       muted: sp.clip.muted,
+      // The clip's level, set through set_clip_volume; absent at 100%.
+      ...((sp.clip.volume ?? 1) !== 1 ? { volume: r(sp.clip.volume ?? 1) } : {}),
       ...(sp.clip.hidden ? { hidden: true } : {}),
       // The clip's own equalizer/compressor/limiter, set through
       // set_clip_sound; absent when its sound is untouched.
