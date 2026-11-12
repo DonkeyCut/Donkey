@@ -1,6 +1,6 @@
 /**
  * The assistant's Library tools — browsing the shared shelf, importing its
- * assets and templates into the project, saving new templates, and
+ * assets and snippets into the project, saving new snippets, and
  * organizing folders — kept beside the Library view that exposes the same
  * shelf inside the Media tab. The catalog spreads this list into the model's
  * toolset and `aiTools.ts` keys its handlers on `LibraryToolName`.
@@ -49,11 +49,11 @@ export const LIBRARY_TOOLS = [
   {
     name: "library_list",
     description:
-      CLOUD_LIBRARY_IMPORT_DESCRIPTION + " " + "List the shared Library — reusable media saved across projects: folders (nested; a folder's parentId names the folder it sits in), assets (video/audio/image, the account's own font files, and its LUT files — .cube/.3dl, offered to every clip as \"lut:<key>\" via set_color_lut), and templates (saved arrangements of clips, overlays, titles, and captions). An asset with `origin` \"inspiration\" is a reference the user saved from their iOS app to the Inspiration folder. Library items live outside the project: library_add imports an asset, template_add re-materializes a template. Answers a page of `items` (assets and templates, each with its kind) with `total` and, when more remain, `next` to pass back as offset. To find a named asset, pass words of its name as query (\"computer desk raw\" finds computer-desk-raw); folder narrows to a folder and the folders inside it. Stock sound effects are not in the Library: use stock_search.",
+      CLOUD_LIBRARY_IMPORT_DESCRIPTION + " " + "List the shared Library — reusable media saved across projects: folders (nested; a folder's parentId names the folder it sits in), assets (video/audio/image, the account's own font files, and its LUT files — .cube/.3dl, offered to every clip as \"lut:<key>\" via set_color_lut), and snippets (saved arrangements of clips, overlays, titles, and captions; their kind is \"template\"). An asset with `origin` \"inspiration\" is a reference the user saved from their iOS app to the Inspiration folder. Library items live outside the project: library_add imports an asset, template_add re-materializes a snippet. Answers a page of `items` (assets and snippets, each with its kind) with `total` and, when more remain, `next` to pass back as offset. To find a named asset, pass words of its name as query (\"computer desk raw\" finds computer-desk-raw); folder narrows to a folder and the folders inside it. Stock sound effects are not in the Library: use stock_search.",
     inputSchema: obj({
       query: str("Words that must all appear in the name, file name or title; case, hyphens and spaces don't matter"),
       folder: str("Folder id or name; lists that folder and the folders inside it"),
-      kind: { type: "string", enum: ["video", "audio", "image", "font", "lut", "template"], description: "Only items of this kind" },
+      kind: { type: "string", enum: ["video", "audio", "image", "font", "lut", "template"], description: "Only items of this kind; \"template\" lists snippets" },
       offset: num("Where the page starts; pass the previous page's next"),
       limit: num(`Items per page, 1..${LIBRARY_PAGE_MAX} (default ${LIBRARY_PAGE_DEFAULT})`),
     }),
@@ -67,11 +67,11 @@ export const LIBRARY_TOOLS = [
   {
     name: "library_add",
     description:
-      "Copy a Library asset into the project; pass share_link for an accessible shared Library asset (it appears in `media` and previews as a card in this chat). This is the import step \"library\"-scope attachments need before editor tools can touch them. For one file inside a shared template, pass its template id and template_file. Shared linked files copy into your Library and return their usable id (fontId for fonts). Your own linked files return their existing id from the registry. Pass add_to_timeline:true (or start/index) only when the user asked for it in the cut: video/image land on track 0, audio on the soundtrack.",
+      "Copy a Library asset into the project; pass share_link for an accessible shared Library asset (it appears in `media` and previews as a card in this chat). This is the import step \"library\"-scope attachments need before editor tools can touch them. For one file inside a shared snippet, pass its snippet id and template_file. Shared linked files copy into your Library and return their usable id (fontId for fonts). Your own linked files return their existing id from the registry. Pass add_to_timeline:true (or start/index) only when the user asked for it in the cut: video/image land on track 0, audio on the soundtrack.",
     inputSchema: obj({
       id: str("Library asset id (from library_list, read_folder or an attachment), or its exact name — case, hyphens and spaces don't matter"),
       share_link: str("Shared Library URL returned or read by read_folder; imports an asset from that share"),
-      template_file: str("One shared template fileName from read_folder; id is the template id when this is set"),
+      template_file: str("One shared snippet's fileName from read_folder; id is the snippet id when this is set"),
       folder_id: str("Shared folder containing the asset (from the read_folder page)"),
       offset: num("Offset of the shared page containing the asset"),
       add_to_timeline: bool("Also place it on the timeline (default false — it stays a project asset until the user asks)"),
@@ -82,9 +82,9 @@ export const LIBRARY_TOOLS = [
   {
     name: "template_add",
     description:
-      "Re-materialize a template into the project: its clips, overlays, titles, and captions land editable, exactly as saved (clip layers append to track 0; free-positioned parts line up at the playhead). A Library template's media import as assets on the way in; a template saved in this project's own Media reuses the media already here. Call it only when the user asked for the template in the cut.",
+      "Re-materialize a snippet into the project: its clips, overlays, titles, and captions land editable, exactly as saved (clip layers append to track 0; free-positioned parts line up at the playhead). A Library snippet's media import as assets on the way in; a snippet saved in this project's own Media reuses the media already here. Call it only when the user asked for the snippet in the cut.",
     inputSchema: obj(
-      { id: str("Template id — from library_list, or the id carried by a template the user referenced") },
+      { id: str("Snippet id — from library_list, or the id carried by a snippet the user referenced") },
       ["id"],
     ),
   },
@@ -121,9 +121,9 @@ export const LIBRARY_TOOLS = [
   {
     name: "save_template",
     description:
-      "Save timeline items as a reusable template in this project's Media, kept by reference — the source media plus the edit arranging it, re-editable when added back. The user can push it to the shared Library from the Media panel. Pass the ids of the items to include: video clips (any track), soundtrack clips, titles, and subtitle cues.",
+      "Save timeline items as a reusable snippet in this project's Media, kept by reference — the source media plus the edit arranging it, re-editable when added back. The user can push it to the shared Library from the Media panel. Pass the ids of the items to include: video clips (any track), soundtrack clips, titles, and subtitle cues.",
     inputSchema: obj({
-      name: str("Template name"),
+      name: str("Snippet name"),
       item_ids: {
         type: "array",
         items: { type: "string" },
@@ -134,7 +134,7 @@ export const LIBRARY_TOOLS = [
   {
     name: "library_organize",
     description:
-      "Organize the shared Library. Folders nest: create_folder makes one at the root or inside parent_id, rename_folder renames, move_folder files a folder under another (omit parent_id for the root; never into itself or a folder inside it), delete_folder deletes one with everything in it — its folders and every item and note they hold — permanently; an inspiration item in it leaves the phone too. move_asset files an asset or template into a folder (omit folder_id for the root), rename_asset / rename_template rename an item (any file kind — video, audio, image, font, LUT — and a font or LUT keeps its new name in its menu), delete_asset / delete_template remove an item. Deletes are permanent — projects keep their own copies, but delete only what the user explicitly asked to remove. Deleting an asset with origin \"inspiration\" takes it off the user's phone as well.",
+      "Organize the shared Library. Folders nest: create_folder makes one at the root or inside parent_id, rename_folder renames, move_folder files a folder under another (omit parent_id for the root; never into itself or a folder inside it), delete_folder deletes one with everything in it — its folders and every item and note they hold — permanently; an inspiration item in it leaves the phone too. move_asset files an asset or snippet into a folder (omit folder_id for the root), rename_asset renames a file (any file kind — video, audio, image, font, LUT — and a font or LUT keeps its new name in its menu) and rename_template a snippet; delete_asset removes a file and delete_template a snippet. Deletes are permanent — projects keep their own copies, but delete only what the user explicitly asked to remove. Deleting an asset with origin \"inspiration\" takes it off the user's phone as well.",
     inputSchema: obj({
       action: {
         type: "string",
@@ -144,7 +144,7 @@ export const LIBRARY_TOOLS = [
       name: str("New name (create_folder, rename_folder, rename_asset, rename_template)"),
       folder_id: str("Folder id (rename_folder, move_folder, delete_folder, move_asset destination — omit for root)"),
       parent_id: str("The folder to file a folder inside (create_folder, move_folder) — omit for the root"),
-      id: str("Library asset or template id (move_asset, rename_asset, rename_template, delete_asset, delete_template)"),
+      id: str("Library asset or snippet id (move_asset, rename_asset, rename_template, delete_asset, delete_template)"),
     }, ["action"]),
   },
 ] as const satisfies readonly AiToolDef[];

@@ -657,7 +657,7 @@ export async function importTemplate(
   const media: TemplateMedia[] = [];
   for (const [i, m] of (input.media ?? []).entries()) {
     const file = files[i];
-    if (!file) throw new UserError("template_media_missing", "Template media missing.");
+    if (!file) throw new UserError("template_media_missing", "Snippet media missing.");
     const dest = await freeName(m.fileName || file.name);
     await writeFile(libMediaPath(dest), Buffer.from(await file.arrayBuffer()));
     media.push({ ...m, fileName: dest });
@@ -731,7 +731,7 @@ export async function copyTemplateToProject(templateId: string, projectId: strin
   if (!(await readProject(projectId))) throw new UserError("project_not_found", "Project not found.");
   const idx = await readIndex();
   const template = (idx.templates ?? []).find((x) => x.id === templateId);
-  if (!template) throw new UserError("template_not_found", "Template not found.");
+  if (!template) throw new UserError("template_not_found", "Snippet not found.");
   const media: TemplateMedia[] = [];
   for (const m of template.media) {
     const dest = await uniqueName(m.fileName, (n) =>
@@ -765,7 +765,7 @@ export async function addMediaToTemplate(
   try {
     return await mutateIndex((idx) => {
       const t = (idx.templates ?? []).find((x) => x.id === templateId);
-      if (!t) throw new UserError("template_not_found", "Template not found.");
+      if (!t) throw new UserError("template_not_found", "Snippet not found.");
       const mi = t.media.length;
       t.media = [...t.media, { ...input.media, fileName: dest }];
       if (input.audio)
@@ -794,7 +794,7 @@ export async function renameTemplate(
   const next = itemName(name);
   return mutateIndex((idx) => {
     const template = (idx.templates ?? []).find((t) => t.id === id);
-    if (!template) throw new UserError("template_not_found", "Template not found.");
+    if (!template) throw new UserError("template_not_found", "Snippet not found.");
     template.name = next;
     return template;
   });

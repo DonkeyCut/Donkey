@@ -638,7 +638,7 @@ async function saveTemplate(req: Request): Promise<Response> {
     });
     return json(template);
   } catch (e) {
-    return caught(e, new UserError("template_save_failed", "Could not save the template."));
+    return caught(e, new UserError("template_save_failed", "Could not save the snippet."));
   }
 }
 
@@ -658,7 +658,7 @@ async function importTemplate(req: Request): Promise<Response> {
     const media: TemplateMedia[] = [];
     for (const [i, m] of (input.media ?? []).entries()) {
       const file = files[i];
-      if (!file) return err(new UserError("template_media_missing", "Template media missing."), 400);
+      if (!file) return err(new UserError("template_media_missing", "Snippet media missing."), 400);
       const fileName = await store.saveLibraryMedia(
         file,
         m.fileName || file.name,
@@ -685,7 +685,7 @@ async function importTemplate(req: Request): Promise<Response> {
     });
     return json(template);
   } catch (e) {
-    return caught(e, new UserError("template_add_failed", "Could not add the template."));
+    return caught(e, new UserError("template_add_failed", "Could not add the snippet."));
   }
 }
 
@@ -698,7 +698,7 @@ async function materializeTemplate(
     if (!(await store.readDoc(projectId)))
       return err(new UserError("project_not_found", "Project not found."), 404);
     const template = (await readIndex()).templates.find((t) => t.id === id);
-    if (!template) return err(new UserError("template_not_found", "Template not found."), 404);
+    if (!template) return err(new UserError("template_not_found", "Snippet not found."), 404);
     const media: TemplateMedia[] = [];
     for (const m of template.media) {
       media.push({
@@ -708,7 +708,7 @@ async function materializeTemplate(
     }
     return json({ template, media });
   } catch (e) {
-    return caught(e, new UserError("template_add_failed", "Could not add the template."));
+    return caught(e, new UserError("template_add_failed", "Could not add the snippet."));
   }
 }
 
@@ -726,7 +726,7 @@ async function addToTemplate(req: Request, id: string): Promise<Response> {
       return json(
         await mutateIndex((idx) => {
           const t = idx.templates.find((x) => x.id === id);
-          if (!t) throw new UserError("template_not_found", "Template not found.");
+          if (!t) throw new UserError("template_not_found", "Snippet not found.");
           const mi = t.media.length;
           t.media = [...t.media, { ...media, fileName: stored }];
           if (audio)
@@ -745,7 +745,7 @@ async function addToTemplate(req: Request, id: string): Promise<Response> {
       throw e;
     }
   } catch (e) {
-    return caught(e, new UserError("template_append_failed", "Could not add to the template."));
+    return caught(e, new UserError("template_append_failed", "Could not add to the snippet."));
   }
 }
 
@@ -756,13 +756,13 @@ async function renameTemplate(req: Request, id: string): Promise<Response> {
     return json(
       await mutateIndex((idx) => {
         const template = idx.templates.find((t) => t.id === id);
-        if (!template) throw new UserError("template_not_found", "Template not found.");
+        if (!template) throw new UserError("template_not_found", "Snippet not found.");
         template.name = next;
         return template;
       }),
     );
   } catch (e) {
-    return caught(e, new UserError("template_rename_failed", "Could not rename the template."));
+    return caught(e, new UserError("template_rename_failed", "Could not rename the snippet."));
   }
 }
 
@@ -789,7 +789,7 @@ async function deleteTemplate(id: string): Promise<Response> {
     await dropFiles(files);
     return json({ ok: true });
   } catch (e) {
-    return caught(e, new UserError("template_delete_failed", "Could not delete the template."));
+    return caught(e, new UserError("template_delete_failed", "Could not delete the snippet."));
   }
 }
 

@@ -234,7 +234,7 @@
     "title": "标题",
     "captions": "{count, plural, other {# 条字幕}}",
     "meta": "{duration} · {count, plural, other {# 个项目}}",
-    "options": "模板选项",
+    "options": "片段选项",
     "add": "添加"
   },
   "groupPanel": {

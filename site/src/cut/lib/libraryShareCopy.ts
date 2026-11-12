@@ -48,7 +48,7 @@ export async function copyLibraryForSharing(
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ...template, folderId, keys }),
     });
-    if (!response.ok) throw new UserError("share_template_copy_failed", "Could not copy the template to Cloud.");
+    if (!response.ok) throw new UserError("share_template_copy_failed", "Could not copy the snippet to Cloud.");
     const landed = await response.json() as { id: string };
     templates.push(landed.id);
   };

@@ -50,6 +50,7 @@
     "fromAssets": "Verwende diese aus meinen Donkey Cut-Assets: {names}",
     "removeFile": "{name} entfernen",
     "chipTemplate": "Vorlage",
+    "chipSnippet": "Snippet",
     "chipProject": "Projekt",
     "startingFrom": "Starten mit {name}",
     "createFailed": "Projekt konnte nicht erstellt werden.",
@@ -66,6 +67,7 @@
         "images": "Bilder",
         "audio": "Audio",
         "notes": "Notizen",
+        "snippets": "Snippets",
         "projects": "Projekte",
         "templates": "Vorlagen"
       }
@@ -183,7 +185,7 @@
     "signIn": "Anmelden",
     "tryAgain": "Erneut versuchen",
     "breadcrumb": "Ordnerpfad",
-    "templateMedia": "Vorlagenmedien",
+    "templateMedia": "Snippet-Medien",
     "emptyFolder": "Dieser Ordner ist leer.",
     "pages": "Seiten",
     "firstPage": "Erste Seite",

@@ -88,14 +88,14 @@ export function useAtRows(open: boolean, projects: HomeProject[]): AtRow[] {
       rows.push({ ref: startTemplateRef(start, name), label: name, tab: "templates", at: 0, preview: { kind: "template", poster: templatePoster(template) }, start });
     }
 
-    // Arrangements saved to the Library are laid into the project by the chat.
-    // Its thumbnail is the first picture it lays in.
+    // Snippets, the arrangements saved to the Library, are laid into the
+    // project by the chat. A snippet's thumbnail is the first picture it lays in.
     for (const t of library?.templates ?? []) {
       const pic = t.media.find((m) => m.type === "image" || m.type === "video");
       const preview: AtRow["preview"] = pic
         ? { kind: "templateMedia", src: libraryMediaUrl(pic.fileName, t.residency), media: pic.type === "image" ? "image" : "video" }
         : { kind: "icon", icon: "file" };
-      rows.push({ ref: refFromTemplate(t), label: t.name, tab: "templates", at: t.addedAt, preview });
+      rows.push({ ref: refFromTemplate(t), label: t.name, tab: "snippets", at: t.addedAt, preview });
     }
 
     return uniqueNames(rows);

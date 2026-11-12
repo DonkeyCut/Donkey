@@ -50,6 +50,7 @@
     "fromAssets": "Utiliser ces éléments de mes ressources Donkey Cut : {names}",
     "removeFile": "Retirer {name}",
     "chipTemplate": "Modèle",
+    "chipSnippet": "Extrait",
     "chipProject": "Projet",
     "startingFrom": "À partir de {name}",
     "createFailed": "Impossible de créer le projet.",
@@ -66,6 +67,7 @@
         "images": "Images",
         "audio": "Audio",
         "notes": "Notes",
+        "snippets": "Extraits",
         "projects": "Projets",
         "templates": "Modèles"
       }
@@ -183,7 +185,7 @@
     "signIn": "Se connecter",
     "tryAgain": "Réessayer",
     "breadcrumb": "Fil d'Ariane du dossier",
-    "templateMedia": "Médias du modèle",
+    "templateMedia": "Médias de l'extrait",
     "emptyFolder": "Ce dossier est vide.",
     "pages": "Pages",
     "firstPage": "Première page",

@@ -234,7 +234,7 @@
     "title": "Title",
     "captions": "{count, plural, one {# caption} other {# captions}}",
     "meta": "{duration} · {count, plural, one {# item} other {# items}}",
-    "options": "Template options",
+    "options": "Snippet options",
     "add": "Add"
   },
   "groupPanel": {

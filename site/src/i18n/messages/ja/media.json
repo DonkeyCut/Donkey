@@ -234,7 +234,7 @@
     "title": "タイトル",
     "captions": "{count, plural, other {#件の字幕}}",
     "meta": "{duration} · {count, plural, other {#個のアイテム}}",
-    "options": "テンプレートオプション",
+    "options": "スニペットのオプション",
     "add": "追加"
   },
   "groupPanel": {

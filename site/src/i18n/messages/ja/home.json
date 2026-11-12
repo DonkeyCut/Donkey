@@ -50,6 +50,7 @@
     "fromAssets": "Donkey Cut アセットからこれらを使用: {names}",
     "removeFile": "{name}を削除",
     "chipTemplate": "テンプレート",
+    "chipSnippet": "スニペット",
     "chipProject": "プロジェクト",
     "startingFrom": "{name}から開始",
     "createFailed": "プロジェクトを作成できませんでした。",
@@ -66,6 +67,7 @@
         "images": "画像",
         "audio": "オーディオ",
         "notes": "ノート",
+        "snippets": "スニペット",
         "projects": "プロジェクト",
         "templates": "テンプレート"
       }
@@ -183,7 +185,7 @@
     "signIn": "サインイン",
     "tryAgain": "再試行",
     "breadcrumb": "フォルダーのパンくずリスト",
-    "templateMedia": "テンプレートメディア",
+    "templateMedia": "スニペットメディア",
     "emptyFolder": "このフォルダーは空です。",
     "pages": "ページ",
     "firstPage": "最初のページ",

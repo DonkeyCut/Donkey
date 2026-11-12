@@ -1019,7 +1019,7 @@ export async function saveTemplate(
     body: JSON.stringify({ projectId, ...input }),
   });
   const body = await apiJson<LibraryTemplate>(res);
-  if (!res.ok) throw replyError(res.status, body, new UserError("template_save_failed", "Could not save the template."));
+  if (!res.ok) throw replyError(res.status, body, new UserError("template_save_failed", "Could not save the snippet."));
   return { ...body, residency };
 }
 
@@ -1044,7 +1044,7 @@ export async function carryTemplateTo(
       `/api/cut/library/media/${encodeURIComponent(m.fileName)}`,
     );
     if (!res.ok)
-      throw new UserError("template_media_read_failed", "Could not read that template's media off its shelf.");
+      throw new UserError("template_media_read_failed", "Could not read that snippet's media off its shelf.");
     files.push(new File([await res.blob()], m.fileName));
   }
   const input = {
@@ -1087,7 +1087,7 @@ export async function carryTemplateTo(
     });
   }
   const body = await apiJson<LibraryTemplate>(res);
-  if (!res.ok) throw replyError(res.status, body, new UserError("template_add_failed", "Could not add the template."));
+  if (!res.ok) throw replyError(res.status, body, new UserError("template_add_failed", "Could not add the snippet."));
   await deleteTemplate(t.residency, t.id);
 }
 
@@ -1102,8 +1102,8 @@ export async function addAssetToLibraryTemplate(
 ): Promise<LibraryTemplateItem> {
   if (template.residency !== getBackend().kind) {
     throw template.residency === "cloud"
-      ? new UserError("template_in_cloud", "That template is in the cloud; this project isn't.")
-      : new UserError("template_on_mac", "That template is on this Mac; this project isn't.");
+      ? new UserError("template_in_cloud", "That snippet is in the cloud; this project isn't.")
+      : new UserError("template_on_mac", "That snippet is on this Mac; this project isn't.");
   }
   const len = asset.type === "image" ? IMAGE_CLIP_SECONDS : asset.duration;
   const part =
@@ -1131,7 +1131,7 @@ export async function addAssetToLibraryTemplate(
     },
   );
   const body = await apiJson<LibraryTemplate>(res);
-  if (!res.ok) throw replyError(res.status, body, new UserError("template_append_failed", "Could not add to the template."));
+  if (!res.ok) throw replyError(res.status, body, new UserError("template_append_failed", "Could not add to the snippet."));
   return { ...body, residency: template.residency };
 }
 
@@ -1148,7 +1148,7 @@ export async function renameTemplate(
       body: JSON.stringify({ name }),
     },
   );
-  if (!res.ok) throw new UserError("template_rename_failed", "Could not rename the template.");
+  if (!res.ok) throw new UserError("template_rename_failed", "Could not rename the snippet.");
 }
 
 /** Rename a Library file on its own shelf. Every kind takes the same call. */
@@ -1183,7 +1183,7 @@ export async function deleteTemplate(
       method: "DELETE",
     },
   );
-  if (!res.ok) throw new UserError("template_delete_failed", "Could not delete the template.");
+  if (!res.ok) throw new UserError("template_delete_failed", "Could not delete the snippet.");
 }
 
 /** Land a template's media in the open project, in `template.media` order, and
@@ -1204,7 +1204,7 @@ async function copyTemplateMediaToProject(
     );
     const body = await apiJson<{ media?: TemplateMedia[] }>(res);
     if (!res.ok || !body.media)
-      throw replyError(res.status, body, new UserError("template_add_failed", "Could not add the template."));
+      throw replyError(res.status, body, new UserError("template_add_failed", "Could not add the snippet."));
     return body.media;
   }
   const out: TemplateMedia[] = [];

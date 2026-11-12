@@ -11,6 +11,7 @@ import {
   FolderPlus,
   Image as ImageIcon,
   LayoutGrid,
+  Layers,
   LayoutTemplate,
   Link as LinkIcon,
   List,
@@ -896,7 +897,7 @@ export function AssetsView() {
   // The list: one row per card, the same pick and menus.
   const renderRow = (e: AssetEntry) => {
     const offline = !live(e.residency);
-    const Icon = e.kind === "project" ? Film : e.kind === "template" ? LayoutTemplate : TYPE_ICON[e.asset.type];
+    const Icon = e.kind === "project" ? Film : e.kind === "template" ? Layers : TYPE_ICON[e.asset.type];
     const length = e.kind === "project" ? e.project.duration : e.kind === "media" ? e.asset.duration : e.template.duration;
     const size = e.kind === "project" ? formatBytes(e.project.sizeBytes ?? 0, locale) : "";
     const openRow = (ev: React.MouseEvent) => {

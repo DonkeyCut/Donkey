@@ -477,9 +477,9 @@ function RefChip({
 }) {
   const t = useTranslations("home.start");
   const name = row?.label ?? refItem.name;
-  // A template or a project shows a picture like a clip does, so a label on
-  // the picture says which it is.
-  const label = row?.tab === "templates" ? t("chipTemplate") : row?.tab === "projects" ? t("chipProject") : null;
+  // A template, snippet or project shows a picture like a clip does, so a
+  // label on the picture says which it is.
+  const label = row?.tab === "templates" ? t("chipTemplate") : row?.tab === "snippets" ? t("chipSnippet") : row?.tab === "projects" ? t("chipProject") : null;
   return (
     <ChipTile
       name={name}

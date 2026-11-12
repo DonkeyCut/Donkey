@@ -50,6 +50,7 @@
     "fromAssets": "내 Donkey Cut 에셋에서 사용: {names}",
     "removeFile": "{name} 제거",
     "chipTemplate": "템플릿",
+    "chipSnippet": "스니펫",
     "chipProject": "프로젝트",
     "startingFrom": "{name}에서 시작",
     "createFailed": "프로젝트를 만들지 못했어요.",
@@ -66,6 +67,7 @@
         "images": "이미지",
         "audio": "오디오",
         "notes": "메모",
+        "snippets": "스니펫",
         "projects": "프로젝트",
         "templates": "템플릿"
       }
@@ -183,7 +185,7 @@
     "signIn": "로그인",
     "tryAgain": "다시 시도",
     "breadcrumb": "폴더 경로",
-    "templateMedia": "템플릿 미디어",
+    "templateMedia": "스니펫 미디어",
     "emptyFolder": "이 폴더는 비어 있어요.",
     "pages": "페이지",
     "firstPage": "첫 페이지",

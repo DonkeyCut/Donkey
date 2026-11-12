@@ -50,6 +50,7 @@
     "fromAssets": "Usar estes dos meus ativos do Donkey Cut: {names}",
     "removeFile": "Remover {name}",
     "chipTemplate": "Modelo",
+    "chipSnippet": "Snippet",
     "chipProject": "Projeto",
     "startingFrom": "Iniciando a partir de {name}",
     "createFailed": "Não foi possível criar o projeto.",
@@ -66,6 +67,7 @@
         "images": "Imagens",
         "audio": "Áudio",
         "notes": "Notas",
+        "snippets": "Snippets",
         "projects": "Projetos",
         "templates": "Modelos"
       }
@@ -183,7 +185,7 @@
     "signIn": "Entrar",
     "tryAgain": "Tentar novamente",
     "breadcrumb": "Navegação estrutural da pasta",
-    "templateMedia": "Mídia de modelo",
+    "templateMedia": "Mídia do snippet",
     "emptyFolder": "Esta pasta está vazia.",
     "pages": "Páginas",
     "firstPage": "Primeira página",

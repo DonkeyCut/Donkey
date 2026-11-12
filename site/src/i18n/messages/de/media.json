@@ -234,7 +234,7 @@
     "title": "Titel",
     "captions": "{count, plural, one {# Untertitel} other {# Untertitel}}",
     "meta": "{duration} · {count, plural, one {# Element} other {# Elemente}}",
-    "options": "Vorlagenoptionen",
+    "options": "Snippet-Optionen",
     "add": "Hinzufügen"
   },
   "groupPanel": {

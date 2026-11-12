@@ -234,7 +234,7 @@
     "title": "타이틀",
     "captions": "{count, plural, other {자막 #개}}",
     "meta": "{duration} · {count, plural, other {항목 #개}}",
-    "options": "템플릿 옵션",
+    "options": "스니펫 옵션",
     "add": "추가"
   },
   "groupPanel": {

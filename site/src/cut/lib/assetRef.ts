@@ -900,10 +900,10 @@ export function refFromTemplate(t: {
 }): AssetRef {
   return entityRef(
     `${CATALOG_PREFIX}template:${t.id}`,
-    `${t.name} template`,
-    `the "${t.name}" template — a saved arrangement of clips, titles and captions, ` +
+    `${t.name} snippet`,
+    `the "${t.name}" snippet — a saved arrangement of clips, titles and captions, ` +
       `${t.duration.toFixed(1)}s long over ${t.media.length} media item${t.media.length === 1 ? "" : "s"}, ` +
-      `template id "${t.id}". Nothing on the timeline holds it yet. ` +
+      `snippet id "${t.id}". Nothing on the timeline holds it yet. ` +
       `Lay it into the cut with template_add(id: "${t.id}").`,
     { entityKind: "template" }
   );

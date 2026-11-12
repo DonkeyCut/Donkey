@@ -80,7 +80,7 @@ export const libraryApi = {
       } & TemplateInput;
       return Response.json(await saveTemplate(projectId, input));
     } catch (e) {
-      return caught(e, new UserError("template_save_failed", "Could not save the template."));
+      return caught(e, new UserError("template_save_failed", "Could not save the snippet."));
     }
   },
 
@@ -99,7 +99,7 @@ export const libraryApi = {
         .filter((f): f is File => f instanceof File);
       return Response.json(await importTemplate(doc, files));
     } catch (e) {
-      return caught(e, new UserError("template_add_failed", "Could not add the template."));
+      return caught(e, new UserError("template_add_failed", "Could not add the snippet."));
     }
   },
 
@@ -109,7 +109,7 @@ export const libraryApi = {
       const { projectId } = (await req.json()) as { projectId: string };
       return Response.json(await copyTemplateToProject(id, projectId));
     } catch (e) {
-      return caught(e, new UserError("template_add_failed", "Could not add the template."));
+      return caught(e, new UserError("template_add_failed", "Could not add the snippet."));
     }
   },
 
@@ -121,7 +121,7 @@ export const libraryApi = {
       } & Parameters<typeof addMediaToTemplate>[2];
       return Response.json(await addMediaToTemplate(id, projectId, input));
     } catch (e) {
-      return caught(e, new UserError("template_append_failed", "Could not add to the template."));
+      return caught(e, new UserError("template_append_failed", "Could not add to the snippet."));
     }
   },
 
@@ -130,7 +130,7 @@ export const libraryApi = {
       const { name } = (await req.json()) as { name?: string };
       return Response.json(await renameTemplate(id, name ?? ""));
     } catch (e) {
-      return caught(e, new UserError("template_rename_failed", "Could not rename the template."));
+      return caught(e, new UserError("template_rename_failed", "Could not rename the snippet."));
     }
   },
 
@@ -161,7 +161,7 @@ export const libraryApi = {
       await deleteTemplate(id);
       return Response.json({ ok: true });
     } catch (e) {
-      return caught(e, new UserError("template_delete_failed", "Could not delete the template."));
+      return caught(e, new UserError("template_delete_failed", "Could not delete the snippet."));
     }
   },
 

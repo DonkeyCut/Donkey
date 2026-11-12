@@ -50,6 +50,7 @@
     "fromAssets": "Usa estos recursos de mi Donkey Cut: {names}",
     "removeFile": "Quitar {name}",
     "chipTemplate": "Plantilla",
+    "chipSnippet": "Fragmento",
     "chipProject": "Proyecto",
     "startingFrom": "A partir de {name}",
     "createFailed": "No se pudo crear el proyecto.",
@@ -66,6 +67,7 @@
         "images": "Imágenes",
         "audio": "Audio",
         "notes": "Notas",
+        "snippets": "Fragmentos",
         "projects": "Proyectos",
         "templates": "Plantillas"
       }
@@ -183,7 +185,7 @@
     "signIn": "Iniciar sesión",
     "tryAgain": "Reintentar",
     "breadcrumb": "Ruta de carpetas",
-    "templateMedia": "Multimedia de plantilla",
+    "templateMedia": "Multimedia del fragmento",
     "emptyFolder": "Esta carpeta está vacía.",
     "pages": "Páginas",
     "firstPage": "Primera página",

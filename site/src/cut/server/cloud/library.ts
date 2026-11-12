@@ -1006,7 +1006,7 @@ export const libraryCloud = {
       });
       return Response.json(templateView(row));
     } catch (e) {
-      return caught(e, new UserError("template_save_failed", "Could not save the template."));
+      return caught(e, new UserError("template_save_failed", "Could not save the snippet."));
     }
   },
 
@@ -1027,7 +1027,7 @@ export const libraryCloud = {
               where: { userId, r2Key: key },
             })
           : null;
-        if (!obj) throw new UserError("template_media_missing", "Template media missing.");
+        if (!obj) throw new UserError("template_media_missing", "Snippet media missing.");
         if (obj.uploadState !== "complete") {
           const info = await head(key!);
           if (!info) throw new UserError("upload_never_arrived", "The upload never arrived.");
@@ -1065,7 +1065,7 @@ export const libraryCloud = {
       });
       return Response.json(templateView(row));
     } catch (e) {
-      return caught(e, new UserError("template_add_failed", "Could not add the template."));
+      return caught(e, new UserError("template_add_failed", "Could not add the snippet."));
     }
   },
 
@@ -1077,7 +1077,7 @@ export const libraryCloud = {
       if (!(await getProject(userId, projectId)))
         throw new UserError("project_not_found", "Project not found.");
       const row = await findTemplate(userId, id);
-      if (!row) throw new UserError("template_not_found", "Template not found.");
+      if (!row) throw new UserError("template_not_found", "Snippet not found.");
       const template = templateView(row);
       // The whole batch against the quota before the first copy; a project
       // copy that still fails is unreferenced project media, which the sweep
@@ -1103,7 +1103,7 @@ export const libraryCloud = {
       }
       return Response.json({ template, media });
     } catch (e) {
-      return caught(e, new UserError("template_add_failed", "Could not add the template."));
+      return caught(e, new UserError("template_add_failed", "Could not add the snippet."));
     }
   },
 
@@ -1118,7 +1118,7 @@ export const libraryCloud = {
         extend: number;
       };
       const row = await findTemplate(userId, id);
-      if (!row) throw new UserError("template_not_found", "Template not found.");
+      if (!row) throw new UserError("template_not_found", "Snippet not found.");
       const src = await projectMediaObject(
         userId,
         projectId,
@@ -1156,7 +1156,7 @@ export const libraryCloud = {
       });
       return Response.json(templateView(updated));
     } catch (e) {
-      return caught(e, new UserError("template_append_failed", "Could not add to the template."));
+      return caught(e, new UserError("template_append_failed", "Could not add to the snippet."));
     }
   },
 
@@ -1165,14 +1165,14 @@ export const libraryCloud = {
       const { name } = (await req.json()) as { name?: string };
       const next = itemName(name);
       const row = await findTemplate(userId, id);
-      if (!row) throw new UserError("template_not_found", "Template not found.");
+      if (!row) throw new UserError("template_not_found", "Snippet not found.");
       const updated = await prisma.cutTemplate.update({
         where: { id },
         data: { name: next },
       });
       return Response.json(templateView(updated));
     } catch (e) {
-      return caught(e, new UserError("template_rename_failed", "Could not rename the template."));
+      return caught(e, new UserError("template_rename_failed", "Could not rename the snippet."));
     }
   },
 
@@ -1182,7 +1182,7 @@ export const libraryCloud = {
       if (row) await deleteTemplateCascade(userId, row);
       return Response.json({ ok: true });
     } catch (e) {
-      return caught(e, new UserError("template_delete_failed", "Could not delete the template."));
+      return caught(e, new UserError("template_delete_failed", "Could not delete the snippet."));
     }
   },
 };

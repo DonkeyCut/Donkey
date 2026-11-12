@@ -10,7 +10,7 @@ import type { GalleryTemplate } from "@/cut/lib/templateGallery";
 import type { ProjectSummary } from "@/cut/lib/types";
 
 /** The picker's tabs, in the order they show. */
-export const AT_TABS = ["all", "folders", "clips", "images", "audio", "notes", "projects", "templates"] as const;
+export const AT_TABS = ["all", "folders", "clips", "images", "audio", "notes", "snippets", "projects", "templates"] as const;
 export type AtTab = (typeof AT_TABS)[number];
 
 /** A template a new project can start from, the way Use as new project

@@ -49,6 +49,7 @@ import { parseTimeInput } from "@/cut/components/ScrubValue";
 import { ValueSlider } from "@/cut/components/ValueSlider";
 import { cn } from "@/lib/utils";
 import { ATTACHMENT_CARD, AudioFace, extensionOf, FolderFace, NoteFace, TextFace } from "./AttachmentFaces";
+import { isStartTemplateRef } from "./home/atRows";
 
 function CollectionLink({ item, children, className }: { item: AssetRef; children: ReactNode; className?: string }) {
   // A note or another project opens in its own tab; a folder reveals in place.
@@ -441,8 +442,9 @@ export function RefFace({ item }: { item: AssetRef }) {
   if (item.kind === "video" || item.kind === "image") {
     return <RefThumb item={item} className="absolute inset-0 size-full rounded-none border-0" />;
   }
+  // A video template starts the project; a snippet is laid into it.
   if (item.entityKind === "template") {
-    return <TextFace name={item.name} badge={t("chipTemplate")} />;
+    return <TextFace name={item.name} badge={t(isStartTemplateRef(item) ? "chipTemplate" : "chipSnippet")} />;
   }
   if (item.preview) {
     // eslint-disable-next-line @next/next/no-img-element -- refs point at engine/static files, not Next-optimizable images

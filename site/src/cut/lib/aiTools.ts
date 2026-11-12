@@ -5857,7 +5857,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       const shelved = own ? null : (await fetchLibrary()).templates.find((x) => x.id === id);
       const t = own ?? shelved;
       if (!t)
-        throw new ToolError(`No template with id ${id}. Call library_list for ids.`);
+        throw new ToolError(`No snippet with id ${id}. Call library_list for ids.`);
       const chatId = chatOwner();
       const before = new Set(s.assets.map((a) => a.id));
       if (shelved) await addTemplateToProject(projectId, shelved);
@@ -5877,7 +5877,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
   save_template: (s, input) => {
       if (!s.projectId) throw new ToolError("No project open.");
       const name = String(input.name ?? "").trim();
-      if (!name) throw new ToolError("A template name is required.");
+      if (!name) throw new ToolError("A snippet name is required.");
       const ids = Array.isArray(input.item_ids) ? input.item_ids.map(String) : [];
       if (ids.length === 0) throw new ToolError("item_ids is required — the timeline items to save.");
       const sels = ids.map((id): NonNullable<Selection> => {
@@ -5892,7 +5892,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       s.select(sels[0]);
       for (const sel of sels.slice(1)) s.toggleSelect(sel);
       const built = useEditor.getState().selectionTemplate();
-      if (!built) throw new ToolError("Could not build a template from those items.");
+      if (!built) throw new ToolError("Could not build a snippet from those items.");
       const saved = useEditor.getState().addTemplate({ ...built, name });
       return { id: saved.id, name: saved.name, duration: roundT(saved.duration) };
   },
@@ -5987,7 +5987,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         case "rename_template": {
           const id = String(input.id ?? "");
           const r = lib.templates.find((t) => t.id === id)?.residency;
-          if (!r) throw new ToolError(`No library template with id ${id}.`);
+          if (!r) throw new ToolError(`No library snippet with id ${id}.`);
           if (!String(input.name ?? "").trim()) throw new ToolError("A name is required.");
           const name = itemName(input.name);
           await renameTemplate(r, id, name);
@@ -6003,7 +6003,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         case "delete_template": {
           const id = String(input.id ?? "");
           const r = lib.templates.find((t) => t.id === id)?.residency;
-          if (!r) throw new ToolError(`No library template with id ${id}.`);
+          if (!r) throw new ToolError(`No library snippet with id ${id}.`);
           await deleteTemplate(r, id);
           return { deleted: true };
         }

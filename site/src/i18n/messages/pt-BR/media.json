@@ -234,7 +234,7 @@
     "title": "Título",
     "captions": "{count, plural, one {# legenda} other {# legendas}}",
     "meta": "{duration} · {count, plural, one {# item} other {# itens}}",
-    "options": "Opções do modelo",
+    "options": "Opções do snippet",
     "add": "Adicionar"
   },
   "groupPanel": {

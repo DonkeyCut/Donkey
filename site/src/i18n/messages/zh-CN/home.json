@@ -50,6 +50,7 @@
     "fromAssets": "使用我 Donkey Cut 资产中的以下内容：{names}",
     "removeFile": "移除 {name}",
     "chipTemplate": "模板",
+    "chipSnippet": "片段",
     "chipProject": "项目",
     "startingFrom": "从 {name} 开始",
     "createFailed": "无法创建项目。",
@@ -66,6 +67,7 @@
         "images": "图像",
         "audio": "音频",
         "notes": "笔记",
+        "snippets": "片段",
         "projects": "项目",
         "templates": "模板"
       }
@@ -183,7 +185,7 @@
     "signIn": "登录",
     "tryAgain": "重试",
     "breadcrumb": "文件夹路径导航",
-    "templateMedia": "模板媒体",
+    "templateMedia": "片段媒体",
     "emptyFolder": "此文件夹为空。",
     "pages": "页数",
     "firstPage": "首页",

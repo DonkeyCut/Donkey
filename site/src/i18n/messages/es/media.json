@@ -234,7 +234,7 @@
     "title": "Título",
     "captions": "{count, plural, one {# subtítulo} other {# subtítulos}}",
     "meta": "{duration} · {count, plural, one {# elemento} other {# elementos}}",
-    "options": "Opciones de plantilla",
+    "options": "Opciones del fragmento",
     "add": "Agregar"
   },
   "groupPanel": {

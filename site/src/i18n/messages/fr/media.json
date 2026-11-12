@@ -234,7 +234,7 @@
     "title": "Titre",
     "captions": "{count, plural, one {# sous-titre} other {# sous-titres}}",
     "meta": "{duration} · {count, plural, one {# élément} other {# éléments}}",
-    "options": "Options du modèle",
+    "options": "Options de l'extrait",
     "add": "Ajouter"
   },
   "groupPanel": {
