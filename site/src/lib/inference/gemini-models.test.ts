@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { geminiChatPicks, geminiModelRoleNames, geminiModelRoles, resolveGeminiModel } from "./gemini-models";
+import {
+  RETIRED_GEMINI_ROLES,
+  geminiChatPicks,
+  geminiModelRoleNames,
+  geminiModelRoles,
+  resolveGeminiModel,
+} from "./gemini-models";
 
 // The page names a role; the route turns it into the registry's current id.
 describe("model roles", () => {
@@ -12,6 +18,14 @@ describe("model roles", () => {
   test("an id passes through unchanged", () => {
     expect(resolveGeminiModel(geminiModelRoles.chat)).toBe(geminiModelRoles.chat);
     expect(resolveGeminiModel("gemini-3.7-flash")).toBe("gemini-3.7-flash");
+  });
+
+  // A bundle built before a role retired still sends its name; the call runs
+  // on the role that took over. Example: "chatPro" runs as the chat model.
+  test("a retired role runs as the role that took over", () => {
+    for (const [retired, role] of Object.entries(RETIRED_GEMINI_ROLES)) {
+      expect(resolveGeminiModel(retired)).toBe(geminiModelRoles[role]);
+    }
   });
 
   test("an object prototype key is not a role", () => {

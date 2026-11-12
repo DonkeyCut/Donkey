@@ -1,4 +1,4 @@
-import { geminiChatPicks, geminiModelRoleNames } from "@/lib/inference/gemini-models";
+import { RETIRED_GEMINI_ROLES, geminiChatPicks, geminiModelRoleNames } from "@/lib/inference/gemini-models";
 
 export interface AiModel {
   id: string;
@@ -47,6 +47,7 @@ export const RETIRED_CHAT_MODELS: Record<string, string> = {
   "gpt-5.6-sol": "gpt-6.1-sol",
   "gpt-6-sol": "gpt-6.1-sol",
   "gpt-5.6-luna": "gpt-6-luna",
+  ...RETIRED_GEMINI_ROLES,
 };
 
 /** The catalog id a saved id runs as today: itself when it is in the catalog,

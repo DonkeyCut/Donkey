@@ -10,10 +10,6 @@
 export const geminiModels = {
   flash: "gemini-3.8-flash",
   flashLite: "gemini-3.1-flash-lite",
-  // Gemini 4 reasoning models the chat picker offers: Argon answers faster on
-  // fewer tokens, Carbon reasons deepest.
-  argon: "gemini-4-argon",
-  carbon: "gemini-4-carbon",
   // Generative image editing/generation ("nano banana 2.1"). Bump here when
   // adopting a newer image model.
   flashImage: "gemini-nano-banana-2.1",
@@ -121,9 +117,6 @@ export type GeminiMusicModel = (typeof geminiMusicModels)[keyof typeof geminiMus
 export const geminiModelRoles = {
   // General chat and non-decision Responses calls — the latest full flash.
   chat: geminiModels.flash,
-  // The chat picker's reasoning picks, run on complex chat turns.
-  chatPro: geminiModels.argon,
-  chatMax: geminiModels.carbon,
   // Chat turns the gate judges simple — one self-contained ask runs on the
   // light chat model; complex turns stay on `chat`.
   chatSimple: geminiModels.flashLite,
@@ -152,22 +145,29 @@ export const geminiModelRoleNames = Object.fromEntries(
 ) as { [K in GeminiModelRole]: K };
 
 // The name the chat picker shows for each model it offers.
-const geminiChatModelNames: Record<(typeof geminiModelRoles)["chat" | "chatPro" | "chatMax"], string> = {
+const geminiChatModelNames: Record<(typeof geminiModelRoles)["chat"], string> = {
   [geminiModels.flash]: "Gemini 3.8 Flash",
-  [geminiModels.argon]: "Gemini 4 Argon",
-  [geminiModels.carbon]: "Gemini 4 Carbon",
 };
 
 /** The Gemini models the chat picker offers, as role names with their display
  * names, strongest first. Pages carry the role, never the id. */
-export const geminiChatPicks = (["chatMax", "chatPro", "chat"] as const).map((role) => ({
+export const geminiChatPicks = (["chat"] as const).map((role) => ({
   role,
   label: geminiChatModelNames[geminiModelRoles[role]],
 }));
 
+/** Roles that left the registry, each mapped to the role that took over.
+ * A page or worker bundle built before the retirement still sends the old
+ * name. */
+export const RETIRED_GEMINI_ROLES: Record<string, GeminiModelRole> = {
+  chatPro: "chat",
+  chatMax: "chat",
+};
+
 /** A role name becomes its registry id; anything else is an id already. */
 export function resolveGeminiModel(value: string): string {
-  return Object.hasOwn(geminiModelRoles, value)
-    ? geminiModelRoles[value as GeminiModelRole]
-    : value;
+  const role = Object.hasOwn(RETIRED_GEMINI_ROLES, value) ? RETIRED_GEMINI_ROLES[value] : value;
+  return Object.hasOwn(geminiModelRoles, role)
+    ? geminiModelRoles[role as GeminiModelRole]
+    : role;
 }
