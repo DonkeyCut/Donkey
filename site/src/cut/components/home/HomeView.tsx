@@ -13,6 +13,7 @@ import { useEnvironment } from "@/cut/lib/environment";
 import { homeHref, useCutBase } from "@/cut/lib/nav";
 import { useTemplateIndex } from "@/cut/lib/queries";
 import { templatePage, type GalleryTemplate } from "@/cut/lib/templateGallery";
+import { cn } from "@/lib/utils";
 import { HomeProjects } from "./HomeProjects";
 import { HomePrompt } from "./HomePrompt";
 import { HomeTemplates } from "./HomeTemplates";
@@ -23,6 +24,11 @@ import { useHomeUploads } from "./useHomeUploads";
 
 // The drag type a browser gives files carried in from the desktop.
 const FILES_TYPE = "Files";
+
+// On an empty Home, Templates rise by half the space between the hero and
+// them: the space under the centered hero, (100dvh - 16rem - hero) / 2, plus
+// the 56px column gap. The hero is the heading, an empty prompt and the pill.
+const EMPTY_LIFT = "calc(-0.5 * (max(0px, (100dvh - 16rem - 244px) / 2) + 56px))";
 
 /**
  * Home: one prompt box that starts a project, a Blank project pill under it,
@@ -46,6 +52,10 @@ export function HomeView() {
 
   useTabTitle(t("tabs.home"));
 
+  // With no projects there is no Projects row: the heading and prompt take its
+  // space and sit centered in it, with Templates starting below.
+  const empty = !loading && projects.length === 0;
+
   return (
     <main
       ref={page}
@@ -55,7 +65,13 @@ export function HomeView() {
       {!chatgpt && <StorageSwitcher className="absolute top-5 right-6 z-10" />}
 
       <div className="mx-auto flex max-w-[1080px] flex-col gap-14">
-        <section className="flex flex-col items-center gap-5">
+        <section
+          className={cn(
+            "flex flex-col items-center gap-5",
+            empty && "min-h-[calc(100dvh-16rem)] justify-center",
+          )}
+          style={empty ? { marginBottom: EMPTY_LIFT } : undefined}
+        >
           <h1 className="flex items-center justify-center gap-3 text-center text-[32px] leading-10 font-normal tracking-[-0.02em]">
             <span className="size-10 shrink-0">
               <DonkeyMark />
