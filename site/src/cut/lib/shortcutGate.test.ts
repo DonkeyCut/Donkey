@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { isDeleteKey, popupOnTop, tellingKey, textEntryOf, typingOf } from "./shortcutGate";
+import { isDeleteKey, isSelectAllKey, popupOnTop, tellingKey, textEntryOf, typingOf } from "./shortcutGate";
 
 const key = (k: string, code = "", mods: Partial<KeyboardEvent> = {}) =>
   ({ key: k, code, metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, ...mods }) as KeyboardEvent;
@@ -76,5 +76,17 @@ describe("which dialog holds the keyboard", () => {
 
   test("a dialog left open on a page the router keeps hidden lets go", () => {
     expect(popupOnTop(popup(["data-open"], false))).toBe(false);
+  });
+});
+
+describe("select all", () => {
+  test("⌘A or Ctrl+A picks every tile; a plain or shifted A does not", () => {
+    // A page of tiles takes the chord so the browser's own select-all never
+    // paints the text of every page the router keeps mounted.
+    expect(isSelectAllKey(key("a", "KeyA", { metaKey: true }))).toBe(true);
+    expect(isSelectAllKey(key("a", "KeyA", { ctrlKey: true }))).toBe(true);
+    expect(isSelectAllKey(key("a", "KeyA"))).toBe(false);
+    expect(isSelectAllKey(key("A", "KeyA", { metaKey: true, shiftKey: true }))).toBe(false);
+    expect(isSelectAllKey(key("a", "KeyA", { metaKey: true, altKey: true }))).toBe(false);
   });
 });

@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
@@ -24,7 +25,23 @@ const LABEL = "w-full truncate text-center text-[10px] font-medium tracking-tigh
  * ChatGPT. */
 export function HomeNav() {
   const { chatgpt } = useEnvironment();
+  useDropSelectionOnNav();
   return chatgpt ? <CardRail /> : <AppSidebar />;
+}
+
+/**
+ * A text selection made on one page goes when another page shows. The router
+ * keeps the pages it left mounted and hidden, so a select-all on Assets
+ * would otherwise light up all of Home the moment Home shows again.
+ */
+function useDropSelectionOnNav() {
+  const pathname = usePathname();
+  useEffect(() => {
+    const selection = window.getSelection();
+    if (selection?.type === "Range") {
+      selection.removeAllRanges();
+    }
+  }, [pathname]);
 }
 
 /**

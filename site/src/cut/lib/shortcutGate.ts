@@ -134,6 +134,10 @@ export const isDeleteKey = (e: KeyboardEvent): boolean =>
   e.key === "Delete" ||
   (e.code === "NumpadDecimal" && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey);
 
+/** ⌘A, or Ctrl+A: pick everything on a page of tiles. */
+export const isSelectAllKey = (e: KeyboardEvent): boolean =>
+  (e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && (e.key === "a" || e.code === "KeyA");
+
 /**
  * Keys worth reporting a decline for. A chord the editor binds — ⌘B, ⌘J, ⌘G —
  * is one no text field wants, so a run of them going nowhere is the editor's

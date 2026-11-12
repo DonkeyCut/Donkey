@@ -6,6 +6,7 @@ import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useLocale, useTranslations } from "next-intl";
 import { Trash2 } from "lucide-react";
 import { useDeleteKey } from "@/cut/hooks/useDeleteKey";
+import { useSelectAllKey } from "@/cut/hooks/useSelectAllKey";
 import { useTabTitle } from "@/cut/hooks/useTabTitle";
 import { noteInLibraryFolder, noteRef, type NoteLocation } from "@/cut/lib/noteReference";
 import { setRefDragData, clearRefDrag } from "@/cut/lib/assetRef";
@@ -478,6 +479,7 @@ export function NotesView({ library, query = "", layout = "tiles", ref }: Props)
   // this list scrolls in and holds it still.
   const pageRef = useRef<HTMLDivElement>(null);
   useDeleteKey(pageRef, pick.length > 0 ? () => setDeletingNotes(pick.map((n) => n.id)) : null);
+  useSelectAllKey(pageRef, () => setSelected(new Set(shownIds)));
   // What the confirm names: each note by its title.
   const deletingNames = (deletingNotes ?? []).map((id) => ({
     name: list.find((n) => n.id === id)?.title.trim() || t("notes.untitledNote"),

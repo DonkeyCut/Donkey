@@ -29,6 +29,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { useDeleteKey } from "@/cut/hooks/useDeleteKey";
+import { useSelectAllKey } from "@/cut/hooks/useSelectAllKey";
 import { useProjectShelves } from "@/cut/hooks/useProjectShelves";
 import { useTabTitle } from "@/cut/hooks/useTabTitle";
 import { apiJson } from "@/cut/lib/api";
@@ -379,6 +380,7 @@ export function AssetsView() {
   const pickSize = pick.folders.length + pick.entries.length;
   const setOf = (e: AssetEntry): DeleteSet => (selected.has(e.id) ? pick : { ...NO_PICK, entries: [e] });
   useDeleteKey(rootRef, pickSize > 0 ? () => setDeleting(pick) : null);
+  useSelectAllKey(rootRef, () => setSelected(new Set(order)));
   const ctx = useSelectionMenu({ picked: selected, setPicked: setSelected, shown: order });
   const pickedMedia = shownEntries.flatMap((e) => (e.kind === "media" && selected.has(e.id) ? [e.asset] : []));
 
