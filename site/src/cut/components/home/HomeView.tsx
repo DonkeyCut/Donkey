@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Upload } from "lucide-react";
+import { DonkeyMark } from "@/components/DonkeyMark";
 import { Button } from "@/components/ui/button";
 import type { PanelNav } from "@/cut/components/GalleryTile";
 import { TemplatePanel, templateAt } from "@/cut/components/TemplateGallery";
@@ -55,7 +56,10 @@ export function HomeView() {
 
       <div className="mx-auto flex max-w-[1080px] flex-col gap-14">
         <section className="flex flex-col items-center gap-5">
-          <h1 className="text-center text-[32px] leading-10 font-normal tracking-[-0.02em]">
+          <h1 className="flex items-center justify-center gap-3 text-center text-[32px] leading-10 font-normal tracking-[-0.02em]">
+            <span className="size-10 shrink-0">
+              <DonkeyMark />
+            </span>
             {t("start.heading")}
           </h1>
           <HomePrompt uploads={uploads} create={create} projects={projects} />
