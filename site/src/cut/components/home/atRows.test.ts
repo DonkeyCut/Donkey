@@ -74,11 +74,15 @@ describe("@ picker rows", () => {
 });
 
 describe("project tiles", () => {
-  test("a wide card is as wide as a tall card is tall", () => {
+  test("every card covers the same area, so a square is smaller than a wide card is wide", () => {
     expect(projectTileSize("9:16")).toEqual({ width: 158, height: 280 });
     expect(projectTileSize("16:9")).toEqual({ width: 280, height: 158 });
-    expect(projectTileSize("1:1")).toEqual({ width: 280, height: 280 });
-    expect(projectTileSize("4:5")).toEqual({ width: 224, height: 280 });
+    expect(projectTileSize("1:1")).toEqual({ width: 210, height: 210 });
+    expect(projectTileSize("4:5")).toEqual({ width: 188, height: 235 });
+  });
+
+  test("a card past 16:9 stops at the long side", () => {
+    expect(projectTileSize("21:9")).toEqual({ width: 280, height: 120 });
   });
 
   test("a project with no aspect is tall", () => {
