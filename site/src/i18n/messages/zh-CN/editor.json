@@ -336,7 +336,6 @@
     "backTo": "{tab, select, assets {返回素材} templates {返回模板} other {返回主页}}",
     "needsApp": "这是一个本地项目 — 存放在此 Mac 上。打开 Donkey 应用即可在此打开。",
     "shareGone": "此分享已不再可用。",
-    "conflictReloaded": "已重新加载在其他地方保存的较新版本。",
     "dismiss": "忽略"
   },
   "preview": {

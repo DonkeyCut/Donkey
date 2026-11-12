@@ -238,12 +238,6 @@ async function putDoc(
       .json()
       .catch(() => null)) as { doc?: unknown; version?: number | string } | null;
     noteVersion(projectId, body?.version);
-    if (typeof window !== "undefined")
-      window.dispatchEvent(
-        new CustomEvent("cut-cloud-doc-conflict", {
-          detail: { projectId, doc: body?.doc, version: body?.version },
-        })
-      );
   } else if (res.ok) {
     const body = (await res
       .clone()

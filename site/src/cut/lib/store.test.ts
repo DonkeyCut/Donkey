@@ -2645,3 +2645,28 @@ describe("explicit timeline groups", () => {
     expect(expandTimelineGroups(s(), [members[5]])).toHaveLength(7);
   });
 });
+
+describe("adopting a merged document", () => {
+  beforeEach(() => s().openProjectDoc("adopt", { name: "Adopt" }, []));
+
+  test("lands as one undo step, keeping runtime fields, copying imports and a live selection", () => {
+    const a = { ...asset(4), url: "blob:a", thumbs: ["t"] } as MediaAsset;
+    const copying = { ...asset(4), url: "blob:b", upload: { stored: false } } as MediaAsset;
+    const kept = vclip({ assetId: a.id, out: 2 });
+    const gone = vclip({ assetId: a.id, start: 2, out: 2 });
+    const mine = vclip({ assetId: copying.id, start: 4, out: 2 });
+    useEditor.setState({ assets: [a, copying], clips: [kept, gone, mine], selection: { kind: "clip", id: gone.id }, multiSelection: [{ kind: "clip", id: gone.id }] });
+    const before = serializeDoc(s());
+
+    // The stored copy dropped one clip and squared the frame.
+    s().adoptDoc({ ...before, aspect: "1:1", clips: before.clips!.filter((c) => c.id !== gone.id) });
+    expect(s().aspect).toBe("1:1");
+    expect(s().clips.map((c) => c.id)).toEqual([kept.id, mine.id]);
+    expect(s().assets.find((x) => x.id === a.id)).toMatchObject({ url: "blob:a", thumbs: ["t"] });
+    expect(s().assets.some((x) => x.id === copying.id)).toBe(true);
+    expect(s().selection).toBeNull();
+
+    expect(s().undo()).toBe(true);
+    expect(s().clips.map((c) => c.id)).toEqual([kept.id, gone.id, mine.id]);
+  });
+});

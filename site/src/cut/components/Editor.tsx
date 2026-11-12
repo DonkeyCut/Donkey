@@ -11,7 +11,7 @@ import { useHostCommands } from "@/cut/lib/hostCommands";
 import { useEnvironment } from "@/cut/lib/environment";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { Clapperboard, Laptop, Loader2, X } from "lucide-react";
+import { Clapperboard, Laptop, Loader2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useDescribeError } from "@/i18n/describeError";
 import { Button } from "@/components/ui/button";
@@ -91,7 +91,9 @@ import { fileLandingAt } from "@/cut/lib/timelineDrop";
 import { landOnRow } from "@/cut/lib/laneTracks";
 import { playheadAt, previewAt, skimAt, stepFrame } from "@/cut/lib/playhead";
 import type { LibraryData } from "@/cut/lib/library";
-import type { MediaAsset } from "@/cut/lib/types";
+import type { MediaAsset, ProjectDoc } from "@/cut/lib/types";
+import { HTTP_CONFLICT } from "@/cut/lib/backend/types";
+import { reconcileDoc, sameDoc } from "@/cut/lib/docReconcile";
 import { AiPanel } from "./AiPanel";
 import type { ChatStatus } from "./ChatStatusBadge";
 import { EmbeddedNewProject } from "./EmbeddedNewProject";
@@ -300,7 +302,6 @@ export function Editor({
   // What the Library lends rather than copies — the account's own typefaces
   // today — is in reach whichever project is open.
   useEffect(() => void syncLinkedLibrary(), []);
-  const [conflictReloaded, setConflictReloaded] = useState(false);
   const [shareGone, setShareGone] = useState(false);
   // This project lives on this Mac and the Donkey app isn't answering. Nothing
   // to load, and nothing to guess at either: say where it is and wait.
@@ -531,21 +532,6 @@ export function Editor({
     };
   }, [viewer, projectId]);
 
-  // A cloud save hit a newer stored version (another session's edits won).
-  // Take the newer doc through the ordinary load path — the GET returns it and
-  // rebinds the driver's version — and say so.
-  useEffect(() => {
-    if (viewer) return;
-    const onConflict = (e: Event) => {
-      const detail = (e as CustomEvent<{ projectId: string }>).detail;
-      if (!detail || detail.projectId !== projectId) return;
-      void useEditor.getState().loadProject(projectId, { inPlace: true, viewer });
-      setConflictReloaded(true);
-    };
-    window.addEventListener("cut-cloud-doc-conflict", onConflict);
-    return () => window.removeEventListener("cut-cloud-doc-conflict", onConflict);
-  }, [projectId, viewer]);
-
   // Keep the project card's hover proxy — and a shared project's link-preview
   // card — following the cut. Both are full renders of the whole project on the
   // same worker pool the exports run on, so they wait for a lull instead of
@@ -643,11 +629,14 @@ export function Editor({
     // parked bar changes no clip field, and comparing the copies would never
     // see it.
     let lastBars = useEditor.getState().transitions;
+    // The document as the stored copy last held it from this tab: the base a
+    // save that meets a newer stored copy merges from.
+    let synced = last;
 
     // Transient failures (the network coming back up after a laptop wake, a
     // 5xx) retry on a capped backoff so unsaved work never parks on a dead
-    // link; 4xx (e.g. a version conflict, which has its own recovery event)
-    // waits for the next edit as before.
+    // link; a version conflict merges and saves again, and any other 4xx
+    // waits for the next edit.
     let failures = 0;
     const retry = () => {
       failures = Math.min(failures + 1, 5);
@@ -704,7 +693,19 @@ export function Editor({
           // The snapshot the next open paints from is whatever this browser
           // last put on the server, so it tracks every save.
           if (editSeq === seqAtSend) writeCachedDoc(projectId, doc);
+          synced = doc;
           return;
+        }
+        // Another writer saved first — a second tab, the agent's edits on the
+        // worker. Both sets of changes stand: theirs merge under this tab's,
+        // and the merge saves straight back over their version.
+        if (res.status === HTTP_CONFLICT) {
+          const body = await res.json().catch(() => null) as { doc?: Partial<ProjectDoc> } | null;
+          if (body?.doc && useEditor.getState().projectId === projectId) {
+            unsavedEdit ||= edit;
+            reconcile(body.doc);
+            return;
+          }
         }
         unsavedEdit ||= edit;
         useEditor.getState().setSaveState("error");
@@ -716,6 +717,26 @@ export function Editor({
       }
     };
 
+    // Take the stored copy with this tab's changes merged over it. The merge
+    // lands as an edit, so autosave saves it on the version it came with; a
+    // merge that adds nothing of this tab's is that version, already saved.
+    const reconcile = (theirs: Partial<ProjectDoc>) => {
+      const mine = serializeDoc(useEditor.getState());
+      useEditor.getState().adoptDoc(reconcileDoc(synced, mine, theirs));
+      synced = theirs;
+      const now = serializeDoc(useEditor.getState());
+      if (sameDoc(now, theirs)) {
+        if (timer) clearTimeout(timer);
+        queued = false;
+        unsavedEdit = false;
+        useEditor.getState().setSaveState("saved");
+        writeCachedDoc(projectId, now);
+        synced = now;
+        return;
+      }
+      queued = true;
+    };
+
     const unregisterSave = registerEditorSave(projectId, async () => {
       if (timer) clearTimeout(timer);
       if (inFlight || useEditor.getState().saveState !== "saved") await save();
@@ -725,7 +746,7 @@ export function Editor({
     });
 
     // Re-baselined every time a document is hydrated — the snapshot an open
-    // paints, the live document that replaces it, a conflict reload — so a
+    // paints, the live document that replaces it, a re-read — so a
     // document that came from the server is never saved straight back to it.
     let primedEpoch = -1;
     // Assets change identity on runtime enrichment (thumbs, peaks) too, so a
@@ -754,6 +775,7 @@ export function Editor({
         // arriving at one never counts as an edit.
         primedEpoch = s.loadEpoch;
         last = serializeDoc(s);
+        synced = last;
         lastBars = s.transitions;
         assetChange(s.assets);
         return;
@@ -1532,20 +1554,6 @@ export function Editor({
       {shareGone && (
         <div className="fixed top-14 left-1/2 z-50 max-w-[calc(100%-2rem)] -translate-x-1/2 rounded-full bg-foreground/90 px-3.5 py-1.5 text-center text-xs font-medium text-background shadow-lg">
           {t("shareGone")}
-        </div>
-      )}
-      {conflictReloaded && (
-        <div className="fixed top-14 left-1/2 z-50 flex max-w-[calc(100%-2rem)] -translate-x-1/2 items-center gap-1.5 rounded-full bg-foreground/90 py-1.5 pr-1.5 pl-3.5 text-background shadow-lg">
-          <span className="text-xs font-medium">{t("conflictReloaded")}</span>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            aria-label={t("dismiss")}
-            className="rounded-full text-background hover:bg-background/15 hover:text-background"
-            onClick={() => setConflictReloaded(false)}
-          >
-            <X />
-          </Button>
         </div>
       )}
       {!chatgpt && <StorageUpgradeDialog surface="editor" />}

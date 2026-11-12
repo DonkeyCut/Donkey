@@ -439,8 +439,8 @@ export interface EditorState {
   projectName: string;
   loaded: boolean;
   /** Bumped every time a document is hydrated into the store — the cached
-   * copy an open paints first, the live one that replaces it, a conflict
-   * reload. Autosave watches it to re-baseline, so a document that arrived
+   * copy an open paints first, the live one that replaces it, a re-read.
+   * Autosave watches it to re-baseline, so a document that arrived
    * from the server is never saved straight back to it. */
   loadEpoch: number;
   loadError: string | null;
@@ -575,15 +575,19 @@ export interface EditorState {
   firstOpen?: ProjectDoc["firstOpen"];
 
   /** Load a project into the store. `inPlace` is for re-reading a project the
-   * editor is already showing (the viewer's change poll, a conflict reload):
+   * editor is already showing (the change poll):
    * the stored copy has moved on, so the head-start snapshot is skipped and
    * only the live document is applied. `viewer` is a share view opening, the
    * one kind of open that refuses edits; every other open clears the flag. */
   loadProject: (id: string, opts?: { inPlace?: boolean; viewer?: boolean }) => Promise<void>;
   /** Apply one project document to the store: the legacy migrations and the
    * state swap, shared by every hydration path — the snapshot paint, the live
-   * load, a conflict reload, and a headless open. */
+   * load, a re-read, and a headless open. */
   applyDocState: (doc: Partial<ProjectDoc>, assets: MediaAsset[], ui: ProjectUiState) => void;
+  /** Take a stored document over the one on screen as an edit: one undo
+   * step, view and selection kept. The merge of this tab's edits with
+   * another writer's save lands through here. */
+  adoptDoc: (doc: Partial<ProjectDoc>) => void;
   /** Open a project from an already-fetched document. The headless runner's
    * open: resets the store, drains pending doc writes, and hydrates straight
    * from the given document. */
@@ -2210,7 +2214,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
     renders: [],
 
     loadProject: async (id, opts) => {
-      // In-place re-reads (the viewer's change poll, a conflict reload) say so
+      // In-place re-reads (the change poll) say so
       // explicitly: the whole point of those is that the stored copy has moved
       // on, so the snapshot below is exactly the wrong thing to paint. A fresh
       // open of a project this store happened to hold last — going home and
@@ -2472,8 +2476,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
         // dirty. Replacing it would throw that work away, so only the media
         // links go in; the edits don't touch them and they do expire. The
         // edits save as usual, and a stored copy that really has moved on
-        // answers that save with a conflict, which reloads through this same
-        // path.
+        // answers that save with a conflict, which merges the two.
         if (
           paintedFromCache &&
           !staleDirty &&
@@ -2501,30 +2504,11 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
     },
 
     applyDocState: (doc, assets, ui) => {
-      const state = normalizeDocState(doc, assets);
-      const aspect = state.aspect ?? lastChosenAspect() ?? "9:16";
       hydrating = true;
       try {
         set({
-          projectName: doc.name ?? "",
-          assets: assets.map(liftColorProfile),
-          clips: state.clips,
-          transitions: state.transitions,
-          audioClips: state.audioClips,
-          overlays: state.overlays,
-          timeline: isTimelineId(doc.timeline) ? doc.timeline : "main",
-          timelines: sanitizeTimelines(doc.timelines, { aspect }) ?? {},
-          templates: doc.templates ?? [],
-          mediaFolders: doc.mediaFolders ?? [],
-          aspect,
-          aspectTouched: doc.aspect !== undefined || lastChosenAspect() !== null,
-          fromTemplate: typeof doc.fromTemplate === "string" ? doc.fromTemplate : null,
-          guides: sanitizeGuides(doc.guides),
+          ...docFields(doc, assets),
           guidesHidden: false,
-          guideLines: sanitizeGuideLines(doc.guideLines),
-          background: state.background,
-          colorSpace: state.colorSpace,
-          magnet: doc.magnet === true,
           // View state lives in IndexedDB; doc.ui covers projects saved
           // before the move.
           pxPerSec: clampPps(ui.pxPerSec ?? doc.ui?.pxPerSec ?? 60),
@@ -2532,22 +2516,6 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
             TIMELINE_H_MIN,
             Math.min(timelineHMax(), ui.timelineH ?? TIMELINE_H_DEFAULT)
           ),
-          publish: {
-            caption: doc.publish?.caption ?? "",
-            tags: doc.publish?.tags ?? "",
-            soundTitle: doc.publish?.soundTitle ?? "",
-            handle: doc.publish?.handle ?? "",
-          },
-          notes: {
-            text: doc.notes?.text ?? "",
-            publishedAt: doc.notes?.publishedAt ?? "",
-            links: doc.notes?.links ?? [],
-          },
-          subtitles: state.subtitles,
-          subtitleStatus: state.subtitles.cues.length > 0 ? "ready" : "idle",
-          genvideo: doc.genvideo ?? undefined,
-          renders: Array.isArray(doc.renders) ? doc.renders : [],
-          firstOpen: doc.firstOpen,
           loaded: true,
           loadEpoch: get().loadEpoch + 1,
         });
@@ -2555,6 +2523,43 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
         // Reset on every path: a doc bad enough to throw inside set() must
         // never leave the store treating ordinary writes as hydration.
         hydrating = false;
+      }
+    },
+
+    adoptDoc: (doc) => {
+      // Assets keep what this tab filled in at runtime (links, strips, peaks),
+      // and imports still copying from this tab stay with their clips: the
+      // stored copy cannot name them yet. A file another writer added plays
+      // through the media route until the next sweep fills it in.
+      const s = get();
+      const live = new Map(s.assets.map((a) => [a.id, a]));
+      const id = s.projectId;
+      const assets: MediaAsset[] = (doc.assets ?? []).map((stored) => {
+        const own = live.get(stored.id);
+        const runtime = own ? omitStored(own) : { url: id ? mediaUrl(id, stored.fileName) : "" };
+        return { ...runtime, ...stored } as MediaAsset;
+      });
+      const copying = s.assets.filter(tabOnlyUpload);
+      const held = new Set(copying.map((a) => a.id));
+      const own = <T extends { assetId: string }>(clips: T[]) => clips.filter((c) => held.has(c.assetId));
+      const merged: Partial<ProjectDoc> = {
+        ...doc,
+        clips: [...(doc.clips ?? []), ...own(s.clips)],
+        audioClips: [...(doc.audioClips ?? []), ...own(s.audioClips)],
+      };
+
+      // One undo step, and a selection that still names something.
+      get().beginHistoryBatch();
+      const fields = docFields(merged, [...assets, ...copying]);
+      const ids = new Set([...fields.clips, ...fields.audioClips, ...fields.overlays, ...fields.subtitles.cues, ...fields.transitions].map((x) => x.id));
+      const kept = (sel: Selection) => !!sel && ids.has(sel.id);
+      const multiSelection = s.multiSelection.filter(kept);
+      set({ ...fields, multiSelection, selection: kept(s.selection) ? s.selection : multiSelection[multiSelection.length - 1] ?? null });
+      get().endHistoryBatch();
+      for (const a of assets) {
+        if (!live.has(a.id)) {
+          void import("./media").then((m) => m.enrichAsset(a)).catch(() => {});
+        }
       }
     },
 
@@ -5935,6 +5940,55 @@ export function storedAssets(assets: MediaAsset[]): StoredAsset[] {
       ...(proxy !== undefined ? { proxy } : {}),
       ...(soundFrom !== undefined ? { soundFrom } : {}),
     }));
+}
+
+/** An asset's fields the document does not store: what this tab filled in. */
+function omitStored(asset: MediaAsset): Partial<MediaAsset> {
+  const stored = new Set(Object.keys(storedAssets([{ ...asset, upload: undefined }])[0]));
+  return Object.fromEntries(Object.entries(asset).filter(([k]) => !stored.has(k))) as Partial<MediaAsset>;
+}
+
+/** The store fields one project document sets, migrated: what a hydration
+ * and an adopted merge share. */
+function docFields(doc: Partial<ProjectDoc>, assets: MediaAsset[]) {
+  const state = normalizeDocState(doc, assets);
+  const aspect = state.aspect ?? lastChosenAspect() ?? "9:16";
+  return {
+    projectName: doc.name ?? "",
+    assets: assets.map(liftColorProfile),
+    clips: state.clips,
+    transitions: state.transitions,
+    audioClips: state.audioClips,
+    overlays: state.overlays,
+    timeline: isTimelineId(doc.timeline) ? doc.timeline : "main",
+    timelines: sanitizeTimelines(doc.timelines, { aspect }) ?? {},
+    templates: doc.templates ?? [],
+    mediaFolders: doc.mediaFolders ?? [],
+    aspect,
+    aspectTouched: doc.aspect !== undefined || lastChosenAspect() !== null,
+    fromTemplate: typeof doc.fromTemplate === "string" ? doc.fromTemplate : null,
+    guides: sanitizeGuides(doc.guides),
+    guideLines: sanitizeGuideLines(doc.guideLines),
+    background: state.background,
+    colorSpace: state.colorSpace,
+    magnet: doc.magnet === true,
+    publish: {
+      caption: doc.publish?.caption ?? "",
+      tags: doc.publish?.tags ?? "",
+      soundTitle: doc.publish?.soundTitle ?? "",
+      handle: doc.publish?.handle ?? "",
+    },
+    notes: {
+      text: doc.notes?.text ?? "",
+      publishedAt: doc.notes?.publishedAt ?? "",
+      links: doc.notes?.links ?? [],
+    },
+    subtitles: state.subtitles,
+    subtitleStatus: state.subtitles.cues.length > 0 ? ("ready" as const) : ("idle" as const),
+    genvideo: doc.genvideo ?? undefined,
+    renders: Array.isArray(doc.renders) ? doc.renders : [],
+    firstOpen: doc.firstOpen,
+  };
 }
 
 /** The persistable slice of the editor state, for autosave. */

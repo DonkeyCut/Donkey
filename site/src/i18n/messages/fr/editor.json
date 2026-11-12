@@ -336,7 +336,6 @@
     "backTo": "{tab, select, assets {Retour aux ressources} templates {Retour aux modèles} other {Retour à l'accueil}}",
     "needsApp": "Ceci est un projet local — il réside sur ce Mac. Ouvrez l'app Donkey et il s'ouvrira ici.",
     "shareGone": "Ce partage n'est plus disponible.",
-    "conflictReloaded": "Version plus récente enregistrée ailleurs rechargée.",
     "dismiss": "Ignorer"
   },
   "preview": {

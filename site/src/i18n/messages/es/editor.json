@@ -336,7 +336,6 @@
     "backTo": "{tab, select, assets {Volver a recursos} templates {Volver a plantillas} other {Volver al inicio}}",
     "needsApp": "Este es un proyecto local: está guardado en esta Mac. Abre la app de Donkey y se abrirá aquí.",
     "shareGone": "Este enlace compartido ya no está disponible.",
-    "conflictReloaded": "Se recargó una versión más reciente guardada en otro lugar.",
     "dismiss": "Descartar"
   },
   "preview": {

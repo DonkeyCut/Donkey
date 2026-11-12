@@ -336,7 +336,6 @@
     "backTo": "{tab, select, assets {에셋으로 돌아가기} templates {템플릿으로 돌아가기} other {홈으로 돌아가기}}",
     "needsApp": "로컬 프로젝트예요 — 이 Mac에 저장되어 있어요. Donkey 앱을 열면 여기서 열려요.",
     "shareGone": "더 이상 유효하지 않은 공유 링크예요.",
-    "conflictReloaded": "다른 곳에서 저장된 최신 버전을 다시 불러왔어요.",
     "dismiss": "닫기"
   },
   "preview": {
