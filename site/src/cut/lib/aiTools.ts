@@ -7189,6 +7189,115 @@ async function dispatchTool(s: Editor, name: string, raw: Record<string, unknown
   }
 }
 
+// The fields a tool names the open project's media in. Each takes one id or
+// a list, and a generation reference may carry a pinned moment ("<id>@3.5").
+const MEDIA_ID_FIELDS = [
+  "asset_id",
+  "asset_ids",
+  "audio_asset_id",
+  "from_audio_asset_id",
+  "reference_asset_id",
+  "reference_asset_ids",
+  "ref_asset_id",
+] as const;
+
+// Tools whose asset ids name something other than the open project's media:
+// another project's files, or a delete, which never lands a file to remove it.
+// A call with a project_link reads another project's media the same way.
+const FOREIGN_ID_TOOLS: ReadonlySet<string> = new Set([
+  "copy_project_media",
+  "replicate_project",
+  "template_use",
+  "delete_asset",
+]);
+
+// Library files a tool call brought into a project, by project and Library
+// id, so a later call with the same Library id reads the same copy.
+const landedFromLibrary = new Map<string, string>();
+
+// The calls bringing Library files in, chained so each runs after the last.
+let landingQueue: Promise<unknown> = Promise.resolve();
+
+// An id as the project knows it, without a pinned moment: "a1@3.5" is "a1".
+function bareId(token: string): string {
+  const at = token.lastIndexOf("@");
+  return at > 0 && Number.isFinite(Number(token.slice(at + 1))) ? token.slice(0, at) : token;
+}
+
+/** The ids in a call's media fields that the open project doesn't hold. */
+function libraryIdsIn(s: Editor, tool: string, input: Record<string, unknown>): string[] {
+  if (FOREIGN_ID_TOOLS.has(tool) || input.project_link || !s.projectId) {
+    return [];
+  }
+  const own = new Set(s.assets.map((a) => a.id));
+  return MEDIA_ID_FIELDS.flatMap((f) => {
+    const v = input[f];
+    const ids = Array.isArray(v) ? v : v === undefined || v === null ? [] : [v];
+    return ids.map((x) => String(x)).filter((t) => !own.has(t) && !own.has(bareId(t)));
+  });
+}
+
+/**
+ * A call's input with every Library id in a media field swapped for the
+ * project copy it lands as. The user attaches Library files to a message and
+ * the model passes their ids straight to the editing tools, so a Library id
+ * works wherever a project asset id does. The input comes back as given when
+ * it names no Library file.
+ */
+async function landLibraryIds(
+  s: Editor,
+  input: Record<string, unknown>,
+  outside: string[],
+): Promise<Record<string, unknown>> {
+  const projectId = s.projectId;
+  if (!projectId) {
+    return input;
+  }
+
+  // One listing serves every id in the call; an id the Library lacks stays
+  // as given, for the tool's own "no such asset" answer.
+  const shelf = (await fetchLibrary()).assets;
+  const swaps = new Map<string, string>();
+  for (const token of new Set(outside)) {
+    const id = bareId(token);
+    const key = `${projectId}:${id}`;
+    const prior = landedFromLibrary.get(key);
+    if (prior && useEditor.getState().assets.some((a) => a.id === prior)) {
+      swaps.set(id, prior);
+      continue;
+    }
+    const lib = shelf.find((a) => a.id === id);
+    if (!lib) {
+      continue;
+    }
+    const asset = await importLibraryAsset(projectId, lib);
+    tagChatAsset(asset.id, chatOwner());
+    landedFromLibrary.set(key, asset.id);
+    swaps.set(id, asset.id);
+  }
+  if (swaps.size === 0) {
+    return input;
+  }
+
+  // The pin rides on: "<library id>@3.5" becomes "<project id>@3.5".
+  const swap = (x: unknown) => {
+    const token = String(x);
+    const id = bareId(token);
+    const to = swaps.get(id);
+    return to ? to + token.slice(id.length) : x;
+  };
+  const out = { ...input };
+  for (const f of MEDIA_ID_FIELDS) {
+    const v = out[f];
+    if (Array.isArray(v)) {
+      out[f] = v.map(swap);
+    } else if (v !== undefined && v !== null) {
+      out[f] = swap(v);
+    }
+  }
+  return out;
+}
+
 /** What an undo or redo moved across, for its result: the tool call the step
  * was, or what kind of edit it was when no tool made it. */
 function stepName(label: string | null): string {
@@ -7221,9 +7330,27 @@ function historyChanges(before: Editor, after: Editor): string {
 }
 
 async function dispatchRun(s: Editor, name: string, raw: Record<string, unknown>, operation?: ProjectOperation): Promise<unknown> {
-  const input = snapSeconds(raw) as Record<string, unknown>;
   // "update_title" stays as an alias so older threads keep working.
   const key = name === "update_title" ? "update_overlay" : name;
+  const input = snapSeconds(raw) as Record<string, unknown>;
+  const outside = libraryIdsIn(s, key, input);
+  if (outside.length === 0) {
+    return runTool(s, name, key, input, operation);
+  }
+
+  // Calls that bring Library files in run one at a time, in the order they
+  // were made: two add_clip calls sent together land their clips in that
+  // order, whichever file copies faster.
+  const turn = landingQueue.then(async () => {
+    const landed = await landLibraryIds(useEditor.getState(), input, outside);
+    return runTool(useEditor.getState(), name, key, landed, operation);
+  });
+  landingQueue = turn.catch(() => undefined);
+  return turn;
+}
+
+/** Run one tool, or, for a sweep, the same write over every id it names. */
+async function runTool(s: Editor, name: string, key: string, input: Record<string, unknown>, operation?: ProjectOperation): Promise<unknown> {
   const run = (toolRuns as Partial<Record<string, ToolRun>>)[key];
   if (!run) throw new ToolError(`Unknown tool: ${name}`);
   const field = SWEEP_TARGETS[key];
