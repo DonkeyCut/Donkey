@@ -7255,8 +7255,13 @@ async function landLibraryIds(
   }
 
   // One listing serves every id in the call; an id the Library lacks stays
-  // as given, for the tool's own "no such asset" answer.
-  const shelf = (await fetchLibrary()).assets;
+  // as given, for the tool's own "no such asset" answer. A Library that can't
+  // be read lands nothing, and the tool answers the same way.
+  const listing = await fetchLibrary().catch(() => null);
+  if (!listing) {
+    return input;
+  }
+  const shelf = listing.assets;
   const swaps = new Map<string, string>();
   for (const token of new Set(outside)) {
     const id = bareId(token);
