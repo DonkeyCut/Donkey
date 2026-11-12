@@ -158,10 +158,10 @@ export function HomeProjects({
         </div>
 
         {/* The bleed keeps hover shadows and focus rings inside the clipped
-            viewport: 8px each side, 12px above and below. items-center sets
-            wide cards midway down the tall ones. */}
+            viewport: 8px each side, 12px above and below. items-start lines
+            every card up along the top, wide and tall alike. */}
         <div className="-mx-2" onContextMenu={(e) => void ctx.onContextMenu(e)}>
-          <CarouselContent className="-ml-6 items-center py-3">
+          <CarouselContent className="-ml-6 items-start py-3">
             {loading && projects.length === 0
               ? Array.from({ length: SKELETON_CARDS }, (_, i) => (
                   <CarouselItem key={i} className="basis-auto pl-8 last:pr-2">
