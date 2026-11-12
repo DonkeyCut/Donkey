@@ -55,6 +55,11 @@ const CLIP_SECONDS = 30;
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 // `models` is used to rewrite a policy-blocked prompt into a safe description.
+/** The Interactions response revision this adapter reads. Unpinned, Vertex
+ * answers in its newest revision, and since 2026-11-12 that revision's
+ * completed music interaction carries no audio. */
+const INTERACTIONS_REVISION = "2026-05-20";
+
 export type GeminiMusicClient = Pick<GoogleGenAI, "interactions" | "models">;
 export type GeminiMusicClientFactory = (options: GoogleGenAIOptions) => GeminiMusicClient;
 
@@ -73,8 +78,17 @@ export function createGeminiMusicAssetProvider(
   environment: AdapterEnvironment = process.env,
   clientFactory: GeminiMusicClientFactory = defaultMusicClientFactory,
 ): InferenceProvider {
-  const clientConfig = geminiClientConfig(environment);
-  const configured = clientConfig.configured;
+  const shared = geminiClientConfig(environment);
+  const configured = shared.configured;
+
+  // Every music call names the revision whose output_audio it reads.
+  const clientConfig = {
+    ...shared,
+    options: {
+      ...shared.options,
+      httpOptions: { ...shared.options.httpOptions, headers: { ...shared.options.httpOptions?.headers, "Api-Revision": INTERACTIONS_REVISION } },
+    },
+  };
 
   async function listModels(
     modalities: InferenceModality[],
