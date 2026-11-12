@@ -253,6 +253,7 @@ export function HomePrompt({
                 </div>
               )}
 
+              {/* Enter adds a line; only the send button starts the project. */}
               <MentionTextarea
                 className="max-h-60 min-h-12 w-full resize-none overflow-y-auto bg-transparent p-1 text-base leading-6 outline-none placeholder:text-muted-foreground"
                 rows={2}
@@ -265,10 +266,8 @@ export function HomePrompt({
                 value={text}
                 onChange={setText}
                 candidates={candidates}
-                submitKey="enter"
                 menuSide="bottom"
                 inputRef={inputRef}
-                onSubmit={submit}
                 attachedRefs={attachments}
                 onUpsertRef={(ref) =>
                   setAttachments((list) => upsertRef(list, ref))

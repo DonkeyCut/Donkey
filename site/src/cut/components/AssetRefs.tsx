@@ -1122,11 +1122,13 @@ export function CopyNameLabel({
 }
 
 /** The open mention being typed at the caret: token start and query text. */
-function mentionAtCaret(value: string, caret: number): { start: number; query: string } | null {
+export function mentionAtCaret(value: string, caret: number): { start: number; query: string } | null {
   const before = value.slice(0, caret);
   const at = before.lastIndexOf("@");
   if (at < 0) return null;
   if (at > 0 && !/[\s([]/.test(before[at - 1])) return null;
+  // An "@" followed by a space is the character itself, e.g. "meet @ 3pm".
+  if (/^\s/.test(before.slice(at + 1))) return null;
   let query = before.slice(at + 1);
   if (query.startsWith('"')) query = query.slice(1);
   // A finished quote or a newline means the caret left the mention.
@@ -1998,6 +2000,13 @@ export function MentionTextarea({
                 return;
               }
             }
+          }
+          // A second "@" with nothing typed after the first closes the menu
+          // and keeps one "@" as text.
+          if ((customOpen || open) && e.key === "@" && mention?.query === "") {
+            e.preventDefault();
+            setDismissed(mention.start);
+            return;
           }
           if (customOpen) {
             const key: MentionMenuKey | null =
