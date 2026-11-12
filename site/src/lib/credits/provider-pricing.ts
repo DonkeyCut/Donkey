@@ -314,9 +314,9 @@ const geminiModelPricing: Record<GeminiModel, ProviderCreditPricing> = {
     output: "1.5",
     inputAudio: "0.5",
   }),
-  // Generative image editing/generation ("nano banana 2") bills per output
-  // image: $0.045 at 1K, the size the scripts render.
-  [geminiModels.flashImage]: { generationCostMicros: usdWithMargin("0.045") },
+  // Generative image editing/generation ("nano banana 2.1") bills per output
+  // image: $0.0336 at 1K, the size the scripts render.
+  [geminiModels.flashImage]: { generationCostMicros: usdWithMargin("0.0336") },
   // "Nano banana pro" bills per output image by resolution: $0.134 at 1K/2K, $0.24 at
   // 4K. Our per-image price can't vary by resolution, so this charges the 1K/2K rate
   // (the default is 2K); 4K currently under-bills. Make billing resolution-aware before
@@ -325,10 +325,18 @@ const geminiModelPricing: Record<GeminiModel, ProviderCreditPricing> = {
 };
 
 // Generative speech (Gemini TTS) bills by seconds of synthesized audio: audio out runs
-// $20/1M tokens at ~25 tokens per second ≈ $0.0005/s; the tiny text input rides along.
-// The Record is keyed by GeminiTtsModel, so adding a TTS id without a price fails the build.
+// $9/1M tokens at ~25 tokens per second ≈ $0.000225/s through 2026-12-31, then
+// $18/1M ≈ $0.00045/s; the tiny text input rides along. The Record is keyed by
+// GeminiTtsModel, so adding a TTS id without a price fails the build.
+const geminiTtsStandardPricingStartMs = Date.UTC(2027, 0, 1);
 const geminiTtsModelPricing: Record<GeminiTtsModel, ProviderCreditPricing> = {
-  [geminiTtsModels.flash]: { durationSecondCostMicros: usdWithMargin("0.0005") },
+  get [geminiTtsModels.flash]() {
+    return {
+      durationSecondCostMicros: usdWithMargin(
+        Date.now() >= geminiTtsStandardPricingStartMs ? "0.00045" : "0.000225",
+      ),
+    };
+  },
 };
 
 function geminiTtsCreditPricing(model: string): ProviderCreditPricing | undefined {

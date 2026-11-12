@@ -1,6 +1,6 @@
 // Renders the hosted voice-persona assets the Cut voice picker shows: one
 // square portrait and one spoken sample clip per prebuilt speech voice. Both are
-// produced with the same Vertex models the app uses — gemini-3.1-flash-image for
+// produced with the same Vertex models the app uses — the Gemini image model for
 // the portrait, the Gemini TTS model for the sample — and written into
 // public/cut/voices as <id>.webp and <id>.mp3 (lowercased ids, matching
 // voicePortraitUrl / voiceSampleUrl). Idempotent: a voice whose portrait and
@@ -10,7 +10,7 @@
 //   cd site && ./node_modules/.bin/bun scripts/generate-voices.ts
 //
 // Needs GOOGLE_APPLICATION_CREDENTIALS_JSON (bun auto-loads site/.env) and
-// ffmpeg on PATH (raw PCM -> MP3). Force a re-render with `--force`.
+// ffmpeg on PATH (WAV -> MP3). Force a re-render with `--force`.
 
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
@@ -30,8 +30,6 @@ const PORTRAIT_EDGE = 512;
 const CONCURRENCY = 3;
 const FORCE = process.argv.includes("--force");
 
-// Gemini TTS returns raw little-endian 16-bit mono PCM (audio/L16), 24 kHz default.
-const PCM_SAMPLE_RATE = 24_000;
 
 /** Per-voice portrait subject. Kept beside — not inside — the shared catalog so
  * the art direction stays out of the client bundle. One diverse persona per
@@ -157,13 +155,12 @@ async function renderPortrait(client: GoogleGenAI, id: string): Promise<void> {
   await writeFile(portraitPath(id), webp);
 }
 
-/** One sample: speak VOICE_SAMPLE_TEXT in this voice, then transcode the raw PCM to MP3. */
+/** One sample: speak VOICE_SAMPLE_TEXT in this voice, then transcode the WAV to MP3. */
 async function renderSample(client: GoogleGenAI, id: string): Promise<void> {
-  let pcm: Buffer | null = null;
-  let rate = PCM_SAMPLE_RATE;
+  let wav: Buffer | null = null;
   // The TTS model intermittently returns an empty candidate (no audio); a resend
   // usually clears it, so retry a few times before giving up.
-  for (let attempt = 1; attempt <= 4 && !pcm; attempt += 1) {
+  for (let attempt = 1; attempt <= 4 && !wav; attempt += 1) {
     const response = await client.models.generateContent({
       model: TTS_MODEL,
       contents: [{ role: "user", parts: [{ text: VOICE_SAMPLE_TEXT }] }],
@@ -174,20 +171,19 @@ async function renderSample(client: GoogleGenAI, id: string): Promise<void> {
     });
     const inline = response.candidates?.[0]?.content?.parts?.find((p) => p.inlineData?.data)?.inlineData;
     if (inline?.data) {
-      pcm = Buffer.from(inline.data, "base64");
-      rate = Number(inline.mimeType?.match(/rate=(\d+)/)?.[1]) || PCM_SAMPLE_RATE;
+      wav = Buffer.from(inline.data, "base64");
     }
   }
-  if (!pcm) throw new Error("no audio after retries");
-  await pcmToMp3(pcm, rate, samplePath(id));
+  if (!wav) throw new Error("no audio after retries");
+  await wavToMp3(wav, samplePath(id));
 }
 
-/** Pipe raw 16-bit mono PCM through ffmpeg to a VBR MP3. */
-function pcmToMp3(pcm: Buffer, rate: number, out: string): Promise<void> {
+/** Pipe the model's WAV through ffmpeg to a VBR MP3. */
+function wavToMp3(wav: Buffer, out: string): Promise<void> {
   return new Promise((resolve, reject) => {
     const ff = spawn("ffmpeg", [
       "-y", "-hide_banner", "-loglevel", "error",
-      "-f", "s16le", "-ar", String(rate), "-ac", "1", "-i", "pipe:0",
+      "-i", "pipe:0",
       "-codec:a", "libmp3lame", "-q:a", "4", out,
     ]);
     let stderr = "";
@@ -196,7 +192,7 @@ function pcmToMp3(pcm: Buffer, rate: number, out: string): Promise<void> {
     ff.on("close", (code) =>
       code === 0 ? resolve() : reject(new Error(`ffmpeg exited ${code}: ${stderr.trim()}`))
     );
-    ff.stdin.write(pcm);
+    ff.stdin.write(wav);
     ff.stdin.end();
   });
 }

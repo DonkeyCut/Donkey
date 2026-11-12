@@ -33,9 +33,9 @@ import {
 // provider id keeps refresh routing from colliding with the image adapter.
 const providerID = "gemini-tts";
 
-// The prompt is what gets spoken; callers steer style, pace, and tone by
-// prefixing a natural-language direction ("Say in a spooky whisper: …") or
-// embedding inline audio tags ("[excited]", "[whispers]") in the text.
+// The prompt is spoken verbatim. Callers steer tone and pace with a
+// natural-language `style` parameter ("a spooky whisper") and mark momentary
+// sounds with angle-bracket tags in the text ("<laugh>", "<short pause>").
 const defaultVoice = "Kore";
 
 export function createGeminiSpeechAssetProvider(
@@ -107,10 +107,11 @@ export function createGeminiSpeechAssetProvider(
     const voice =
       stringValue(inputs.voice) ?? stringValue(parameters.voice) ?? defaultVoice;
     const languageCode = stringValue(parameters.languageCode);
+    const style = stringValue(parameters.style)?.trim();
 
     const params: GenerateContentParameters = {
       model,
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      contents: [{ role: "user", parts: [{ text: prompt, ...(style ? { speechMetadata: { style } } : {}) }] }],
       config: {
         responseModalities: [Modality.AUDIO],
         speechConfig: {
@@ -224,8 +225,54 @@ function isPermanentSpeechBlock(finishReason: string | undefined): boolean {
   return finishReason !== undefined && permanentSpeechBlocks.has(finishReason);
 }
 
-// Gemini TTS returns raw little-endian 16-bit mono PCM (audio/L16), 24 kHz by default.
+// Callers get raw little-endian 16-bit mono PCM (audio/L16), 24 kHz by default.
+// The model answers with a WAV file, so its header is read and dropped.
 const defaultSampleRate = 24_000;
+const riffHeaderBytes = 12;
+const chunkHeaderBytes = 8;
+// The fmt chunk fields we read, and the only format callers can decode.
+const fmtMinBytes = 16;
+const pcmFormatTag = 1;
+const monoChannels = 1;
+const pcmBits = 16;
+
+/** The PCM samples and rate inside a WAV file, or undefined when the bytes are
+ * no RIFF/WAVE container. Chunks are walked, so an extra LIST chunk before
+ * `data` is skipped. A WAV in any format but 16-bit mono PCM throws: callers
+ * would decode it as noise and bill the wrong length. */
+function pcmFromWav(bytes: Buffer): { pcm: Buffer; rate: number } | undefined {
+  if (bytes.length < riffHeaderBytes || bytes.toString("latin1", 0, 4) !== "RIFF" || bytes.toString("latin1", 8, 12) !== "WAVE") {
+    return undefined;
+  }
+
+  // fmt carries the sample rate at offset 4; data holds the samples.
+  let rate = defaultSampleRate;
+  for (let at = riffHeaderBytes; at + chunkHeaderBytes <= bytes.length; ) {
+    const id = bytes.toString("latin1", at, at + 4);
+    const size = bytes.readUInt32LE(at + 4);
+    const body = at + chunkHeaderBytes;
+    if (id === "fmt ") {
+      const fits = size >= fmtMinBytes && body + fmtMinBytes <= bytes.length;
+      if (
+        !fits ||
+        bytes.readUInt16LE(body) !== pcmFormatTag ||
+        bytes.readUInt16LE(body + 2) !== monoChannels ||
+        bytes.readUInt16LE(body + 14) !== pcmBits
+      ) {
+        throw new InferenceProviderError("Gemini returned audio that is not 16-bit mono PCM.", {
+          statusCode: 502,
+          code: "unsupported_speech_audio",
+        });
+      }
+      rate = bytes.readUInt32LE(body + 4);
+    }
+    if (id === "data") {
+      return { pcm: bytes.subarray(body, Math.min(bytes.length, body + size)), rate };
+    }
+    at = body + size + (size % 2);
+  }
+  return undefined;
+}
 
 function audioOutputs(raw: JsonValue, generationId: string): GenerationOutputRef[] {
   const outputs: GenerationOutputRef[] = [];
@@ -236,14 +283,23 @@ function audioOutputs(raw: JsonValue, generationId: string): GenerationOutputRef
       if (!isJsonObject(inline)) {
         continue;
       }
-      const data = stringValue(inline.data);
-      if (!data) {
+      const raw = stringValue(inline.data);
+      if (!raw) {
         continue;
       }
-      const mimeType =
-        stringValue(inline.mimeType) ??
-        stringValue(inline.mime_type) ??
-        `audio/L16;codec=pcm;rate=${defaultSampleRate}`;
+
+      // A WAV answer becomes the bare PCM callers read; one with no samples
+      // is no audio, so the caller's retry resends it.
+      const wav = pcmFromWav(Buffer.from(raw, "base64"));
+      if (wav && wav.pcm.length === 0) {
+        continue;
+      }
+      const data = wav ? wav.pcm.toString("base64") : raw;
+      const mimeType = wav
+        ? `audio/L16;codec=pcm;rate=${wav.rate}`
+        : (stringValue(inline.mimeType) ??
+          stringValue(inline.mime_type) ??
+          `audio/L16;codec=pcm;rate=${defaultSampleRate}`);
       outputs.push({
         id: `${generationId}-speech-${index}`,
         kind: "audio",

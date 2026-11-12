@@ -152,7 +152,7 @@ Respond with ONLY a JSON object — no prose, no code fences:
 
 Rules:
 - Set "language" only when the direction actually asks to speak in a language ("say it in Korean", "in Spanish", "read this in Japanese").
-- When you set "language", translate every line into it, preserving meaning, tone, punctuation, and inline tags like [whispers]. Keep the same number of lines in the same order.
+- When you set "language", translate every line into it, preserving meaning, tone, punctuation, and inline tags like <laugh>. Keep the same number of lines in the same order.
 - When the direction is only about tone, pace, or energy ("say warmly"), return "language": null and "lines": null and put the whole direction in "delivery".
 - When the direction is empty, return {"language": null, "delivery": null, "lines": null}.`;
 
@@ -227,9 +227,10 @@ interface PcmClip {
 const readFailure = (res: Response, fallback: UserError) =>
   readHostedFailure(res, new UserError("sign_in_to_generate_voiceovers", "Sign in to Donkey to generate voiceovers."), fallback);
 
-/** One hosted Gemini speech call: text in, decoded PCM out. A direction is a
- * natural-language delivery instruction ("Say warmly, like an old friend");
- * the model also honors inline tags like [whispers] in the text itself. */
+/** One hosted Gemini speech call: text in, decoded PCM out. The text is
+ * spoken verbatim; a direction is a natural-language delivery instruction
+ * ("warmly, like an old friend") sent as its own style field, and the text may
+ * carry momentary sounds as tags like <laugh>. */
 async function synthesizeSegment(
   text: string,
   voice: string,
@@ -240,11 +241,12 @@ async function synthesizeSegment(
   const languageCode = resolveLanguage(language);
   const res = await hostedPost("/api/inference/assets", {
     kind: "speech",
-    prompt: style ? `${style}: ${text}` : text,
+    prompt: text,
     inputs: { voice },
-    ...(languageCode !== DEFAULT_LANGUAGE
-      ? { parameters: { languageCode } }
-      : {}),
+    parameters: {
+      ...(style ? { style } : {}),
+      ...(languageCode !== DEFAULT_LANGUAGE ? { languageCode } : {}),
+    },
   });
   if (!res.ok) {
     throw await readFailure(res, new UserError("voice_generation_failed", "Voice generation failed."));

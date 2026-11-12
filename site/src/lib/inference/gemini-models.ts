@@ -10,9 +10,9 @@
 export const geminiModels = {
   flash: "gemini-3.8-flash",
   flashLite: "gemini-3.1-flash-lite",
-  // Generative image editing/generation ("nano banana 2"). Bump here when
+  // Generative image editing/generation ("nano banana 2.1"). Bump here when
   // adopting a newer image model.
-  flashImage: "gemini-3.1-flash-image",
+  flashImage: "gemini-nano-banana-2.1",
   // "Nano banana pro": higher-fidelity image editing/generation that takes a real
   // aspectRatio + imageSize (1K/2K/4K) via imageConfig. GA since 2026-05-28 (the
   // -preview id was shut down 2026-06-25); served only on Vertex's global
@@ -80,10 +80,11 @@ export function geminiOmniRenderUnits(
   return Math.max(1, Math.ceil((seconds * geminiOmniTokensPerSecond[resolution]) / geminiOmniUnitTokens));
 }
 
-// Generative speech (Gemini TTS): text in, spoken audio out, with prompt-driven
-// style direction and inline audio tags. Bump here when adopting a newer TTS model.
+// Generative speech (Gemini TTS): text in, spoken audio out. The text is read
+// verbatim; delivery rides a separate style field and momentary sounds are
+// angle-bracket tags like <laugh>. Bump here when adopting a newer TTS model.
 export const geminiTtsModels = {
-  flash: "gemini-3.1-flash-tts-preview",
+  flash: "gemini-3.8-flash-tts",
 } as const;
 
 export type GeminiTtsModel = (typeof geminiTtsModels)[keyof typeof geminiTtsModels];
@@ -93,7 +94,7 @@ export type GeminiTtsModel = (typeof geminiTtsModels)[keyof typeof geminiTtsMode
 // generateContent with an audio transcription config; it takes no prompt,
 // system instruction, or output schema. Bump here when adopting a newer one.
 export const geminiTranscribeModels = {
-  file: "gemini-3.5-transcribe-preview",
+  file: "gemini-3.5-transcribe",
 } as const;
 
 export type GeminiTranscribeModel =
