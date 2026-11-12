@@ -114,11 +114,14 @@ const runsWithCap = async (over: Partial<ExportSpec>, cap: number | undefined): 
  * finished frames (colorParamsFilter), for assertions about the chains. */
 const untagged = (g: string[]): string[] => g.filter((l) => !l.endsWith("[vtag]"));
 
-// Every chain the render's graphs carry: a range renders its picture and its
-// sound in runs of their own.
+// Every chain the render's graphs carry, sources first: a range renders its
+// picture and its sound in runs of their own, and each graph lists its
+// chains outputs first.
 const graphFor = async (over: Partial<ExportSpec>): Promise<string[]> => {
   const runs = await runsFor(over);
-  return runs.filter((a) => a.includes("-filter_complex")).flatMap((a) => a[a.indexOf("-filter_complex") + 1].split(";"));
+  return runs
+    .filter((a) => a.includes("-filter_complex"))
+    .flatMap((a) => a[a.indexOf("-filter_complex") + 1].split(";").reverse());
 };
 
 type Clip = ExportSpec["clips"][number];

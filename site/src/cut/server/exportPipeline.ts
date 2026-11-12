@@ -10,7 +10,7 @@ import path from "node:path";
 import { atempoChain, audioChannels, hasStream, mediaDuration, num, videoDecodeCost, videoDimensions, videoPicture } from "./util";
 import { CUT_EXPORT_PASSES } from "../lib/exportPassSettings";
 import { xfadeTransition } from "./transitionExpr";
-import { assertGraphSafe, chainsFeeding, fanOutInputs, fexpr, inputsRead } from "./filterGraph";
+import { assertGraphSafe, chainsFeeding, downstreamFirst, fanOutInputs, fexpr, inputsRead } from "./filterGraph";
 import { bakeRetimedAudio, setptsExpr, type BakedAudio } from "./retimeAudio";
 import { bakeTurnedMedia } from "./turnMedia";
 import { withSpecColors } from "./fileColor";
@@ -3694,7 +3694,7 @@ async function renderPass(
       [
         "-y",
         ...boundThreads(picture.inputs),
-        "-filter_complex", assertGraphSafe(fanOutInputs(picture.chains).join(";")),
+        "-filter_complex", assertGraphSafe(downstreamFirst(fanOutInputs(picture.chains)).join(";")),
         "-map", `[${vLabel}]`,
         ...videoCodecArgs(enc, spec),
         ...colorTagArgs(spec),
@@ -3707,7 +3707,7 @@ async function renderPass(
     await io.runFfmpeg(job, [
       "-y",
       ...sound.inputs,
-      "-filter_complex", assertGraphSafe(fanOutInputs(sound.chains).join(";")),
+      "-filter_complex", assertGraphSafe(downstreamFirst(fanOutInputs(sound.chains)).join(";")),
       ...mixOutput,
       ...stemOutputs,
     ]);
@@ -3717,7 +3717,7 @@ async function renderPass(
     [
       "-y",
       ...boundThreads(inputs),
-      "-filter_complex", assertGraphSafe(fanOutInputs(filters).join(";")),
+      "-filter_complex", assertGraphSafe(downstreamFirst(fanOutInputs(filters)).join(";")),
       "-map", `[${vLabel}]`,
       ...(rawMix ? [] : ["-map", `[${aLabel}]`]),
       ...videoCodecArgs(enc, spec),

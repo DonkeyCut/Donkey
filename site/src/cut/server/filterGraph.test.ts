@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { assertGraphSafe, chainsFeeding, fanOutInputs, fexpr, inputsRead } from "./filterGraph";
+import { spawnSync } from "node:child_process";
+import { effectFilterLines } from "@donkeycut/effects-kit";
+import { assertGraphSafe, chainsFeeding, downstreamFirst, fanOutInputs, fexpr, inputsRead } from "./filterGraph";
 
 const thrown = (fn: () => unknown): string => {
   try {
@@ -114,4 +116,31 @@ describe("one output's part of a graph", () => {
     const chains = ["[2:a]atrim=0:2[x]", "[x]volume='[0:a]'[y]"];
     expect(inputsRead(["-i", "a", "-i", "b", "-i", "c"], chainsFeeding(chains, ["y"])).chains[1]).toBe("[x]volume='[0:a]'[y]");
   });
+});
+
+describe("graph order", () => {
+  test("lists every chain before the chains it reads", () => {
+    const graph = ["[0:v]split[a][b]", "[b]scale=2:2[c]", "[a][c]overlay[d]", "[d]null[out]"];
+    expect(downstreamFirst(graph)).toEqual(["[d]null[out]", "[a][c]overlay[d]", "[b]scale=2:2[c]", "[0:v]split[a][b]"]);
+  });
+
+  // Seven glitches back to back, each with its dust: listed source-first,
+  // this ran minutes for one second of video.
+  test("seven glitches render every frame promptly", () => {
+    const starts = [0.1, 0.3, 0.5, 0.7, 0.9, 1.1, 1.3];
+    const lines = ["[0:v]format=yuv420p[c0]"];
+    starts.forEach((s, i) => {
+      lines.push(...effectFilterLines(`c${i}`, `c${i + 1}`, "glitch", 0.5, s, s + 0.2, 320, 180, `g${i}`)!);
+    });
+    const begun = Date.now();
+    const run = spawnSync("ffmpeg", [
+      "-v", "error", "-f", "lavfi", "-i", "color=c=gray:s=320x180:r=30:d=1",
+      "-filter_complex", assertGraphSafe(downstreamFirst(lines).join(";")),
+      "-map", `[c${starts.length}]`, "-f", "framecrc", "-",
+    ], { timeout: 20_000, killSignal: "SIGKILL" });
+    const frames = run.stdout.toString().split("\n").filter((l) => /^0,/.test(l));
+    expect(run.status).toBe(0);
+    expect(frames.length).toBe(30);
+    expect(Date.now() - begun).toBeLessThan(10_000);
+  }, 30_000);
 });

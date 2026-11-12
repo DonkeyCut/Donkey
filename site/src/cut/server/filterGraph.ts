@@ -116,6 +116,53 @@ export function chainsFeeding(filters: string[], outs: string[]): string[] {
 }
 
 /**
+ * The graph's chains ordered so each comes before the chains it reads. On a
+ * tie ffmpeg runs the filter created first, and a graph listed source-first
+ * sends each request up through every split twice, once per branch: a chain
+ * of diamonds costs twice as much per diamond, and a cut with seven glitches
+ * stalled. Listed this way, a filter's requests gather before it runs.
+ */
+export function downstreamFirst(filters: string[]): string[] {
+  const chains = chainsOf(filters);
+
+  // Which chain writes each label, and how many chains read each chain.
+  const writer = new Map<string, number>();
+  chains.forEach((c, i) => {
+    for (const label of labelsOf(c.match(TRAIL_PADS)![0])) {
+      writer.set(label, i);
+    }
+  });
+  const reads = chains.map((c) => labelsOf(c.match(LEAD_PADS)![0]).flatMap((l) => writer.get(l) ?? []));
+  const readers = chains.map(() => 0);
+  for (const from of reads) {
+    for (const j of from) {
+      readers[j]++;
+    }
+  }
+
+  // Emit a chain once every chain reading it is out, the latest listed
+  // first, so a graph already listed sources-first comes out reversed; any
+  // chain left in a cycle keeps its place at the end.
+  const ready = chains.flatMap((_, i) => (readers[i] === 0 ? [i] : []));
+  const order: number[] = [];
+  while (ready.length > 0) {
+    const i = ready.pop()!;
+    order.push(i);
+    for (const j of reads[i]) {
+      readers[j]--;
+      if (readers[j] !== 0) {
+        continue;
+      }
+      const at = ready.findIndex((k) => k > j);
+      ready.splice(at < 0 ? ready.length : at, 0, j);
+    }
+  }
+  const placed = new Set(order);
+  const left = [...chains.keys()].filter((i) => !placed.has(i));
+  return [...order, ...left].map((i) => chains[i]);
+}
+
+/**
  * The inputs `chains` read, out of a run's `inputs` args, and the chains
  * with their stream pads renumbered to match: `[3:a]` reading the second
  * input kept becomes `[1:a]`. An input's flags travel with it.
