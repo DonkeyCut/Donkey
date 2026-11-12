@@ -1,5 +1,6 @@
 import { runCommandBatch, type CommandJobResult, type CommandJobSpec } from "../lib/commandBatch";
 import { openCloudProject, pushCloudProject } from "../lib/headless/docSession";
+import { uploadsSettled } from "../lib/importQueue";
 import { headlessDeps } from "../lib/pi/serverDeps";
 import { projectRevision } from "../lib/projectRevision";
 import { serializeDoc, useEditor } from "../lib/store";
@@ -34,6 +35,15 @@ export async function runCommandJob(
       handle.progress = fraction;
     },
   });
+
+  // A library or stock add copies its file behind the placement; the asset
+  // and its clip join the document once the bytes land. A copy that failed
+  // fails the batch: the add said ok, and the save would drop it.
+  await uploadsSettled(job.projectId);
+  const failed = useEditor.getState().assets.filter((a) => a.upload?.error);
+  if (failed.length) {
+    throw new Error(`Could not copy ${failed.map((a) => `"${a.name}"`).join(", ")} into the project: ${failed[0].upload?.error}`);
+  }
 
   // A read never saves; an edit saves once, as the card's batch does.
   const changed = !spec.readOnly && snapshot() !== before;

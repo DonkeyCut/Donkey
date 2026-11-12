@@ -61,6 +61,8 @@ type Job = {
    * residency, and its cleanup has to reach the backend it landed on. */
   backend: CutBackend;
   controller: AbortController;
+  /** The current attempt, settled once the bytes land or the copy fails. */
+  running?: Promise<void>;
 };
 
 const jobs = new Map<string, Job>();
@@ -144,7 +146,23 @@ export function startUpload(projectId: string, pending: PendingImport) {
     controller: new AbortController(),
   };
   jobs.set(pending.asset.id, job);
-  void run(job);
+  job.running = run(job);
+}
+
+/** Resolve once every copy into this project has landed or failed. A headless
+ * save waits here: a pending asset stays out of the saved document, so saving
+ * first would drop the clip a library or stock add just placed. */
+export async function uploadsSettled(projectId: string): Promise<void> {
+  for (;;) {
+    const runs = [...jobs.values()].filter((j) => j.projectId === projectId).map((j) => j.running);
+    await Promise.all(runs);
+
+    // A retry that began meanwhile is a new attempt to wait on.
+    const now = [...jobs.values()].filter((j) => j.projectId === projectId).map((j) => j.running);
+    if (now.every((r) => runs.includes(r))) {
+      return;
+    }
+  }
 }
 
 /** Whether a job's bytes are held by the browser store — see the header. */
@@ -181,7 +199,7 @@ export function retryUpload(assetId: string) {
   if (!job) return;
   job.controller = new AbortController();
   useEditor.getState().updateAsset(assetId, uploadPatch(job, 0));
-  void run(job);
+  job.running = run(job);
 }
 
 /** Drop bytes that landed for an asset that is no longer here. A copy that

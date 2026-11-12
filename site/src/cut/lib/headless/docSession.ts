@@ -5,6 +5,7 @@ import { syncFontAssets } from "../fontAssets";
 import { syncLinkedLibrary } from "../linkedLibrary";
 import { withAssetColors } from "../mediaRead";
 import { drawnLists } from "../itemKinds";
+import { uploadsSettled } from "../importQueue";
 import { serializeDoc, useEditor } from "../store";
 import type { MediaAsset, ProjectDoc } from "../types";
 
@@ -106,6 +107,9 @@ export async function pushCloudProject(
   s: HeadlessSession,
   session: HeadlessDocSession
 ): Promise<HeadlessDocSession> {
+  // Copies still landing hold their assets out of the document; wait so a
+  // chat turn's library or stock add saves with it.
+  await uploadsSettled(session.projectId);
   const state = useEditor.getState();
   if (state.projectId !== session.projectId)
     throw new Error("The store holds a different project than this session opened.");
