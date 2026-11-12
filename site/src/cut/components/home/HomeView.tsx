@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { Libre_Baskerville } from "next/font/google";
 import { usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Upload } from "lucide-react";
@@ -21,6 +22,9 @@ import { StorageSwitcher } from "./StorageSwitcher";
 import { useHomeCreate, useHomeResidency } from "./useHomeCreate";
 import { useHomeProjects } from "./useHomeProjects";
 import { useHomeUploads } from "./useHomeUploads";
+
+// Home's heading face: a book serif, served with the page and loaded only here.
+const headingFont = Libre_Baskerville({ subsets: ["latin", "latin-ext"], weight: "variable" });
 
 // The drag type a browser gives files carried in from the desktop.
 const FILES_TYPE = "Files";
@@ -72,7 +76,12 @@ export function HomeView() {
           )}
           style={empty ? { marginBottom: EMPTY_LIFT } : undefined}
         >
-          <h1 className="flex items-center justify-center gap-3 text-center text-[32px] leading-10 font-normal tracking-[-0.02em]">
+          <h1
+            className={cn(
+              headingFont.className,
+              "flex items-center justify-center gap-3 text-center text-[34px] leading-10 font-medium tracking-[-0.05em]",
+            )}
+          >
             <span className="size-10 shrink-0">
               <DonkeyMark />
             </span>
