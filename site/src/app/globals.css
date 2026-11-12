@@ -165,6 +165,15 @@
   }
 }
 
+/* The Home prompt box lifts off its page with a close shadow and a wide soft
+   glow; in dark mode its lighter surface does the lifting. */
+@utility composer-lift {
+  box-shadow: 0 2px 8px rgb(0 0 0 / 0.04), 0 4px 80px 8px rgb(0 0 0 / 0.024);
+  @variant dark {
+    box-shadow: none;
+  }
+}
+
 @utility backlight-image {
   @variant dark {
     filter: drop-shadow(0 20px 60px rgb(255 255 255 / 0.12));

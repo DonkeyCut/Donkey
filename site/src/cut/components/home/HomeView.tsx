@@ -48,14 +48,14 @@ export function HomeView() {
   return (
     <main
       ref={page}
-      className="relative min-h-full px-6 pt-[72px] pb-20 sm:px-10"
+      className="relative min-h-full bg-[#fcfcfc] px-6 pt-[72px] pb-20 sm:px-10 dark:bg-background"
     >
       {/* The ChatGPT card keeps its projects in the cloud; there is no choice. */}
       {!chatgpt && <StorageSwitcher className="absolute top-5 right-6 z-10" />}
 
       <div className="mx-auto flex max-w-[1080px] flex-col gap-14">
         <section className="flex flex-col items-center gap-5">
-          <h1 className="text-center text-[32px] leading-10 font-semibold tracking-[-0.02em]">
+          <h1 className="text-center text-[32px] leading-10 font-normal tracking-[-0.02em]">
             {t("start.heading")}
           </h1>
           <HomePrompt uploads={uploads} create={create} projects={projects} />

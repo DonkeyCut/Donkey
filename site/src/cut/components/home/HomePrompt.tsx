@@ -37,7 +37,6 @@ import { useCutCaps } from "@/cut/lib/backend/hooks";
 import { useEnvironment } from "@/cut/lib/environment";
 import { promptThroughHost } from "@/cut/lib/hostBridge";
 import { useMicTranscription } from "@/cut/lib/micTranscribe";
-import { cn } from "@/lib/utils";
 import {
   ATTACHMENT_CARD,
   AudioFace,
@@ -225,14 +224,11 @@ export function HomePrompt({
           chips; files from the desktop go through the page's own drop. */}
       <RefDropZone
         onRef={(ref) => attach([ref])}
-        activeClassName="rounded-[20px] ring-3 ring-[#0a84ff]/50"
+        activeClassName="rounded-[26px] ring-3 ring-[#0a84ff]/50"
       >
         <div
           onFocusCapture={() => setEngaged(true)}
-          className={cn(
-            "flex flex-col gap-2.5 rounded-[20px] border border-border bg-background px-4 py-3 transition-shadow",
-            "focus-within:border-foreground focus-within:shadow-[0_0_0_4px_var(--muted)] dark:bg-[color-mix(in_oklab,var(--card),white_4%)]",
-          )}
+          className="composer-lift flex flex-col gap-2.5 rounded-[26px] border border-border bg-card px-4 py-3 transition-colors focus-within:border-foreground/40 dark:bg-[color-mix(in_oklab,var(--card),white_3%)]"
         >
           {mic.state === "idle" ? (
             <>
