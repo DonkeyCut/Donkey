@@ -85,7 +85,8 @@ import {
   shortcutDecline,
   shortcutReached,
 } from "@/cut/lib/shortcutGate";
-import { docFieldsEdited, projectDuration, serializeDoc, storedAssets, timelineHMax, useEditor, clipLen, type VideoTrackPlacement } from "@/cut/lib/store";
+import { DOC_SAVE_HEADER } from "@/cut/lib/backend/docSave";
+import { docFieldsEdited, personAssets, projectDuration, serializeDoc, storedAssets, timelineHMax, useEditor, clipLen, type VideoTrackPlacement } from "@/cut/lib/store";
 import { fileLandingAt } from "@/cut/lib/timelineDrop";
 import { landOnRow } from "@/cut/lib/laneTracks";
 import { playheadAt, previewAt, skimAt, stepFrame } from "@/cut/lib/playhead";
@@ -658,6 +659,10 @@ export function Editor({
     let inFlight: Promise<void> | null = null;
     let queued = false;
     let editSeq = 0;
+    // Whether the changes not yet saved include one of the person's. Saves
+    // that carry only what analysis filled in settle, and leave the project's
+    // edited time where it was: opening a project never marks it edited.
+    let unsavedEdit = false;
     const save = (): Promise<void> => {
       if (inFlight) {
         queued = true;
@@ -677,10 +682,12 @@ export function Editor({
       s.setSaveState("saving");
       const doc = serializeDoc(s);
       const seqAtSend = editSeq;
+      const edit = unsavedEdit;
+      unsavedEdit = false;
       try {
         const res = await apiFetch(`/api/cut/projects/${projectId}`, {
           method: "PUT",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", [DOC_SAVE_HEADER]: edit ? "edit" : "settle" },
           body: JSON.stringify(doc),
         });
         if (res.ok) {
@@ -696,9 +703,11 @@ export function Editor({
           if (editSeq === seqAtSend) writeCachedDoc(projectId, doc);
           return;
         }
+        unsavedEdit ||= edit;
         useEditor.getState().setSaveState("error");
         if (res.status >= 500) retry();
       } catch {
+        unsavedEdit ||= edit;
         useEditor.getState().setSaveState("error");
         retry();
       }
@@ -719,15 +728,21 @@ export function Editor({
     // Assets change identity on runtime enrichment (thumbs, peaks) too, so a
     // new reference compares by its stored projection: field edits like an
     // origin change ("Add to Media", chat tagging) must save, enrichment not.
+    // A stored change is the person's when it shows past analysis too: a
+    // probe or a transcript landing settles, a rename or an import edits.
     let lastAssetsRef = useEditor.getState().assets;
     let lastAssetsJson = JSON.stringify(storedAssets(lastAssetsRef));
-    const assetsChanged = (assets: MediaAsset[]): boolean => {
-      if (assets === lastAssetsRef) return false;
-      const json = JSON.stringify(storedAssets(assets));
-      const changed = json !== lastAssetsJson;
+    let lastPersonJson = JSON.stringify(personAssets(lastAssetsRef));
+    const assetChange = (assets: MediaAsset[]): "none" | "analysis" | "person" => {
+      if (assets === lastAssetsRef) return "none";
       lastAssetsRef = assets;
+      const json = JSON.stringify(storedAssets(assets));
+      if (json === lastAssetsJson) return "none";
       lastAssetsJson = json;
-      return changed;
+      const person = JSON.stringify(personAssets(assets));
+      const change = person === lastPersonJson ? "analysis" : "person";
+      lastPersonJson = person;
+      return change;
     };
     const unsub = useEditor.subscribe((s) => {
       if (!s.loaded || s.projectId !== projectId) return;
@@ -737,23 +752,24 @@ export function Editor({
         primedEpoch = s.loadEpoch;
         last = serializeDoc(s);
         lastBars = s.transitions;
-        assetsChanged(s.assets);
+        assetChange(s.assets);
         return;
       }
       // The open resumed unsaved edits from the dirty disk snapshot: the
       // document on screen is already ahead of the server, so push it up
       // without waiting for a fresh edit.
       if (s.resumePush) {
-        useEditor.setState({ resumePush: false });
+        unsavedEdit ||= s.resumePush === "edit";
+        useEditor.setState({ resumePush: null });
         if (timer) clearTimeout(timer);
         timer = setTimeout(() => void save(), 800);
         return;
       }
       // Evaluated every tick (not short-circuited) so the asset baseline
       // advances even when another slice triggered this save.
-      const assetsDirty = assetsChanged(s.assets);
+      const assets = assetChange(s.assets);
       const fieldsEdited = docFieldsEdited(s, last, lastBars);
-      if (!assetsDirty && !fieldsEdited) return;
+      if (assets === "none" && !fieldsEdited) return;
 
       // A template copy stops offering its tour at its first edit to the
       // document. Asset changes alone are often the media settling (a probe,
@@ -766,11 +782,12 @@ export function Editor({
       last = serializeDoc(s);
       lastBars = s.transitions;
       editSeq++;
+      if (fieldsEdited || assets === "person") unsavedEdit = true;
       // Every edit lands on disk marked dirty before it lands on the server,
       // with the version it was edited on top of: a crash or a closed tab
       // inside the debounce window resumes on the next open instead of
       // losing the edit.
-      writeCachedDocDirty(projectId, last, knownDocVersion(projectId));
+      writeCachedDocDirty(projectId, last, knownDocVersion(projectId), unsavedEdit ? "edit" : "settle");
       if (inFlight) queued = true;
       if (s.saveState !== "saving") s.setSaveState("dirty");
       if (timer) clearTimeout(timer);

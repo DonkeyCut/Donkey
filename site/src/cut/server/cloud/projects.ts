@@ -2,6 +2,7 @@
 // docs and metadata in Postgres, media bytes in R2. Every query scopes by userId.
 import { sanitizeGuideLines, sanitizeGuides } from "@/cut/lib/guides";
 import { timelineEnd } from "@/cut/lib/timelineEnd";
+import { docSaveOf, savedAt, type DocSave } from "@/cut/lib/backend/docSave";
 import { DOC_SEQ_HEADER, DOC_WRITER_HEADER, HTTP_CONFLICT } from "@/cut/lib/backend/types";
 import { OUTPUT_SPACES } from "@donkeycut/effects-kit";
 import { isProjectKind, isTimelineId, normalizeAspect, sanitizeTimelines, type ProjectDoc, type ProjectSummary } from "@/cut/lib/types";
@@ -88,7 +89,7 @@ function follows(row: ProjectRow, writer: DocWriter | null): boolean {
 
 /** A save's body over the stored doc: fields the body leaves out keep their
  * stored values. */
-function mergeDoc(existing: ProjectDoc, body: Partial<ProjectDoc>): ProjectDoc {
+function mergeDoc(existing: ProjectDoc, body: Partial<ProjectDoc>, save: DocSave): ProjectDoc {
   const doc: ProjectDoc = {
     ...existing,
     name: typeof body.name === "string" && body.name.trim() ? body.name.trim() : existing.name,
@@ -130,7 +131,7 @@ function mergeDoc(existing: ProjectDoc, body: Partial<ProjectDoc>): ProjectDoc {
     genvideo: body.genvideo !== undefined ? body.genvideo ?? undefined : existing.genvideo,
     renders: Array.isArray(body.renders) ? body.renders : existing.renders,
   };
-  doc.updatedAt = Date.now();
+  doc.updatedAt = savedAt(save, existing.updatedAt, Date.now());
   return doc;
 }
 
@@ -290,17 +291,20 @@ export const projectsCloud = {
         return err("Bad writer.", HTTP_BAD_REQUEST);
       }
       const body = (await req.json()) as Partial<ProjectDoc>;
+      const save = docSaveOf(req);
 
       // Every save records its writer, or clears the last one's, so only a
-      // version the same writer saved can be built over by that writer.
+      // version the same writer saved can be built over by that writer. A
+      // settle keeps the row's edited time, which the project list shows.
       const dataOver = (base: ProjectRow) => {
-        const doc = mergeDoc(docOf(base), body);
+        const doc = mergeDoc(docOf(base), body, save);
         return {
           doc: asJson(doc),
           name: doc.name,
           version: { increment: 1 },
           writer: writer?.id ?? null,
           writerSeq: writer?.seq ?? null,
+          ...(save === "settle" ? { updatedAt: base.updatedAt } : {}),
         };
       };
       if (vParam === null) {

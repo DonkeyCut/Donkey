@@ -19,6 +19,7 @@
  */
 
 import { getBackend } from "./backend";
+import type { DocSave } from "./backend/docSave";
 import type { CutMode } from "./backend/types";
 import { dropSnapshot, readSnapshot, snapshotKey, writeSnapshot } from "./cache";
 import type { Aspect, ProjectDoc } from "./types";
@@ -32,8 +33,9 @@ const linksKey = (projectId: string, kind: CutMode) => snapshotKey(kind, "media-
 
 export type CachedDoc = Partial<ProjectDoc>;
 
-/** On-disk shape. Older records stored the bare doc; both read back. */
-type StoredDoc = { doc: CachedDoc; dirty?: boolean; baseVersion?: string | null };
+/** On-disk shape. Older records stored the bare doc; both read back. `save`
+ * says whether dirty edits hold one of the person's; older records did. */
+type StoredDoc = { doc: CachedDoc; dirty?: boolean; baseVersion?: string | null; save?: DocSave };
 
 export type CachedDocHit = {
   doc: CachedDoc;
@@ -43,6 +45,8 @@ export type CachedDocHit = {
   /** The doc version the dirty edits were made on top of; null for a local
    * project (the engine has no versions) or edits made before one was known. */
   baseVersion: string | null;
+  /** Whether the dirty edits hold one of the person's, or only analysis. */
+  save: DocSave;
 };
 
 export async function readCachedDoc(
@@ -53,9 +57,9 @@ export async function readCachedDoc(
   if (!hit) return null;
   const v = hit.value as StoredDoc;
   if (v && typeof v === "object" && "doc" in v && v.doc && typeof v.doc === "object") {
-    return { doc: v.doc, at: hit.at, dirty: v.dirty === true, baseVersion: v.baseVersion ?? null };
+    return { doc: v.doc, at: hit.at, dirty: v.dirty === true, baseVersion: v.baseVersion ?? null, save: v.save ?? "edit" };
   }
-  return { doc: hit.value as CachedDoc, at: hit.at, dirty: false, baseVersion: null };
+  return { doc: hit.value as CachedDoc, at: hit.at, dirty: false, baseVersion: null, save: "edit" };
 }
 
 // A drag can commit dozens of states a second; dirty writes trail-coalesce so
@@ -89,10 +93,11 @@ export function writeCachedDocDirty(
   projectId: string,
   doc: CachedDoc,
   baseVersion: string | null,
+  save: DocSave,
   kind = getBackend().kind
 ) {
   const key = docKey(projectId, kind);
-  dirtyPending.set(key, { doc, dirty: true, baseVersion } satisfies StoredDoc);
+  dirtyPending.set(key, { doc, dirty: true, baseVersion, save } satisfies StoredDoc);
   if (!dirtyTimers.has(key)) {
     dirtyTimers.set(key, setTimeout(() => flushDirtyWrite(key), DIRTY_WRITE_DELAY_MS));
   }

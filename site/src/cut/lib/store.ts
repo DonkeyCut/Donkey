@@ -73,6 +73,7 @@ import { fillSlot } from "./genvideo/fillSlot";
 import { apiFetch, apiJson, getBackend, hasLocalCompute } from "./backend";
 import { errorFields, errorFromBody, replyError, UserError, type ErrorFields } from "./userError";
 import { fetchSignedMediaUrls, pinDocBase } from "./backend/cloud";
+import type { DocSave } from "./backend/docSave";
 import { cancelRevoke, resolveRegisteredBlob, revokeRegistered } from "./backend/browser/registry";
 import { markSignedBatch } from "./mediaLinks";
 import { dropLocalMedia, localMediaUrl, prefetchCloudMedia } from "./mediaSync";
@@ -446,9 +447,10 @@ export interface EditorState {
   /** loadError with its code, for the page to word it. */
   loadFailure: ErrorFields | null;
   saveState: SaveState;
-  /** Raised when an open resumed unsaved edits from the dirty disk snapshot:
-   * autosave sees it, clears it, and pushes the resumed document up. */
-  resumePush: boolean;
+  /** Set when an open resumed unsaved edits from the dirty disk snapshot, to
+   * the kind of save they make: autosave sees it, clears it, and pushes the
+   * resumed document up. */
+  resumePush: DocSave | null;
   /** Read-only shared view: the set wrapper strips doc-mutating writes, so
    * every edit path is inert by construction. View state stays live. */
   readOnly: boolean;
@@ -2097,7 +2099,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
         loaded: false,
         loadError: null, loadFailure: null,
         saveState: "saved",
-        resumePush: false,
+        resumePush: null,
         // A share view is the one that refuses edits, and the surface opening
         // the project is what knows it is one. Every other open clears the flag:
         // left standing, it follows a tab out of a share link and back into that
@@ -2160,7 +2162,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
     loadEpoch: 0,
     loadError: null, loadFailure: null,
     saveState: "saved",
-    resumePush: false,
+    resumePush: null,
     readOnly: false,
     sharedFeatures: null,
 
@@ -2315,7 +2317,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
               // of, so a server copy that moved on answers 409 instead of
               // being overwritten. Pinned now, before any save can dispatch.
               if (getBackend().kind === "cloud") pinDocBase(id, dirtyBase);
-              set({ saveState: "dirty", resumePush: true });
+              set({ saveState: "dirty", resumePush: cached.save });
             }
           }
         }
@@ -2334,7 +2336,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
           if ([401, 403, 404].includes(res.status)) {
             pinDocBase(id, null);
             dropCachedDoc(id);
-            set({ loaded: false, ...loadFailed(new UserError("project_gone", "This project no longer exists.")), resumePush: false });
+            set({ loaded: false, ...loadFailed(new UserError("project_gone", "This project no longer exists.")), resumePush: null });
             return;
           }
           throw new UserError("project_load_failed", "This project could not be loaded.");
@@ -2462,7 +2464,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
           paintedDirty && getBackend().kind === "cloud" && dirtyBase !== serverVersion;
         if (staleDirty) {
           pinDocBase(id, null);
-          set({ saveState: "saved", resumePush: false });
+          set({ saveState: "saved", resumePush: null });
         }
         // The snapshot is on screen and is the newer document — resumed
         // unsaved work, an undoable edit made since it painted, or a
@@ -5871,6 +5873,36 @@ export const docTimelines = (() => {
  * thumbs/peaks must not mark the doc dirty). Assets whose bytes live only in
  * this tab are left out entirely; they join the document when they land — or
  * straight away when the browser store holds their bytes. */
+// Asset fields the editor fills in by itself: what probing, listening and
+// analysing the media find, and the proxy it builds.
+const ANALYSIS_FIELDS = [
+  "duration",
+  "sizeBytes",
+  "width",
+  "height",
+  "language",
+  "watch",
+  "speech",
+  "beats",
+  "picture",
+  "sceneCuts",
+  "color",
+  "proxy",
+] as const satisfies readonly (keyof StoredAsset)[];
+
+/** The stored assets as the person shaped them: which files, their names,
+ * folders and settings, without what analysis filled in. Two lists that
+ * match here differ only by analysis. */
+export function personAssets(assets: MediaAsset[]): Partial<StoredAsset>[] {
+  return storedAssets(assets).map((a) => {
+    const kept: Partial<StoredAsset> = { ...a };
+    for (const field of ANALYSIS_FIELDS) {
+      delete kept[field];
+    }
+    return kept;
+  });
+}
+
 export function storedAssets(assets: MediaAsset[]): StoredAsset[] {
   return assets
     .filter((a) => !tabOnlyUpload(a))

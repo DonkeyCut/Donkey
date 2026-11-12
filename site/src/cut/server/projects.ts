@@ -4,6 +4,7 @@ import { cp, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promi
 import path from "node:path";
 import { defaultNames } from "@/cut/lib/defaultNames";
 import { timelineEnd } from "@/cut/lib/timelineEnd";
+import { savedAt, type DocSave } from "@/cut/lib/backend/docSave";
 import type { Aspect, ProjectDoc, ProjectFolder, ProjectSummary } from "@/cut/lib/types";
 import { DEFAULT_LOCALE, type Locale } from "@/i18n/locales";
 import { UserError } from "@/cut/lib/userError";
@@ -350,9 +351,9 @@ export async function readProject(id: string): Promise<ProjectDoc | null> {
   }
 }
 
-export async function writeProject(id: string, doc: ProjectDoc) {
+export async function writeProject(id: string, doc: ProjectDoc, save: DocSave = "edit") {
   doc.id = id;
-  doc.updatedAt = Date.now();
+  doc.updatedAt = savedAt(save, doc.updatedAt, Date.now());
   const revision = await writeJsonAtomic(docPath(id), doc);
   followName(id, doc.name);
   return revision;

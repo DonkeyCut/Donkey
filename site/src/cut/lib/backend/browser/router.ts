@@ -16,6 +16,7 @@ import {
   removeBrowserExportJob,
 } from "./exportJobs";
 import { createFolder, deleteFolder, dispatchLibraryRoute, dropProject, folderExists, listFolders, updateFolder } from "./library";
+import { docSaveOf } from "../docSave";
 import * as store from "./opfs";
 import { registerBlobFile, registeredUrl, revokeRegistered } from "./registry";
 import { caught, err, json, serveFile } from "./respond";
@@ -125,7 +126,7 @@ async function putProject(req: Request, id: string): Promise<Response> {
       genvideo: body.genvideo !== undefined ? body.genvideo ?? undefined : existing.genvideo,
       renders: Array.isArray(body.renders) ? body.renders : existing.renders,
     };
-    const revision = await store.writeDoc(id, doc);
+    const revision = await store.writeDoc(id, doc, docSaveOf(req));
     return json({ ok: true, updatedAt: doc.updatedAt, revision });
   } catch (e) {
     return caught(e, new UserError("project_save_failed", "Could not save project."));

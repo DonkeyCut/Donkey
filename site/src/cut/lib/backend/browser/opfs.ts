@@ -21,6 +21,7 @@ import { registerBlobFile } from "./registry";
 import { isDeliveryName } from "../../exportDelivery";
 import { timelineEnd } from "../../timelineEnd";
 import type { ProjectDoc, ProjectFolder, ProjectSummary } from "../../types";
+import { savedAt, type DocSave } from "../docSave";
 import { currentEngineUser } from "../../api";
 import { UserError } from "../../userError";
 
@@ -183,12 +184,12 @@ export async function readDoc(id: string): Promise<ProjectDoc | null> {
   return readJson<ProjectDoc>(await projectDir(id), "project.json");
 }
 
-export async function writeDoc(id: string, doc: ProjectDoc): Promise<string> {
+export async function writeDoc(id: string, doc: ProjectDoc, save: DocSave = "edit"): Promise<string> {
   return withStoreLock(`doc:${id}`, async () => {
     const dir = await projectDir(id, true);
     if (!dir) throw storageUnavailable();
     doc.id = id;
-    doc.updatedAt = Date.now();
+    doc.updatedAt = savedAt(save, doc.updatedAt, Date.now());
     await writeFileAt(dir, "project.json", JSON.stringify(doc));
     const file = await readFileAt(dir, "project.json");
     if (!file) throw new UserError("saved_project_unreadable", "Could not read the saved project.");

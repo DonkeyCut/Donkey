@@ -2,6 +2,7 @@ import { sanitizeGuideLines, sanitizeGuides } from "@/cut/lib/guides";
 import { execFile } from "node:child_process";
 import { compatCoverIn, compatProxyNameFor } from "@/cut/lib/proxyNames";
 import { OUTPUT_SPACES } from "@donkeycut/effects-kit";
+import { docSaveOf } from "@/cut/lib/backend/docSave";
 import { isProjectKind, isTimelineId, normalizeAspect, sanitizeTimelines, type ProjectDoc } from "@/cut/lib/types";
 import { detectSilence, extractAudio, makeFreezeFrame, probeDims, probeDuration } from "../frames";
 import {
@@ -175,7 +176,7 @@ export const projectsApi = {
         genvideo: body.genvideo !== undefined ? body.genvideo ?? undefined : existing.genvideo,
         renders: Array.isArray(body.renders) ? body.renders : existing.renders,
       };
-      const revision = await writeProject(id, doc);
+      const revision = await writeProject(id, doc, docSaveOf(req));
       return Response.json({ ok: true, updatedAt: doc.updatedAt, revision });
     } catch (e) {
       return caught(e, new UserError("project_save_failed", "Could not save project."));
