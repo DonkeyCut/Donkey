@@ -4,7 +4,6 @@ import { useEffect, useMemo, useRef } from "react";
 import {
   burnGradient,
   burnStreakGradient,
-  grainTileUrl,
   isAudioEffect,
   LEAK_TINT,
   leakGradient,
@@ -24,7 +23,7 @@ import {
   washSlotsOf,
   type LiveEffect,
 } from "@/cut/lib/effectStack";
-import "./grain.css";
+import { GrainLayer } from "./GrainLayer";
 import { LightbarCanvas } from "./LightbarCanvas";
 import { rgbSplitFilter } from "./rgbSplit";
 
@@ -158,12 +157,13 @@ export function StageEffectPaint({ lane }: { lane: number }) {
   const overlays = useEditor((s) => s.overlays);
   const slots = useMemo(() => washSlotsOf(overlays, lane), [overlays, lane]);
   const live = useLiveEffects();
+  // The grain's clock: the stage moves it to a fresh offset every frame.
+  const t = usePreviewTime();
   const states = useMemo(
     () => live.filter((e) => e.lane === lane).map((e) => e.state),
     [live, lane]
   );
   if (states.length === 0 && slots.length === 0) return null;
-  const grainUrl = grainTileUrl();
   const grain = Math.max(0, ...states.map((s) => s.grain ?? 0));
   const vignette = Math.max(0, ...states.map((s) => s.vignette ?? 0));
   const flash = Math.max(0, ...states.map((s) => (s.flashTone ? 0 : (s.flash ?? 0))));
@@ -186,12 +186,7 @@ export function StageEffectPaint({ lane }: { lane: number }) {
     return null;
   return (
     <div className="pointer-events-none absolute inset-0">
-      {grain > 0 && grainUrl && (
-        <div
-          className="cut-grain absolute inset-0"
-          style={{ opacity: grain, backgroundImage: `url(${grainUrl})` }}
-        />
-      )}
+      {grain > 0 && <GrainLayer alpha={grain} t={t} />}
       {vignette > 0 && (
         <div
           className="absolute inset-0"

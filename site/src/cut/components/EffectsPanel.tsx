@@ -7,7 +7,6 @@ import {
   AUDIO_EFFECT_IDS,
   audioFxBars,
   effectPreviewState,
-  grainTileUrl,
   isAudioEffect,
   LEAK_TINT,
   leakGradient,
@@ -38,7 +37,7 @@ import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useLabels } from "@/i18n/labels";
-import "./grain.css";
+import { GrainLayer } from "./GrainLayer";
 import { LightbarCanvas } from "./LightbarCanvas";
 
 /**
@@ -933,7 +932,6 @@ export function EffectSwatch({
   // The leak wanders at a pace tuned to a clip's seconds; the tile doubles its
   // clock so the roaming reads without a long watch.
   const st = effectPreviewState(id, 0.9, id === "lightleak" ? t * 2 : t);
-  const grainUrl = grainTileUrl();
   const wash = st.washes?.[0];
   // Filter blur radii are design px against the full frame; the swatch is a
   // small fraction of one, so the same radius smears it to a wash. Scale the
@@ -984,12 +982,7 @@ export function EffectSwatch({
           <SwatchScene frame={frame} />
         </span>
       )}
-      {!!st.grain && grainUrl && (
-        <span
-          className="cut-grain absolute inset-0"
-          style={{ opacity: st.grain, backgroundImage: `url(${grainUrl})` }}
-        />
-      )}
+      {!!st.grain && <GrainLayer alpha={st.grain} t={t} />}
       {!!st.vignette && st.vignette > 0 && (
         <span
           className="absolute inset-0"
