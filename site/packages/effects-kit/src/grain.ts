@@ -231,7 +231,7 @@ export function grainFilterLines(
     `[gns${tag}]scale=w='ceil(iw/${cell})':h='ceil(ih/${cell})':flags=neighbor,${flat},` +
       `noise=c0s=${NOISE_STRENGTH}:c0f=t${on},` +
       `lut=c0='clip(128+(val-${NOISE_MEAN})*${fmt(GRAIN_SD / NOISE_SD)}+0.5,0,255)'[gnc${tag}]`,
-    `[gnc${tag}][gnp${tag}]scale2ref=w=rw:h=rh:flags=bilinear[gnu${tag}][gnb${tag}]`,
+    `[gnc${tag}][gnp${tag}]scale2ref=w=iw:h=ih:flags=bilinear[gnu${tag}][gnb${tag}]`,
     `[gnu${tag}]format=${pixFmt}[gnl${tag}]`,
   ];
   const opacity = fmt(Math.min(1, alpha));
