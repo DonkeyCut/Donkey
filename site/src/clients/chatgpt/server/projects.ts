@@ -19,7 +19,7 @@ import { usageBytes } from "@/cut/server/cloud/usage";
 import { wakeRenderWorker } from "@/cut/server/cloud/wake";
 import type { ImportUrlResult } from "@/cut/worker/importUrlJob";
 import type { Download, Editor, Playback, ProjectView } from "@/clients/chatgpt/contracts";
-import { createEditorCode, editorBootDeadline } from "@/clients/chatgpt/server/oauthTokens";
+import { createEditorCode, editorBootDeadline, hasEditorSession } from "@/clients/chatgpt/server/oauthTokens";
 import type { ChatgptConfig } from "@/clients/chatgpt/server/config";
 import { READ_COMMANDS, unknownCommandNames } from "@/clients/chatgpt/server/catalog";
 
@@ -111,11 +111,13 @@ export function projectTools(
     return { ...emptyProjectView(), view: "project", project: await getOwnedProject(projectId) };
   }
 
-  /** How long a batch waits for the card: the claim window, or longer while
-   * a card this connection just framed boots its editor. */
+  /** How long a batch waits for the card: the claim window, longer while
+   * a card this connection just framed boots its editor, none when it has
+   * never signed an editor in. */
   const claimWait = {
     editorClaimMs: config.editorClaimMs,
     editorBootDeadline: () => editorBootDeadline(identity.grantId, db),
+    editorOpen: () => hasEditorSession(identity.grantId, db),
   };
 
   function requireEdit() {

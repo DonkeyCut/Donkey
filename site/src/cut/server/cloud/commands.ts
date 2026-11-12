@@ -74,7 +74,7 @@ const TERMINAL = new Set(["done", "error", "canceled", "dismissed"]);
  * window is measured from the row's age, the one clock the card's polling
  * and this wait share. */
 const claimWindowClosed = (row: Pick<JobRow, "createdAt">, claimMs: number) =>
-  Date.now() - row.createdAt.getTime() > claimMs;
+  Date.now() - row.createdAt.getTime() >= claimMs;
 
 /** A batch no card claimed in time: the worker runs it on the saved
  * project, unless it steps the card's history. */
@@ -103,13 +103,14 @@ async function expireBatch(row: Pick<JobRow, "id">): Promise<void> {
 /** Poll a job row until it settles or the budget runs out. The row comes back
  * either way; the caller reads its state. A command batch no card claims
  * within `editorClaimMs` goes to the worker, unless `editorBootDeadline` says
- * a card is still booting its editor; one whose editor stops beating ends in
- * error. Any other kind of job is the worker's, which is woken as needed. */
+ * a card is still booting its editor; when `editorOpen` says no editor could
+ * claim it, it goes at once. One whose editor stops beating ends in error.
+ * Any other kind of job is the worker's, which is woken as needed. */
 export async function waitForJob(
   userId: string,
   jobId: string,
   budgetMs: number,
-  opts: { editorClaimMs?: number; editorBootDeadline?: () => Promise<number> } = {}
+  opts: { editorClaimMs?: number; editorBootDeadline?: () => Promise<number>; editorOpen?: () => Promise<boolean> } = {}
 ): Promise<JobRow | null> {
   const deadline = Date.now() + budgetMs;
   const claimMs = opts.editorClaimMs ?? 3000;
@@ -120,7 +121,9 @@ export async function waitForJob(
     if (row.kind === EDITOR_BATCH) {
       // A card that framed a moment ago claims once its editor boots.
       const booting = row.state === "queued" && opts.editorBootDeadline && Date.now() < (await opts.editorBootDeadline());
-      if (row.state === "queued" && claimWindowClosed(row, claimMs) && !booting) {
+      // A host with no editor signed in (Codex) has no card to wait for.
+      const noEditor = row.state === "queued" && opts.editorOpen && !(await opts.editorOpen());
+      if (row.state === "queued" && claimWindowClosed(row, noEditor ? 0 : claimMs) && !booting) {
         await handOffBatch(row);
         continue;
       }

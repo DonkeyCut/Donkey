@@ -338,6 +338,16 @@ export async function editorBootDeadline(grantId: string, db = prisma): Promise<
   return latest?.consumedAt ? latest.consumedAt.getTime() + EDITOR_BOOT_MS : 0;
 }
 
+/** Whether this connection holds a live editor session: only an editor
+ * signed in through a card claims batches. */
+export async function hasEditorSession(grantId: string, db = prisma): Promise<boolean> {
+  const live = await db.chatgptToken.findFirst({
+    where: { grantId, kind: "session", expiresAt: { gt: new Date() } },
+    select: { hash: true },
+  });
+  return !!live;
+}
+
 /** The editor session a code produced, kept so revoking the connection ends it. */
 export async function recordEditorSession(
   grantId: string,

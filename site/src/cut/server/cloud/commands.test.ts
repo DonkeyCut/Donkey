@@ -108,6 +108,13 @@ test("a batch no card claims in time goes to the cloud worker, and the card wait
   expect((await claimEditorBatch("u", "p"))?.id).toBe(rows[1].id);
 });
 
+test("a connection with no editor open hands its batch to the worker at once", async () => {
+  // Codex never frames a card, so nothing could claim within the window.
+  const read = await queueCommands("u", "p", { commands: [{ name: "get_state", input: {} }], readOnly: true });
+  const row = await waitForJob("u", (read as { id: string }).id, 50, { editorClaimMs: 10_000, editorOpen: async () => false });
+  expect(row).toMatchObject({ kind: WORKER_BATCH, state: "queued" });
+});
+
 test("a batch waits past the claim window for a card that is still booting its editor", async () => {
   const queued = await queueCommands("u", "p", { commands: [{ name: "set_aspect", input: { aspect: "1:1" } }] });
   const id = (queued as { id: string }).id;
