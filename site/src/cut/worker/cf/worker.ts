@@ -9,6 +9,7 @@ import { Container, getContainer } from "@cloudflare/containers";
 import { CUT_MEDIA_HOST, CUT_WORKER_HOST } from "../../lib/hosts";
 import { serveMedia, type MediaEnv } from "./media";
 import { MAX_REPLICAS, replicasToStart, type WakeBody } from "./wakeSize";
+import { LONGEST_RUN_MS } from "../jobLimits";
 
 type WorkerEnv = MediaEnv & {
   CUT_RENDER_WORKER: unknown;
@@ -44,8 +45,9 @@ const replicaName = (i: number) => `cut-render-${i}`;
 
 export class CutRenderWorker extends Container<WorkerEnv> {
   // Backstop only: main.ts exits by itself when the queue drains. This stops
-  // a hung process that no longer polls (and so can't exit).
-  sleepAfter = "15m";
+  // a hung process that no longer polls (and so can't exit). Only a wake
+  // renews it, so it outlasts the longest job a replica may be running.
+  sleepAfter = Math.ceil(LONGEST_RUN_MS / 1000);
 
   constructor(ctx: unknown, env: WorkerEnv) {
     // The Container base types come from workers-types, which this file keeps

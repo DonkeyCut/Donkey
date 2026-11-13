@@ -9,6 +9,7 @@ import { runImportUrlJob } from "./importUrlJob";
 import { runTurnJob } from "./turnJob";
 import { runCommandJob } from "./commandJob";
 import { EDITOR_BATCH, WORKER_BATCH } from "../server/cloud/batchKinds";
+import { DEFAULT_MAX_RUNTIME_MS, DRAIN_MS, MAX_RUNTIME_MS } from "./jobLimits";
 import { describeRuntime, installHeadlessRuntime } from "../lib/headless/runtime";
 import { deleteObjects } from "./r2";
 import { failedJobFate, InputFault, staleRunningFate, TAB_EXPORT_SILENCE_MS } from "./settle";
@@ -46,30 +47,9 @@ const FAIL_EXIT_MS = 5 * 60_000;
 // A "running" row this quiet lost its worker; sweep it back to the queue.
 const STALE_RUNNING_MS = 60_000;
 const SWEEP_EVERY_MS = 15_000;
-// Cloudflare sends SIGTERM 15 minutes before SIGKILL and rolls replicas one at
-// a time, so a deploy can let a render finish rather than throw it away. Drain
-// inside that window, keeping enough of it back to requeue whatever is still
-// going when it closes.
-const DRAIN_MS = 13 * 60_000;
 /** Set when the platform sends SIGTERM: a run whose process stops from here
  * on is the shutdown's doing (`failedJobFate`). */
 let signaled = false;
-
-/** The longest a job of each kind may run. Everything else about a job's cost
- * is bounded when it is queued; this bounds the one thing that isn't — a
- * render that keeps ffmpeg talking forever holds a billed container. */
-const MAX_RUNTIME_MS: Record<string, number> = {
-  export: 60 * 60_000,
-  preview: 20 * 60_000,
-  card: 10 * 60_000,
-  hls: 3 * 60 * 60_000,
-  import_url: 20 * 60_000,
-  convert: 60 * 60_000,
-  proxy: 60 * 60_000,
-  agent_turn: 20 * 60_000,
-  [WORKER_BATCH]: 10 * 60_000,
-};
-const DEFAULT_MAX_RUNTIME_MS = 60 * 60_000;
 
 interface ActiveJob {
   handle: RenderHandle;
