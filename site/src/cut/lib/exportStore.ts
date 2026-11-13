@@ -199,6 +199,9 @@ export const useExports = create<ExportsState>((set, get) => ({
     // A job handed to the engine or the worker returns once queued; its file
     // lands later, in the feed.
     let queued = false;
+    // Why the tab gave the render up, by code or by the error's name — never
+    // its words, which carry file names.
+    let tabError: string | undefined;
     const renderOnWorker = async () => {
       release();
       renderer = "machine";
@@ -230,12 +233,13 @@ export const useExports = create<ExportsState>((set, get) => ({
           // The dock shows only the worker's row; the console keeps the
           // reason the tab gave up, or no one could find it.
           console.warn("The tab's render failed; the worker renders this export instead.", err);
+          tabError = errorFields(err, String(err)).errorCode ?? (err instanceof Error ? err.name : typeof err);
           await renderOnWorker();
         }
       } else {
         await renderOnWorker();
       }
-      track("export_finished", { ...shape, renderer, result: queued ? "queued" : "done" });
+      track("export_finished", { ...shape, renderer, result: queued ? "queued" : "done", ...(tabError ? { tabError } : {}) });
       // Pull the finished (or queued) job into the feed *before* retiring the
       // placeholder — dropping the local row first left a round-trip with
       // neither row on screen — and while the job row is still hidden, since
@@ -262,7 +266,7 @@ export const useExports = create<ExportsState>((set, get) => ({
         track("export_finished", { ...shape, renderer, result: "cancelled" });
         return;
       }
-      track("export_finished", { ...shape, renderer, result: "failed", error: errorFields(err, String(err)).errorCode ?? "unknown" });
+      track("export_finished", { ...shape, renderer, result: "failed", error: errorFields(err, String(err)).errorCode ?? "unknown", ...(tabError ? { tabError } : {}) });
       fail(err);
     }
   },
