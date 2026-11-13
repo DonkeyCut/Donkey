@@ -1551,7 +1551,7 @@ describe("clip color in the filtergraph", () => {
     expect(joined).toMatch(/\[dtc0ss\]gblur=sigma=1\.77\d*:planes=1\[dtc0sb\]/);
     expect(joined).toContain("[dtc0sr][dtc0sb]blend=c0_mode=grainextract,lutyuv=y='clip((val-32768)*0.750+32768,0,65535)'[dtc0sd]");
     // Clarity's window at 1920 tall is 43, past guided's reach: a reduced copy.
-    expect(joined).toContain("[dtc0cs]scale='ceil(iw/3)':'ceil(ih/3)':flags=bilinear,guided=radius=14:eps=0.010:planes=1[dtc0cq]");
+    expect(joined).toContain("[dtc0cs]scale='ceil(iw/3)':'ceil(ih/3)':flags=bilinear,guided=radius=14:eps=0.010:planes=1:mode=fast:sub=3[dtc0cq]");
     expect(joined).toContain("[dtc0cq][dtc0cx]scale=rw:rh:flags=bilinear[dtc0cb]");
     expect(joined).toContain("[dtc0cr][dtc0cb]blend=c0_mode=grainextract,lutyuv=y='clip((val-32768)*0.900+32768,0,65535)'[dtc0cd]");
     expect(joined).toContain("[dtc0o][dtc0sd]blend=c0_mode=grainmerge[dtc0m1]");
@@ -1573,7 +1573,7 @@ describe("clip color in the filtergraph", () => {
       const joined = g.join(";");
       expect(joined).toMatch(/\[dtc0ss\]gblur=sigma=0\.56\d*:planes=1\[dtc0sb\]/);
       // A window of 14 fits guided's reach: no reduced copy.
-      expect(joined).toContain("[dtc0cs]guided=radius=14:eps=0.010:planes=1[dtc0cb]");
+      expect(joined).toContain("[dtc0cs]guided=radius=14:eps=0.010:planes=1:mode=fast:sub=3[dtc0cb]");
       // Covering the frame, the picture is 1920 tall and 3413 wide.
       const covered = (
         await graphFor({ clips: [clip("wide.mp4", { fit: "fill", grade: { sharpen: 25 } })] })
@@ -1593,8 +1593,20 @@ describe("clip color in the filtergraph", () => {
     const joined = g.join(";");
     expect(joined).not.toContain("lut3d");
     expect(joined).toContain("[dtic0]split=3[dtc0o][dtc0cs][dtc0cr]");
-    expect(joined).toContain("[dtc0cs]guided=radius=8:eps=0.010:planes=1[dtc0cb]");
+    expect(joined).toContain("[dtc0cs]guided=radius=8:eps=0.010:planes=1:mode=fast:sub=2[dtc0cb]");
     expect(joined).toContain("[dtc0o][dtc0cd]blend=c0_mode=grainmerge[dtoc0]");
+  });
+
+  test("clarity's guided means run on a copy small enough to keep the window narrow", async () => {
+    // 850 rows give a window of 19, inside guided's reach. Its box sums cost
+    // the square of the window, so at full size this ran 0.35 s a frame and a
+    // 98 s export outlived the worker; four times smaller the window is 4.
+    const g = await graphFor({
+      width: 478,
+      height: 850,
+      clips: [clip("a.mp4", { grade: { clarity: 8 } })],
+    });
+    expect(g.join(";")).toContain("[dtc0cs]guided=radius=19:eps=0.010:planes=1:mode=fast:sub=4[dtc0cb]");
   });
 
   test("a graded overlay colors before its box pad, and a still keeps its alpha", async () => {

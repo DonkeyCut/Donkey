@@ -1254,6 +1254,11 @@ type PassOutput =
   | { kind: "delivery" }
   | { kind: "piece"; video: string; mix: string; stems: string[]; progress: [number, number] };
 
+// The widest window clarity's guided filter sums over on its reduced copy.
+// Its box sums cost the square of the window: a window of 19 at full size
+// took 0.35 s a frame, and 4 on a copy four times smaller takes 2.5 ms.
+const CLARITY_WORK_RADIUS = 5;
+
 /** One encode pass over `given`, composited whole and cut to its range. */
 async function renderPass(
   job: RenderHandle,
@@ -1963,6 +1968,11 @@ async function renderPass(
     // guided takes a window up to 20; a wider one runs on a copy reduced to
     // fit and is read back at the picture's own size, off one more copy.
     const sub = Math.ceil(radius / 20);
+    // guided's fast mode works the window's means out on a copy `fast` times
+    // smaller and applies them to the full picture, as the preview's GPU pass
+    // does at half size. The copy shrinks until the window there is narrow.
+    const fast = (r: number) => Math.max(2, Math.ceil(r / CLARITY_WORK_RADIUS));
+    const guided = (r: number) => `guided=radius=${r}:eps=${num(CLARITY_EPS)}:planes=1:mode=fast:sub=${fast(r)}`;
     const copies = 1 + (ks > 0 ? 2 : 0) + (kc > 0 ? (sub > 1 ? 3 : 2) : 0);
     lines.push(
       `[${inLabel}]split=${copies}[${t}o]${ks > 0 ? `[${t}ss][${t}sr]` : ""}${kc > 0 ? `[${t}cs][${t}cr]${sub > 1 ? `[${t}cx]` : ""}` : ""}`
@@ -1976,13 +1986,13 @@ async function renderPass(
     }
     if (kc > 0) {
       if (sub <= 1) {
-        lines.push(`[${t}cs]guided=radius=${radius}:eps=${num(CLARITY_EPS)}:planes=1[${t}cb]`);
+        lines.push(`[${t}cs]${guided(radius)}[${t}cb]`);
         lines.push(`[${t}cr][${t}cb]${extract},${gain(kc)}[${t}cd]`);
       } else {
         const r = Math.max(1, Math.round(radius / sub));
         lines.push(
           `[${t}cs]scale=${fexpr(`ceil(iw/${sub})`)}:${fexpr(`ceil(ih/${sub})`)}:flags=bilinear,` +
-            `guided=radius=${r}:eps=${num(CLARITY_EPS)}:planes=1[${t}cq]`
+            `${guided(r)}[${t}cq]`
         );
         lines.push(`[${t}cq][${t}cx]scale=rw:rh:flags=bilinear[${t}cb]`);
         lines.push(`[${t}cr][${t}cb]${extract},${gain(kc)}[${t}cd]`);
