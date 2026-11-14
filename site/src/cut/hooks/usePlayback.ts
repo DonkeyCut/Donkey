@@ -20,7 +20,15 @@ import { stageTimeAt } from "@/cut/lib/overlayLive";
 import { FrameCompositor, MISSING_FRAME, PENDING_FRAME, type Frame } from "@/cut/lib/composite";
 import { hdrCanvasSupport } from "@/cut/lib/hdrCanvas";
 import { displayIsHdr, HdrPresenter, onDisplayRangeChange, setHdrPreviewState } from "@/cut/lib/hdrPresent";
-import { crossHandles, duckGainAt, overlayPlan, soundCrossGain, trackZeroAt, trackZeroPlan } from "@/cut/lib/framePlan";
+import {
+  crossHandles,
+  duckGainAt,
+  overlayPlan,
+  pictureLag,
+  soundCrossGain,
+  trackZeroAt,
+  trackZeroPlan,
+} from "@/cut/lib/framePlan";
 import { type ClipFrameSource, FrameSourcePool, mappingKey, walkCostMs } from "@/cut/lib/frameSource";
 import { liveAudioFxAt } from "@/cut/lib/audioEffects";
 import { PreviewMixer, type Voice } from "@/cut/lib/previewMixer";
@@ -586,7 +594,7 @@ class Engine {
     // The picture on track 0 is the one being watched, so it is the one the
     // machine is judged on — see the meter in `perfTrace`.
     if (master && playing) {
-      const lag = frame ? Math.max(0, st - frame.timestamp) : 0;
+      const lag = pictureLag(span.asset, st, frame);
       // The trade does not wait for anyone to turn diagnostics on.
       this.noteLag(lag, performance.now(), src.byteBound);
       if (metering()) meterFrame(lag, !frame);

@@ -6,6 +6,7 @@ import {
   heldSpans,
   overlayPlan,
   overlayTransitionFx,
+  pictureLag,
   prerollLead,
   PREROLL_LEAD_S,
   soundCrossGain,
@@ -390,5 +391,23 @@ describe("one-frame clips on a 30 fps export", () => {
     const live = (t: number) => overlayPlan([1], () => spans, t, held);
     expect(live(1 / 30).map((l) => [l.span, l.at])).toEqual([[spans[0], spans[0].start]]);
     expect(live(2 / 30).map((l) => l.span)).toEqual([spans[1]]);
+  });
+});
+
+describe("pictureLag", () => {
+  // A still's one picture belongs to every moment of its clip, so a photo two
+  // seconds into its span is on time. Read as late, it steps the decode down.
+  test("a still is never behind", () => {
+    const still: MediaAsset = { ...asset, type: "image", duration: 0 };
+    expect(pictureLag(still, 2.5, { timestamp: 0 })).toBe(0);
+  });
+
+  test("a video frame is behind by its distance to the asked time", () => {
+    expect(pictureLag(asset, 2.5, { timestamp: 2 })).toBe(0.5);
+    expect(pictureLag(asset, 2, { timestamp: 2.1 })).toBe(0);
+  });
+
+  test("no picture yet counts as no lag", () => {
+    expect(pictureLag(asset, 2, null)).toBe(0);
   });
 });

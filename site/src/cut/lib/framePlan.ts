@@ -352,6 +352,17 @@ export function prerollLead(inPoint: number, speed: number): number {
 }
 
 /**
+ * Seconds the picture shown for source time `st` sits behind it. A still's one
+ * picture belongs to every moment of its clip, so a photo is never behind.
+ */
+export function pictureLag(asset: MediaAsset, st: number, frame: { timestamp: number } | null): number {
+  if (!frame || asset.type === "image") {
+    return 0;
+  }
+  return Math.max(0, st - frame.timestamp);
+}
+
+/**
  * Work out track 0's state at time `t`: the transition live across the join,
  * the master clip's own entrance/exit ramps, and the neighbour frame that
  * belongs behind an animation at an abutting cut.
