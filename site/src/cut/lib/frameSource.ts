@@ -34,7 +34,7 @@ import {
   type FrameCanvasSink,
   type MediaHandle,
 } from "./mediaRead";
-import { allowance, canvasBytes, decodedFrameBytes, holdMemory } from "./memoryBudget";
+import { allowance, canvasBytes, decodedFrameBytes, holdMemory, memoryCeiling, memoryTotal } from "./memoryBudget";
 import { meterPull, meterSource, meterWalk } from "./perfTrace";
 import { drawBlock } from "./blockSource";
 import { colorRead, fileAt, type ColorRead, type ReadFile } from "./sourceColor";
@@ -286,6 +286,14 @@ const BACK_FAR_S = 2.5;
  * second of playback — long enough that crossing a cut and coming back finds
  * the decoder still open. */
 const EVICT_GRACE = 90;
+/** The same grace on the clock. A machine drawing four frames a second takes
+ * twenty seconds to count ninety, and would hold every clip it played in that
+ * time open; after this long unwanted, a source is idle however few frames
+ * were drawn. */
+const EVICT_GRACE_MS = 1_500;
+/** Frames a source must miss before the clock can idle it, so a long pause —
+ * one frame drawn after a minute looking at a still — spends no grace. */
+const EVICT_MIN_FRAMES = 4;
 /**
  * Canvas backing the pool may hold in stood-down sources, past the ones the
  * decoder budget is keeping live.
@@ -699,6 +707,8 @@ export class ClipFrameSource {
   /** The engine's tick number when this was last asked for anything, for the
    * pool's eviction order. */
   touched = 0;
+  /** The pool's clock, in milliseconds, at that same ask. */
+  touchedAt = 0;
 
   /** When the pull awaiting the walk's next frame started, for the debug dump. */
   private nextStartedAt = 0;
@@ -1912,6 +1922,7 @@ export class ClipFrameSource {
 export class FrameSourcePool {
   private sources = new Map<string, ClipFrameSource>();
   private tick = 0;
+  private now = 0;
 
   private readonly release: () => void;
 
@@ -1928,8 +1939,19 @@ export class FrameSourcePool {
   }
 
   /** Advance the clock the eviction order is measured on. */
-  beginFrame(): void {
+  beginFrame(now = performance.now()): void {
     this.tick++;
+    this.now = now;
+  }
+
+  /** Whether a source has gone unwanted long enough to stand down: the grace
+   * in frames, or on the clock once a few frames have passed it by. */
+  private idle(src: ClipFrameSource): boolean {
+    const frames = this.tick - src.touched;
+    if (frames >= EVICT_GRACE) {
+      return true;
+    }
+    return frames >= EVICT_MIN_FRAMES && this.now - src.touchedAt >= EVICT_GRACE_MS;
   }
 
   /**
@@ -1960,6 +1982,7 @@ export class FrameSourcePool {
       this.sources.set(id, src);
     }
     src.touched = this.tick;
+    src.touchedAt = this.now;
     return src;
   }
 
@@ -2046,9 +2069,9 @@ export class FrameSourcePool {
     // gesture that ended; the source itself may be worth keeping warm, the
     // canvases under those frames are not.
     for (const s of this.sources.values())
-      if (this.tick - s.touched >= EVICT_GRACE) s.dropBack(true);
+      if (this.idle(s)) s.dropBack(true);
     const idle = [...this.sources.entries()]
-      .filter(([, s]) => this.tick - s.touched >= EVICT_GRACE)
+      .filter(([, s]) => this.idle(s))
       .sort((a, b) => a[1].touched - b[1].touched);
 
     // Past the decoder budget, the least recently read decoders stand down.
@@ -2072,7 +2095,7 @@ export class FrameSourcePool {
     for (const [id, src] of [...this.sources.entries()].sort((a, b) => b[1].touched - a[1].touched)) {
       if (src.suspended) continue;
       liveBytes += src.decoderBytes;
-      if (liveBytes <= decoderCap || this.tick - src.touched < EVICT_GRACE) continue;
+      if (liveBytes <= decoderCap || !this.idle(src)) continue;
       poolLog(`pool suspend ${id} (memory)`);
       src.suspend();
     }
@@ -2080,8 +2103,15 @@ export class FrameSourcePool {
     // Then the memory. The warm shelf is filled most-recently-read first until
     // the canvas budget runs out, and what does not fit closes for real. Only
     // stood-down sources are on the shelf, so nothing holding a decoder — and
-    // nothing the picture is being drawn from — is ever closed here.
-    const warmCap = allowance("previewCanvases", canvasBytes(WARM_PIXELS));
+    // nothing the picture is being drawn from — is ever closed here. The shelf
+    // is the one cache kept for later, so it also gives up whatever the rest
+    // of the editor leaves over this machine's ceiling: large frames on a
+    // Retina stage fill the live sources alone.
+    const others = memoryTotal() - canvasBytes(this.warmPixels);
+    const warmCap = Math.min(
+      allowance("previewCanvases", canvasBytes(WARM_PIXELS)),
+      Math.max(0, memoryCeiling() - others)
+    );
     let held = 0;
     let warm = 0;
     for (const [id, src] of [...this.sources.entries()].sort((a, b) => b[1].touched - a[1].touched)) {

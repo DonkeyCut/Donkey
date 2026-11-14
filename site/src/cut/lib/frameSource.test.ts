@@ -123,6 +123,21 @@ await stubModule<typeof import("./mediaProxy")>("./mediaProxy", import.meta.url,
 const { BACK_WINDOW, ClipFrameSource, FrameRing, FrameSourcePool, mappingKey, walkClaim } =
   await import("./frameSource");
 
+/** Every pool a test made. A pool reports what it holds to the page's memory
+ * budget until it is disposed, and the budget is one per page, so each test
+ * hands its pools back before the next one reads the total. */
+const pools: InstanceType<typeof FrameSourcePool>[] = [];
+const newPool = (...args: ConstructorParameters<typeof FrameSourcePool>) => {
+  const pool = new FrameSourcePool(...args);
+  pools.push(pool);
+  return pool;
+};
+afterEach(() => {
+  for (const pool of pools.splice(0)) {
+    pool.dispose();
+  }
+});
+
 /** Let the opens, walks and drains the last call set going run out. */
 const settle = async (rounds = 400) => {
   for (let i = 0; i < rounds; i++) await Promise.resolve();
@@ -407,7 +422,7 @@ describe("FrameSourcePool", () => {
   });
 
   test("one source per mapping and size, reused across frames", () => {
-    const pool = new FrameSourcePool(4);
+    const pool = newPool(4);
     pool.beginFrame();
     const a = pool.get("k", asset("a"), 480);
     const b = pool.get("k", asset("a"), 480);
@@ -422,7 +437,7 @@ describe("FrameSourcePool", () => {
     // mapping still names the same pictures at a new address, so the source
     // moves there itself — everything it has decoded keeps answering while
     // the new address opens behind it.
-    const pool = new FrameSourcePool(4);
+    const pool = newPool(4);
     pool.beginFrame();
     const before = pool.get("k", asset("a"), 480);
     expect(pool.get("k", asset("a"), 480)).toBe(before);
@@ -437,7 +452,7 @@ describe("FrameSourcePool", () => {
     // A ProRes master plays through the WASM decoder until its proxy is
     // written onto the asset; the same mapping then reads the proxy's URL,
     // in place, with nothing reloaded.
-    const pool = new FrameSourcePool(4);
+    const pool = newPool(4);
     pool.beginFrame();
     const master = asset("a");
     const before = pool.get("k", master, 480);
@@ -454,7 +469,7 @@ describe("FrameSourcePool", () => {
   });
 
   test("suspends the least recently asked-for, never this frame's", () => {
-    const pool = new FrameSourcePool(2);
+    const pool = newPool(2);
     pool.beginFrame();
     const old = pool.get("old", asset("a"), 480);
     pool.beginFrame();
@@ -477,7 +492,7 @@ describe("FrameSourcePool", () => {
     const uhd = (id: string) => asset(id, 3840, 2160);
     const hd = (id: string) => asset(id, 1920, 1080);
     const ids = ["a", "b", "c", "d", "e", "f"];
-    const pool = new FrameSourcePool(12);
+    const pool = newPool(12);
     const big = ids.map((id) => {
       pool.beginFrame();
       return pool.get(id, uhd(id), 480);
@@ -496,7 +511,7 @@ describe("FrameSourcePool", () => {
   });
 
   test("says what it is holding, live sources included", () => {
-    const pool = new FrameSourcePool(4);
+    const pool = newPool(4);
     expect(pool.decoderBytes).toBe(0);
     expect(pool.canvasBytes).toBe(0);
     pool.beginFrame();
@@ -513,7 +528,7 @@ describe("FrameSourcePool", () => {
 
     // Standing down gives the decoder back and keeps the canvases, which is
     // the whole point of the warm shelf.
-    const tight = new FrameSourcePool(0);
+    const tight = newPool(0);
     tight.beginFrame();
     tight.get("a", asset("a", 1920, 1080), 1080);
     const canvases = tight.canvasBytes;
@@ -524,7 +539,7 @@ describe("FrameSourcePool", () => {
   });
 
   test("standing down costs a decoder, not a source", () => {
-    const pool = new FrameSourcePool(1);
+    const pool = newPool(1);
     pool.beginFrame();
     const a = pool.get("a", asset("a"), 360);
     pool.beginFrame();
@@ -545,7 +560,7 @@ describe("FrameSourcePool", () => {
   test("closes what the canvas budget cannot keep", () => {
     // Big frames: a handful of sinks is the whole budget, so a montage of them
     // is bounded by memory rather than by a count.
-    const pool = new FrameSourcePool(2);
+    const pool = newPool(2);
     for (let i = 0; i < 24; i++) {
       pool.beginFrame();
       pool.get(`s${i}`, asset(`x${i}`, 3840, 2160), 2160);
@@ -554,7 +569,7 @@ describe("FrameSourcePool", () => {
     pool.evict();
     expect(pool.size).toBeLessThan(6);
     // Small frames of the same count fit, and all of them stay.
-    const small = new FrameSourcePool(2);
+    const small = newPool(2);
     for (let i = 0; i < 24; i++) {
       small.beginFrame();
       small.get(`s${i}`, asset(`x${i}`, 640, 360), 360);
@@ -565,11 +580,36 @@ describe("FrameSourcePool", () => {
     expect(small.active).toBe(2);
   });
 
+  test("the warm shelf gives way when the editor stands at the machine's ceiling", async () => {
+    // The shelf is the one cache kept for later, so it is what yields when
+    // everything else already fills what this machine allows.
+    const { holdMemory, memoryCeiling } = await import("./memoryBudget");
+    const fill = (pool: InstanceType<typeof FrameSourcePool>) => {
+      for (let i = 0; i < 24; i++) {
+        pool.beginFrame();
+        pool.get(`s${i}`, asset(`x${i}`, 640, 360), 360);
+      }
+      for (let i = 0; i < 200; i++) pool.beginFrame();
+      pool.evict();
+    };
+    const release = holdMemory("chunkMemory", () => memoryCeiling() - 40e6);
+    const full = newPool(2);
+    fill(full);
+    release();
+    expect(full.size).toBeLessThan(10);
+    full.dispose();
+
+    const roomy = newPool(2);
+    fill(roomy);
+    expect(roomy.size).toBe(24);
+    roomy.dispose();
+  });
+
   test("holds a source through the grace, so a busy cut never thrashes", () => {
     // A cut with more clips than the budget would otherwise close and reopen
     // decoders every frame, and reopening costs far more than the memory it
     // saves. Nothing is closed until it has gone unwanted for a while.
-    const pool = new FrameSourcePool(1);
+    const pool = newPool(1);
     pool.beginFrame();
     const a = pool.get("a", asset("a"), 480);
     pool.beginFrame();
@@ -580,8 +620,36 @@ describe("FrameSourcePool", () => {
     expect(pool.get("b", asset("b"), 480)).toBe(b);
   });
 
+  test("a machine drawing four frames a second stands decoders down on the clock", () => {
+    // The grace is a second and a half of playback. Counted in frames alone,
+    // a machine running behind would hold every clip of the last twenty
+    // seconds open — the decoders that put it behind in the first place.
+    const pool = newPool(1);
+    pool.beginFrame(0);
+    const a = pool.get("a", asset("a"), 360);
+    for (let i = 1; i <= 8; i++) {
+      pool.beginFrame(i * 250);
+      pool.get("b", asset("b"), 360);
+    }
+    pool.evict();
+    expect(a.suspended).toBe(true);
+    expect(pool.active).toBe(1);
+  });
+
+  test("a long pause is not a grace spent", () => {
+    // Time passing with nothing drawn is a person looking at a still picture,
+    // and the neighbour warmed before the pause is still the next thing read.
+    const pool = newPool(1);
+    pool.beginFrame(0);
+    const a = pool.get("a", asset("a"), 360);
+    pool.beginFrame(60_000);
+    pool.get("b", asset("b"), 360);
+    pool.evict();
+    expect(a.suspended).toBe(false);
+  });
+
   test("stays put while under budget", () => {
-    const pool = new FrameSourcePool(4);
+    const pool = newPool(4);
     pool.beginFrame();
     const a = pool.get("a", asset("a"), 480);
     pool.beginFrame();
@@ -641,7 +709,7 @@ describe("ClipFrameSource retarget", () => {
     // onto the master.
     reset();
     unopenable.length = 0;
-    const pool = new FrameSourcePool(4);
+    const pool = newPool(4);
     pool.beginFrame();
     const master = asset("lost");
     const proxied = { ...master, proxy: { fileName: "lost.proxy.mp4", sizeBytes: 1 }, proxyUrl: "https://example.test/lost.proxy.mp4" };
@@ -918,7 +986,7 @@ describe("ClipFrameSource backward walk", () => {
     // — and a clip the pointer has left lets its go the moment another walk
     // starts.
     reset();
-    const pool = new FrameSourcePool(4);
+    const pool = newPool(4);
     pool.beginFrame();
     const a = pool.get("a", asset("a"), 360);
     a.want(5, false);

@@ -237,6 +237,18 @@ export function memoryUsage(): MemoryUsage {
   return out;
 }
 
+/** What every registered cache is holding right now, in bytes. The same walk
+ * as `memoryUsage` with nothing allocated, for a caller on the frame loop. */
+export function memoryTotal(): number {
+  let n = 0;
+  for (const set of holders.values()) {
+    for (const bytes of set) {
+      n += bytes();
+    }
+  }
+  return n;
+}
+
 /** Least time between two walks of every reporter, for callers that want a
  * number rather than a peak. */
 const TOTAL_TTL_MS = 1_000;
