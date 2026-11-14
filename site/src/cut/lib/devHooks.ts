@@ -14,6 +14,7 @@ import { useGenScene } from "./genScene";
 import { edgeFramesPending, enrichAsset, importFileToProject } from "./media";
 import { awaitingFrame, startTrace, stopTrace, traceReport } from "./perfTrace";
 import { markSignedBatch } from "./mediaLinks";
+import { memoryUsage } from "./memoryBudget";
 import { prefetchCloudMedia } from "./mediaSync";
 import { playheadAt } from "./playhead";
 import { sweepSource } from "./sourceCompare";
@@ -56,6 +57,8 @@ export function installDevHooks(): void {
     // The export eval starts a real export through the store, the way the
     // dialog does, and watches the dock's feed for the file.
     useExports,
+    // The perf eval reads what each memory bucket holds after a play.
+    memoryUsage,
   };
   // The perf eval arms and reads the frame trace through here. Off until
   // `start()` is called, so an ordinary dev session records nothing.

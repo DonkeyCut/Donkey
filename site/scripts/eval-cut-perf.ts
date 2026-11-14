@@ -44,7 +44,7 @@
  *   npm run eval:cut-perf [--only <case>] [--runs N] [--out path]
  *                         [--enforce-budgets] [--headed] [--dump-trace] [--software-decode]
  *                         [--machine desktop|laptop|ryzen-5500u|potato|software-decode|ci] [--cpu N]
- *                         [--net <kbps>] [--rtt <ms>] [--big-file <path>]
+ *                         [--net <kbps>] [--rtt <ms>] [--big-file <path>] [--cpu-profile] [--chrome-trace] [--dpr N] [--device-memory GB]
  *
  * `--enforce-budgets` holds the run to the machine's gate: a case that
  * breaches is run again, to three runs, and the majority decides. A
@@ -1015,6 +1015,9 @@ interface EvalCase {
   transitions: boolean;
   /** Least link this case is measured over — see `linkKbps`. */
   minKbps?: number;
+  /** Most the editor may hold over this case, in place of the gate's own —
+   * see `caseMemMb`. */
+  memMb?: number;
   /** The project this case measures; the montage of stock clips when unset. */
   seed?: (page: Page) => Promise<Fixture>;
   /** A file put on the library shelf before the editor opens, for a case
@@ -1380,7 +1383,7 @@ async function judgePlay(
   const warmMb = Math.max(0, ...trace.warmMb);
   if (warmMb > GATE.warmMb) notes.push(`warm shelf holding ${warmMb}MB of canvas`);
   const memMb = Math.max(0, ...(trace.memMb ?? []));
-  if (memMb > GATE.memMb) notes.push(`editor holding ${memMb}MB`);
+  if (memMb > caseMemMb) notes.push(`editor holding ${memMb}MB`);
   // Long tasks are reported, not gated: this case judges sync, decay and
   // memory, and the stray dev-build hiccup that leaves every frame exact is
   // not a fail.
@@ -1567,6 +1570,67 @@ const userColdCase: EvalCase = {
     await playThrough(page, fx.duration);
     await setPlaying(page, false);
     return judgePlay(page, "play-user-project-cold", 1, userSteady(fx));
+  },
+};
+
+/** The memory budget's ceiling on an eight-gigabyte machine: a quarter of it. */
+const STARTER_CEILING_MB = 2048;
+
+/**
+ * The starter project every signup opens: 44 graded cuts of half a second at
+ * up to 1080p, under 56 titles, stickers, shapes and effects. A creator's
+ * first play of it on a 4-core Mac ran at 3 fps with canvases past the
+ * memory ceiling.
+ */
+const seedStarter = async (page: Page): Promise<Fixture> =>
+  page.evaluate(async () => {
+    const dev = (window as unknown as {
+      __cutDev: {
+        useEditor: { getState(): never; setState(p: unknown): void };
+        markSignedBatch?: (projectId: string, expiresAt: number | null) => void;
+        projectDuration(s: never): number;
+      };
+    }).__cutDev;
+    // Safari reports no device memory, and the budget assumes eight
+    // gigabytes for it: the ceiling the creator's session ran under.
+    Object.defineProperty(navigator, "deviceMemory", { value: 8, configurable: true });
+    const doc = await (await fetch("/cut-starter/project.json")).json();
+
+    // The doc's media is served beside it from the public folder.
+    const assets = doc.assets.map((a: { fileName?: string }) =>
+      a.fileName ? { ...a, url: `/cut-starter/media/${a.fileName}` } : a
+    );
+    dev.useEditor.setState({ ...doc, assets, loaded: true });
+    dev.markSignedBatch?.("", null);
+    await new Promise((r) => setTimeout(r, 200));
+    const starts = (doc.clips as { start: number }[]).map((c) => c.start).sort((a, b) => a - b);
+    return { cuts: starts.slice(1), duration: dev.projectDuration(dev.useEditor.getState()) };
+  });
+
+/** The starter project played straight through once, cold. */
+const starterCase: EvalCase = {
+  name: "play-starter-project",
+  bucket: "playback",
+  transitions: false,
+  // Forty-four 1080p cuts keep a dozen decoders live by design; what the
+  // budget promises for them is the ceiling it enforces on that machine.
+  memMb: STARTER_CEILING_MB,
+  seed: seedStarter,
+  run: async (page, fx) => {
+    await rewind(page);
+    await settle(page);
+    await startTrace(page);
+    await playThrough(page, fx.duration);
+    if (has("--detail")) {
+      await dumpDetail(page, 0);
+      const usage = await page.evaluate(() =>
+        (window as unknown as { __cutDev: { memoryUsage(): Record<string, number> } }).__cutDev.memoryUsage()
+      );
+      console.log(`[memory] ${Object.entries(usage).map(([k, v]) => `${k}=${Math.round(v / 1e6)}MB`).join(" ")}`);
+    }
+    await setPlaying(page, false);
+    // The first nine seconds are titles and stickers over no clip at all.
+    return judgePlay(page, "play-starter-project", 1, (p) => p.clipId !== null && p.t < fx.duration - 0.3);
   },
 };
 
@@ -2221,6 +2285,7 @@ const CASES: EvalCase[] = [
   montageCase("play-fast-cuts-long", 4),
   replayCase("play-replay-from-end"),
   ...(existsSync(path.join(OUT, USER_FILE)) ? [userColdCase, userReplayCase] : []),
+  starterCase,
   // One file on the timeline, which is what most projects are. Warm first, so
   // this one is about decode alone.
   longClipCase("play-one-long-clip", { fps: 30 }),
@@ -2281,6 +2346,10 @@ const CASES: EvalCase[] = [
  * about first reads raises this to where the link is not the answer.
  */
 let linkKbps = MACHINE.netKbps;
+
+/** The memory the case running now is held to. The gate's figure is tuned
+ * on the montage; a real project denser than it names its own. */
+let caseMemMb = GATE.memMb;
 
 /** Bytes handed to the page at a time over a paced link. Small enough that a
  * reader waiting on the first chunk of a long run has it after a fraction of
@@ -2558,6 +2627,9 @@ async function launch(): Promise<{ browser: Browser; page: Page }> {
   const context = await browser.newContext({
     extraHTTPHeaders: { "x-donkey-dev-auth-bypass": "1" },
     viewport: { width: 1600, height: 1000 },
+    // `--dpr 2` is a Retina laptop: the stage's backing store, and so the
+    // height the preview decodes at, doubles.
+    deviceScaleFactor: Number(arg("--dpr") ?? 1),
     // The fixture server's certificate is its own.
     ignoreHTTPSErrors: true,
   });
@@ -2581,6 +2653,12 @@ async function launch(): Promise<{ browser: Browser; page: Page }> {
     await context.addInitScript({ content: decoderShim(MACHINE) });
   if (MACHINE.outputLatencyS > 0)
     await context.addInitScript({ content: audioShim(MACHINE.outputLatencyS) });
+  // `--device-memory 8` is what the memory budget assumes for a browser that
+  // reports none, which is every Safari.
+  if (arg("--device-memory"))
+    await context.addInitScript({
+      content: `Object.defineProperty(navigator, "deviceMemory", { value: ${Number(arg("--device-memory"))} });`,
+    });
   // The editor's session gate is a client-side cookie read, and the only sign-in
   // this build offers is Google's. Answering that one request for the dev-bypass
   // user is the whole of the fake: every other request the page makes is real,
@@ -2878,6 +2956,7 @@ async function main(): Promise<void> {
       // that asks for a faster link asks for itself alone: carried forward, it
       // would hand every case after it a link the profile never granted, and
       // they would pass on a machine the profile says they should not.
+      caseMemMb = c.memMb ?? GATE.memMb;
       linkKbps =
         c.minKbps && MACHINE.netKbps > 0
           ? Math.max(MACHINE.netKbps, c.minKbps)
@@ -2889,7 +2968,20 @@ async function main(): Promise<void> {
         await open(page, projectId);
         const fx = await (c.seed ? c.seed(page) : seed(page, files, c.transitions));
         await settle(page);
+        // With `--cpu-profile`, a sampled profile of the case beside the
+        // report, for the question a trace cannot answer: which code ran.
+        const profiler = has("--cpu-profile") ? await page.context().newCDPSession(page) : null;
+        await profiler?.send("Profiler.enable");
+        await profiler?.send("Profiler.start");
+        // With `--chrome-trace`, the renderer's own timeline: the style,
+        // layout, paint and raster a CPU profile files under "(program)".
+        if (has("--chrome-trace")) await browser.startTracing(page, { categories: TRACE_CATEGORIES });
         r = await c.run(page, fx);
+        if (profiler) {
+          const { profile } = await profiler.send("Profiler.stop");
+          await writeFile(path.join(OUT, `${c.name}.cpuprofile`), JSON.stringify(profile));
+        }
+        if (has("--chrome-trace")) await writeFile(path.join(OUT, `${c.name}.trace.json`), await browser.stopTracing());
       } finally {
         // Leave the page on the home route first: an editor still open on the
         // project would keep writing to a doc the engine has just removed.
@@ -2908,6 +3000,10 @@ async function main(): Promise<void> {
 
   await writeReport(results);
 }
+
+/** What `--chrome-trace` records: the main thread's tasks and what the
+ * renderer did inside them. */
+const TRACE_CATEGORIES = ["devtools.timeline", "disabled-by-default-devtools.timeline", "disabled-by-default-devtools.timeline.invalidationTracking", "blink", "cc", "gpu"];
 
 async function writeReport(results: CaseResult[]): Promise<void> {
   const report = {
