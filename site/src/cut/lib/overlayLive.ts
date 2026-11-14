@@ -1,3 +1,6 @@
+import { isOverlayAnimated } from "@donkeycut/effects-kit";
+import type { Overlay } from "./types";
+
 /**
  * When an element is on screen.
  *
@@ -24,4 +27,15 @@ export function overlayLiveAt(o: { start: number; end: number }, t: number): boo
  */
 export function stageTimeAt(t: number, total: number): number {
   return Math.max(0, Math.min(t, total - END_HOLD));
+}
+
+/**
+ * Whether an element's picture can change while it is on screen: something
+ * moves it (a preset, keys, a camera, a doodle's strokes), a Lottie plays
+ * inside it, or a subject mask follows the footage under it. Every other
+ * element shows one picture for its whole span, and the preview leaves it
+ * alone as the playhead moves.
+ */
+export function overlayReadsClock(o: Overlay): boolean {
+  return isOverlayAnimated(o) || o.mask?.kind === "subject" || (o.kind === "sticker" && !!o.lottie);
 }

@@ -108,18 +108,30 @@ export function StagePictureFx({ children }: { children: React.ReactNode }) {
       paintGhost(0);
       return;
     }
+    // The box's size, kept by an observer. Read in `apply`, it would force a
+    // layout of the whole stage on every frame.
+    let width = 0;
+    let height = 0;
     const apply = () => {
       // The canvas's moment: the last frame's, with the playhead on the end.
       const at = stageTimeAt(previewAt(), projectDuration(useEditor.getState()));
       const states = liveEffectsAt(overlays, at).map((e) => e.state);
-      const box = ref.current;
-      const split = box ? rgbSplitFilter(states, box.clientWidth, box.clientHeight) : "";
+      const split = rgbSplitFilter(states, width, height);
       write([stageEffectFilter(states), split].filter(Boolean).join(" "), stageEffectTransform(states) ?? "");
       paintGhost(Math.max(0, ...states.map((s) => s.ghost ?? 0)));
     };
+    const sizes = new ResizeObserver(([entry]) => {
+      width = entry.contentRect.width;
+      height = entry.contentRect.height;
+      apply();
+    });
+    if (ref.current) {
+      sizes.observe(ref.current);
+    }
     apply();
     const stop = subscribePlayhead(apply);
     return () => {
+      sizes.disconnect();
       stop();
       write("", "");
       paintGhost(0);

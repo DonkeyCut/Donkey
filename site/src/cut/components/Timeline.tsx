@@ -3787,10 +3787,19 @@ function Playhead({
   // and re-aimed each frame at where the playhead is now, so it lands with the
   // playhead at the margin however far it moved during the glide.
   const glide = useRef<{ from: number; t0: number } | null>(null);
+  // The scroller's offset and width, kept by its own events. Read in the
+  // playhead callback, either one forces a layout of the timeline every frame.
+  const scroll = useRef({ left: 0, width: 0 });
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
+    scroll.current = { left: el.scrollLeft, width: el.clientWidth };
+    const sizes = new ResizeObserver(() => {
+      scroll.current.width = el.clientWidth;
+    });
+    sizes.observe(el);
     const onScroll = () => {
+      scroll.current.left = el.scrollLeft;
       if (followWrote.current !== null && Math.abs(el.scrollLeft - followWrote.current) < 1) {
         followWrote.current = null;
         return;
@@ -3800,7 +3809,10 @@ function Playhead({
       manualUntil.current = performance.now() + 5000;
     };
     el.addEventListener("scroll", onScroll);
-    return () => el.removeEventListener("scroll", onScroll);
+    return () => {
+      sizes.disconnect();
+      el.removeEventListener("scroll", onScroll);
+    };
   }, [scrollRef]);
 
   // The marker is one transform. Rendering a component sixty times a second to
@@ -3817,15 +3829,18 @@ function Playhead({
       if (!scroller || !playing) return;
       if (performance.now() < manualUntil.current) return;
       const sx = x + PAD_SIDE; // playhead position in scroll coordinates
-      const view = scroller.clientWidth;
+      const { left: scrolled, width: view } = scroll.current;
       // The trailing pad is room to drop clips into, so following stops once
       // the last frame reaches the right edge: a project that fits the
       // viewport never scrolls, and the end of a long one lands flush.
       const maxFollow = Math.max(0, total * pps + PAD_SIDE * 2 - view);
       const margin = () => Math.min(maxFollow, Math.max(0, sx - FOLLOW_MARGIN));
+      // Every write lies inside the content, so the browser has nothing to
+      // clamp; the scroll event's echo corrects the kept offset if it rounds.
       const write = (left: number) => {
         scroller.scrollLeft = left;
-        followWrote.current = scroller.scrollLeft; // read back: the browser clamps
+        followWrote.current = left;
+        scroll.current.left = left;
       };
       const now = performance.now();
       if (glide.current) {
@@ -3835,11 +3850,11 @@ function Playhead({
         if (p >= 1) glide.current = null;
         return;
       }
-      if (sx < scroller.scrollLeft + 24 || sx > scroller.scrollLeft + view - FOLLOW_MARGIN) {
+      if (sx < scrolled + 24 || sx > scrolled + view - FOLLOW_MARGIN) {
         const want = margin();
-        if (Math.abs(want - scroller.scrollLeft) <= 0.5) return;
+        if (Math.abs(want - scrolled) <= 0.5) return;
         if (reducedMotion()) write(want);
-        else glide.current = { from: scroller.scrollLeft, t0: now };
+        else glide.current = { from: scrolled, t0: now };
       }
     };
     glide.current = null;
@@ -4961,6 +4976,10 @@ function Filmstrip({
   // approximation (exact for the scalar sliders and the preset's scalars;
   // curves/wheels/hue bands show in the preview and exports).
   const { filter, tint } = gradeCssApprox(grade);
+  // A pulse repaints its slab on every frame, and a cut of short clips lays
+  // dozens of them; while the cut plays they hold still, so the frames go to
+  // the preview being watched.
+  const playing = useEditor((s) => s.playing);
   if (hidden) return <div className="tl-filmstrip pointer-events-none absolute inset-0" />;
   // No thumbs yet — the media is still streaming into the browser store. A
   // placeholder slab fills the box until the strip can draw real frames.
@@ -4977,6 +4996,9 @@ function Filmstrip({
       return (
         <div className="tl-filmstrip-failed pointer-events-none absolute inset-0 bg-[var(--skeleton)]" />
       );
+    }
+    if (playing) {
+      return <div className="tl-filmstrip-skeleton pointer-events-none absolute inset-0 bg-[var(--skeleton)]" />;
     }
     // Both states cover the clip box's black with an opaque neutral slab, so a
     // clip waiting on thumbnails reads as a placeholder against the timeline's

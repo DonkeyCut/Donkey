@@ -1,10 +1,10 @@
 import { beforeAll, describe, expect, test } from "bun:test";
-import type { ShapeOverlay } from "@donkeycut/effects-kit";
+import { WORD_EFFECT_IDS, type ShapeOverlay } from "@donkeycut/effects-kit";
 import { behindOverlaysAt, SubjectMaskCompositor } from "./behindPass";
 import { liveEffectsAt } from "./effectStack";
 import { renderProjectFrame } from "./exportRender";
 import { installSkiaRaster } from "./headless/skiaRaster";
-import { overlayLiveAt, stageTimeAt } from "./overlayLive";
+import { overlayLiveAt, overlayReadsClock, stageTimeAt } from "./overlayLive";
 import type { ExportDoc } from "./renderSnapshot";
 import type { Overlay, TextOverlay } from "./types";
 
@@ -110,5 +110,25 @@ describe("paused at the cut's end", () => {
 
   test("a moment inside the cut is its own", () => {
     expect(stageTimeAt(3, total)).toBe(3);
+  });
+});
+
+// The preview redraws an element as the playhead moves only when its picture
+// can change with the clock; the rest hold one picture for their whole span.
+describe("overlayReadsClock", () => {
+  test("a still element holds one picture", () => {
+    expect(overlayReadsClock(rect("still", 0, 2, "#ffffff"))).toBe(false);
+  });
+
+  test("an animation, a pose key or a word effect moves it", () => {
+    expect(overlayReadsClock({ ...rect("in", 0, 2, "#fff"), anim: { in: { style: "fade", seconds: 0.3 } } } as Overlay)).toBe(true);
+    expect(overlayReadsClock({ ...rect("kf", 0, 2, "#fff"), kf: [{ t: 0, x: 0.2 }, { t: 1, x: 0.8 }] } as Overlay)).toBe(true);
+    expect(overlayReadsClock({ ...behind("w", 0, 2), mask: undefined, anim: { words: { style: WORD_EFFECT_IDS[0] } } } as Overlay)).toBe(true);
+  });
+
+  test("a doodle, a Lottie and a subject mask change on their own", () => {
+    expect(overlayReadsClock({ ...rect("d", 0, 2, "#fff"), shape: "doodle" } as Overlay)).toBe(true);
+    expect(overlayReadsClock({ id: "l", kind: "sticker", assetId: "a", lottie: true, start: 0, end: 2, x: 0.5, y: 0.5, w: 0.2 } as Overlay)).toBe(true);
+    expect(overlayReadsClock(behind("s", 0, 2))).toBe(true);
   });
 });

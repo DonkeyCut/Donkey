@@ -3,7 +3,7 @@
 import { useTranslations } from "next-intl";
 import { creatorNames } from "@/cut/lib/defaultNames";
 import { guideSnapLines } from "@/cut/lib/guides";
-import { createContext, Fragment, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
+import { createContext, Fragment, memo, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import { releaseAnimRest, useAnimPreview } from "@/cut/lib/animPreview";
 import { startDrag } from "@/cut/lib/drag";
@@ -11,7 +11,7 @@ import { startSelectionDrag, togglePreviewSelection } from "@/cut/components/pre
 import { pictureGroupSelected } from "@/cut/lib/previewSelection";
 import { useSkim, usePreviewTime } from "@/cut/lib/playhead";
 import { projectDuration, useEditor } from "@/cut/lib/store";
-import { overlayLiveAt, stageTimeAt } from "@/cut/lib/overlayLive";
+import { overlayLiveAt, overlayReadsClock, stageTimeAt } from "@/cut/lib/overlayLive";
 import {
   captionStyle,
   cueAt,
@@ -376,7 +376,7 @@ export function OverlayLayer({
             armed={selected && !scrubbing}
             grouped={grouped}
             ghost={!inRange && !selected}
-            t={t}
+            t={clockOf(o, t, selected)}
             stageWidth={stageWidth}
             bandTransform={transform}
             registerBox={registerBox}
@@ -427,7 +427,7 @@ export function OverlayLayer({
               armed={false}
               grouped={false}
               ghost={false}
-              t={t}
+              t={clockOf(o, t, false)}
               stageWidth={stageWidth}
               registerBox={ignoreBox}
               snap={snap}
@@ -444,6 +444,19 @@ export function OverlayLayer({
 
 /** The ghost copy's boxes stay out of the snap registry. */
 const ignoreBox = () => {};
+
+/**
+ * The moment an element is drawn for. One whose picture never changes on
+ * screen is handed its own start, so the playhead moving re-renders nothing
+ * for it; a selected one follows the clock, since its grips and a drag write
+ * at the playhead.
+ */
+function clockOf(o: Overlay, t: number, selected: boolean): number {
+  if (selected || overlayReadsClock(o)) {
+    return t;
+  }
+  return o.start;
+}
 
 /** Re-read a face's metrics when the page finishes loading one. */
 const subscribeFaces = (changed: () => void) => {
@@ -695,7 +708,7 @@ function SubtitleCaption({
   );
 }
 
-function OverlayItem({
+const OverlayItem = memo(function OverlayItem({
   overlay: o,
   selected,
   armed,
@@ -1546,7 +1559,7 @@ function OverlayItem({
       )}
     </>
   );
-}
+});
 
 /**
  * The element's mask as CSS: the kit painter draws its coverage on a small
