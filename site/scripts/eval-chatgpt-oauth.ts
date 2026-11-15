@@ -188,6 +188,15 @@ const submitConsent = (
       body: new URLSearchParams({ nonce, decision }),
     }) as DonkeyAuthenticatedRequest,
   );
+// Consent answers with a page that refreshes to the callback: chatgpt.com
+// refuses its callback reached by redirecting the form POST.
+const callbackOf = async (response: Response) => {
+  const refresh = (await response.text()).match(
+    /http-equiv="refresh" content="0;url=([^"]+)"/,
+  );
+  assert.ok(refresh, "Consent must hand off to the callback from a page");
+  return new URL(refresh[1].replaceAll("&amp;", "&"));
+};
 const first = await openConsent("first-tab");
 const second = await openConsent("second-tab", first.cookie);
 const jar = second.cookie;
@@ -210,11 +219,9 @@ for (const [page, state] of [
   [second, "second-tab"],
 ] as const) {
   const response = await submitConsent(page.nonce, jar);
-  assert.equal(response.status, 303);
-  assert.equal(
-    new URL(response.headers.get("location")!).searchParams.get("state"),
-    state,
-  );
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("location"), null);
+  assert.equal((await callbackOf(response)).searchParams.get("state"), state);
   assert.equal(
     response.headers.get("set-cookie"),
     null,
