@@ -83,10 +83,18 @@ export type AnalyticsEvents = {
   generation_started: { kind: "video" | "image" | "music" | "voiceover"; refs: number };
   // An export, and how it ended: done when its file is written, queued when
   // the engine or the worker took it on, failed with the error code.
-  // tabError is why the tab gave a render up to the machine behind it, and
-  // freeStorageMb what this origin could still store when it failed.
+  // tabError is why the tab gave a render up to the machine behind it,
+  // errorCause and errorStatus what lay under a failure, and freeStorageMb
+  // what this origin could still store when it failed.
   export_started: ExportShape;
-  export_finished: ExportShape & { result: "done" | "queued" | "cancelled" | "failed"; error?: string; tabError?: string; freeStorageMb?: number };
+  export_finished: ExportShape & {
+    result: "done" | "queued" | "cancelled" | "failed";
+    error?: string;
+    tabError?: string;
+    errorCause?: string;
+    errorStatus?: number;
+    freeStorageMb?: number;
+  };
   // Cut projects home.
   project_created: { source: "projects_home" | "sidebar" | "file_import" | "chatgpt_card" | "template" | "home_prompt" | "home_blank" };
   folder_created: void;

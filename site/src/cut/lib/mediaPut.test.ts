@@ -55,6 +55,9 @@ test("a refused upload names the status and the storage's error code", async () 
   expect(err.code).toBe("upload_failed");
   expect(String(err.cause?.message)).toContain("403");
   expect(String(err.cause?.message)).toContain("SignatureDoesNotMatch");
+  // The status and the storage's code travel as fields too, for analytics.
+  expect(err.params.status).toBe(403);
+  expect(err.cause?.name).toBe("SignatureDoesNotMatch");
 });
 
 test("a dropped upload of a file the browser can no longer read carries the read failure", async () => {
@@ -74,6 +77,7 @@ test("a dropped upload of a readable file says how far it got", async () => {
 
   expect(err instanceof ConnectionLostError).toBe(true);
   expect(String(err.cause?.message)).toContain("3 of 5 bytes");
+  expect(err.cause?.name).toBe("ConnectionDropped");
 });
 
 test("a refused upload without XHR names the status too", async () => {

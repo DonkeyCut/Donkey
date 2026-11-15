@@ -132,6 +132,24 @@ function failureName(err: unknown): string {
   return typeof err;
 }
 
+/**
+ * What lay under a failure, for the event beside its code: the innermost
+ * cause by name, e.g. `NotReadableError` or R2's `SignatureDoesNotMatch`,
+ * and the HTTP status a refusal carried. Names and numbers only — the words
+ * can carry file names.
+ */
+function causeFields(err: unknown): { errorCause?: string; errorStatus?: number } {
+  let inner: unknown = err;
+  while (inner instanceof Error && inner.cause != null) {
+    inner = inner.cause;
+  }
+  const status = errorFields(err, String(err)).errorParams?.status;
+  return {
+    ...(inner === err ? {} : { errorCause: failureName(inner) }),
+    ...(typeof status === "number" ? { errorStatus: status } : {}),
+  };
+}
+
 /** The megabytes this origin can still store, when the browser says. A full
  * disk fails a tab render's scratch file and its saved export. */
 async function freeStorage(): Promise<number | undefined> {
@@ -312,6 +330,7 @@ export const useExports = create<ExportsState>((set, get) => ({
         ...shape, renderer, result: "failed", error: errorFields(err, String(err)).errorCode ?? "unknown",
         ...(tabError ? { tabError } : {}),
         ...(freeStorageMb === undefined ? {} : { freeStorageMb }),
+        ...causeFields(err),
       });
       fail(err);
     }

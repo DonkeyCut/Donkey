@@ -165,7 +165,7 @@ test("a tab render that fails goes to the worker and reports why", async () => {
   expect(events.finished()?.tabError).toBe("QuotaExceededError");
 });
 
-test("a browser export the tab and the worker both fail names both failures and the free storage", async () => {
+test("a browser export the tab and the worker both fail names both failures, their cause and the free storage", async () => {
   const mode = spyOn(backend, "getBackend").mockReturnValue(exportBackend("browser"));
   const probe = spyOn(exportRender, "canRenderInBrowser").mockResolvedValue(true);
   // A failure with no name of its own still has to say what it was.
@@ -173,7 +173,8 @@ test("a browser export the tab and the worker both fail names both failures and 
   const render = spyOn(exportClient, "runBrowserExport").mockImplementation(async () => {
     throw tabFailure;
   });
-  const uploadFailure = new UserError("upload_failed", "Upload failed.");
+  const uploadFailure = new UserError("upload_failed", "Upload failed.", { status: 403 });
+  uploadFailure.cause = Object.assign(new Error("The storage answered 403 SignatureDoesNotMatch."), { name: "SignatureDoesNotMatch" });
   const borrowed = spyOn(exportClient, "runBrowserExportInCloud").mockImplementation(async () => {
     throw uploadFailure;
   });
@@ -198,6 +199,8 @@ test("a browser export the tab and the worker both fail names both failures and 
   expect(finished?.error).toBe("upload_failed");
   expect(finished?.tabError).toBe("Error");
   expect(finished?.freeStorageMb).toBe(200);
+  expect(finished?.errorCause).toBe("SignatureDoesNotMatch");
+  expect(finished?.errorStatus).toBe(403);
   expect(reports.map((r) => r.cause)).toEqual([tabFailure, uploadFailure]);
 });
 

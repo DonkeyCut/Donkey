@@ -277,11 +277,14 @@ export async function presignedUpload(
 // `<Code>SignatureDoesNotMatch</Code>` in R2's XML reply.
 const STORAGE_ERROR_CODE = /<Code>([^<]+)<\/Code>/;
 
-/** A PUT the storage answered with a refusal, carrying its status and code. */
+/** A PUT the storage answered with a refusal. The status rides as a param
+ * and the storage's code names the cause, so analytics can carry both. */
 function uploadRefused(status: number, body: string): UserError {
   const code = STORAGE_ERROR_CODE.exec(body)?.[1];
-  const err = new UserError("upload_failed", "Upload failed.");
-  err.cause = new Error(`The storage answered ${status}${code ? ` ${code}` : ""}.`);
+  const err = new UserError("upload_failed", "Upload failed.", { status });
+  const refusal = new Error(`The storage answered ${status}${code ? ` ${code}` : ""}.`);
+  refusal.name = code ?? "StorageRefused";
+  err.cause = refusal;
   return err;
 }
 
@@ -295,7 +298,9 @@ async function uploadDropped(file: Blob, sent: number): Promise<ConnectionLostEr
   const err = new ConnectionLostError("upload_failed", "Upload failed.");
   try {
     await file.slice(0, 1).arrayBuffer();
-    err.cause = new Error(`The connection dropped after ${sent} of ${file.size} bytes.`);
+    const dropped = new Error(`The connection dropped after ${sent} of ${file.size} bytes.`);
+    dropped.name = "ConnectionDropped";
+    err.cause = dropped;
   } catch (readErr) {
     err.cause = readErr;
   }
