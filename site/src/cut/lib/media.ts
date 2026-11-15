@@ -273,6 +273,35 @@ export async function presignedUpload(
   return signed.key;
 }
 
+// The storage's own name for why it refused a PUT, e.g.
+// `<Code>SignatureDoesNotMatch</Code>` in R2's XML reply.
+const STORAGE_ERROR_CODE = /<Code>([^<]+)<\/Code>/;
+
+/** A PUT the storage answered with a refusal, carrying its status and code. */
+function uploadRefused(status: number, body: string): UserError {
+  const code = STORAGE_ERROR_CODE.exec(body)?.[1];
+  const err = new UserError("upload_failed", "Upload failed.");
+  err.cause = new Error(`The storage answered ${status}${code ? ` ${code}` : ""}.`);
+  return err;
+}
+
+/**
+ * A PUT that got no answer. The browser reports a body it could not read the
+ * same way as a dropped connection, so the file is read once more: a read
+ * failure (a stored file gone stale under the tab) is the cause, and
+ * otherwise how far the bytes got.
+ */
+async function uploadDropped(file: Blob, sent: number): Promise<ConnectionLostError> {
+  const err = new ConnectionLostError("upload_failed", "Upload failed.");
+  try {
+    await file.slice(0, 1).arrayBuffer();
+    err.cause = new Error(`The connection dropped after ${sent} of ${file.size} bytes.`);
+  } catch (readErr) {
+    err.cause = readErr;
+  }
+  return err;
+}
+
 /** PUT a blob to a presigned R2 URL. XHR because it is the only way to watch
  * the bytes leave, which is what an upload running behind the editor has to
  * report. A headless runtime has no XHR and nobody watching; fetch covers it. */
@@ -288,8 +317,8 @@ export function putSigned(
       headers: { "Content-Type": mime ?? (file.type || "application/octet-stream") },
       body: file,
       signal: opts?.signal,
-    }).then((res) => {
-      if (!res.ok) throw new UserError("upload_failed", "Upload failed.");
+    }).then(async (res) => {
+      if (!res.ok) throw uploadRefused(res.status, await res.text().catch(() => ""));
       opts?.onProgress?.(1);
     });
   }
@@ -298,14 +327,15 @@ export function putSigned(
     const xhr = new XMLHttpRequest();
     xhr.open("PUT", url);
     xhr.setRequestHeader("Content-Type", mime ?? (file.type || "application/octet-stream"));
-    if (opts?.onProgress) {
-      xhr.upload.onprogress = (e) => {
-        if (e.lengthComputable && e.total > 0) opts.onProgress!(e.loaded / e.total);
-      };
-    }
+    // How far the bytes got, for the report on a dropped upload.
+    let sent = 0;
+    xhr.upload.onprogress = (e) => {
+      sent = e.loaded;
+      if (opts?.onProgress && e.lengthComputable && e.total > 0) opts.onProgress(e.loaded / e.total);
+    };
     xhr.onload = () =>
-      xhr.status >= 200 && xhr.status < 300 ? resolve() : reject(new UserError("upload_failed", "Upload failed."));
-    xhr.onerror = () => reject(new ConnectionLostError("upload_failed", "Upload failed."));
+      xhr.status >= 200 && xhr.status < 300 ? resolve() : reject(uploadRefused(xhr.status, xhr.responseText));
+    xhr.onerror = () => void uploadDropped(file, sent).then(reject);
     xhr.onabort = () => reject(new DOMException("Upload cancelled.", "AbortError"));
     opts?.signal?.addEventListener("abort", () => xhr.abort(), { once: true });
     xhr.send(file);
