@@ -774,6 +774,61 @@ export async function decodeAudioSpan(
 const AUDIO_PREROLL = 0.12;
 
 /**
+ * A whole audio file decoded by the browser's own audio decoder, or null when
+ * the file is larger than `maxBytes` or that decoder cannot read it.
+ *
+ * One request and one decode, which runs apart from the decoders the picture
+ * uses: a 20 s soundtrack decodes this way in tens of milliseconds under a
+ * picture that leaves a walk over the same file reading slower than the clock.
+ */
+export async function decodeAudioFile(
+  src: string | Blob,
+  ctx: BaseAudioContext,
+  maxBytes: number
+): Promise<AudioBuffer | null> {
+  const bytes = await wholeBytes(coveredSrc("audio", src), maxBytes);
+  if (!bytes) return null;
+  try {
+    return await ctx.decodeAudioData(bytes);
+  } catch {
+    // A codec the browser's audio decoder lacks: the caller walks the file.
+    return null;
+  }
+}
+
+/** A file's bytes when it holds at most `maxBytes`, otherwise null. */
+async function wholeBytes(src: string | Blob, maxBytes: number): Promise<ArrayBuffer | null> {
+  const file = typeof src === "string" ? resolveRegisteredBlob(src) ?? src : src;
+  if (typeof file !== "string") {
+    return file.size <= maxBytes ? file.arrayBuffer() : null;
+  }
+
+  // A file the tab keeps in its chunk store is read from there, the way the
+  // picture's reader reads it.
+  const chunked = chunkSourceOptions(file);
+  if (chunked) {
+    try {
+      const size = await chunked.getSize();
+      if (size > maxBytes) return null;
+      // A copy: the decode takes ownership of the bytes it is given.
+      return (await chunked.read(0, size)).slice().buffer as ArrayBuffer;
+    } finally {
+      chunked.dispose();
+    }
+  }
+
+  // Anything else is one request, given up once its length says too large.
+  const abort = new AbortController();
+  const res = await trackedFetch(file)(file, { signal: abort.signal });
+  if (Number(res.headers.get("content-length") ?? 0) > maxBytes) {
+    abort.abort();
+    return null;
+  }
+  const bytes = await res.arrayBuffer();
+  return bytes.byteLength <= maxBytes ? bytes : null;
+}
+
+/**
  * Lay decoded chunks into one buffer covering `[from, to)`, or null when there
  * are none.
  *

@@ -15,6 +15,8 @@ import { AudioBuffer } from "node-web-audio-api";
  */
 
 const RATE = 48_000;
+/** One frame of the picture, the step every case drives the clock by. */
+const FRAME_S = 0.05;
 /** How much source audio one read off the walk hands back. */
 const PART_S = 0.2;
 const CLIP_S = 70;
@@ -127,6 +129,9 @@ let trackEnd = CLIP_S;
  * container parsed from nothing over the link. A voice that reopens mid-play
  * pays it; one that keeps its reader does not. */
 let openCostS = 0;
+/** What every read off a walk costs before it answers: a main thread busy
+ * opening the picture's decoders as a play begins. */
+let partCostS = 0;
 
 const waiting: { at: number; wake: () => void }[] = [];
 
@@ -143,7 +148,7 @@ function delivered(sourceTime: number): Promise<void> {
   return new Promise((wake) => waiting.push({ at, wake }));
 }
 
-const walks = { opened: 0 };
+const walks = { opened: 0, seeks: 0 };
 
 const openAudioWalk = (_url: string, from: number, to?: number) => {
   walks.opened++;
@@ -166,6 +171,7 @@ const openAudioWalk = (_url: string, from: number, to?: number) => {
         if (closed) return null;
       }
       if (wall < hangUntil) return new Promise<null>(() => {});
+      await after(partCostS);
       await delivered(pos + PART_S);
       if (closed) return null;
       if (wall < failUntil) throw new Error("the link dropped");
@@ -191,6 +197,7 @@ const openAudioWalk = (_url: string, from: number, to?: number) => {
       return pos;
     },
     seek(next: number) {
+      walks.seeks++;
       pos = next;
       done = false;
     },
@@ -217,6 +224,17 @@ const assembleAudio = (
 
 const reMints = { asked: 0 };
 const decodes = { asked: 0 };
+const wholeReads = { asked: 0 };
+/** How long a file read whole lasts, or null for a file too large to be read
+ * whole: the browser's own decode, one request and one answer. */
+let wholeFileS: number | null = null;
+
+const decodeAudioFile = async () => {
+  wholeReads.asked++;
+  await after(FRAME_S);
+  if (wholeFileS === null) return null;
+  return new AudioBuffer({ length: Math.round(wholeFileS * RATE), numberOfChannels: 1, sampleRate: RATE });
+};
 
 /** A span asked for in one go, which the link cannot answer until it has
  * delivered the file as far as the span's end. */
@@ -239,6 +257,7 @@ await stubModule<typeof import("./mediaRead")>("./mediaRead", import.meta.url, {
   openAudioWalk: openAudioWalk as never,
   assembleAudio,
   decodeAudioSpan: decodeAudioSpan as never,
+  decodeAudioFile: decodeAudioFile as never,
 });
 await stubModule<typeof import("./mediaLinks")>("./mediaLinks", import.meta.url, {
   reportMediaUrlError: () => {
@@ -249,7 +268,6 @@ await stubModule<typeof import("./mediaLinks")>("./mediaLinks", import.meta.url,
 const { PreviewMixer } = await import("./previewMixer");
 
 // ── driving a play ──────────────────────────────────────────────────────────
-const FRAME_S = 0.05;
 
 /** Let everything the frame set going settle before the clock moves again. */
 async function settle(): Promise<void> {
@@ -277,6 +295,18 @@ const voice = {
   gain: 1,
 };
 
+/** A soundtrack short enough, and small enough, to be read whole. */
+const BED_S = 20;
+const bed = {
+  id: "bed",
+  url: "bed.m4a",
+  start: 0,
+  in: 0,
+  out: BED_S,
+  retime: retimeOf({ in: 0, out: BED_S, speed: 1 }),
+  gain: 1,
+};
+
 /** Put every control back where a case starts. */
 function reset(file: { endEarlyAt?: number; trackEnd?: number } = {}): void {
   wall = 0;
@@ -285,11 +315,15 @@ function reset(file: { endEarlyAt?: number; trackEnd?: number } = {}): void {
   played = [];
   waiting.length = 0;
   walks.opened = 0;
+  walks.seeks = 0;
   reMints.asked = 0;
   decodes.asked = 0;
+  wholeReads.asked = 0;
+  wholeFileS = null;
   failUntil = 0;
   hangUntil = 0;
   openCostS = 0;
+  partCostS = 0;
   resumeBlockedUntil = 0;
   deviceOpensAt = 0;
   deviceLatency = 0;
@@ -480,6 +514,101 @@ describe("the preview's sound over a link that only just keeps up", () => {
     expect(played.length).toBeGreaterThan(0);
     expect(Math.min(...played.map((p) => p.from))).toBeLessThan(0.4);
     expect(walks.opened).toBe(1);
+  });
+
+  test("a play's sound runs unbroken once it starts", async () => {
+    // The failure this is here for: a soundtrack under a busy picture played a
+    // beat, dropped out for a third of a second, and came back, on every play.
+    // The first window was a third of a second and the next read assembled a
+    // whole second before scheduling any of it, so a read at twice the speed
+    // of the clock still landed after the sound in hand ran out.
+    reset();
+    headStart = CLIP_S; // the link is not the subject; the read's pace is
+    partCostS = PART_S / 2;
+    const mixer = new PreviewMixer();
+    mixer.start(0);
+    liveCtx = (mixer as unknown as { ctx: FakeContext }).ctx;
+    while (wall < 6) {
+      step();
+      mixer.update(Math.min(mixer.now(), CLIP_S), [voice]);
+      await settle();
+    }
+    mixer.dispose();
+    const first = Math.min(...played.map((p) => p.from));
+    expect(first).toBeLessThan(0.4);
+    expect(heard(played, first, 5)).toBeGreaterThan(0.99);
+  });
+
+  test("a read slower than the clock catches up without re-aiming every packet", async () => {
+    // A cold first play reads slower than the clock while the picture's
+    // decoders open. A group handed over the moment it holds anything lands
+    // behind the clock, and each one that does re-aims the walk, so the sound
+    // chased the clock a packet at a time and came in seconds late.
+    reset();
+    headStart = CLIP_S;
+    const mixer = new PreviewMixer();
+    mixer.start(0);
+    liveCtx = (mixer as unknown as { ctx: FakeContext }).ctx;
+    while (wall < 6) {
+      partCostS = wall < 1.5 ? PART_S * 1.5 : PART_S / 4;
+      step();
+      mixer.update(Math.min(mixer.now(), CLIP_S), [voice]);
+      await settle();
+    }
+    mixer.dispose();
+    expect(walks.seeks).toBeLessThan(3);
+    expect(heard(played, 2.5, 5.5)).toBeGreaterThan(0.99);
+  });
+
+  test("a soundtrack plays unbroken while its walk reads slower than the clock", async () => {
+    // The failure this is here for: a 20 s soundtrack under a picture decoding
+    // several videos at once. Its walk read 1.3 s for every second of sound,
+    // so each group landed after its moment and the music dropped out for most
+    // of the cut, while the browser's own decoder read the whole file in 44 ms.
+    // A file that small is read once, whole.
+    reset();
+    headStart = CLIP_S;
+    partCostS = PART_S * 1.5;
+    wholeFileS = BED_S;
+    const mixer = new PreviewMixer();
+    mixer.start(0);
+    liveCtx = (mixer as unknown as { ctx: FakeContext }).ctx;
+    while (wall < BED_S) {
+      step();
+      mixer.update(Math.min(mixer.now(), BED_S), [bed]);
+      await settle();
+    }
+    mixer.dispose();
+    const first = Math.min(...played.map((p) => p.from));
+    expect(first).toBeLessThan(0.4);
+    expect(heard(played, first, BED_S)).toBeGreaterThan(0.99);
+    expect(walks.opened).toBe(0);
+    expect(wholeReads.asked).toBe(1);
+  });
+
+  test("a file too large to hold whole is walked, and asked about once", async () => {
+    reset();
+    headStart = CLIP_S;
+    const mixer = new PreviewMixer();
+    mixer.start(0);
+    liveCtx = (mixer as unknown as { ctx: FakeContext }).ctx;
+    while (wall < 6) {
+      step();
+      mixer.update(mixer.now(), [bed]);
+      await settle();
+    }
+    // A seek re-reads the voice, and the answer about its file still stands.
+    mixer.stop();
+    mixer.start(10);
+    for (let i = 0; i < 40; i++) {
+      step();
+      mixer.update(mixer.now(), [bed]);
+      await settle();
+    }
+    mixer.dispose();
+    expect(wholeReads.asked).toBe(1);
+    expect(walks.opened).toBeGreaterThan(0);
+    expect(heard(played, 1, 5)).toBeGreaterThan(0.99);
   });
 
   test("a play's clock waits for its device and never steps back", async () => {
@@ -678,6 +807,112 @@ describe("the preview's sound over a link that only just keeps up", () => {
     expect(Math.min(...played.map((p) => p.from)) - pressed).toBeLessThan(0.5);
     // The file it read was the one it already had open.
     expect(walks.opened).toBe(1);
+  });
+
+  test("a play from a parked playhead starts with its sound in hand", async () => {
+    // The failure this is here for: a play began with nothing scheduled, and
+    // its first reads came back in bursts behind a picture opening its
+    // decoders, so the soundtrack played a sliver and dropped out. The parked
+    // playhead's priming read keeps what it decoded, so the play starts with
+    // that much sound already scheduled and a stalled read has it to cover.
+    reset();
+    headStart = CLIP_S;
+    const mixer = new PreviewMixer();
+    mixer.start(0);
+    liveCtx = (mixer as unknown as { ctx: FakeContext }).ctx;
+    mixer.stop();
+    for (let i = 0; i < 20; i++) {
+      step();
+      mixer.warm(40, [voice]);
+      await settle();
+    }
+    played = [];
+    const pressed = ctxTime;
+    const pressedWall = wall;
+    mixer.start(40);
+    while (wall < pressedWall + 3) {
+      partCostS = wall < pressedWall + 0.3 ? 0.4 : PART_S / 4;
+      step();
+      mixer.update(Math.min(mixer.now(), CLIP_S), [voice]);
+      await settle();
+    }
+    mixer.dispose();
+    // From the first frame the play draws; the press itself is a frame
+    // before it here, where the engine makes both in one tick.
+    expect(heard(played, pressed + FRAME_S, pressed + 2.5)).toBeGreaterThan(0.99);
+  });
+
+  test("a pause primes the sound the resume starts with", async () => {
+    // A pause re-aims each walk at the paused moment, and a walk standing
+    // there read as warm enough, so the resume began with nothing in hand and
+    // a stalled read cut the soundtrack a beat after it came back. The engine
+    // draws a paused frame once, so that one warm is the one that primes.
+    reset();
+    headStart = CLIP_S;
+    const mixer = new PreviewMixer();
+    mixer.start(0);
+    liveCtx = (mixer as unknown as { ctx: FakeContext }).ctx;
+    for (let i = 0; i < 60; i++) {
+      step();
+      mixer.update(Math.min(mixer.now(), CLIP_S), [voice]);
+      await settle();
+    }
+    const at = mixer.now();
+    mixer.stop();
+    mixer.warm(at, [voice]);
+    for (let i = 0; i < 10; i++) {
+      step();
+      await settle();
+    }
+    played = [];
+    const pressed = ctxTime;
+    const pressedWall = wall;
+    mixer.start(at);
+    while (wall < pressedWall + 3) {
+      partCostS = wall < pressedWall + 0.3 ? 0.4 : PART_S / 4;
+      step();
+      mixer.update(Math.min(mixer.now(), CLIP_S), [voice]);
+      await settle();
+    }
+    mixer.dispose();
+    expect(heard(played, pressed + FRAME_S, pressed + 2.5)).toBeGreaterThan(0.99);
+  });
+
+  test("the page's first play is warmed once the page has been touched", async () => {
+    // A context used to open with the first play, so that play had nothing
+    // primed and started with no sound in hand. Once the page has had a
+    // gesture the browser lets a context run, and the parked playhead warms
+    // the first play like any other.
+    reset();
+    headStart = CLIP_S;
+    const nav = globalThis.navigator as unknown as Record<string, unknown>;
+    const had = Object.getOwnPropertyDescriptor(nav, "userActivation");
+    Object.defineProperty(nav, "userActivation", { value: { hasBeenActive: true }, configurable: true });
+    const mixer = new PreviewMixer();
+    try {
+      for (let i = 0; i < 20; i++) {
+        step();
+        mixer.warm(40, [voice]);
+        liveCtx = (mixer as unknown as { ctx: FakeContext | null }).ctx;
+        await settle();
+      }
+      played = [];
+      const pressed = ctxTime;
+      const pressedWall = wall;
+      mixer.start(40);
+      liveCtx = (mixer as unknown as { ctx: FakeContext }).ctx;
+      while (wall < pressedWall + 3) {
+        partCostS = wall < pressedWall + 0.3 ? 0.4 : PART_S / 4;
+        step();
+        mixer.update(Math.min(mixer.now(), CLIP_S), [voice]);
+        await settle();
+      }
+      expect(heard(played, pressed + FRAME_S, pressed + 2.5)).toBeGreaterThan(0.99);
+    } finally {
+      mixer.dispose();
+      if (had) Object.defineProperty(nav, "userActivation", had);
+      else delete nav.userActivation;
+    }
   });
 
   test("keeps its readers when the clock jumps", async () => {
