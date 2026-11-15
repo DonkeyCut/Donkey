@@ -5,7 +5,7 @@ import { useCallback, useState } from "react";
 import { openCutDb } from "./cache";
 
 /**
- * Per-project view state (zoom level, timeline panel height) — how this
+ * Per-project view state (zoom level, timeline panel height, guides hidden) — how this
  * browser looks at a project, not part of the cut. Stored in IndexedDB
  * keyed by project id; project.json only carries real content.
  *
@@ -15,6 +15,8 @@ import { openCutDb } from "./cache";
 export interface ProjectUiState {
   pxPerSec?: number;
   timelineH?: number;
+  /** The chosen guides are hidden (⌘;). */
+  guidesHidden?: boolean;
 }
 
 const STORE = "project-ui";

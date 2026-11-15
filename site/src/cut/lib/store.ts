@@ -496,7 +496,8 @@ export interface EditorState {
   guides: GuideId[];
   /** The custom guide lines, drawn when "custom" is among `guides`. */
   guideLines: GuideLines;
-  /** Guides stay chosen but draw nothing (⌘;). Not a doc field. */
+  /** Guides stay chosen but draw nothing (⌘;). View state, kept per project
+   * in this browser. */
   guidesHidden: boolean;
   /** The frame's own color, behind every clip and element. A cut made of
    * nothing but titles and shapes plays over it, a fitted clip letterboxes
@@ -2508,7 +2509,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       try {
         set({
           ...docFields(doc, assets),
-          guidesHidden: false,
+          guidesHidden: ui.guidesHidden === true,
           // View state lives in IndexedDB; doc.ui covers projects saved
           // before the move.
           pxPerSec: clampPps(ui.pxPerSec ?? doc.ui?.pxPerSec ?? 60),
@@ -5735,6 +5736,16 @@ useEditor.subscribe((s, prev) => {
     (s.assets !== prev.assets && beatsEdited(prev.assets, s.assets))
   )
     docSeq++;
+});
+
+// Hiding or showing the guides is kept with the project's view state, so a
+// project opens the way it was left. A load writes it from that state and
+// saves nothing.
+useEditor.subscribe((s, prev) => {
+  if (s.guidesHidden === prev.guidesHidden || hydrating || !s.projectId || s.projectId !== prev.projectId) {
+    return;
+  }
+  saveUiState(s.projectId, { guidesHidden: s.guidesHidden });
 });
 
 // A drag's release settles the magnet: the gesture's writes held off while it

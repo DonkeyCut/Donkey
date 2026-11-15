@@ -2670,3 +2670,17 @@ describe("adopting a merged document", () => {
     expect(s().clips.map((c) => c.id)).toEqual([kept.id, gone.id, mine.id]);
   });
 });
+
+describe("guides shown or hidden", () => {
+  beforeEach(() => s().openProjectDoc("guides", { name: "Guides", guides: ["thirds"] }, []));
+
+  test("a project opens with its guides hidden when they were hidden as it closed", () => {
+    s().applyDocState({ name: "Guides", guides: ["thirds"] }, [], { guidesHidden: true });
+    expect(s().guides).toEqual(["thirds"]);
+    expect(s().guidesHidden).toBe(true);
+  });
+
+  test("a project with no view state opens with its guides showing", () => {
+    expect(s().guidesHidden).toBe(false);
+  });
+});
