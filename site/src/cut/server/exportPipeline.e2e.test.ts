@@ -752,13 +752,14 @@ describe("a join between two upper-track clips", () => {
             const row = new Uint8Array(
               ffmpegOut(["-i", job.outPath, "-vf", `select=eq(n\\,${FRAME}),crop=160:2:0:44`, "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"])
             );
-            // The channels that dominate the pixel. An HLG file read back
-            // without its transfer comes out muted, so a channel counts by
-            // its share of the brightest one.
+            // The channel that dominates the pixel. An HLG file read back
+            // without its transfer and primaries comes out muted, its green
+            // carrying red at about 70% (133, 188, 68), so only the brightest
+            // channel counts.
             const shows = (x: number) => {
               const [r, g, b] = row.slice(Math.round(x * 160) * 3, Math.round(x * 160) * 3 + 3);
               const top = Math.max(r, g, b);
-              const on = (v: number) => top > 100 && v > 0.75 * top;
+              const on = (v: number) => top > 100 && v === top;
               return { r: on(r), g: on(g), b: on(b) };
             };
             expect(c.expect.map(([x]) => [x, shows(x)])).toEqual(c.expect);
