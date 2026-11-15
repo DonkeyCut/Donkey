@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, jest, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -2149,58 +2149,32 @@ describe("clips shorter than an output frame", () => {
 });
 
 describe("the ffmpeg stall watchdog", () => {
-  // A wedged ffmpeg keeps printing its stats line twice a second with the
-  // cursor frozen ("frame=    4 ... time=00:00:00.16"). The watchdog counts
-  // that as silence. The fake ffmpeg prints two stats lines, the second a
-  // frozen repeat or a step on, and the fake clock runs 130s across them.
+  // A wedged ffmpeg keeps printing its stats line with the cursor frozen
+  // ("frame=    4 ... time=00:00:00.10"). The watchdog counts that as
+  // silence. The fake ffmpeg prints a line every 100ms for 1.5s, frozen or
+  // stepping on, against a 500ms bound on the real clock. A fake clock across
+  // a live process stalls its pipe reads on a loaded runner.
+  const STALL_MS = 500;
   const LINE = (time: string) => `frame=    4 fps=0.0 q=-0.0 size=     256KiB time=${time} bitrate=12559.5kbits/s speed=0.0007x\r`;
-
-  // The fake waits for a step file before each next move. A write to its
-  // stdin can sit unflushed while the fake clock holds the stream's timers,
-  // which left the moving run waiting forever on a loaded CI runner.
-  const fakeFfmpeg = (bin: string) => {
-    const waitFor = (step: string) => `while [ ! -e '${path.join(bin, step)}' ]; do sleep 0.01; done`;
-    return [
-      "#!/bin/bash",
-      `printf '${LINE("00:00:00.16")}' >&2`,
-      waitFor("step1"),
-      `[ "$1" = frozen ] && printf '${LINE("00:00:00.16")}' >&2 || printf '${LINE("00:00:00.20")}' >&2`,
-      waitFor("step2"),
-    ].join("\n");
-  };
-
-  // A run that times out skips its own cleanup; the fake clock must not
-  // outlive it, or every later file in the process stalls on it.
-  afterEach(() => {
-    jest.useRealTimers();
-  });
+  const FAKE_FFMPEG = [
+    "#!/bin/bash",
+    "for i in $(seq 10 24); do",
+    `  [ "$1" = frozen ] && t=00:00:00.10 || t=00:00:00.$i`,
+    `  printf '${LINE("%s")}' "$t" >&2`,
+    "  sleep 0.1",
+    "done",
+  ].join("\n");
 
   const runAcross = async (mode: "frozen" | "moving") => {
     const bin = await mkdtemp(path.join(os.tmpdir(), "cut-stall-"));
-    await writeFile(path.join(bin, "ffmpeg"), fakeFfmpeg(bin));
+    await writeFile(path.join(bin, "ffmpeg"), FAKE_FFMPEG);
     await chmod(path.join(bin, "ffmpeg"), 0o755);
     const pathBefore = process.env.PATH;
     process.env.PATH = `${bin}:${pathBefore}`;
-    jest.useFakeTimers();
     try {
       const job: RenderHandle = { tmpDir: bin, outPath: path.join(bin, "out.mp4"), progress: 0, log: [] };
-      const run = runFfmpeg(job, [mode]);
-      const settled = run.then(() => "done", (err: Error) => err.message);
-      const stderr = job.proc!.stderr!;
-      const nextLine = () => new Promise((resolve) => stderr.once("data", resolve));
-
-      // Each step waits for ffmpeg's line, moves the clock, then lets the
-      // fake print its next line.
-      await nextLine();
-      jest.advanceTimersByTime(100_000);
-      const second = nextLine();
-      await writeFile(path.join(bin, "step1"), "");
-      await second;
-      jest.advanceTimersByTime(30_000);
-      await writeFile(path.join(bin, "step2"), "");
-      return await settled;
+      return await runFfmpeg(job, [mode], undefined, STALL_MS).then(() => "done", (err: Error) => err.message);
     } finally {
-      jest.useRealTimers();
       process.env.PATH = pathBefore;
       await rm(bin, { recursive: true, force: true });
     }

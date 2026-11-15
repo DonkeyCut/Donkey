@@ -93,6 +93,9 @@ const STALL_HOLD_MS = 200;
  */
 const DECODER_BUDGET = 12;
 
+/** An upper-track layer's frame motion: none, held once for every join. */
+const STILL = { dx: 0, dy: 0 };
+
 /** Source time of a clip at timeline time `t`. */
 const sourceTimeOf = (clip: VideoClip, t: number) =>
   retimeOf(clip).srcAt(Math.max(0, t - clip.start));
@@ -873,12 +876,38 @@ class Engine {
     if (plan.veil > 0) this.comp.fillBlackVeil(plan.veil, rectOf(master.clip));
   }
 
-  /** Draw the overlay tracks over track 0, further-back first. */
+  /** Draw the overlay tracks over track 0, further-back first. A live join
+   * draws its pair as one layer, the incoming side decoding alongside the
+   * outgoing one as track 0's does. */
   private drawOverlays(t: number, playing: boolean) {
-    for (const { span, clip, alpha, zoom } of this.liveOverlays(t)) {
+    let joined = false;
+    for (const { span, clip, alpha, zoom, join } of this.liveOverlays(t)) {
       const frame = this.frameFor(span, t, playing);
+      if (join) {
+        joined = true;
+        this.comp.drawOverlayJoin(
+          join.style,
+          join.p,
+          {
+            masterFrame: frame,
+            masterClip: clip,
+            masterAlpha: alpha,
+            masterZoom: zoom,
+            masterFx: STILL,
+            incFrame: this.frameFor(join.incoming, join.incoming.start, playing),
+            incClip: join.incoming.clip,
+            incAlpha: join.incAlpha,
+            incZoom: join.incZoom,
+          },
+          t
+        );
+        continue;
+      }
       if (frame.kind !== "ready") continue;
       this.comp.drawIntoRect(frame, rectOf(clip), clipCovers(clip), alpha, t, zoom, clip);
+    }
+    if (!joined) {
+      this.comp.releaseJoin();
     }
   }
 

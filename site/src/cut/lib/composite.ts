@@ -31,6 +31,8 @@ import {
   CLOCK_SWEEP,
   clampBand,
   clampFeather,
+  DIP_SWITCH,
+  dipVeil,
   featherAlpha,
   shapeEase,
   SLICE_TAPS,
@@ -155,6 +157,17 @@ export class FrameCompositor {
   /** A soft-edged transition draws its incoming shot here, then fades it
    * out along the edge before laying it over the outgoing one. */
   private featherScratch: Surface | null = null;
+  /** An upper-track join draws its pair here, clear around them, before it
+   * lands over the tracks beneath. Held only while a join is live. */
+  private joinScratch: Surface | null = null;
+  /** Who last drew through the feather scratch: a join layer frees it with
+   * the join scratch, a track 0 join keeps it. */
+  private featherBy: "frame" | "layer" = "frame";
+  /** Where a join draws: onto the frame, or onto the join scratch as one
+   * upper-track layer — there a veil keeps to the layer's own pixels, a
+   * region the join hands to one shot holds that shot alone, and a blend
+   * mixes the two shots' coverage with their color. */
+  private joinOnto: "frame" | "layer" = "frame";
   /** The fade under the card edge, rebuilt only when the band moves. */
   private cardFade: { ctx: Ctx; edge: number; bottom: number; fill: CanvasGradient } | null = null;
   /** The card shadow's ink, rebuilt only when its opacity changes. */
@@ -271,7 +284,8 @@ export class FrameCompositor {
       | "cardPop"
       | "cardLayer"
       | "cardPost"
-      | "featherScratch",
+      | "featherScratch"
+      | "joinScratch",
     w: number,
     h: number
   ): { surface: Surface; resized: boolean } {
@@ -323,8 +337,10 @@ export class FrameCompositor {
     const W = this.canvas.width;
     const H = this.canvas.height;
     ctx.fillStyle = `rgba(${rgb},${Math.min(1, amount).toFixed(3)})`;
+    ctx.globalCompositeOperation = this.joinOnto === "layer" ? "source-atop" : "source-over";
     if (rect) ctx.fillRect(rect.x * W, rect.y * H, rect.w * W, rect.h * H);
     else ctx.fillRect(0, 0, W, H);
+    ctx.globalCompositeOperation = "source-over";
   }
 
   fillBlackVeil(amount: number, rect?: FrameRect) {
@@ -1364,8 +1380,26 @@ export class FrameCompositor {
       ctx.beginPath();
       path();
       ctx.clip();
+      // On a layer the region holds the shot drawn into it alone, so the
+      // tracks beneath show wherever that shot is clear.
+      if (this.joinOnto === "layer") {
+        ctx.globalAlpha = 1;
+        ctx.globalCompositeOperation = "destination-out";
+        ctx.fillStyle = "#000000";
+        ctx.fillRect(0, 0, W, H);
+        ctx.globalCompositeOperation = "source-over";
+      }
       draw();
       ctx.restore();
+    };
+    // A blend draws the incoming shot over the outgoing one on the frame;
+    // on a layer it mixes them, coverage and all.
+    const blendInc = (filter: string) => {
+      if (this.joinOnto === "frame") {
+        drawInc();
+        return;
+      }
+      this.blendIntoLayer(d.incAlpha, filter, () => drawInc(1));
     };
     // Only the absence of an incoming clip cancels the transition. One whose
     // picture merely hasn't decoded yet still runs the layered styles: a dip's
@@ -1403,12 +1437,9 @@ export class FrameCompositor {
     switch (style) {
       case "dipblack":
       case "dipwhite": {
-        // Matches xfade fadeblack/fadewhite's measured plateau: out by ~30%,
-        // solid to ~60%, in over the rest.
-        const veil = Math.max(0, Math.min(1, Math.min(p / 0.3, (1 - p) / 0.4)));
-        if (p < 0.45) drawMaster();
+        if (p < DIP_SWITCH) drawMaster();
         else drawInc(1);
-        this.fillVeil(style === "dipwhite" ? "255,255,255" : "0,0,0", veil);
+        this.fillVeil(style === "dipwhite" ? "255,255,255" : "0,0,0", dipVeil(p));
         break;
       }
       case "blur": {
@@ -1417,9 +1448,10 @@ export class FrameCompositor {
         // ctx.filter this degrades to the plain crossfade below.
         const supports = "filter" in ctx;
         const r = Math.max(0.5, Math.min(W, H) * TRANSITION_BLUR * (1 - Math.abs(2 * p - 1)));
-        if (supports) ctx.filter = `blur(${r.toFixed(2)}px)`;
+        const blur = supports ? `blur(${r.toFixed(2)}px)` : "none";
+        if (supports) ctx.filter = blur;
         drawMaster();
-        drawInc();
+        blendInc(blur);
         if (supports) ctx.filter = "none";
         break;
       }
@@ -1572,9 +1604,100 @@ export class FrameCompositor {
         // crossfade / crosszoom: the classic A·(1−α)+B·α blend (zooms already
         // folded into the layer zoom factors).
         drawMaster();
-        drawInc();
+        blendInc("none");
       }
     }
+  }
+
+  /**
+   * Draw an upper-track join: the pair through `drawCrossJoin` onto a clear
+   * scratch, then laid over the frame. Wherever the join leaves the layer
+   * clear the tracks beneath show, and a dip's veil darkens only the layer's
+   * own pixels.
+   */
+  drawOverlayJoin(style: TransitionStyle, p: number, d: CrossJoin, at: number) {
+    const ctx = this.ctx();
+    if (!ctx) {
+      return;
+    }
+    const W = this.canvas.width;
+    const H = this.canvas.height;
+    const { surface } = this.scratch("joinScratch", W, H);
+    const jctx = surface.getContext("2d") as Ctx | null;
+    if (!jctx) {
+      return;
+    }
+    jctx.clearRect(0, 0, W, H);
+    const main = this.canvas;
+    this.canvas = surface;
+    this.joinOnto = "layer";
+    try {
+      this.drawCrossJoin(style, p, d, at);
+    } finally {
+      this.canvas = main;
+      this.joinOnto = "frame";
+    }
+    ctx.drawImage(surface as CanvasImageSource, 0, 0);
+  }
+
+  /** Free the join scratch once no join is live; the next join opens it
+   * again. */
+  releaseJoin() {
+    if (this.featherScratch && this.featherBy === "layer") {
+      this.featherScratch.width = this.featherScratch.height = 1;
+      this.featherScratch = null;
+    }
+    if (!this.joinScratch) {
+      return;
+    }
+    this.joinScratch.width = this.joinScratch.height = 1;
+    this.joinScratch = null;
+  }
+
+  /**
+   * Blend the incoming shot into a join layer at `share`: the layer fades by
+   * it, and the shot, drawn apart on the feather scratch through `filter`,
+   * adds in at it. That is the export's per-plane blend with coverage
+   * included, so the outgoing shot fades out where the incoming one has
+   * nothing.
+   */
+  private blendIntoLayer(share: number, filter: string, drawInc: () => void) {
+    const ctx = this.ctx();
+    if (!ctx) {
+      return;
+    }
+    const W = this.canvas.width;
+    const H = this.canvas.height;
+    const { surface } = this.scratch("featherScratch", W, H);
+    const sctx = surface.getContext("2d") as Ctx | null;
+    if (!sctx) {
+      return;
+    }
+    this.featherBy = "layer";
+    sctx.clearRect(0, 0, W, H);
+    const main = this.canvas;
+    this.canvas = surface;
+    const filters = "filter" in sctx;
+    if (filters) {
+      sctx.filter = filter;
+    }
+    try {
+      drawInc();
+    } finally {
+      this.canvas = main;
+      if (filters) {
+        sctx.filter = "none";
+      }
+    }
+    ctx.save();
+    ctx.filter = "none";
+    ctx.globalAlpha = share;
+    ctx.globalCompositeOperation = "destination-out";
+    ctx.fillStyle = "#000000";
+    ctx.fillRect(0, 0, W, H);
+    ctx.globalCompositeOperation = "lighter";
+    ctx.drawImage(surface as CanvasImageSource, 0, 0);
+    ctx.restore();
   }
 
   /**
@@ -1590,6 +1713,7 @@ export class FrameCompositor {
     const { surface } = this.scratch("featherScratch", W, H);
     const sctx = surface.getContext("2d") as Ctx | null;
     if (!sctx) return;
+    this.featherBy = this.joinOnto;
     sctx.clearRect(0, 0, W, H);
     const main = this.canvas;
     this.canvas = surface;
@@ -1625,6 +1749,20 @@ export class FrameCompositor {
     sctx.fillStyle = grad;
     sctx.fillRect(0, 0, W, H);
     sctx.restore();
+    if (this.joinOnto === "frame") {
+      ctx.drawImage(surface as CanvasImageSource, 0, 0);
+      return;
+    }
+
+    // On a layer the edge mixes the two shots, coverage included: the layer
+    // fades by the profile and the faded shot adds in, so past a regioned
+    // incoming shot's edge the tracks beneath show through.
+    ctx.save();
+    ctx.globalCompositeOperation = "destination-out";
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
+    ctx.globalCompositeOperation = "lighter";
     ctx.drawImage(surface as CanvasImageSource, 0, 0);
+    ctx.restore();
   }
 }

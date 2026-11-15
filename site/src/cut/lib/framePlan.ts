@@ -29,14 +29,25 @@ export interface OverlayFx {
   gain: number;
 }
 
+/** How far the join at `span`'s tail into `next` has played at `t`, or
+ * null when no join is live then. A join plays over the window before the
+ * cut, as on track 0; a hidden incoming clip leaves a plain cut. */
+function joinProgress(span: ClipSpan, next: ClipSpan | undefined, t: number): number | null {
+  if (!next || next.clip.hidden || span.transitionOut <= 0) {
+    return null;
+  }
+  const from = next.start - span.transitionOut;
+  return t >= from ? Math.min(1, (t - from) / span.transitionOut) : null;
+}
+
 /**
  * The alpha/zoom/gain ramps a transition or clip animation puts on one
- * upper-track clip at `t`. A transition blends the incoming clip in over the
- * outgoing one (which keeps full alpha and its audio until its footprint
- * ends); a clip animation ramps the clip's own edge. On an upper track a fade
- * ramps to transparent — the tracks beneath show through — and the animation
- * styles that need frame motion degrade to a fade, both matching the export's
- * alpha ramps.
+ * upper-track clip at `t`. A transition plays as on track 0 (see
+ * `overlayPlan`): the outgoing clip's sound fades across the window before
+ * the cut and the incoming clip enters clean at it. A clip animation ramps
+ * the clip's own edge; on an upper track a fade ramps to transparent — the
+ * tracks beneath show through — and the animation styles that need frame
+ * motion degrade to a fade, both matching the export's alpha ramps.
  */
 export function overlayTransitionFx(
   span: ClipSpan,
@@ -49,24 +60,20 @@ export function overlayTransitionFx(
   let gain = 1;
   const style = span.clip.transitionStyle ?? "crossfade";
   const prevStyle = prev?.clip.transitionStyle ?? "crossfade";
-  // Incoming side of the previous clip's transition: the clip blends in over
-  // its own head — upper tracks composite through alpha, so the arrival is an
-  // alpha ramp against whatever is beneath.
-  if (prev && prev.transitionOut > 0) {
+  // The incoming side of the previous clip's cross zoom: it arrived pushed
+  // in, and settles back to 1 over its own head.
+  if (prev && !span.clip.hidden && prev.transitionOut > 0 && prevStyle === "crosszoom") {
     const rel = t - span.start;
     if (rel < prev.transitionOut) {
-      const p = Math.max(0, rel / prev.transitionOut);
-      alpha = Math.min(alpha, p);
-      gain = Math.min(gain, p);
-      if (prevStyle === "crosszoom") zoom = TRANSITION_ZOOM - (TRANSITION_ZOOM - 1) * p;
+      zoom = TRANSITION_ZOOM - (TRANSITION_ZOOM - 1) * Math.max(0, rel / prev.transitionOut);
     }
   }
-  // Outgoing side of this clip's own cross zoom: the picture pushes in across
-  // its last blend-window seconds, handing over at the cut.
-  if (next && span.transitionOut > 0 && style === "crosszoom") {
-    const from = span.start + span.len - span.transitionOut;
-    if (t >= from) {
-      const p = Math.min(1, (t - from) / span.transitionOut);
+  // The outgoing side of this clip's own join: its sound leaves across the
+  // window, and a cross zoom pushes its picture in.
+  const p = joinProgress(span, next, t);
+  if (p !== null) {
+    gain = Math.min(gain, 1 - p);
+    if (style === "crosszoom") {
       zoom = 1 + (TRANSITION_ZOOM - 1) * p;
     }
   }
@@ -477,6 +484,17 @@ export function heldSpans(spans: ClipSpan[], fps: number): Map<ClipSpan, HeldFra
   return new Map(shown.map((sp, k) => [sp, held[k]]));
 }
 
+/** A join live on an upper track: the clip arriving at the cut, held on
+ * its first frame through the window, and how far the style has played. */
+export interface OverlayJoin {
+  incoming: ClipSpan;
+  style: TransitionStyle;
+  /** Transition progress, 0..1. */
+  p: number;
+  incAlpha: number;
+  incZoom: number;
+}
+
 /** One upper-track clip on screen, with its ramps resolved. */
 export interface OverlayPlanItem {
   span: ClipSpan;
@@ -488,12 +506,16 @@ export interface OverlayPlanItem {
   /** The time its picture is read at: `t`, or its start while it holds an
    * output frame past its own end. */
   at: number;
+  /** The join into the next clip on its track, while one is live. */
+  join: OverlayJoin | null;
 }
 
 /**
  * The upper-track clips live at `t`, in draw order: further-back tracks first,
- * and within a track earlier clips first, so a dissolving pair blends the
- * incoming clip in over the outgoing one.
+ * and within a track earlier clips first. A join plays exactly as track 0's
+ * does — over the window before the cut, the incoming clip's first frame
+ * held, every style's geometry — so the outgoing clip carries it as `join`
+ * and draws the pair as one layer over the tracks beneath.
  *
  * `spansOf` supplies a track's spans; callers pass the store's own
  * `getClipSpans` so span geometry is computed one way everywhere. An export
@@ -513,12 +535,19 @@ export function overlayPlan(
       const sp = spans[i];
       if (sp.clip.hidden) continue;
       if (!showsAt(sp.start, sp.start + sp.len, held?.get(sp) ?? null, t)) continue;
+      const next = spans[i + 1];
+      const p = joinProgress(sp, next, t);
+      const style = sp.clip.transitionStyle ?? "crossfade";
       live.push({
         span: sp,
         clip: sp.clip,
         asset: sp.asset,
-        ...overlayTransitionFx(sp, spans[i - 1], spans[i + 1], t),
+        ...overlayTransitionFx(sp, spans[i - 1], next, t),
         at: pictureAt(sp, t),
+        join:
+          p === null
+            ? null
+            : { incoming: next, style, p, incAlpha: p, incZoom: style === "crosszoom" ? TRANSITION_ZOOM : 1 },
       });
     }
   }

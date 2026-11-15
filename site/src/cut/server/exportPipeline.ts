@@ -9,7 +9,7 @@ import { readFile, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { atempoChain, audioChannels, hasStream, mediaDuration, num, videoDecodeCost, videoDimensions, videoPicture } from "./util";
 import { CUT_EXPORT_PASSES } from "../lib/exportPassSettings";
-import { xfadeTransition } from "./transitionExpr";
+import { layerXfade, xfadeTransition } from "./transitionExpr";
 import { assertGraphSafe, chainsFeeding, downstreamFirst, fanOutInputs, fexpr, inputsRead } from "./filterGraph";
 import { bakeRetimedAudio, setptsExpr, type BakedAudio } from "./retimeAudio";
 import { bakeTurnedMedia } from "./turnMedia";
@@ -301,16 +301,21 @@ export interface ExportSpec {
     reverse?: boolean;
     /** Synthesize the frames wherever the rate runs below 1× (see slowRuns). */
     smoothSlow?: boolean;
-    /** Transition ramps, timeline seconds from this overlay's head/tail. On
+    /** Animation ramps, timeline seconds from this overlay's head/tail. On
      * an upper track a fade is an alpha fade (the tracks beneath show
-     * through); a cross transition arrives as the incoming clip's headFade
-     * while the outgoing clip stays opaque under it, and cross zoom adds a
-     * tailZoom/headZoom pair riding that overlap. The audio fades with the
-     * picture. */
+     * through), and the audio fades with the picture. Cross zoom adds a
+     * tailZoom/headZoom pair around its join. */
     headFade?: number;
     tailFade?: number;
     headZoom?: number;
     tailZoom?: number;
+    /** The join into the next overlay on this track, which starts where
+     * this one ends, as on `clips`: the window's seconds before the cut, its
+     * style, feather and band. */
+    transition?: number;
+    transitionStyle?: string;
+    transitionFeather?: number;
+    transitionBand?: number;
     /** Half the cross dissolve at this overlay's head/tail, timeline seconds:
      * the level crosses equal-power at the cut and the picture is left alone.
      * `soundBack`/`soundAhead` are the handle each side reaches into so both
@@ -853,6 +858,44 @@ const FRAME_EPS = 1e-6;
 const READ_MARGIN_S = 1;
 const READ_SEEK_MIN_S = 10;
 
+/** How near a layer's start may sit to the previous layer's end and still
+ * join it, seconds — the editor's own touch tolerance. */
+const JOIN_TOUCH_S = 0.02;
+
+type OverlayEntry = NonNullable<ExportSpec["overlayVideos"]>[number];
+
+/**
+ * The joins between upper-track layers: each layer whose transition runs
+ * into the next layer on its track, starting where it ends, mapped to that
+ * layer and the window's seconds before the cut. The window can't exceed
+ * most of either clip, matching the editor clamp.
+ */
+function overlayJoins(list: readonly OverlayEntry[]): Map<OverlayEntry, { next: OverlayEntry; seconds: number }> {
+  const joins = new Map<OverlayEntry, { next: OverlayEntry; seconds: number }>();
+  const sorted = [...list].sort((a, b) => a.track - b.track || a.start - b.start);
+  for (let i = 0; i + 1 < sorted.length; i++) {
+    const out = sorted[i];
+    const next = sorted[i + 1];
+    if (next.track !== out.track || !out.transition || out.transition <= 0) {
+      continue;
+    }
+    if (Math.abs(out.start + spanLen(out) - next.start) > JOIN_TOUCH_S) {
+      continue;
+    }
+    const seconds = Math.min(out.transition, spanLen(out) * 0.9, spanLen(next) * 0.9);
+    if (seconds > 0.01) {
+      joins.set(out, { next, seconds });
+    }
+  }
+  return joins;
+}
+
+/** Seconds each upper-track layer shows ahead of its start: the window of
+ * the join behind it, where its held first frame plays. */
+function overlayLeads(list: readonly OverlayEntry[]): Map<OverlayEntry, number> {
+  return new Map([...overlayJoins(list).values()].map(({ next, seconds }) => [next, seconds]));
+}
+
 /**
  * How far before and after its slot each track-0 clip shapes the delivery:
  * its own sound handles, the join and sound crossing at each of its cuts, and
@@ -940,8 +983,9 @@ export function passWindows(spec: ExportSpec, sourceOf: (file: string) => Source
     spans.push({ start: cursor, end: cursor + spanLen(c), ...reach[j], file: c.file, ...footage(c) });
     cursor += spanLen(c);
   }
+  const leads = overlayLeads(spec.overlayVideos ?? []);
   for (const o of spec.overlayVideos ?? []) {
-    const handles = { before: o.soundBack ?? 0, after: o.soundAhead ?? 0 };
+    const handles = { before: Math.max(o.soundBack ?? 0, leads.get(o) ?? 0), after: o.soundAhead ?? 0 };
     spans.push({ start: o.start, end: o.start + spanLen(o), ...handles, file: o.file, ...footage(o) });
   }
   for (const o of spec.overlays) {
@@ -1008,6 +1052,7 @@ export function narrowSpecToRange(spec: ExportSpec): ExportSpec {
   const from = Math.max(0, spec.range.start) - RANGE_SLACK_S;
   const to = Math.min(spec.duration, spec.range.end) + RANGE_SLACK_S;
   const inside = (start: number, end: number) => end >= from && start <= to;
+  const leads = overlayLeads(spec.overlayVideos ?? []);
   let cursor = 0;
   const clips = spec.clips.map((c, j) => {
     const start = cursor;
@@ -1021,7 +1066,7 @@ export function narrowSpecToRange(spec: ExportSpec): ExportSpec {
     ...(spec.overlayVideos
       ? {
           overlayVideos: spec.overlayVideos.filter((o) =>
-            inside(o.start - (o.soundBack ?? 0), o.start + spanLen(o) + (o.soundAhead ?? 0))
+            inside(o.start - Math.max(o.soundBack ?? 0, leads.get(o) ?? 0), o.start + spanLen(o) + (o.soundAhead ?? 0))
           ),
         }
       : {}),
@@ -1038,17 +1083,21 @@ export function narrowSpecToRange(spec: ExportSpec): ExportSpec {
 /** How far an ffmpeg run has got, as its stats line prints it. */
 const STATS_CURSOR = /size=\s*\S+\s+time=\S+/g;
 
+/** How long an ffmpeg run may go without progress before the watchdog kills it. */
+const STALL_MS = 120_000;
+
 /**
  * Spawn ffmpeg for one pass, tracking `job.proc` so a cancel kills the live
  * process, bounding silence with the stall watchdog, and (when `onProgress` is
  * given) reporting the `time=` cursor from stderr. Rejects with a readable
  * message on a non-zero exit or a missing binary. Shared by the encode pass and
- * the rotation-strip remux.
+ * the rotation-strip remux. `stallMs` bounds the silence; tests shorten it.
  */
 export function runFfmpeg(
   job: RenderHandle,
   args: string[],
-  onProgress?: (seconds: number) => void
+  onProgress?: (seconds: number) => void,
+  stallMs = STALL_MS
 ): Promise<void> {
   return new Promise<void>((resolve, reject) => {
     const proc = spawn("ffmpeg", args);
@@ -1057,7 +1106,6 @@ export function runFfmpeg(
     // time — kill only if ffmpeg makes no progress for STALL_MS. A wedged
     // ffmpeg keeps printing its stats line with the cursor frozen
     // ("size= 256KiB time=00:00:00.16"), so a repeated cursor is silence.
-    const STALL_MS = 120_000;
     let watchdog: ReturnType<typeof setTimeout> | undefined;
     let cursor: string | undefined;
     const bump = () => {
@@ -1065,7 +1113,7 @@ export function runFfmpeg(
       watchdog = setTimeout(() => {
         proc.kill("SIGKILL");
         reject(new UserError("export_stalled", "Export stalled — no ffmpeg progress for 120s."));
-      }, STALL_MS);
+      }, stallMs);
       watchdog.unref();
     };
     bump();
@@ -2173,11 +2221,14 @@ async function renderPass(
   // a piece's start, e.g.) would otherwise hold that layer's delayed stream
   // open past the output's end, and the graph stops making frames. It takes
   // no matte either, so the matte splits count only the layers drawn.
-  const showsInRange = (oc: (typeof overlayVideos)[number]) => {
+  // A layer arriving through a join shows `lead` seconds early, its first
+  // frame held through the window.
+  const overlayLead = overlayLeads(overlayVideos);
+  const showsInRange = (oc: (typeof overlayVideos)[number], lead = 0) => {
     if (!spec.range) {
       return true;
     }
-    const from = Math.max(spec.range.start, oc.start);
+    const from = Math.max(spec.range.start, oc.start - lead);
     const to = Math.min(spec.range.end, oc.start + spanLen(oc));
     return Math.ceil(from * spec.fps - FRAME_EPS) / spec.fps < to - FRAME_EPS / spec.fps;
   };
@@ -2185,7 +2236,7 @@ async function renderPass(
   const matteConsumers = !subjectActive
     ? 0
     : spec.overlays.filter((o) => o.subject && o.frames?.length && o.blank).length +
-      overlayVideos.filter((oc) => oc.mask?.subject && showsInRange(oc) && (oc.image || videoPresence.get(oc.file)))
+      overlayVideos.filter((oc) => oc.mask?.subject && showsInRange(oc, overlayLead.get(oc)) && (oc.image || videoPresence.get(oc.file)))
         .length +
       spec.clips.filter((c) => c.mask?.subject && clipDrawable(c)).length;
   let matteN = 0;
@@ -3080,6 +3131,7 @@ async function renderPass(
   // muted) mixes in below.
   const overlaySoundLabels: string[] = [];
   let ovk = 0;
+  const joins = overlayJoins(overlayVideos);
   // Overlay one track clip onto `onto`, returning the new label; also queues
   // its audio.
   // A layer's own sound, mixed in at its timeline place. It reads only the
@@ -3105,10 +3157,13 @@ async function renderPass(
       // The picture's fade edges carry the sound with them; zoom edges don't.
       // A cross dissolve's ramps are equal-power and reach half level on the
       // cut, so they are a volume expression rather than a fade to silence.
+      // A join hands the sound over as track 0's does: the outgoing clip
+      // fades across the window and the incoming one enters clean at the cut.
+      const tail = Math.max(tf, joins.get(oc)?.seconds ?? 0);
       const afades =
         (hf > 0.01 ? `afade=t=in:st=${num(back)}:d=${num(hf)},` : "") +
-        (tf > 0.01
-          ? `afade=t=out:st=${num(Math.max(0, back + olen - tf))}:d=${num(tf)},`
+        (tail > 0.01
+          ? `afade=t=out:st=${num(Math.max(0, back + olen - tail))}:d=${num(tail)},`
           : "");
       const crosses = crossFilters([
         crossExpr(back, hs, true),
@@ -3128,19 +3183,23 @@ async function renderPass(
     }
   };
 
-  const addOverlay = (oc: (typeof overlayVideos)[number], onto: string): string => {
+  /** One layer's picture through its framing, look, effects, fades, mask
+   * and pose, on its own clock (`masked`), with what placing it needs. Null
+   * when the layer has no picture to read. */
+  const overlaySegment = (oc: (typeof overlayVideos)[number]) => {
     const orIn = overlayRemovalInput.get(oc);
-    if (!oc.image && !orIn && !videoPresence.get(oc.file)) return onto;
+    if (!oc.image && !orIn && !videoPresence.get(oc.file)) {
+      return null;
+    }
     const idx = oc.image ? imageOverlayInput.get(oc)! : inputIndex.get(oc.file)!;
     const ort = retimeOf(oc);
     const olen = spanLen(oc);
     const end = Math.min(oc.start + olen, spec.duration);
     const region = regionPx(oc.frame, W, H);
     const cover = oc.fit === "fill" || (oc.fit == null && !region);
-    // Transition ramps, clamped so head+tail never overrun the segment. On an
+    // Edge ramps, clamped so head+tail never overrun the segment. On an
     // upper track the fades are alpha fades — the clip dissolves against
-    // whatever is beneath it (a cross transition ships as the incoming clip's
-    // head fade, blending it in over the still-opaque outgoing clip).
+    // whatever is beneath it.
     const hz = Math.max(0, Math.min(oc.headZoom ?? 0, olen));
     const tz = Math.max(0, Math.min(oc.tailZoom ?? 0, olen - hz));
     const hf = Math.max(0, Math.min(oc.headFade ?? 0, olen));
@@ -3186,6 +3245,13 @@ async function renderPass(
       ? `,format=${alphaFmt},pad=${boxW}:${boxH}:(ow-iw)/2:(oh-ih)/2:color=black@0.0`
       : "";
     if (boxed) pos = region ? `${region.rx}:${region.ry}` : "0:0";
+    // The same spot as x/y, for a layer placed onto a clear frame.
+    const spot =
+      boxed || cover
+        ? { x: `${region ? region.rx : 0}`, y: `${region ? region.ry : 0}` }
+        : region
+          ? { x: `${region.rx}+(${region.rw}-w)/2`, y: `${region.ry}+(${region.rh}-h)/2` }
+          : { x: `(${W}-w)/2`, y: `(${H}-h)/2` };
     const fmt = hf > 0.01 || tf > 0.01 || boxed || orIn ? alphaFmt : clipFmt;
     // The look chain reads the pre-pad picture, which is opaque.
     const lookFmt = boxed ? clipFmt : fmt;
@@ -3266,11 +3332,34 @@ async function renderPass(
       }
       masked = softenPose(masked, oc, olen, boxW, boxH, `format=${alphaFmt}`, `oso${k}`, ovLead);
     }
+    // A clip the grid moved holds exactly its frames from its first picture.
+    const held = overlayHeld.get(oc);
+    return { k, seg, masked, held, end, region, boxW, boxH, pos, spot, keyed, subjMask };
+  };
+
+  /** A subject-masked layer's box laid on the full frame. The box may reach
+   * past the frame, so it pads to the box holding both and crops the frame
+   * window back out (pad rejects placement outside its area). */
+  const padToFrame = (seg: string, region: ReturnType<typeof regionPx>, boxW: number, boxH: number, out: string) => {
+    const padX = region ? region.rx : 0;
+    const padY = region ? region.ry : 0;
+    const bx = Math.min(0, padX);
+    const by = Math.min(0, padY);
+    const bw = Math.max(W, padX + boxW) - bx;
+    const bh = Math.max(H, padY + boxH) - by;
+    const win = bw > W || bh > H ? `,crop=${W}:${H}:${-bx}:${-by}` : "";
+    filters.push(`[${seg}]${videoToAlpha},pad=${bw}:${bh}:${padX - bx}:${padY - by}:color=black@0.0${win}[${out}]`);
+  };
+
+  const addOverlay = (oc: (typeof overlayVideos)[number], onto: string): string => {
+    const s = overlaySegment(oc);
+    if (!s) {
+      return onto;
+    }
+    const { k, seg, masked, held, end, region, boxW, boxH, pos, keyed, subjMask } = s;
     // The clip's first frame is the first one at or after its start, as on
     // track 0. The zoom slices' concat drops the stream's frame-rate
     // metadata, so the fps re-stamp keeps tpad's frames on the grid.
-    // A clip the grid moved holds exactly its frames from its first picture.
-    const held = overlayHeld.get(oc);
     filters.push(
       held
         ? `[${masked}]fps=${fps},${gridHold(held.last - held.first, fps)},tpad=start=${held.first}[${seg}]`
@@ -3303,19 +3392,7 @@ async function renderPass(
         const kpos = posePositionExprs(oc.kf!, oc.start);
         placeOnClear(seg, kpos.x, kpos.y, spec.duration, `osb${k}`, `osp${k}`);
       } else {
-        // The box may reach past the frame; pad to the box holding both and
-        // crop the frame window back out (pad rejects placement outside its
-        // area).
-        const padX = region ? region.rx : 0;
-        const padY = region ? region.ry : 0;
-        const bx = Math.min(0, padX);
-        const by = Math.min(0, padY);
-        const bw = Math.max(W, padX + boxW) - bx;
-        const bh = Math.max(H, padY + boxH) - by;
-        const win = bw > W || bh > H ? `,crop=${W}:${H}:${-bx}:${-by}` : "";
-        filters.push(
-          `[${seg}]${videoToAlpha},pad=${bw}:${bh}:${padX - bx}:${padY - by}:color=black@0.0${win}[osp${k}]`
-        );
+        padToFrame(seg, region, boxW, boxH, `osp${k}`);
       }
       alphaMultiply(`osp${k}`, matte, `osc${k}`, `os${k}`, `,format=${alphaFmt}`);
       filters.push(`[${onto}][osc${k}]overlay=0:0:${enable}:eof_action=pass${ovl}[${next}]`);
@@ -3331,15 +3408,143 @@ async function renderPass(
     return next;
   };
 
+  /**
+   * One layer of a joined run on a clear frame, on the run's clock: `lead`
+   * frames of its held first frame, then its own frames, `len` frames from
+   * the timeline's frame `from`. Its shadow comes apart on its own clear
+   * frame, since the composite overlays only onto opaque frames. Null when
+   * the layer has no picture to read.
+   */
+  const overlayLayer = (oc: (typeof overlayVideos)[number], lead: number, from: number, len: number) => {
+    const s = overlaySegment(oc);
+    if (!s) {
+      return null;
+    }
+    const { k, seg, masked, held, region, boxW, boxH, spot, keyed, subjMask } = s;
+    const hold = held ? `${gridHold(held.last - held.first, fps)},` : "";
+    const clone = lead > 0 ? `tpad=start=${lead}:start_mode=clone,` : "";
+    filters.push(`[${masked}]fps=${fps},${hold}${clone}null[${seg}]`);
+    // The key clock runs from the clip's start; this stream's 0 is `from`.
+    const startAt = oc.start - from / fps;
+    const dur = (len + 1) / fps;
+    let layer = `oll${k}`;
+    if (subjMask) {
+      const matte = nextMatte(`bsj${k}`, subjMask);
+      filters.push(`[${matte}]trim=start_frame=${from},setpts=PTS-STARTPTS[osm${k}]`);
+      if (keyed) {
+        const kpos = posePositionExprs(oc.kf!, startAt);
+        placeOnClear(seg, kpos.x, kpos.y, dur, `osb${k}`, `osp${k}`);
+      } else {
+        padToFrame(seg, region, boxW, boxH, `osp${k}`);
+      }
+      alphaMultiply(`osp${k}`, `osm${k}`, layer, `os${k}`, `,format=${alphaFmt}`);
+    } else {
+      const xy = keyed ? posePositionExprs(oc.kf!, startAt) : spot;
+      placeOnClear(seg, xy.x, xy.y, dur, `olb${k}`, layer);
+    }
+    let shadow: string | null = null;
+    const oshIdx = overlayShadowInput.get(oc);
+    if (oshIdx !== undefined) {
+      shadow = `ovsh${k}`;
+      filters.push(`[${gfx(`${oshIdx}:v`)}]fps=${fps},scale=${W}:${H},setsar=1,${rgbToAlpha},${clone}null[${shadow}]`);
+    }
+    addOverlaySound(oc, k);
+    return { layer, shadow };
+  };
+
+  // A run of joined layers on one track composites as one, the way track 0
+  // joins its segments: each layer on a clear frame, the incoming one with
+  // its first frame held through the window, the style's xfade over the
+  // window before each cut, and the joined layer laid over the tracks
+  // beneath once. A region the join leaves clear shows those tracks, and
+  // each layer keeps its mask, keys and matte through it.
+  const drawable = (oc: (typeof overlayVideos)[number]) =>
+    oc.image || !!overlayRemovalInput.get(oc) || !!videoPresence.get(oc.file);
+  const firstFrame = (oc: (typeof overlayVideos)[number]) => overlayHeld.get(oc)?.first ?? gridFrame(oc.start, fps);
+  const endFrame = (oc: (typeof overlayVideos)[number]) =>
+    overlayHeld.get(oc)?.last ?? gridFrame(Math.min(oc.start + spanLen(oc), spec.duration), fps);
+  /** Frames of the next layer's held first frame `out`'s join plays, or 0
+   * when it plays none. */
+  const joinLead = (out: (typeof overlayVideos)[number]) => {
+    const join = joins.get(out);
+    if (!join || !drawable(join.next) || !showsInRange(join.next, join.seconds)) {
+      return 0;
+    }
+    return Math.max(0, firstFrame(join.next) - gridFrame(join.next.start - join.seconds, fps));
+  };
+  let jr = 0;
+  const addJoinedRun = (run: (typeof overlayVideos)[number][], onto: string): string => {
+    const r = jr++;
+    const start = firstFrame(run[0]);
+    const end = endFrame(run[run.length - 1]);
+    const shadowed = run.some((oc) => overlayShadowInput.has(oc));
+    let pic = "";
+    let ink = "";
+    run.forEach((oc, k) => {
+      const prev = run[k - 1];
+      const next = run[k + 1];
+      const lead = prev ? joinLead(prev) : 0;
+      const from = firstFrame(oc) - lead;
+      const len = (next ? firstFrame(next) : endFrame(oc)) - from;
+      const part = overlayLayer(oc, lead, from, len);
+      // Each layer keeps exactly its stretch: a missing picture or shadow is
+      // a clear frame.
+      const take = (label: string | null | undefined, tag: string) => {
+        const out = `j${tag}${r}_${k}`;
+        filters.push(
+          label
+            ? `[${label}]trim=end_frame=${len},setpts=PTS-STARTPTS,format=${alphaFmt}[${out}]`
+            : `color=c=black@0.0:s=${W}x${H}:r=${fps}:d=${num(len / fps)},format=${alphaFmt}[${out}]`
+        );
+        return out;
+      };
+      const layer = take(part?.layer, "l");
+      const shadow = shadowed ? take(part?.shadow, "s") : "";
+      if (!prev) {
+        pic = layer;
+        ink = shadow;
+        return;
+      }
+      const kind = layerXfade(prev.transitionStyle, prev.transitionFeather, joins.get(prev)!.seconds, W, H, prev.transitionBand, depth);
+      const xfade = (a: string, b: string, tag: string) => {
+        const out = `j${tag}x${r}_${k}`;
+        filters.push(`[${a}][${b}]xfade=${kind}:duration=${num(lead / fps)}:offset=${num((from - start) / fps)}[${out}]`);
+        return out;
+      };
+      pic = xfade(pic, layer, "l");
+      ink = shadowed ? xfade(ink, shadow, "s") : "";
+    });
+    // The shadow falls on the tracks beneath, then the joined layer over it.
+    const enable = `enable='between(t,${edge((start - 0.5) / fps)},${edge((end - 0.5) / fps)})'`;
+    for (const [label, tag] of [[ink, "s"], [pic, "l"]]) {
+      if (!label) {
+        continue;
+      }
+      filters.push(`[${label}]tpad=start=${start}:color=black@0.0[j${tag}p${r}]`);
+      filters.push(`[${onto}][j${tag}p${r}]overlay=0:0:${enable}:eof_action=pass${ovl}[j${tag}o${r}]`);
+      onto = `j${tag}o${r}`;
+    }
+    return onto;
+  };
+
   let vLabel = vAcc;
-  for (const oc of overlayVideos) {
-    if (showsInRange(oc)) {
-      vLabel = addOverlay(oc, vLabel);
+  for (let i = 0; i < overlayVideos.length; i++) {
+    const oc = overlayVideos[i];
+    if (!showsInRange(oc)) {
+      if (drawable(oc)) {
+        addOverlaySound(oc, ovk++);
+      }
       continue;
     }
-    if (oc.image || overlayRemovalInput.get(oc) || videoPresence.get(oc.file)) {
-      addOverlaySound(oc, ovk++);
+    const run = [oc];
+    while (joinLead(run[run.length - 1]) > 0) {
+      run.push(joins.get(run[run.length - 1])!.next);
     }
+    i += run.length - 1;
+    // A layer that takes part in a join draws the run's way even when the
+    // range holds only its own side, so a pass makes the frames one pass does.
+    const joined = run.length > 1 || joins.has(oc) || overlayLead.has(oc);
+    vLabel = joined ? addJoinedRun(run, vLabel) : addOverlay(oc, vLabel);
   }
 
   // Burn in overlay elements. Static ones are full-frame PNGs windowed with

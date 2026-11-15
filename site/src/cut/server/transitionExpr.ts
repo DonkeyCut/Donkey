@@ -16,6 +16,9 @@ import {
   clampBand,
   CLOCK_SWEEP,
   clampFeather,
+  DIP_FALL,
+  DIP_RISE,
+  DIP_SWITCH,
   FEATHER_STYLES,
   SLICE_KNEE,
   SLICE_KNEE_SHARE,
@@ -128,14 +131,13 @@ function clockExpr(W: number, H: number): string {
  * A banded wipe: the incoming picture behind the edge, a solid white panel
  * `band` of the crossed distance just ahead of it, the outgoing picture
  * past that — the edge standing where `bandEdge` puts it. White is the
- * limited-range code at the chain's depth; an alpha plane keeps the
- * outgoing picture's.
+ * limited-range code at the chain's depth, opaque on an alpha plane.
  */
 function bandExpr(style: TransitionStyle, band: number, depth: 8 | 10): string {
   const b = n(band);
   const e = `(${PROG}*(1+${b})-${b})`;
   const s = depth === 10 ? 1023 / 255 : 1;
-  const white = `if(eq(PLANE,0),${n(235 * s)},if(eq(PLANE,3),A,${n(128 * s)}))`;
+  const white = `if(eq(PLANE,0),${n(235 * s)},if(eq(PLANE,3),${depth === 10 ? 1023 : 255},${n(128 * s)}))`;
   // `d` is how far the pixel sits behind the edge's start, as a share of the
   // distance crossed: under `e` it is revealed, under `e + band` it is white.
   const d =
@@ -172,4 +174,35 @@ export function xfadeTransition(
     return `transition=custom:expr=${fexpr(`A+(B-A)*${featherShare(known, feather!)}`)}`;
   }
   return `transition=${kind}`;
+}
+
+/** The dips, whose veil an upper-track join keeps to the layer's pixels. */
+const isDip = (style: string | undefined) => style === "dipblack" || style === "dipwhite";
+
+/**
+ * The xfade options for a join between two upper-track layers, each on a
+ * clear frame. Every style plays the track-0 geometry over the planes,
+ * alpha included, so a region the join leaves clear stays clear. A dip is
+ * spelled out: the shots switch under the veil, and the veil mixes the color
+ * planes toward the dip's color while the alpha follows the shot, so it
+ * darkens only the layer's own pixels. Limited-range codes at the chain's
+ * depth.
+ */
+export function layerXfade(
+  style: string | undefined,
+  feather: number | undefined,
+  seconds: number,
+  W: number,
+  H: number,
+  band?: number,
+  depth: 8 | 10 = 8
+): string {
+  if (!isDip(style)) {
+    return xfadeTransition(style, feather, seconds, W, H, band, depth);
+  }
+  const s = depth === 10 ? 4 : 1;
+  const shot = `if(lte(P,${n(1 - DIP_SWITCH)}),B,A)`;
+  const veil = `clip(min(${PROG}/${n(DIP_RISE)},P/${n(DIP_FALL)}),0,1)`;
+  const color = `if(eq(PLANE,0),${n((style === "dipwhite" ? 235 : 16) * s)},${n(128 * s)})`;
+  return `transition=custom:expr=${fexpr(`if(eq(PLANE,3),${shot},${shot}+(${color}-${shot})*${veil})`)}`;
 }

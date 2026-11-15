@@ -159,7 +159,32 @@ export async function renderSubjectMask(
         if (!span) continue;
         const f = await readerFor(layer.asset).frameAt(sourceTimeAt(span, t));
         await stageMattes(layer.clip, sourceTimeAt(span, t));
-        comp.drawIntoRect(f, rectOf(layer.clip), clipCovers(layer.clip), layer.alpha, t, layer.zoom, layer.clip);
+        const join = layer.join;
+        if (!join || subjectClip(join.incoming.clip)) {
+          comp.drawIntoRect(f, rectOf(layer.clip), clipCovers(layer.clip), layer.alpha, t, layer.zoom, layer.clip);
+          continue;
+        }
+        // A join draws its pair as one layer, the incoming clip held on its
+        // first frame, as the preview and the export draw it.
+        const head = sourceTimeAt(join.incoming, join.incoming.start);
+        const incFrame = await readerFor(join.incoming.asset).frameAt(head);
+        await stageMattes(join.incoming.clip, head);
+        comp.drawOverlayJoin(
+          join.style,
+          join.p,
+          {
+            masterFrame: f,
+            masterClip: layer.clip,
+            masterAlpha: layer.alpha,
+            masterZoom: layer.zoom,
+            masterFx: { dx: 0, dy: 0 },
+            incFrame,
+            incClip: join.incoming.clip,
+            incAlpha: join.incAlpha,
+            incZoom: join.incZoom,
+          },
+          t
+        );
       }
       // Luma mask: black frame, the subject's alpha silhouette drawn white.
       mctx.globalCompositeOperation = "source-over";
@@ -179,5 +204,6 @@ export async function renderSubjectMask(
   } finally {
     for (const r of readers.values()) r.dispose();
     for (const m of mattes.values()) m?.dispose();
+    comp.releaseJoin();
   }
 }

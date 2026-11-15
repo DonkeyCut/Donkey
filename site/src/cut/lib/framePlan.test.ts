@@ -150,6 +150,50 @@ describe("overlayTransitionFx", () => {
   });
 });
 
+describe("an upper-track join", () => {
+  /** Two track-1 clips joined by a 2s `style` at their 4s cut. */
+  const joined = (style: VideoClip["transitionStyle"]) => {
+    const spans = spansOf(2, 4, [2]).map((sp) => ({ ...sp, clip: { ...sp.clip, track: 1 } }));
+    spans[0].clip.transitionStyle = style;
+    return { spans, cut: spans[1].start, live: (t: number) => overlayPlan([1], () => spans, t) };
+  };
+
+  test("plays over the window before the cut, the incoming clip held on its first frame", () => {
+    const { spans, cut, live } = joined("wiperight");
+    const mid = live(cut - 1);
+    expect(mid.map((l) => l.span)).toEqual([spans[0]]);
+    expect(mid[0].alpha).toBe(1);
+    expect(mid[0].join?.incoming).toBe(spans[1]);
+    expect(mid[0].join?.style).toBe("wiperight");
+    expect(mid[0].join?.p).toBeCloseTo(0.5, 5);
+    expect(live(cut - 2.1)[0].join).toBe(null);
+  });
+
+  test("hands the sound over as track 0 does: out across the window, in clean at the cut", () => {
+    const { cut, live } = joined("wiperight");
+    expect(live(cut - 1)[0].gain).toBeCloseTo(0.5, 5);
+    const after = live(cut + 0.1);
+    expect(after[0].alpha).toBe(1);
+    expect(after[0].gain).toBe(1);
+    expect(after[0].join).toBe(null);
+  });
+
+  test("a cross zoom pushes the outgoing clip in and holds the incoming one pushed", () => {
+    const { cut, live } = joined("crosszoom");
+    const mid = live(cut - 1)[0];
+    expect(mid.zoom).toBeCloseTo(1 + (TRANSITION_ZOOM - 1) * 0.5, 5);
+    expect(mid.join?.incZoom).toBeCloseTo(TRANSITION_ZOOM, 5);
+    expect(live(cut + 1)[0].zoom).toBeCloseTo(TRANSITION_ZOOM - (TRANSITION_ZOOM - 1) * 0.5, 5);
+  });
+
+  test("a hidden incoming clip leaves the outgoing one to play out on its own", () => {
+    const { spans, cut, live } = joined("wiperight");
+    spans[1].clip.hidden = true;
+    expect(live(cut - 1)[0].join).toBe(null);
+    expect(live(cut - 1)[0].gain).toBe(1);
+  });
+});
+
 describe("trackZeroPlan", () => {
   test("reports no transition in the middle of a clip", () => {
     const spans = spansOf(2);

@@ -190,6 +190,14 @@ async function everyFeature(mediaDir: string, tmpDir: string): Promise<ExportSpe
           { t: 0, x: 0.75, y: 0.7, scale: 1, rotation: 0, opacity: 1 },
           { t: 0.6, x: 0.65, y: 0.75, scale: 1.1, rotation: -10, opacity: 1 },
         ],
+        // A softened wipe into the next layer on the track.
+        transition: 0.4, transitionStyle: "wipeleft", transitionFeather: 0.2,
+      },
+      {
+        file: "b.mp4", in: 0, out: 1, start: 1.6, track: 1,
+        frame: { x: 0.1, y: 0.1, w: 0.5, h: 0.4 }, fit: "fill",
+        muted: false, shadow: { file: "shadow.png" },
+        mask: { subject: { feather: 2 } },
       },
     ],
     audio: [
@@ -657,4 +665,110 @@ describe("a keyed track-0 clip in a frame box over the background", () => {
     },
     60_000
   );
+});
+
+describe("a join between two upper-track clips", () => {
+  // A red clip hands over to a blue one at 1s on track 1, through a 0.5s
+  // join, over an empty track 0 on a green background. Frame 23 of 30 fps
+  // sits a little past the window's middle.
+  const FRAME = 23;
+  const P = (FRAME / 30 - 0.5) / 0.5;
+  const red = { r: true, g: false, b: false };
+  const blue = { r: false, g: false, b: true };
+  const green = { r: false, g: true, b: false };
+  const dark = { r: false, g: false, b: false };
+  type Case = {
+    name: string;
+    style: string;
+    keyed: boolean;
+    // Frame-width fractions along the middle row, and what each shows.
+    expect: [number, { r: boolean; g: boolean; b: boolean }][];
+  };
+  const cases: Case[] = [
+    { name: "a wipe between full-frame clips", style: "wiperight", keyed: false, expect: [[0.1, blue], [P - 0.1, blue], [P + 0.1, red], [0.9, red]] },
+    // The incoming clip is keyed down to half size: the wipe uncovers the
+    // background left of its box.
+    { name: "a wipe into a keyed clip", style: "wiperight", keyed: true, expect: [[0.1, green], [0.4, blue], [P + 0.1, red], [0.9, red]] },
+    // The dip darkens the layer's own pixels, never the frame beneath.
+    { name: "a dip into a keyed clip", style: "dipblack", keyed: true, expect: [[0.1, green], [0.5, dark], [0.9, green]] },
+  ];
+  const deliveries = [
+    { name: "H.264", ext: "mp4", over: {} },
+    { name: "ProRes 4444", ext: "mov", over: { codec: "prores4444", container: "mov", audioCodec: "pcm" } },
+    { name: "HLG HEVC", ext: "mp4", over: { codec: "hevc", colorSpace: "hlg" } },
+  ] as const satisfies readonly { name: string; ext: string; over: Partial<ExportSpec> }[];
+
+  for (const delivery of deliveries) {
+    for (const c of cases) {
+      test.skipIf(!tools)(
+        `${c.name} plays its style over the window before the cut as ${delivery.name}`,
+        async () => {
+          const mediaDir = await mkdtemp(path.join(os.tmpdir(), "cut-e2e-media-"));
+          const tmpDir = await mkdtemp(path.join(os.tmpdir(), "cut-e2e-job-"));
+          try {
+            const solid = (name: string, color: string) =>
+              ff(["-f", "lavfi", "-i", `color=c=${color}:s=160x90:r=30:d=1`, "-pix_fmt", "yuv420p", path.join(mediaDir, name)]);
+            solid("red.mp4", "red");
+            solid("blue.mp4", "blue");
+            const pose = (scale: number) => ({ x: 0.5, y: 0.5, scale, rotation: 0, opacity: 1 });
+            const spec: ExportSpec = {
+              projectId: "p",
+              width: 160,
+              height: 90,
+              fps: 30,
+              crf: 18,
+              preset: "veryfast",
+              duration: 2,
+              background: "#00FF00",
+              clips: [{ file: "", in: 0, out: 2, muted: true, hidden: true }],
+              overlayVideos: [
+                {
+                  file: "red.mp4",
+                  in: 0,
+                  out: 1,
+                  start: 0,
+                  track: 1,
+                  muted: true,
+                  transition: 0.5,
+                  transitionStyle: c.style,
+                  ...(c.keyed ? { kf: [{ t: 0, ...pose(1) }, { t: 1, ...pose(1.2) }] } : {}),
+                },
+                {
+                  file: "blue.mp4",
+                  in: 0,
+                  out: 1,
+                  start: 1,
+                  track: 1,
+                  muted: true,
+                  ...(c.keyed ? { kf: [{ t: 0, ...pose(0.5) }] } : {}),
+                },
+              ],
+              audio: [],
+              overlays: [],
+              ...delivery.over,
+            };
+            const job: RenderHandle = { tmpDir, outPath: path.join(tmpDir, `out.${delivery.ext}`), progress: 0, log: [] };
+            await runExport(job, spec, (file) => path.join(mediaDir, file));
+            const row = new Uint8Array(
+              ffmpegOut(["-i", job.outPath, "-vf", `select=eq(n\\,${FRAME}),crop=160:2:0:44`, "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"])
+            );
+            // The channels that dominate the pixel. An HLG file read back
+            // without its transfer comes out muted, so a channel counts by
+            // its share of the brightest one.
+            const shows = (x: number) => {
+              const [r, g, b] = row.slice(Math.round(x * 160) * 3, Math.round(x * 160) * 3 + 3);
+              const top = Math.max(r, g, b);
+              const on = (v: number) => top > 100 && v > 0.75 * top;
+              return { r: on(r), g: on(g), b: on(b) };
+            };
+            expect(c.expect.map(([x]) => [x, shows(x)])).toEqual(c.expect);
+          } finally {
+            await rm(mediaDir, { recursive: true, force: true });
+            await rm(tmpDir, { recursive: true, force: true });
+          }
+        },
+        60_000
+      );
+    }
+  }
 });

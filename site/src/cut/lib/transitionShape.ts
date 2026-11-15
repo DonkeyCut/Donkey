@@ -22,6 +22,16 @@ export const FEATHER_STYLES: TransitionStyle[] = [
 /** The softest edge offered: a ramp half the frame wide. */
 export const TRANSITION_FEATHER_MAX = 0.5;
 
+/** A dip's measured plateau, matching xfade fadeblack/fadewhite: the veil
+ * is solid from `DIP_RISE` to `1 - DIP_FALL` of the window, and the incoming
+ * shot takes over under it at `DIP_SWITCH`. */
+export const DIP_RISE = 0.3;
+export const DIP_FALL = 0.4;
+export const DIP_SWITCH = 0.45;
+
+/** How solid a dip's veil is at progress `p`, 0..1. */
+export const dipVeil = (p: number): number => Math.max(0, Math.min(1, p / DIP_RISE, (1 - p) / DIP_FALL));
+
 /** The styles that cut the frame into two halves sliding opposite ways. */
 export const SLICE_STYLES: TransitionStyle[] = ["sliceleft", "sliceup"];
 

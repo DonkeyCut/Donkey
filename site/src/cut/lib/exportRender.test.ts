@@ -107,6 +107,22 @@ describe("mixSpecFor", () => {
     expect(overlay?.fadeOut).toBeCloseTo(0.75, 5);
   });
 
+  test("hands an upper-track join's sound over as track 0 does", () => {
+    // The outgoing clip fades across the window before the cut; the incoming
+    // one enters clean at it.
+    const spec = mixSpecFor(
+      doc({
+        clips: [
+          clip({ id: "c1", assetId: "a", track: 1, start: 0, transition: 0.5, transitionStyle: "wiperight" }),
+          clip({ id: "c2", assetId: "b", track: 1, start: 4 }),
+        ],
+      }),
+      resolve
+    );
+    expect(spec.items.find((i) => i.start === 0)?.fadeOut).toBeCloseTo(0.5, 5);
+    expect(spec.items.find((i) => i.start === 4)?.fadeIn).toBe(0);
+  });
+
   test("gives a zoom no audio ramp, since it does not change loudness", () => {
     const spec = mixSpecFor(
       doc({

@@ -1179,19 +1179,23 @@ export async function buildExportPayload(
         ];
 
   // Video tracks composited over track 0; hidden ones are dropped. Each
-  // track's transitions and animations translate into per-clip head/tail
-  // ramps: on an upper track a fade is an alpha fade (transparent, so the
-  // tracks beneath show through), and a transition blends the incoming clip
-  // in over the outgoing one — the incoming alpha-fades in for the overlap
-  // while the outgoing stays opaque underneath it (cross zoom adds its zoom
-  // ramps). Animations map fade/zoom natively; the styles that need frame
-  // motion degrade to a fade up here.
+  // track's animations translate into per-clip head/tail ramps: on an upper
+  // track a fade is an alpha fade (transparent, so the tracks beneath show
+  // through); fade/zoom map natively and the styles that need frame motion
+  // degrade to a fade up here. A transition ships as the join into the next
+  // clip, which the graph plays as track 0's (cross zoom adds its zoom
+  // ramps).
   const overlayTracks = [...new Set(overlayLayers(doc.clips).map((c) => c.track))];
   // Entry → its source clip, so the mask loop below can paint per clip after
   // the entries assemble.
   const overlayClipOf = new Map<object, VideoClip>();
   const overlayVideos = overlayTracks.flatMap((track) => {
     const trackSpans = getClipSpans(doc.clips, doc.assets, track);
+    // The join each clip makes into the next: only into one that plays.
+    const joins = trackSpans.map((sp, i) => {
+      const next = trackSpans[i + 1];
+      return next && !next.clip.hidden && next.start < duration ? sp.transitionOut : 0;
+    });
     const ramps = trackSpans.map(() => ({
       headFade: 0,
       tailFade: 0,
@@ -1219,9 +1223,8 @@ export async function buildExportPayload(
       // it never fights the transition's blend (mirrors preview and track 0).
       if (!((trackSpans[i - 1]?.transitionOut ?? 0) > 0)) applyAnim(sp.clip.animIn, "head");
       if (!(sp.transitionOut > 0)) applyAnim(sp.clip.animOut, "tail");
-      if (sp.transitionOut > 0 && trackSpans[i + 1]) {
+      if (joins[i] > 0) {
         const nr = ramps[i + 1];
-        nr.headFade = Math.max(nr.headFade, sp.transitionOut);
         if ((sp.clip.transitionStyle ?? "crossfade") === "crosszoom") {
           r.tailZoom = Math.max(r.tailZoom, sp.transitionOut);
           nr.headZoom = Math.max(nr.headZoom, sp.transitionOut);
@@ -1235,9 +1238,9 @@ export async function buildExportPayload(
       r.soundBack = sp.soundBack;
     });
     return trackSpans
-      .map((sp, i) => ({ c: sp.clip, sp, ramp: ramps[i] }))
+      .map((sp, i) => ({ c: sp.clip, sp, ramp: ramps[i], join: joins[i] }))
       .filter(({ c }) => !c.hidden && c.start < duration)
-      .map(({ c, sp, ramp }) => {
+      .map(({ c, sp, ramp, join }) => {
         const entry = {
           ...spanSoundSpec(sp, specFile),
           file: assetById.get(c.assetId)!.fileName,
@@ -1275,6 +1278,14 @@ export async function buildExportPayload(
           border: undefined as string | undefined,
           removal: undefined as { rgb: string; alpha: string } | undefined,
           ...ramp,
+          ...(join > 0
+            ? {
+                transition: join,
+                transitionStyle: c.transitionStyle,
+                transitionFeather: c.transitionFeather,
+                transitionBand: c.transitionBand,
+              }
+            : {}),
         };
         overlayClipOf.set(entry, posed(cardBoxless(c)));
         return entry;

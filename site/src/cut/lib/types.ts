@@ -707,8 +707,8 @@ export interface VideoClip {
   smoothSlow?: boolean;
   /** Transition into the next clip on this clip's track, in timeline seconds
    * (absent/0 = hard cut). Every style overlaps the two clips by this much,
-   * so the cut shortens. On upper tracks a transition blends the incoming
-   * clip in over the outgoing one (the tracks beneath show through). */
+   * so the cut shortens. On upper tracks the style plays as on track 0, and
+   * the tracks beneath show wherever the pair leaves the frame clear. */
   transition?: number;
   /** Look of that transition; absent = "crossfade". */
   transitionStyle?: TransitionStyle;

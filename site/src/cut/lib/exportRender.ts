@@ -862,9 +862,10 @@ function overlayRamps(
     // A transitioned joint owns its edge, so the animation there stands down.
     if (!((spans[i - 1]?.transitionOut ?? 0) > 0)) apply(sp.clip.animIn, "head");
     if (!(sp.transitionOut > 0)) apply(sp.clip.animOut, "tail");
-    if (sp.transitionOut > 0 && spans[i + 1]) {
+    // A join hands the sound over as track 0's does: the outgoing clip fades
+    // across the window, the incoming one enters clean at the cut.
+    if (sp.transitionOut > 0 && spans[i + 1] && !spans[i + 1].clip.hidden) {
       ramps[i].tail = Math.max(ramps[i].tail, sp.transitionOut);
-      ramps[i + 1].head = Math.max(ramps[i + 1].head, sp.transitionOut);
     }
     // A cross dissolve is these ramps and nothing else: the picture cuts.
     // They stay off `head`/`tail` — a fade ends at silence, a crossing ramps
@@ -1755,11 +1756,36 @@ export class FramePainter {
     }
 
     const spansOf = (track: number) => this.byTrack.get(track) ?? [];
+    let joined = false;
     for (const layer of overlayPlan(this.overlayTracks, spansOf, t, this.overlayHeld)) {
       const span = this.spanOfClip.get(layer.clip.id);
       if (!span) continue;
       await this.fetchRemovalMatte(span, layer.at);
       const frame = await this.frameOf(span, layer.at);
+      const join = layer.join;
+      if (join) {
+        // The pair draws as one layer, the incoming clip held on its first
+        // frame, as the preview draws it.
+        joined = true;
+        await this.fetchRemovalMatte(join.incoming, join.incoming.start);
+        comp.drawOverlayJoin(
+          join.style,
+          join.p,
+          {
+            masterFrame: frame,
+            masterClip: layer.clip,
+            masterAlpha: layer.alpha,
+            masterZoom: layer.zoom,
+            masterFx: { dx: 0, dy: 0 },
+            incFrame: await this.frameOf(join.incoming, join.incoming.start),
+            incClip: join.incoming.clip,
+            incAlpha: join.incAlpha,
+            incZoom: join.incZoom,
+          },
+          layer.at
+        );
+        continue;
+      }
       comp.drawIntoRect(
         frame,
         rectOf(layer.clip),
@@ -1769,6 +1795,9 @@ export class FramePainter {
         layer.zoom,
         layer.clip
       );
+    }
+    if (!joined) {
+      comp.releaseJoin();
     }
 
     // The subject pass: video → behind elements → segmented person, exactly
