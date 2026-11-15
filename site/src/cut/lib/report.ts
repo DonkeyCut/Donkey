@@ -76,8 +76,12 @@ export function bindFailureSink(next: FailureSink): void {
  * chain of causes behind it, with the file it failed on left out. Error
  * tracking groups by message otherwise, so a filename in the sentence opened
  * one issue per file — "peaks failed for IMG_7087.MOV" and "… IMG_7091.MOV"
- * apart. Signed URLs are masked, since each carries its own signature.
+ * apart. Signed URLs and long counts are masked, since each differs per run.
  */
+// A count in a message (bytes sent, a frame index) is masked from the
+// grouping; three digits and under stay, since those are status codes.
+const COUNT = /\d{4,}/g;
+
 function fingerprintOf(what: string, err: unknown): string {
   const parts = [what];
   for (let at = err, depth = 0; at != null && depth < 4; depth++) {
@@ -85,7 +89,7 @@ function fingerprintOf(what: string, err: unknown): string {
       parts.push(String(at));
       break;
     }
-    parts.push(`${at.name}: ${at.message.replace(/https?:\/\/\S+/g, "<url>")}`);
+    parts.push(`${at.name}: ${at.message.replace(/https?:\/\/\S+/g, "<url>").replace(COUNT, "<n>")}`);
     at = at.cause;
   }
   return parts.join(" | ");
@@ -97,10 +101,19 @@ function fingerprintOf(what: string, err: unknown): string {
  * both, and the grouping only the first.
  */
 export function reportSwallowed(what: string, err: unknown, subject?: string): void {
-  const message = subject ? `${what} for ${subject}` : what;
   if (transient(err)) {
-    console.warn(message, err);
+    console.warn(subject ? `${what} for ${subject}` : what, err);
     return;
   }
+  reportFailure(what, err, subject);
+}
+
+/**
+ * Record a failure whatever its shape. A step with no retry behind it — an
+ * export the tab gave up on — needs the storage and network failures that
+ * `reportSwallowed` keeps to the console, since those are its likeliest causes.
+ */
+export function reportFailure(what: string, err: unknown, subject?: string): void {
+  const message = subject ? `${what} for ${subject}` : what;
   sink(new Error(message, { cause: err }), fingerprintOf(what, err));
 }

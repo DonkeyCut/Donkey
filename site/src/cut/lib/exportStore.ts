@@ -8,6 +8,7 @@ import { getBackend, type CutBackend, type CutMode } from "./backend";
 import { browserBackend } from "./backend/browser";
 import { cloudBackend } from "./backend/cloud";
 import { localBackend } from "./backend/local";
+import { reportFailure } from "./report";
 import { errorFields, UserError, type UserErrorParams } from "./userError";
 import {
   matchSourceSettings,
@@ -114,6 +115,36 @@ interface ExportsState {
 }
 
 export type FeedPace = "now" | "paced";
+
+const MB = 1024 ** 2;
+
+/** What a failure was, by its catalog code or its error's name — never its
+ * words, which carry file names. Never empty: an error with a blank name
+ * reports its class, and anything else its type. */
+function failureName(err: unknown): string {
+  const code = errorFields(err, String(err)).errorCode;
+  if (code) {
+    return code;
+  }
+  if (err instanceof Error) {
+    return err.name || err.constructor.name || "Error";
+  }
+  return typeof err;
+}
+
+/** The megabytes this origin can still store, when the browser says. A full
+ * disk fails a tab render's scratch file and its saved export. */
+async function freeStorage(): Promise<number | undefined> {
+  try {
+    const { quota, usage } = await navigator.storage.estimate();
+    if (quota === undefined || usage === undefined) {
+      return undefined;
+    }
+    return Math.round((quota - usage) / MB);
+  } catch {
+    return undefined;
+  }
+}
 
 export const useExports = create<ExportsState>((set, get) => ({
   jobs: [],
@@ -230,16 +261,21 @@ export const useExports = create<ExportsState>((set, get) => ({
           // is final: the worker sits behind the same gate.
           if (err instanceof DOMException && err.name === "AbortError") throw err;
           if (err instanceof ExportRefusedError) throw err;
-          // The dock shows only the worker's row; the console keeps the
+          // The dock shows only the worker's row; error tracking keeps the
           // reason the tab gave up, or no one could find it.
-          console.warn("The tab's render failed; the worker renders this export instead.", err);
-          tabError = errorFields(err, String(err)).errorCode ?? (err instanceof Error ? err.name : typeof err);
+          reportFailure("[cut] the tab's export failed; the worker renders it instead", err);
+          tabError = failureName(err);
           await renderOnWorker();
         }
       } else {
         await renderOnWorker();
       }
-      track("export_finished", { ...shape, renderer, result: queued ? "queued" : "done", ...(tabError ? { tabError } : {}) });
+      const freeStorageMb = tabError ? await freeStorage() : undefined;
+      track("export_finished", {
+        ...shape, renderer, result: queued ? "queued" : "done",
+        ...(tabError ? { tabError } : {}),
+        ...(freeStorageMb === undefined ? {} : { freeStorageMb }),
+      });
       // Pull the finished (or queued) job into the feed *before* retiring the
       // placeholder — dropping the local row first left a round-trip with
       // neither row on screen — and while the job row is still hidden, since
@@ -266,7 +302,17 @@ export const useExports = create<ExportsState>((set, get) => ({
         track("export_finished", { ...shape, renderer, result: "cancelled" });
         return;
       }
-      track("export_finished", { ...shape, renderer, result: "failed", error: errorFields(err, String(err)).errorCode ?? "unknown", ...(tabError ? { tabError } : {}) });
+      // A refusal is the gate answering; anything else is a failure someone
+      // has to trace, with the free storage that rules a full disk in or out.
+      if (!(err instanceof ExportRefusedError)) {
+        reportFailure("[cut] export failed", err);
+      }
+      const freeStorageMb = await freeStorage();
+      track("export_finished", {
+        ...shape, renderer, result: "failed", error: errorFields(err, String(err)).errorCode ?? "unknown",
+        ...(tabError ? { tabError } : {}),
+        ...(freeStorageMb === undefined ? {} : { freeStorageMb }),
+      });
       fail(err);
     }
   },

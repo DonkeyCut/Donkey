@@ -4,7 +4,10 @@ import * as exportClient from "@/cut/lib/exportClient";
 import * as exportRender from "@/cut/lib/exportRender";
 import { EXPORT_PRESETS } from "@/cut/lib/exportPresets";
 import { exportBackend, exportCancelable, useExports, type ExportJob, type LocalRow } from "@/cut/lib/exportStore";
+import { bindFailureSink } from "@/cut/lib/report";
 import { useEditor } from "@/cut/lib/store";
+import { UserError } from "@/cut/lib/userError";
+import posthog from "posthog-js";
 
 const initial = useExports.getState();
 const restores: (() => void)[] = [];
@@ -13,6 +16,26 @@ afterEach(() => {
   for (const restore of restores.splice(0)) restore();
   useExports.setState(initial, true);
 });
+
+/** Every failure report sent from here on, as the errors the sink got. */
+function sinkReports(): Error[] {
+  const reports: Error[] = [];
+  bindFailureSink((error) => reports.push(error));
+  restores.push(() => bindFailureSink((error) => console.error(error)));
+  return reports;
+}
+
+/** Every analytics event captured from here on; `finished` is the last
+ * export_finished's properties. */
+function captured() {
+  const calls: [string, Record<string, unknown> | undefined][] = [];
+  const capture = spyOn(posthog, "capture").mockImplementation(((name: string, props?: Record<string, unknown>) => {
+    calls.push([name, props]);
+    return undefined;
+  }) as typeof posthog.capture);
+  restores.push(() => capture.mockRestore());
+  return { finished: () => calls.findLast(([name]) => name === "export_finished")?.[1] };
+}
 
 function feed(jobs: ExportJob[] = []) {
   const online = Object.getOwnPropertyDescriptor(navigator, "onLine");
@@ -120,7 +143,7 @@ test("hidden preparation stays hidden when the worker queues its job", async () 
   expect(useExports.getState().jobs[0].status).toBe("queued");
 });
 
-test("a tab render that fails goes to the worker and says why in the console", async () => {
+test("a tab render that fails goes to the worker and reports why", async () => {
   const mode = spyOn(backend, "getBackend").mockReturnValue(exportBackend("cloud"));
   const probe = spyOn(exportRender, "canRenderInBrowser").mockResolvedValue(true);
   const failure = new DOMException("The operation failed because it would cause the application to exceed its storage quota.", "QuotaExceededError");
@@ -128,17 +151,54 @@ test("a tab render that fails goes to the worker and says why in the console", a
     throw failure;
   });
   const create = spyOn(exportClient, "createExportJob").mockResolvedValue("queued");
-  const warn = spyOn(console, "warn").mockImplementation(() => {});
-  restores.push(() => mode.mockRestore(), () => probe.mockRestore(), () => render.mockRestore(), () => create.mockRestore(), () => warn.mockRestore());
+  restores.push(() => mode.mockRestore(), () => probe.mockRestore(), () => render.mockRestore(), () => create.mockRestore());
+  const reports = sinkReports();
+  const events = captured();
   feed([{ id: "queued", projectId: "project", residency: "cloud", status: "queued", progress: 0 }]);
 
   await useExports.getState().start("project", useEditor.getState(), {
     width: 1280, height: 720, ...EXPORT_PRESETS[0].settings,
   });
   expect(create).toHaveBeenCalled();
-  const [message, error] = warn.mock.calls[0] ?? [];
-  expect(String(message)).toContain("worker");
-  expect(error).toBe(failure);
+  expect(reports[0]?.message).toContain("worker");
+  expect(reports[0]?.cause).toBe(failure);
+  expect(events.finished()?.tabError).toBe("QuotaExceededError");
+});
+
+test("a browser export the tab and the worker both fail names both failures and the free storage", async () => {
+  const mode = spyOn(backend, "getBackend").mockReturnValue(exportBackend("browser"));
+  const probe = spyOn(exportRender, "canRenderInBrowser").mockResolvedValue(true);
+  // A failure with no name of its own still has to say what it was.
+  const tabFailure = Object.assign(new Error("Encoder gave up."), { name: "" });
+  const render = spyOn(exportClient, "runBrowserExport").mockImplementation(async () => {
+    throw tabFailure;
+  });
+  const uploadFailure = new UserError("upload_failed", "Upload failed.");
+  const borrowed = spyOn(exportClient, "runBrowserExportInCloud").mockImplementation(async () => {
+    throw uploadFailure;
+  });
+  const storage = Object.getOwnPropertyDescriptor(navigator, "storage");
+  Object.defineProperty(navigator, "storage", {
+    configurable: true,
+    value: { estimate: async () => ({ quota: 300 * 1024 ** 2, usage: 100 * 1024 ** 2 }) },
+  });
+  restores.push(
+    () => mode.mockRestore(), () => probe.mockRestore(), () => render.mockRestore(), () => borrowed.mockRestore(),
+    () => (storage ? Object.defineProperty(navigator, "storage", storage) : Reflect.deleteProperty(navigator, "storage")),
+  );
+  const reports = sinkReports();
+  const events = captured();
+  feed();
+
+  await useExports.getState().start("project", useEditor.getState(), {
+    width: 1280, height: 720, ...EXPORT_PRESETS[0].settings,
+  });
+  const finished = events.finished();
+  expect(finished?.result).toBe("failed");
+  expect(finished?.error).toBe("upload_failed");
+  expect(finished?.tabError).toBe("Error");
+  expect(finished?.freeStorageMb).toBe(200);
+  expect(reports.map((r) => r.cause)).toEqual([tabFailure, uploadFailure]);
 });
 
 test("a paced poll reads the cloud feed at most every few seconds; a direct refresh always does", async () => {

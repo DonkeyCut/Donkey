@@ -47,6 +47,15 @@ describe("reportSwallowed", () => {
     expect(one?.fingerprint).toBe(two!.fingerprint);
   });
 
+  test("leaves byte counts out of the grouping and keeps status codes in it", () => {
+    const one = report("[cut] export failed", new Error("The connection dropped after 1048576 of 9437184 bytes."));
+    const two = report("[cut] export failed", new Error("The connection dropped after 2097152 of 9437184 bytes."));
+    const refused = report("[cut] export failed", new Error("The storage answered 403 SignatureDoesNotMatch."));
+
+    expect(one?.fingerprint).toBe(two!.fingerprint);
+    expect(refused?.fingerprint).toContain("403");
+  });
+
   test("sends a dropped connection to the console only", () => {
     expect(report("[cut] peaks failed", new TypeError("Failed to fetch"), "a.mp4")).toBeUndefined();
   });
