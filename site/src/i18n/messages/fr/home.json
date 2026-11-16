@@ -400,6 +400,8 @@
   },
   "assets": {
     "newFolder": "Nouveau dossier",
+    "newProject": "Nouveau projet",
+    "more": "Plus d'actions",
     "upload": "Importer",
     "search": "Rechercher projets, clips, audio, polices, notes",
     "clearSearch": "Effacer la recherche",

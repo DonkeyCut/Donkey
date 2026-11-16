@@ -16,8 +16,10 @@ import {
   Link as LinkIcon,
   List,
   Loader2,
+  MoreHorizontal,
   Search,
   Share2,
+  SquarePlus,
   StickyNote,
   Trash2,
   Type,
@@ -26,7 +28,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { useDeleteKey } from "@/cut/hooks/useDeleteKey";
 import { useSelectAllKey } from "@/cut/hooks/useSelectAllKey";
@@ -107,6 +109,7 @@ import {
 import { DeleteConfirm, SelectionMenu, usePickWords, useSelectionMenu } from "@/cut/components/selectionMenu";
 import { ASSET_ROW, ASSET_ROW_PICKED, AssetTable } from "./assetTable";
 import { GraceBanner } from "./GraceBanner";
+import { useHomeCreate } from "@/cut/components/home/useHomeCreate";
 import { ProjectMenu, ProjectMenuItems, ProjectTile, ResidencyBadge } from "./ProjectCard";
 import { useProjectActions } from "./projectActions";
 import {
@@ -340,6 +343,11 @@ export function AssetsView() {
   };
   const newShelf = open && live(open.residency) ? open.residency : target;
   const newParent = open && open.residency === newShelf && open.store === "library" ? open.id : null;
+
+  // A new project files into the open folder when the folder's shelf answers
+  // and holds projects there, else it lands at the top of the target shelf.
+  const projectFiled = !!open && live(open.residency) && (open.store === "projects" || unified(open.residency));
+  const create = useHomeCreate(projectFiled ? open.residency : target, projectFiled ? open.id : null);
 
   // Navigation keeps the tab; a folder opens by URL so it is shareable.
   const gotoFolder = (id: string | null) => {
@@ -806,6 +814,29 @@ export function AssetsView() {
     }
   };
 
+  // What can be made or done here: the header's ⋯ menu and a right-click on
+  // the page both list these, the right-click adding Upload under them.
+  const pageItems = (
+    <>
+      <DropdownMenuItem disabled={create.busy} onClick={() => void create.start("assets_new", null, null)}>
+        <SquarePlus /> {t("assets.newProject")}
+      </DropdownMenuItem>
+      {(openFolder === null || newParent) && (
+        <DropdownMenuItem onClick={() => setFolderCreating(true)}>
+          <FolderPlus /> {t("assets.newFolder")}
+        </DropdownMenuItem>
+      )}
+      <DropdownMenuItem onClick={() => noteView.current?.create()}>
+        <StickyNote /> {t("library.addNote")}
+      </DropdownMenuItem>
+      {open && open.store === "library" && (
+        <DropdownMenuItem disabled={!live(open.residency)} onClick={() => shareFolder(open.id)}>
+          <Share2 /> {t("library.share")}
+        </DropdownMenuItem>
+      )}
+    </>
+  );
+
   // ── Page state ──────────────────────────────────────────────────────────
   const loading = !library.data && library.isPending && residencies.every((r) => sections[r].isLoading);
   const placedNotes = noteList.some((n) => !!n.libraryLocation);
@@ -1077,19 +1108,15 @@ export function AssetsView() {
             />
           )}
           <div className="flex items-center gap-2">
-            {open && open.store === "library" && (
-              <Button variant="outline" disabled={!live(open.residency)} onClick={() => shareFolder(open.id)}>
-                <Share2 data-icon="inline-start" /> {t("library.share")}
-              </Button>
-            )}
-            {(openFolder === null || newParent) && (
-              <Button variant="outline" onClick={() => setFolderCreating(true)}>
-                <FolderPlus data-icon="inline-start" /> {t("assets.newFolder")}
-              </Button>
-            )}
             <Button onClick={() => setAddOpen(true)}>
               <Upload data-icon="inline-start" /> {t("assets.upload")}
             </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger render={<Button variant="outline" size="icon" aria-label={t("assets.more")} />}>
+                <MoreHorizontal />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">{pageItems}</DropdownMenuContent>
+            </DropdownMenu>
           </div>
           <input
             ref={inputRef}
@@ -1184,7 +1211,7 @@ export function AssetsView() {
         </div>
 
         <GraceBanner enabled={cloudListed} />
-        {failure && <p className="mb-4 text-sm text-destructive">{failure}</p>}
+        {(failure ?? create.error) && <p className="mb-4 text-sm text-destructive">{failure ?? create.error}</p>}
         {residencies.map(
           (r) =>
             sections[r].isError &&
@@ -1294,14 +1321,7 @@ export function AssetsView() {
         >
           {ctx.menu?.ids.length === 0 ? (
             <>
-              {(openFolder === null || newParent) && (
-                <DropdownMenuItem onClick={() => setFolderCreating(true)}>
-                  <FolderPlus /> {t("assets.newFolder")}
-                </DropdownMenuItem>
-              )}
-              <DropdownMenuItem onClick={() => noteView.current?.create()}>
-                <StickyNote /> {t("library.addNote")}
-              </DropdownMenuItem>
+              {pageItems}
               <DropdownMenuItem onClick={() => setAddOpen(true)}>
                 <Upload /> {t("assets.upload")}
               </DropdownMenuItem>

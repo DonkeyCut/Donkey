@@ -400,6 +400,8 @@
   },
   "assets": {
     "newFolder": "새 폴더",
+    "newProject": "새 프로젝트",
+    "more": "추가 작업",
     "upload": "업로드",
     "search": "프로젝트, 클립, 오디오, 폰트, 메모 검색",
     "clearSearch": "검색 지우기",

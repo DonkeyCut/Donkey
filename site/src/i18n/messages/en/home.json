@@ -400,6 +400,8 @@
   },
   "assets": {
     "newFolder": "New folder",
+    "newProject": "New project",
+    "more": "More actions",
     "upload": "Upload",
     "search": "Search projects, clips, audio, fonts, notes",
     "clearSearch": "Clear search",

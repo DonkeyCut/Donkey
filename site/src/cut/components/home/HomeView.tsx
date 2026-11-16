@@ -48,7 +48,7 @@ export function HomeView() {
   // Inside ChatGPT, projects and files go to the cloud, where ChatGPT's tools
   // can see them.
   const residency = chatgpt ? "cloud" : picked;
-  const create = useHomeCreate(residency);
+  const create = useHomeCreate(residency, null);
   const uploads = useHomeUploads(residency);
   const page = useRef<HTMLElement>(null);
   const dragging = usePageFileDrop(page, uploads.add);

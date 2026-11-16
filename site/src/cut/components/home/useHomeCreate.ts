@@ -24,8 +24,9 @@ import { track } from "@/lib/analytics";
 import type { StartTemplate } from "./atRows";
 
 /** What started a project on Home, for the creation event; `chatgpt_card` is
- * a prompt Home's box sends to the conversation around the card. */
-type HomeSource = "home_prompt" | "home_blank" | "chatgpt_card";
+ * a prompt Home's box sends to the conversation around the card, and
+ * `assets_new` is New project in an Assets folder. */
+type HomeSource = "home_prompt" | "home_blank" | "chatgpt_card" | "assets_new";
 
 /** Whether a template copy cues the template tour: `quiet` when the chat
  * starts working in the project on arrival. */
@@ -37,9 +38,10 @@ export type StartProgress = { name: string; done: number; total: number };
 /**
  * Making a project from Home: an empty one, or one from a template, on the
  * shelf the storage switcher points at, opened in the editor. A prompt rides
- * along as the chat's first message, which the editor sends on arrival.
+ * along as the chat's first message, which the editor sends on arrival. An
+ * empty project lands in `folderId`, the Assets folder it was made from.
  */
-export function useHomeCreate(residency: Residency) {
+export function useHomeCreate(residency: Residency, folderId: string | null) {
   const t = useTranslations("home.start");
   const locale = useLocale();
   const describeError = useDescribeError();
@@ -56,7 +58,7 @@ export function useHomeCreate(residency: Residency) {
     const res = await backendFor(residency).fetch("/api/cut/projects", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: creatorNames().untitled, folderId: null, aspect }),
+      body: JSON.stringify({ name: creatorNames().untitled, folderId, aspect }),
     });
     if (!res.ok) {
       throw errorFromBody(await res.json().catch(() => null), t("createFailed"));

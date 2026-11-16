@@ -400,6 +400,8 @@
   },
   "assets": {
     "newFolder": "Neuer Ordner",
+    "newProject": "Neues Projekt",
+    "more": "Weitere Aktionen",
     "upload": "Hochladen",
     "search": "Projekte, Clips, Audio, Schriften, Notizen durchsuchen",
     "clearSearch": "Suche löschen",

@@ -400,6 +400,8 @@
   },
   "assets": {
     "newFolder": "新建文件夹",
+    "newProject": "新建项目",
+    "more": "更多操作",
     "upload": "上传",
     "search": "搜索项目、片段、音频、字体、笔记",
     "clearSearch": "清除搜索",

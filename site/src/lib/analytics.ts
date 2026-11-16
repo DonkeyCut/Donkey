@@ -96,7 +96,7 @@ export type AnalyticsEvents = {
     freeStorageMb?: number;
   };
   // Cut projects home.
-  project_created: { source: "projects_home" | "sidebar" | "file_import" | "chatgpt_card" | "template" | "home_prompt" | "home_blank" };
+  project_created: { source: "projects_home" | "sidebar" | "file_import" | "chatgpt_card" | "template" | "home_prompt" | "home_blank" | "assets_new" };
   folder_created: void;
   // Cut cloud storage limits.
   cut_storage_pill_clicked: void;
