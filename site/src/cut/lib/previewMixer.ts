@@ -993,11 +993,6 @@ export class PreviewMixer {
           buffer = fit?.buffer ?? null;
           shift = Math.max(0, fit?.shift ?? 0);
         } else if (whole) {
-          // A file that stops short of the clip has nothing past its end.
-          if (whole.skip >= whole.buffer.duration - 1e-3) {
-            live.ended = true;
-            return;
-          }
           buffer = whole.buffer;
           skip = whole.skip;
         } else if (isShort(live)) {
@@ -1036,6 +1031,15 @@ export class PreviewMixer {
           // re-mint cannot speak to, so this failure keeps to itself.
           this.miss(live, false);
         }
+        return;
+      }
+
+      // A file whose sound stops short of the clip — a phone clip's track a
+      // few frames shorter than its picture — answers the ask past its end
+      // with the held buffer joined at its very end. That window is empty and
+      // leaves the voice where it stood, so the voice is over.
+      if (skip >= buffer.duration - 1e-3) {
+        live.ended = true;
         return;
       }
       const tNow = this.at();

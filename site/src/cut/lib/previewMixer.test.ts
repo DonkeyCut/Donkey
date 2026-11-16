@@ -51,6 +51,8 @@ interface Played {
   to: number;
 }
 let played: Played[] = [];
+/** Every source handed to the graph, empty ones included. */
+let starts = 0;
 
 class FakeGain {
   gain = { value: 0 };
@@ -64,6 +66,7 @@ class FakeSource {
   connect() {}
   disconnect() {}
   start(when: number, offset = 0) {
+    starts++;
     const length = (this.buffer?.duration ?? 0) - offset;
     if (length > 0) {
       this.span = { from: when, to: when + length };
@@ -242,8 +245,8 @@ const decodeAudioSpan = async (_url: string, from: number, to: number) => {
   decodes.asked++;
   await delivered(to);
   if (wall < failUntil) throw new Error("the link dropped");
-  if (from >= CLIP_S - 1e-6) return null;
-  const end = Math.min(to, CLIP_S);
+  if (from >= Math.min(CLIP_S, trackEnd) - 1e-6) return null;
+  const end = Math.min(to, CLIP_S, trackEnd);
   return new AudioBuffer({
     length: Math.max(1, Math.round((end - from) * RATE)),
     numberOfChannels: 1,
@@ -313,6 +316,7 @@ function reset(file: { endEarlyAt?: number; trackEnd?: number } = {}): void {
   ctxTime = 0;
   resumes = 0;
   played = [];
+  starts = 0;
   waiting.length = 0;
   walks.opened = 0;
   walks.seeks = 0;
@@ -684,6 +688,38 @@ describe("the preview's sound over a link that only just keeps up", () => {
     mixer.dispose();
     expect(played.filter((p) => p.from >= 4.9 && p.from <= 5.1).length).toBe(1);
     expect(decodes.asked).toBe(1);
+  });
+
+  test("a short clip whose sound stops before its picture schedules it once", async () => {
+    // The failure this is here for: a phone clip 2.9 s of sound under a
+    // longer picture. Its whole sound went out, then every frame asked for
+    // the sound from 2.9 s on and got the same buffer back joined at its
+    // very end — an empty window that never moved the voice on. Inside the
+    // last half second those asks chained without yielding, and the tab
+    // froze until the sound's clock passed the clip.
+    reset({ trackEnd: 2.9 });
+    headStart = CLIP_S;
+    const tail = {
+      id: "tail",
+      url: "tail.mov",
+      start: 0,
+      in: 0,
+      out: 3,
+      retime: retimeOf({ in: 0, out: 3, speed: 1 }),
+      gain: 1,
+    };
+    const mixer = new PreviewMixer();
+    mixer.start(0);
+    liveCtx = (mixer as unknown as { ctx: FakeContext }).ctx;
+    for (let t = 0; t < tail.out; ) {
+      step();
+      t = mixer.now();
+      mixer.update(t, [tail]);
+      await settle();
+    }
+    mixer.dispose();
+    expect(starts).toBe(1);
+    expect(heard(played, 0, 2.9)).toBeGreaterThan(0.95);
   });
 
   test("a seek keeps its reader and lands with its sound", async () => {
