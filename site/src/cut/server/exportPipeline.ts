@@ -2087,13 +2087,14 @@ async function renderPass(
     const det = o.grade && detailActive(o.grade) ? o.grade : null;
     // A still decodes to RGB, where a matrix means nothing.
     const yuv = !o.image;
-    const inFlags = yuv ? `:in_color_matrix=${ffMatrix(color.matrix)}:in_range=${color.fullRange ? "pc" : "tv"}` : "";
+    const inOpts = yuv ? `in_color_matrix=${ffMatrix(color.matrix)}:in_range=${color.fullRange ? "pc" : "tv"}` : "";
+    const inFlags = yuv ? `:${inOpts}` : "";
     if (!lut && !det) {
       // Nothing to bake: a file whose code values are not the composite's
       // video still converts to it, in video, so the delivery's tags tell
       // the truth.
       if (yuv && (color.matrix !== outMatrixName || color.fullRange)) {
-        return { flags: inFlags, run: (core) => `${core},scale${inFlags}:out_color_matrix=${outMatrix}:out_range=tv` };
+        return { flags: inFlags, run: (core) => `${core},scale=${inOpts}:out_color_matrix=${outMatrix}:out_range=tv` };
       }
       return null;
     }
@@ -2104,7 +2105,7 @@ async function renderPass(
       run: (core, tag) => {
         // Motion interpolation between the framing and here works in video,
         // so the conversion is spelled out again where it actually happens.
-        let chain = core + (yuv && opts.interpolated ? `,scale${inFlags},format=${rgb16}` : `,format=${rgb16}`);
+        let chain = core + (yuv && opts.interpolated ? `,scale=${inOpts},format=${rgb16}` : `,format=${rgb16}`);
         if (lut) chain += `,${lut}`;
         if (det) {
           chain += `,scale=out_color_matrix=${outMatrix}:out_range=pc,format=${yuv16}`;

@@ -131,6 +131,13 @@ describe("a file whose first audio track ffmpeg cannot decode, through ffmpeg", 
   });
 });
 
+describe("a file in another matrix and range, through ffmpeg", () => {
+  test.skipIf(!tools)("converts and exports", async () => {
+    const color = { profile: "rec709" as const, matrix: "bt601" as const, fullRange: true };
+    near(await clickIn({ duration: 3, clips: [{ file: "lead.mov", in: 0, out: 3, muted: false, color }] }, "bt601"), 0.8);
+  });
+});
+
 describe("a recording bound to the video, through ffmpeg", () => {
   test.skipIf(!tools)("plays the recording on the video's clock, and the camera's track stays out", async () => {
     // Recording 3.0 is video 4.0, which a clip from video 1 plays at 3.0.

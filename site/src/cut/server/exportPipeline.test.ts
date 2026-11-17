@@ -1542,7 +1542,7 @@ describe("clip color in the filtergraph", () => {
     });
     const line = g.find((l) => l.startsWith("[0:v]"))!;
     expect(line).not.toContain("lut3d");
-    expect(line).toContain("scale:in_color_matrix=bt601:in_range=pc:out_color_matrix=bt709:out_range=tv");
+    expect(line).toContain(",scale=in_color_matrix=bt601:in_range=pc:out_color_matrix=bt709:out_range=tv");
     expect(line.indexOf("out_range=tv")).toBeLessThan(line.indexOf("pad=1080:1920"));
   });
 
@@ -1643,7 +1643,7 @@ describe("clip color in the filtergraph", () => {
     });
     const line = g.find((l) => l.startsWith("[0:v]"))!;
     expect(line).toContain("minterpolate=");
-    expect(line.indexOf("minterpolate=")).toBeLessThan(line.indexOf("scale:in_color_matrix=bt709:in_range=tv,format=gbrp16le,lut3d"));
+    expect(line.indexOf("minterpolate=")).toBeLessThan(line.indexOf(",scale=in_color_matrix=bt709:in_range=tv,format=gbrp16le,lut3d"));
   });
 
   test("a staged library LUT bakes into the clip's cube, and one that will not read fails naming it", async () => {
