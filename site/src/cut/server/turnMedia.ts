@@ -14,7 +14,7 @@
  * (see `mirrorRetimable`), so the graph itself never turns anything around.
  */
 
-import { num } from "./util";
+import { audioSpec, num } from "./util";
 
 /** The longest stretch of source one chunk turns at once, and the shortest.
  * The ceiling keeps the join list short on ordinary footage; the floor stops
@@ -53,6 +53,8 @@ export interface TurnSpec {
   /** Which streams the source carries; the file carries the same. */
   video: boolean;
   audio: boolean;
+  /** Which audio stream the sound is read from; the first when unset. */
+  audioStream?: number;
   /** Bytes a second of the source's picture comes to decoded (see
    * `videoDecodeCost`), which sizes the chunks. */
   decodeCost?: number;
@@ -96,6 +98,12 @@ export async function bakeTurnedMedia(
     if (to - from <= 1e-4) break;
     const piece = `${outFile}.${i}${spec.video ? ".mov" : ".wav"}`;
     const args = ["-y", "-hide_banner", "-loglevel", "error", "-ss", num(from), "-t", num(to - from), "-i", src];
+
+    // Sound is read from the stream ffmpeg decodes, which names the picture
+    // beside it too.
+    if (spec.audio) {
+      args.push(...(spec.video ? ["-map", "0:v:0"] : []), "-map", `0:${audioSpec(spec.audioStream ?? 0)}`);
+    }
     if (spec.video) {
       args.push("-vf", `reverse,format=${spec.fmt}`);
       args.push(

@@ -5,6 +5,7 @@ import { prepareSourceRemux, prepareTrimRemux } from "../lib/sourceRemux";
 import type { SourceSegment } from "../lib/sourceExportPlan";
 import { runFfmpeg, type RenderHandle } from "./exportPipeline";
 import { UserError, errorFromBody } from "../lib/userError";
+import { audioPad, audioStreamIndex } from "./util";
 
 /** The Mac and worker share the packet copier with browser exports. */
 export async function exportSourceFiles(job: RenderHandle, resolve: (file: string) => string, segments: SourceSegment[], codec: "h264" | "hevc", audioBitrate?: number) {
@@ -60,7 +61,7 @@ export async function exportSourceFiles(job: RenderHandle, resolve: (file: strin
   };
   try {
     for (const segment of segments) if (!inputs.has(segment.file)) inputs.set(segment.file, await read(resolve(segment.file)));
-    const audioTracks = await Promise.all(segments.map((s) => inputs.get(s.file)!.getPrimaryAudioTrack()));
+    const audioTracks = await Promise.all(segments.map((s) => inputs.get(s.file)!.getPrimaryAudioTrack({ filter: (track) => track.codec !== null })));
     const reference = audioTracks.find(Boolean);
     const joinedAudio = segments.length > 1 && !!reference;
     const copy = await prepareSourceRemux(inputs, segments, codec, joinedAudio);
@@ -76,8 +77,9 @@ export async function exportSourceFiles(job: RenderHandle, resolve: (file: strin
     stop();
     const sampleRate = await reference!.getSampleRate();
     const channels = Math.max(...await Promise.all(audioTracks.map((track) => track?.getNumberOfChannels() ?? 0)));
+    const audioStreams = await Promise.all(segments.map((s) => audioStreamIndex(resolve(s.file))));
     const filters = segments.map((s, index) => audioTracks[index]
-      ? `[${index}:a:0]atrim=start=${s.from}:end=${s.to},asetpts=PTS-${s.from}/TB,aresample=${sampleRate}:async=1:first_pts=0,aformat=channel_layouts=${channels}c,apad,atrim=duration=${s.to - s.from}[a${index}]`
+      ? `${audioPad(index, audioStreams[index])}atrim=start=${s.from}:end=${s.to},asetpts=PTS-${s.from}/TB,aresample=${sampleRate}:async=1:first_pts=0,aformat=channel_layouts=${channels}c,apad,atrim=duration=${s.to - s.from}[a${index}]`
       : `anullsrc=r=${sampleRate}:cl=${channels}c,atrim=duration=${s.to - s.from}[a${index}]`);
     filters.push(`${segments.map((_, i) => `[a${i}]`).join("")}concat=n=${segments.length}:v=0:a=1[audio]`);
     const duration = segments.reduce((n, s) => n + s.to - s.from, 0);

@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { runExport, type ExportSpec, type RenderHandle } from "./exportPipeline";
@@ -45,6 +45,22 @@ beforeAll(async () => {
   video("quiet.mov", `anullsrc=r=${RATE}:cl=stereo:d=8`, 8);
   video("lead.mov", click(0.8, 8), 8);
   video("tail.mov", click(2.3, 8), 8);
+
+  // A phone recording with spatial sound: a first audio track in a codec
+  // ffmpeg has no decoder for, then a plain one that clicks at 1.5. The
+  // first track's sample entry is renamed to make it unreadable.
+  const twoTracks = path.join(media, "two-tracks.mov");
+  ff([
+    "-f", "lavfi", "-i", "testsrc2=size=160x120:rate=24:duration=4",
+    "-f", "lavfi", "-i", click(0.5, 4),
+    "-f", "lavfi", "-i", click(1.5, 4),
+    "-map", "0", "-map", "1", "-map", "2",
+    "-pix_fmt", "yuv420p", "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "pcm_s16le",
+    twoTracks,
+  ]);
+  const bytes = Buffer.from(await readFile(twoTracks));
+  bytes.write("apac", bytes.indexOf("sowt"), "latin1");
+  await writeFile(path.join(media, "spatial.mov"), bytes);
 });
 
 afterAll(async () => {
@@ -103,6 +119,17 @@ const near = (got: number | null, want: number) => {
 };
 
 const bound = { file: "rec.wav", offset: -1, duration: 8 };
+
+describe("a file whose first audio track ffmpeg cannot decode, through ffmpeg", () => {
+  test.skipIf(!tools)("plays its decodable track", async () => {
+    near(await clickIn({ duration: 3, clips: [{ file: "spatial.mov", in: 1, out: 4, muted: false }] }, "spatial"), 0.5);
+  });
+
+  test.skipIf(!tools)("plays its decodable track backward and retimed", async () => {
+    // Source 1.5 of a span [1, 4] played backward lands at 4 − 1.5 = 2.5.
+    near(await clickIn({ duration: 3, clips: [{ file: "spatial.mov", in: 1, out: 4, muted: false, reverse: true }] }, "spatial-back"), 2.5);
+  });
+});
 
 describe("a recording bound to the video, through ffmpeg", () => {
   test.skipIf(!tools)("plays the recording on the video's clock, and the camera's track stays out", async () => {

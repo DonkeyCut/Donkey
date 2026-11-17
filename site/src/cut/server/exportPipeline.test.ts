@@ -63,6 +63,7 @@ const runsWithCap = async (over: Partial<ExportSpec>, cap: number | undefined): 
       return true;
     },
     audioChannels: async (file) => (file.includes("mono") ? 1 : 2),
+    audioStreamIndex: async (file) => (file.includes("spatial") ? 1 : 0),
     videoDecodeCost: async () => null,
     videoPicture: async () => null,
     videoDimensions: async (file) => probedDims.get(file) ?? null,
@@ -1472,6 +1473,13 @@ describe("channel layout", () => {
     expect(stanza("mono-bed.m4a")).toContain("aresample=44100,pan=stereo|c0=c0|c1=c0,aformat=");
     expect(stanza("stereo.mp4")).toContain("aresample=44100,aformat=");
     expect(stanza("stereo.mp4")).not.toContain("pan=");
+  });
+
+  test("a file whose first audio stream does not decode is read from the one that does", async () => {
+    const f = await graphFor({ clips: [clip("spatial.mov"), clip("plain.mp4")] });
+    expect(f.some((x) => x.startsWith("[0:a:1]atrim="))).toBe(true);
+    expect(f.some((x) => x.startsWith("[0:a]"))).toBe(false);
+    expect(f.some((x) => x.startsWith("[1:a]atrim="))).toBe(true);
   });
 });
 

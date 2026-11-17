@@ -3,7 +3,7 @@ import { stat } from "node:fs/promises";
 import { hasVp9Encoder, runFfmpeg, videoEncoder, vtQuality, type RenderHandle } from "./exportPipeline";
 import { assertGraphSafe } from "./filterGraph";
 import { streamCodecs } from "./convert";
-import { videoDimensions } from "./util";
+import { audioSpec, audioStreamIndex, videoDimensions } from "./util";
 import { UserError } from "../lib/userError";
 import type { CompatCover } from "../lib/proxyNames";
 
@@ -46,6 +46,8 @@ export type ProxyEncoder = "hevc_videotoolbox" | "libx265";
 export interface ProxyArgs {
   encoder: ProxyEncoder;
   source: ProxySource;
+  /** Which of the master's audio streams the proxy carries; the first when unset. */
+  audioStream?: number;
   /** The proxy's largest height; a taller master is scaled down. */
   maxHeight: number;
   /** x265 crf; VideoToolbox's constant quality maps from it. */
@@ -104,7 +106,7 @@ export function proxyFfmpegArgs(src: string, out: string, opts: ProxyArgs): stri
     "-copyts",
     "-i", src,
     "-map", "0:v:0",
-    ...(source.hasAudio ? ["-map", "0:a:0"] : []),
+    ...(source.hasAudio ? ["-map", `0:${audioSpec(opts.audioStream ?? 0)}`] : []),
     "-vf", assertGraphSafe(graph),
     "-color_primaries", "bt709",
     "-color_trc", "iec61966-2-1",
@@ -189,11 +191,11 @@ export async function makeProxy(
   out: string,
   opts: { maxHeight: number; crf: number; maxKbps?: number; onProgress?: (seconds: number) => void }
 ): Promise<ProxyOutcome> {
-  const [source, dims, encoder] = await Promise.all([probeProxySource(src), videoDimensions(src), proxyEncoder()]);
+  const [source, dims, encoder, audioStream] = await Promise.all([probeProxySource(src), videoDimensions(src), proxyEncoder(), audioStreamIndex(src)]);
   // The display height decides the scale — a phone's sideways file is
   // measured upright everywhere else in Cut.
   if (dims) source.height = dims.height;
-  await runFfmpeg(handle, proxyFfmpegArgs(src, out, { encoder, source, maxHeight: opts.maxHeight, crf: opts.crf, maxKbps: opts.maxKbps }), opts.onProgress);
+  await runFfmpeg(handle, proxyFfmpegArgs(src, out, { encoder, source, audioStream, maxHeight: opts.maxHeight, crf: opts.crf, maxKbps: opts.maxKbps }), opts.onProgress);
   const [info, outDims] = await Promise.all([stat(out), videoDimensions(out)]);
   return { sizeBytes: info.size, ...(outDims ? { width: outDims.width, height: outDims.height } : {}) };
 }
@@ -232,7 +234,7 @@ export interface CompatArgs {
 export function compatFfmpegArgs(
   src: string,
   out: string,
-  opts: CompatArgs & { source: ProxySource | null; videoCodec: string | null; hasAudio: boolean; h264: string }
+  opts: CompatArgs & { source: ProxySource | null; videoCodec: string | null; hasAudio: boolean; audioStream?: number; h264: string }
 ): string[] {
   const { source } = opts;
   const cap = Math.max(2, Math.round(opts.maxHeight));
@@ -274,7 +276,7 @@ export function compatFfmpegArgs(
       video.push("-force_key_frames", KEY_EVERY_SECOND);
     }
   }
-  const audio = opts.hasAudio ? ["-map", "0:a:0", "-c:a", "libopus", "-b:a", `${OPUS_KBPS}k`] : ["-an"];
+  const audio = opts.hasAudio ? ["-map", `0:${audioSpec(opts.audioStream ?? 0)}`, "-c:a", "libopus", "-b:a", `${OPUS_KBPS}k`] : ["-an"];
   return [
     "-y",
     "-copyts",
@@ -297,13 +299,14 @@ export async function makeCompatProxy(
   const codecs = await streamCodecs(src);
   if (opts.cover === "video" && !codecs.video) throw new UserError("media_no_video", "That file carries no video.");
   if (opts.cover === "video" && !(await hasVp9Encoder())) throw new UserError("proxy_no_vp9_encoder", "This machine's ffmpeg has no VP9 encoder.");
-  const [source, dims, h264] = await Promise.all([
+  const [source, dims, h264, audioStream] = await Promise.all([
     codecs.video ? probeProxySource(src) : Promise.resolve(null),
     codecs.video ? videoDimensions(src) : Promise.resolve(null),
     videoEncoder("h264"),
+    audioStreamIndex(src),
   ]);
   if (source && dims) source.height = dims.height;
-  await runFfmpeg(handle, compatFfmpegArgs(src, out, { ...opts, source, videoCodec: codecs.video ?? null, hasAudio: !!codecs.audio, h264 }), opts.onProgress);
+  await runFfmpeg(handle, compatFfmpegArgs(src, out, { ...opts, source, videoCodec: codecs.video ?? null, hasAudio: !!codecs.audio, audioStream, h264 }), opts.onProgress);
   const [info, outDims] = await Promise.all([stat(out), source ? videoDimensions(out) : Promise.resolve(null)]);
   return { sizeBytes: info.size, ...(outDims ? { width: outDims.width, height: outDims.height } : {}) };
 }

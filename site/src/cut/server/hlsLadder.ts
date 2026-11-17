@@ -16,7 +16,7 @@ import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { runFfmpeg, type RenderHandle } from "./exportPipeline";
 import { assertGraphSafe } from "./filterGraph";
-import { hasStream, videoDimensions } from "./util";
+import { audioSpec, audioStreamIndex, hasStream, videoDimensions } from "./util";
 
 /** Segment length. Six seconds is the common VOD choice: long enough that
  * per-segment request overhead stays small on a long cut, short enough that a
@@ -132,6 +132,7 @@ export async function encodeRungs(
 ): Promise<Variant[]> {
   await Promise.all(rungs.map((r) => mkdir(path.join(outDir, r.name), { recursive: true })));
   const withAudio = await hasStream(source, "a");
+  const audio = audioSpec(withAudio ? await audioStreamIndex(source) : 0);
 
   const split = `[0:v]split=${rungs.length}${rungs.map((_, i) => `[s${i}]`).join("")}`;
   const scales = rungs.map(
@@ -140,7 +141,7 @@ export async function encodeRungs(
 
   const maps: string[] = [];
   for (let i = 0; i < rungs.length; i++) maps.push("-map", `[o${i}]`);
-  if (withAudio) for (let i = 0; i < rungs.length; i++) maps.push("-map", "0:a:0");
+  if (withAudio) for (let i = 0; i < rungs.length; i++) maps.push("-map", `0:${audio}`);
 
   const codecArgs: string[] = [];
   rungs.forEach((r, i) => {

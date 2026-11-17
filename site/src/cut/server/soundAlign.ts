@@ -12,6 +12,7 @@
  */
 
 import { BAKE_RATE } from "./retimeAudio";
+import { audioSpec } from "./util";
 
 /** Six decimals: a seek and a length to the microsecond, well under a sample. */
 const exact = (n: number) => n.toFixed(6);
@@ -31,7 +32,7 @@ export async function alignRecording(
   outFile: string,
   /** A mono recording is laid into both channels at full level, the way the
    * browser's mixer upmixes it. */
-  opts: { mono?: boolean } = {}
+  opts: { mono?: boolean; /** Which audio stream of `rec` to read. */ stream?: number } = {}
 ): Promise<boolean> {
   const len = hi - lo;
   const start = lo + bound.offset;
@@ -50,6 +51,8 @@ export async function alignRecording(
     rec,
     "-t",
     exact(to - from),
+    "-map",
+    `0:${audioSpec(opts.stream ?? 0)}`,
     "-vn",
     "-af",
     `aresample=${BAKE_RATE},` +

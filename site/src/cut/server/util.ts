@@ -256,17 +256,87 @@ export function mediaDuration(file: string): Promise<number | null> {
   });
 }
 
+/** A probe's stdout, or null when it fails, exits non-zero or hangs. */
+function probeText(cmd: "ffmpeg" | "ffprobe", args: string[]): Promise<string | null> {
+  return new Promise((resolve) => {
+    const p = spawn(cmd, args);
+    let out = "";
+    const timer = setTimeout(() => {
+      p.kill("SIGKILL");
+      resolve(null);
+    }, 30_000);
+    timer.unref();
+    p.stdout.on("data", (d) => (out += d));
+    p.on("close", (code) => {
+      clearTimeout(timer);
+      resolve(code === 0 ? out : null);
+    });
+    p.on("error", () => {
+      clearTimeout(timer);
+      resolve(null);
+    });
+  });
+}
+
+let decodable: Promise<Set<string>> | undefined;
+
 /**
- * How many channels a file's first audio stream carries, or null when the
+ * The codecs this ffmpeg decodes, read once from its own list, where a
+ * leading `D` marks one it can decode: ` DEA.L. aac`.
+ */
+function decodableCodecs(): Promise<Set<string>> {
+  decodable ??= probeText("ffmpeg", ["-hide_banner", "-codecs"]).then((out) => {
+    const names = (out ?? "").split("\n").map((line) => /^ D[.A-Z]{5} (\S+)/.exec(line)?.[1]);
+    return new Set(names.filter((n): n is string => !!n));
+  });
+  return decodable;
+}
+
+/**
+ * Which of a file's audio streams ffmpeg reads, counted among its audio
+ * streams: the first one this ffmpeg can decode. A phone recording with
+ * spatial sound leads with a track ffmpeg has no decoder for and carries a
+ * plain AAC one after it, so that file answers 1. A file with one track, a
+ * failed probe, or no decodable track answers 0.
+ *
+ *   ["-map", `0:${audioSpec(await audioStreamIndex(src))}`]
+ */
+export async function audioStreamIndex(file: string): Promise<number> {
+  const [codecs, out] = await Promise.all([
+    decodableCodecs(),
+    probeText("ffprobe", ["-v", "error", "-select_streams", "a", "-show_entries", "stream=codec_name", "-of", "csv=p=0", file]),
+  ]);
+  const names = (out ?? "").split("\n").map((line) => line.trim().split(",")[0]).filter(Boolean);
+
+  // A single track has no alternative, and an unreadable codec list says
+  // nothing about any of them.
+  if (names.length < 2 || codecs.size === 0) {
+    return 0;
+  }
+  return Math.max(0, names.findIndex((name) => codecs.has(name)));
+}
+
+/** An audio stream as ffmpeg names it within its file: `a:0`, `a:1`. */
+export const audioSpec = (index: number) => `a:${index}`;
+
+/**
+ * An input's audio as a graph pad: `[2:a]` for the first stream, `[2:a:1]`
+ * for a later one.
+ */
+export const audioPad = (input: number, index: number) => (index > 0 ? `[${input}:${audioSpec(index)}]` : `[${input}:a]`);
+
+/**
+ * How many channels the audio stream ffmpeg reads carries, or null when the
  * probe fails or the file has no audio. A mono source is the one the mix
  * upmixes by hand: ffmpeg's own mono-to-stereo lays the channel into each
  * side 3 dB down, and the browser's mixer copies it at full level.
  */
-export function audioChannels(file: string): Promise<number | null> {
+export async function audioChannels(file: string): Promise<number | null> {
+  const stream = audioSpec(await audioStreamIndex(file));
   return new Promise((resolve) => {
     const p = spawn("ffprobe", [
       "-v", "error",
-      "-select_streams", "a:0",
+      "-select_streams", stream,
       "-show_entries", "stream=channels",
       "-of", "csv=p=0",
       file,

@@ -7,7 +7,7 @@ import { deliveryCodec, deliveryContainer, deliverySpan, KEYFRAME_INTERVAL_S, vi
 export type { SpecClipColor };
 import { readFile, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { atempoChain, audioChannels, hasStream, mediaDuration, num, videoDecodeCost, videoDimensions, videoPicture } from "./util";
+import { atempoChain, audioChannels, audioPad, audioStreamIndex, hasStream, mediaDuration, num, videoDecodeCost, videoDimensions, videoPicture } from "./util";
 import { CUT_EXPORT_PASSES } from "../lib/exportPassSettings";
 import { layerXfade, xfadeTransition } from "./transitionExpr";
 import { assertGraphSafe, chainsFeeding, downstreamFirst, fanOutInputs, fexpr, inputsRead } from "./filterGraph";
@@ -1173,6 +1173,7 @@ export interface ExportPipelineIO {
   unlink: typeof unlink;
   hasStream: typeof hasStream;
   audioChannels: typeof audioChannels;
+  audioStreamIndex: typeof audioStreamIndex;
   videoDecodeCost: typeof videoDecodeCost;
   videoDimensions: typeof videoDimensions;
   videoPicture: typeof videoPicture;
@@ -1193,6 +1194,7 @@ const realIO: ExportPipelineIO = {
   unlink,
   hasStream,
   audioChannels,
+  audioStreamIndex,
   videoDecodeCost,
   videoDimensions,
   videoPicture,
@@ -1286,6 +1288,7 @@ function probesOnce(io: ExportPipelineIO): ExportPipelineIO {
     ...io,
     hasStream,
     audioChannels: once(io.audioChannels),
+    audioStreamIndex: once(io.audioStreamIndex),
     videoDecodeCost: once(io.videoDecodeCost),
     videoDimensions: once(io.videoDimensions),
     videoPicture: once(io.videoPicture),
@@ -1415,6 +1418,7 @@ async function renderPass(
     const video = !soundOnly && (await io.hasStream(src, "v"));
     const audio = await io.hasStream(src, "a");
     const mono = audio && (await io.audioChannels(src)) === 1;
+    const audioStream = audio ? await io.audioStreamIndex(src) : 0;
     const decodeCost = video ? ((await io.videoDecodeCost(src)) ?? 0) : 0;
     const file = path.join(job.tmpDir, `turned_${tag}.${video ? "mov" : "wav"}`);
     const pivot = await bakeTurnedMedia(
@@ -1425,7 +1429,7 @@ async function renderPass(
         duration: io.mediaDuration,
       },
       src,
-      { lo, hi, video, audio, decodeCost, fmt: clipFmt, master: full || hdr },
+      { lo, hi, video, audio, audioStream, decodeCost, fmt: clipFmt, master: full || hdr },
       file
     );
     turned.set(file, { video, audio, mono });
@@ -1450,6 +1454,7 @@ async function renderPass(
     const mono = (await io.audioChannels(rec)) === 1;
     const laid = await alignRecording((args) => io.runFfmpeg(job, args), rec, c.soundFrom, reach.lo, reach.hi, file, {
       mono,
+      stream: await io.audioStreamIndex(rec),
     });
     if (!laid) return null;
     twinFiles.add(file);
@@ -1569,6 +1574,9 @@ async function renderPass(
   // and the in-tab fold play through, copies it at full level. Every read of
   // a mono file upmixes by hand so the export sits where the preview did.
   const monoFiles = new Set<string>();
+  // Which audio stream each source file is read from: the first one ffmpeg
+  // decodes. A file missing here reads its first.
+  const audioStreams = new Map<string, number>();
   const toStereo = (file: string) =>
     `aresample=44100,${monoFiles.has(file) ? "pan=stereo|c0=c0|c1=c0," : ""}` +
     "aformat=sample_fmts=fltp:channel_layouts=stereo,";
@@ -1605,6 +1613,9 @@ async function renderPass(
       const hasAudio = await io.hasStream(paths[i], "a", () => (audioProbeFailed = true));
       audioPresence.set(f, hasAudio || audioProbeFailed);
       if (hasAudio && (await io.audioChannels(paths[i])) === 1) monoFiles.add(f);
+      if (hasAudio) {
+        audioStreams.set(f, await io.audioStreamIndex(paths[i]));
+      }
       let videoProbeFailed = false;
       const hasVideo = await io.hasStream(paths[i], "v", () => (videoProbeFailed = true));
       videoPresence.set(f, hasVideo || videoProbeFailed);
@@ -2157,7 +2168,7 @@ async function renderPass(
       c.soundBack ?? 0,
       c.soundAhead ?? 0,
       file,
-      { mono: monoFiles.has(c.file) }
+      { mono: monoFiles.has(c.file), stream: audioStreams.get(c.file) ?? 0 }
     );
     const idx = nInputs++;
     inputs.push("-i", file);
@@ -2177,7 +2188,7 @@ async function renderPass(
     }
     const rt = retimeOf(c);
     const tempo = rt.rate !== 1 ? `${atempoChain(rt.rate)},` : "";
-    return `[${inputIndex.get(c.file)!}:a]atrim=${num(rt.srcAt(fromT))}:${num(rt.srcAt(toT))},asetpts=PTS-STARTPTS,${tempo}`;
+    return `${audioPad(inputIndex.get(c.file)!, audioStreams.get(c.file) ?? 0)}atrim=${num(rt.srcAt(fromT))}:${num(rt.srcAt(toT))},asetpts=PTS-STARTPTS,${tempo}`;
   };
   /** Timeline seconds of source a clip has before its head, at its own pace. */
   const headRoom = (c: Sounding) => Math.max(0, -retimeOf(c).tAt(0));

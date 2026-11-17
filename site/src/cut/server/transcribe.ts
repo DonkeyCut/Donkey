@@ -10,7 +10,7 @@ import { mediaPath, readProject } from "./projects";
 import { retimeOf, type SpeedNode } from "@donkeycut/effects-kit";
 import { CLIP_MIN_SECONDS } from "../lib/types";
 import { bakeRetimedAudio, type BakedAudio } from "./retimeAudio";
-import { atempoChain, findOnPath, hasStream, num, round, errorRecord } from "./util";
+import { atempoChain, audioPad, audioStreamIndex, findOnPath, hasStream, num, round, errorRecord } from "./util";
 import { UserError, type ErrorFields } from "../lib/userError";
 
 /** The audible slice of the cut, in timeline time (mirrors ExportSpec). */
@@ -389,6 +389,10 @@ async function runTranscribe(job: TranscribeJob, spec: TranscribeSpec) {
       files.map(async (f, i) => audible.set(f, await hasStream(paths[i], "a")))
     );
 
+    // Each file's sound is read from the first stream ffmpeg decodes.
+    const audioStreams = new Map<string, number>();
+    await Promise.all(files.map(async (f, i) => audioStreams.set(f, audible.get(f) ? await audioStreamIndex(paths[i]) : 0)));
+
     const hasSpeechSource =
       spec.clips.some((c) => !c.muted && audible.get(c.file)) ||
       spec.audio.some((a) => audible.get(a.file));
@@ -426,7 +430,7 @@ async function runTranscribe(job: TranscribeJob, spec: TranscribeSpec) {
       const rt = retimeOf(c);
       if (rt.uniform || !c.file || !audible.get(c.file)) continue;
       const file = path.join(tmpDir, `retime_${tag}.wav`);
-      const bake = await bakeRetimedAudio(bakeIO, mediaPath(spec.projectId, c.file), rt, 0, 0, file);
+      const bake = await bakeRetimedAudio(bakeIO, mediaPath(spec.projectId, c.file), rt, 0, 0, file, { stream: audioStreams.get(c.file) ?? 0 });
       const idx = inputs.length / 2;
       inputs.push("-i", file);
       baked.set(c, { ...bake, idx });
@@ -437,7 +441,7 @@ async function runTranscribe(job: TranscribeJob, spec: TranscribeSpec) {
       if (b) return `[${b.idx}:a]atrim=${num(b.back)}:${num(b.back + len)},asetpts=PTS-STARTPTS,`;
       const rate = retimeOf(c).rate;
       const tempo = rate !== 1 ? `${atempoChain(rate)},` : "";
-      return `[${inputIndex.get(c.file)}:a]atrim=${num(c.in)}:${num(c.out)},asetpts=PTS-STARTPTS,${tempo}`;
+      return `${audioPad(inputIndex.get(c.file)!, audioStreams.get(c.file) ?? 0)}atrim=${num(c.in)}:${num(c.out)},asetpts=PTS-STARTPTS,${tempo}`;
     };
     spec.clips.forEach((c, j) => {
       const dur = clipDur(c);

@@ -5,7 +5,7 @@ import path from "node:path";
 import { h264Encoder, vtQuality } from "./exportPipeline";
 import { mediaPath } from "./projects";
 import { assertGraphSafe, fexpr } from "./filterGraph";
-import { num, round } from "./util";
+import { audioSpec, audioStreamIndex, num, round } from "./util";
 import { UserError } from "../lib/userError";
 
 function run(cmd: string, args: string[]): Promise<void> {
@@ -228,12 +228,14 @@ export async function detectSilence(
   opts: { from: number; to: number; thresholdDb: number; minSilence: number }
 ): Promise<SilenceRange[]> {
   const { from, to, thresholdDb, minSilence } = opts;
+  const stream = audioSpec(await audioStreamIndex(mediaPath(projectId, sourceFile)));
   const r = await runCapture(
     [
       "-hide_banner", "-nostats", "-loglevel", "info",
       ...(from > 0 ? ["-ss", num(from)] : []),
       "-t", num(to - from),
       "-i", mediaPath(projectId, sourceFile),
+      "-map", `0:${stream}`,
       "-vn", "-sn", "-dn",
       "-af", `silencedetect=n=${thresholdDb}dB:d=${num(minSilence)}`,
       "-f", "null", "-",
@@ -272,18 +274,20 @@ export async function detectSilence(
  * assistant can hear it inline. Works for audio and video sources alike — the
  * video image never travels, and 32 kbps keeps ~50 min under the model's
  * inline cap. Times are absolute source seconds; an empty `to` runs to the end. */
-export function extractAudio(
+export async function extractAudio(
   projectId: string,
   sourceFile: string,
   opts: { from: number; to?: number },
 ): Promise<Buffer> {
   const { from, to } = opts;
+  const stream = audioSpec(await audioStreamIndex(mediaPath(projectId, sourceFile)));
   return new Promise((resolve, reject) => {
     const p = spawn("ffmpeg", [
       "-hide_banner", "-nostats", "-loglevel", "error",
       ...(from > 0 ? ["-ss", num(from)] : []),
       ...(to !== undefined ? ["-t", num(to - from)] : []),
       "-i", mediaPath(projectId, sourceFile),
+      "-map", `0:${stream}`,
       "-vn", "-sn", "-dn",
       "-ac", "1", "-ar", "24000", "-c:a", "aac", "-b:a", "32k",
       "-f", "adts", "-",

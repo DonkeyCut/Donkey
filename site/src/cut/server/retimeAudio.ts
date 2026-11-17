@@ -15,7 +15,7 @@
 import { srcSpan, type Retime } from "@donkeycut/effects-kit";
 import { fitSpan } from "../lib/retimeFit";
 import { wavHeader } from "../lib/wav";
-import { num } from "./util";
+import { audioSpec, num } from "./util";
 
 /** The bake's sample rate: what the graphs resample every input to. */
 export const BAKE_RATE = 44100;
@@ -53,7 +53,7 @@ export async function bakeRetimedAudio(
   outFile: string,
   /** A mono source is laid into both channels at full level, the way the
    * browser's mixer upmixes it; ffmpeg's own upmix would sit it 3 dB down. */
-  opts: { mono?: boolean } = {}
+  opts: { mono?: boolean; /** Which audio stream of `src` to read. */ stream?: number } = {}
 ): Promise<BakedAudio> {
   const rt = retime;
   // A handle cannot reach before the source's first sample; the head reach
@@ -73,6 +73,8 @@ export async function bakeRetimedAudio(
     src,
     "-t",
     num(Math.max(0.001, to - from)),
+    "-map",
+    `0:${audioSpec(opts.stream ?? 0)}`,
     "-vn",
     ...(opts.mono ? ["-af", "pan=stereo|c0=c0|c1=c0"] : ["-ac", String(CHANNELS)]),
     "-ar",
