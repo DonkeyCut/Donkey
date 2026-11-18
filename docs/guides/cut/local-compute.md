@@ -33,7 +33,7 @@ The engine transcribes a rendered mix, and that is what makes this work for a pr
 
 Whoever transcribes, the cue times are checked against that same mix before they become captions. Every transcriber mistimes a caption in its own way — the on-device model hands the silence in front of a sentence to that sentence's first word, so a caption can appear a second before anyone speaks — and the audio settles it: a speech envelope says where each stretch of talking starts and stops, and a cue edge moves onto the edge it belongs to. Only edges the audio can testify to move. A caption boundary in the middle of a sentence, or a mix playing music under the whole cut, keeps the time the transcriber gave it, so the pass is an improvement or nothing.
 
-Dictation is the same trade in the other direction: with the app running, mic audio streams to the engine live and the transcript evolves as the user speaks; without it, the take is recorded, sent up in one piece, and arrives when it arrives.
+Dictation streams either way: to the engine with the app, or to the hosted route a phrase at a time.
 
 The assistant's background sweep over a source takes the same fork under one extra constraint: it uses only a transcriber that costs the user nothing — this Mac's engine, or the hosted route held to the account's included allowance — and stops asking once that allowance is spent. Background work is unable to reach a metered path by construction.
 

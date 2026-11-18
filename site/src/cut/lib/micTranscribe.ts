@@ -4,33 +4,33 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { confirmEngine } from "./api";
 import { hasLocalCompute } from "./backend";
 import { localBackend } from "./backend/local";
-import { cloudTranscribeRecording } from "./cloudTranscribe";
-import { errorFromBody, UserError } from "./userError";
+import { transcribePhrase } from "./cloudTranscribe";
+import { PhraseCutter } from "./phraseCutter";
+import { UserError } from "./userError";
 
-// Live dictation for the chat composer. The browser holds the mic permission,
+// Live dictation for every voice input. The browser holds the mic permission,
 // so capture happens in the page, and the transcription runs wherever it can.
+// Either way the words appear while the user speaks.
 //
-// Every take is recorded here (MediaRecorder) for the whole dictation — that
-// recording is the floor under the feature. On a Mac with the app, the same
-// audio also streams to the engine as 16 kHz mono s16le PCM for Apple's
-// on-device SpeechAnalyzer (server/mic.ts + native/cut-stt.swift), which gives
-// live partials and keeps the speech on the machine. Where the engine is
-// absent, and the moment it stops carrying a dictation already under way, the
-// recording goes to the hosted route on confirm and the composer shows
-// "Listening…" until it answers. Dictation works on every surface; which
-// transcriber served it is the only difference the user can see.
+// One capture graph, an AudioWorklet, turns the mic into 16 kHz mono s16le
+// PCM on the audio thread. On a Mac with the app, that PCM streams to the
+// engine for Apple's on-device SpeechAnalyzer (server/mic.ts +
+// native/cut-stt.swift), which keeps the speech on the machine; the page holds
+// the take as it goes, so the moment the engine stops carrying a dictation the
+// whole take moves to the hosted route. Without the engine, PhraseCutter cuts
+// the PCM at the speaker's pauses and each phrase goes to the hosted route as
+// soon as it ends, its words landing while the next phrase is spoken.
 //
-// Capture is an AudioWorklet. It downsamples on the audio thread and hands the
-// main thread whole chunks, and it releases its partial chunk on request so the
-// end of the last word reaches the model. A dictation that stops carrying audio
-// at all — a graph that never started, a microphone delivering nothing — ends
-// with the reason on screen, because a session nothing feeds produces nothing
-// and waits for a transcript that will never come.
+// The worklet releases its partial chunk on request so the end of the last
+// word reaches the transcriber. A dictation that stops carrying audio at all —
+// a graph that never started, a microphone delivering nothing — ends with the
+// reason on screen, because a session nothing feeds produces nothing and waits
+// for a transcript that will never come.
 
 export type MicState = "idle" | "starting" | "recording" | "finishing";
 
-/** Which transcriber is carrying the dictation: this Mac's engine, live, or
- * the hosted route reading the recording once the user confirms. */
+/** Which transcriber is carrying the dictation: this Mac's engine, or the
+ * hosted route a phrase at a time. */
 type MicMode = "engine" | "hosted";
 
 const TARGET_RATE = 16000; // must match cut-stt.swift's live input format
@@ -38,14 +38,8 @@ const CHUNK_MS = 250; // how much PCM the worklet batches into one message
 const FEED_MS = 250; // how often queued PCM is flushed to the engine
 const POLL_MS = 150; // how often the evolving transcript is fetched
 // Capture that has delivered nothing by here never will: the graph is dead, and
-// waiting longer turns a failure the user can act on into a silent one. Both
-// paths are held to it — the worklet's first chunk, the recorder's first blob.
+// waiting longer turns a failure the user can act on into a silent one.
 const FIRST_AUDIO_MS = 2500;
-// How often MediaRecorder hands over what it has on the hosted path.
-const RECORDER_SLICE_MS = 1000;
-// How long that recorder may take to report its stop before the take is read
-// from the blobs already in hand.
-const STOP_RECORDER_MS = 1500;
 // Feeds drop transiently; a run of them means the audio is going nowhere.
 const MAX_FEED_FAILURES = 3;
 // How long the worklet's tail chunk may take once the flush is asked for.
@@ -119,15 +113,20 @@ export function useMicTranscription(onResult: (text: string) => void): MicContro
   const [partial, setPartial] = useState("");
   const [error, setError] = useState<Error | null>(null);
 
+  /** The state as async callbacks see it: a phrase that fails or a capture
+   * that stops reads the live value, never the one its closure was made in. */
+  const stateRef = useRef<MicState>("idle");
+  const phase = useCallback((next: MicState) => {
+    stateRef.current = next;
+    setState(next);
+  }, []);
+
   const jobRef = useRef<string | null>(null);
   /** Which transcriber this dictation is on; a run that loses the engine flips
    * it to "hosted" without the user doing anything. */
   const modeRef = useRef<MicMode>("hosted");
-  /** The newest partial, kept outside React so a hosted transcription that
-   * fails can still hand back what the engine had said. */
+  /** The newest transcript, kept outside React for the finish to read. */
   const partialRef = useRef("");
-  const recorderRef = useRef<MediaRecorder | null>(null);
-  const recChunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
   const ctxRef = useRef<AudioContext | null>(null);
   const nodesRef = useRef<{ source: MediaStreamAudioSourceNode; node: AudioWorkletNode } | null>(null);
@@ -142,34 +141,43 @@ export function useMicTranscription(onResult: (text: string) => void): MicContro
   const feedTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const silenceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  /** The take so far while the engine carries it: the net that lets the
+   * hosted route pick the whole take up if the engine drops it. */
+  const takeRef = useRef<Int16Array[]>([]);
+  /** What the engine had said when the take moved off it. */
+  const engineSaidRef = useRef("");
+  /** Hosted mode: the pause cutter, each phrase's text in take order (null
+   * while in flight), the requests still out, and the first failure. */
+  const cutterRef = useRef<PhraseCutter | null>(null);
+  const phrasesRef = useRef<(string | null)[]>([]);
+  const pendingRef = useRef(new Set<Promise<void>>());
+  const hostedErrorRef = useRef<Error | null>(null);
+  /** Bumped whenever a dictation ends, so a phrase answering late lands nowhere. */
+  const sessionRef = useRef(0);
+
   const onResultRef = useRef(onResult);
   useLayoutEffect(() => {
     onResultRef.current = onResult;
   }, [onResult]);
 
-  /** Stop and forget the recorded take (before its tracks stop). */
-  const discardRecorder = useCallback(() => {
-    const rec = recorderRef.current;
-    recorderRef.current = null;
-    recChunksRef.current = [];
-    if (rec && rec.state !== "inactive") {
-      try {
-        rec.stop();
-      } catch {
-        // Already stopping; nothing to discard.
-      }
-    }
-  }, []);
-
-  /** Drop the live capture that feeds the engine — worklet, context, timers —
-   * and leave the microphone and the recording running. This is what a
-   * dictation sheds when it moves off the engine mid-sentence. */
-  const teardownEngine = useCallback(() => {
+  /** Stop the engine's feed and poll timers. */
+  const stopEngineTimers = useCallback(() => {
     if (feedTimer.current) clearInterval(feedTimer.current);
     if (pollTimer.current) clearInterval(pollTimer.current);
-    if (silenceTimer.current) clearTimeout(silenceTimer.current);
     feedTimer.current = null;
     pollTimer.current = null;
+  }, []);
+
+  /** Release everything the dictation holds: timers, graph, microphone, and
+   * the take. */
+  const teardownAudio = useCallback(() => {
+    sessionRef.current += 1;
+    stopEngineTimers();
+    queueRef.current = [];
+    feedingRef.current = false;
+    failuresRef.current = 0;
+    if (silenceTimer.current) clearTimeout(silenceTimer.current);
     silenceTimer.current = null;
     tailRef.current = null;
     const nodes = nodesRef.current;
@@ -185,36 +193,36 @@ export function useMicTranscription(onResult: (text: string) => void): MicContro
       ctx.onstatechange = null;
       void ctx.close().catch(() => {});
     }
-    queueRef.current = [];
-    feedingRef.current = false;
-    failuresRef.current = 0;
-  }, []);
-
-  const teardownAudio = useCallback(() => {
-    discardRecorder();
-    teardownEngine();
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
     gotAudioRef.current = false;
+    takeRef.current = [];
+    engineSaidRef.current = "";
+    cutterRef.current = null;
+    phrasesRef.current = [];
+    pendingRef.current.clear();
+    hostedErrorRef.current = null;
     setStream(null);
-  }, [discardRecorder, teardownEngine]);
+  }, [stopEngineTimers]);
 
-  /** Hand the session back and put the reason on screen. Everything that can
-   * leave a dictation with no transcriber and no recording ends here, so the
-   * engine never holds a session nothing is feeding and the user is never left
-   * watching an empty transcript. */
+  /** Hand the engine its session back without waiting for an answer. */
+  const releaseJob = useCallback(() => {
+    const job = jobRef.current;
+    jobRef.current = null;
+    if (job) void localBackend.fetch(`/api/cut/mic/${job}/cancel`, { method: "POST" }).catch(() => {});
+  }, []);
+
+  /** End the dictation with nothing delivered and the reason on screen. */
   const fail = useCallback(
     (message: Error) => {
-      const job = jobRef.current;
-      jobRef.current = null;
-      if (job) void localBackend.fetch(`/api/cut/mic/${job}/cancel`, { method: "POST" }).catch(() => {});
+      releaseJob();
       teardownAudio();
-      setState("idle");
+      phase("idle");
       setPartial("");
       partialRef.current = "";
       setError(message);
     },
-    [teardownAudio]
+    [releaseJob, teardownAudio, phase]
   );
 
   /** Capture that has delivered nothing by the deadline never will; say so
@@ -227,61 +235,74 @@ export function useMicTranscription(onResult: (text: string) => void): MicContro
     }, FIRST_AUDIO_MS);
   }, [fail]);
 
-  /** Record the take in the page. Every dictation runs this: on the Mac it is
-   * the net under the engine's live transcript, and everywhere else it is the
-   * dictation itself. */
-  const startRecorder = useCallback(
-    (media: MediaStream): boolean => {
-      try {
-        recChunksRef.current = [];
-        const rec = new MediaRecorder(media);
-        rec.ondataavailable = (e) => {
-          if (e.data.size === 0) return;
-          gotAudioRef.current = true;
-          recChunksRef.current.push(e.data);
-        };
-        rec.onerror = () => {
-          recorderRef.current = null;
-          // The engine is still transcribing this one; only a dictation the
-          // recording *was* has nothing left to finish with.
-          if (modeRef.current === "hosted") fail(new UserError("mic_recording_stopped", "The browser stopped recording the microphone."));
-        };
-        rec.start(RECORDER_SLICE_MS);
-        recorderRef.current = rec;
-        return true;
-      } catch {
-        return false;
+  // `finish` is defined below and a failing phrase needs it; the ref breaks
+  // the cycle between them.
+  const finishRef = useRef<(reason?: Error) => Promise<void>>(async () => {});
+
+  /** Send one phrase to the hosted route and show its words when they land.
+   * The first failure ends the take with what it has; nothing more goes out. */
+  const sendPhrase = useCallback((pcm: Int16Array) => {
+    if (hostedErrorRef.current) return;
+    const session = sessionRef.current;
+    const slot = phrasesRef.current.push(null) - 1;
+    const sent: Promise<void> = transcribePhrase(pcm, navigator.language)
+      .then((text) => {
+        if (session !== sessionRef.current) return;
+        phrasesRef.current[slot] = text;
+        const said = phrasesRef.current.filter(Boolean).join(" ");
+        partialRef.current = said;
+        setPartial(said);
+      })
+      .catch((e: unknown) => {
+        if (session !== sessionRef.current || hostedErrorRef.current) return;
+        const reason = e instanceof Error ? e : new UserError("mic_transcription_failed", "Transcription failed.");
+        hostedErrorRef.current = reason;
+        void finishRef.current(reason);
+      })
+      .finally(() => {
+        pendingRef.current.delete(sent);
+      });
+    pendingRef.current.add(sent);
+  }, []);
+
+  /** Route one chunk of captured PCM to whichever transcriber has the take. */
+  const onPcm = useCallback(
+    (pcm: Int16Array) => {
+      if (modeRef.current === "engine") {
+        queueRef.current.push(pcm);
+        takeRef.current.push(pcm);
+        return;
+      }
+      for (const phrase of cutterRef.current?.push(pcm) ?? []) {
+        sendPhrase(phrase);
       }
     },
-    [fail]
+    [sendPhrase]
   );
 
-  /** The engine stopped carrying this dictation. Hand its session back, drop
-   * the live capture, and let the recording finish the job on the hosted route
-   * when the user confirms — the microphone keeps running and nothing on
-   * screen changes but the partial. Returns false when there was no recording
-   * to fall back on, in which case the dictation ended with `reason` shown. */
-  const degrade = useCallback(
-    (reason: Error): boolean => {
-      if (!recorderRef.current) {
-        fail(reason);
-        return false;
-      }
-      const job = jobRef.current;
-      jobRef.current = null;
-      if (job) void localBackend.fetch(`/api/cut/mic/${job}/cancel`, { method: "POST" }).catch(() => {});
-      // The app may have quit under the dictation; let the gate settle that
-      // once instead of leaving every other surface to find out on its own.
-      void confirmEngine();
-      modeRef.current = "hosted";
-      teardownEngine();
-      setPartial("");
-      partialRef.current = "";
-      if (!gotAudioRef.current) armSilence();
-      return true;
-    },
-    [fail, teardownEngine, armSilence]
-  );
+  /** Move the take onto the hosted route: everything captured so far is cut
+   * into phrases and sent, and capture keeps feeding the cutter from here. */
+  const goHosted = useCallback(() => {
+    if (modeRef.current === "engine") engineSaidRef.current = partialRef.current;
+    modeRef.current = "hosted";
+    stopEngineTimers();
+    queueRef.current = [];
+    const take = takeRef.current;
+    takeRef.current = [];
+    cutterRef.current = new PhraseCutter();
+    for (const pcm of take) onPcm(pcm);
+  }, [stopEngineTimers, onPcm]);
+
+  /** The engine stopped carrying this dictation. Hand its session back and
+   * let the hosted route take the whole take from the start — the microphone
+   * keeps running and nothing on screen changes but who supplies the words. */
+  const degrade = useCallback(() => {
+    releaseJob();
+    // The app may have quit under the dictation; let the gate settle that
+    // once instead of leaving every other surface to find out on its own.
+    void confirmEngine();
+    goHosted();
+  }, [releaseJob, goHosted]);
 
   /** Concatenate and POST all queued PCM. Guarded so chunks stay ordered. */
   const flush = useCallback(async () => {
@@ -305,13 +326,11 @@ export function useMicTranscription(onResult: (text: string) => void): MicContro
       });
       if (!res.ok) throw new UserError("mic_audio_refused", `Donkey turned the audio away (${res.status}).`, { status: res.status });
       failuresRef.current = 0;
-    } catch (e) {
+    } catch {
       // A dropped chunk just shortens the transcript; a run of them means the
-      // engine is no longer taking this dictation, and the recording takes over.
+      // engine is no longer taking this dictation, and the hosted route takes over.
       failuresRef.current += 1;
-      if (failuresRef.current >= MAX_FEED_FAILURES) {
-        degrade(e instanceof Error ? e : new UserError("mic_feed_stopped", "Donkey stopped receiving the audio."));
-      }
+      if (failuresRef.current >= MAX_FEED_FAILURES && jobRef.current === job) degrade();
     } finally {
       feedingRef.current = false;
     }
@@ -341,15 +360,15 @@ export function useMicTranscription(onResult: (text: string) => void): MicContro
     if (!job) return;
     try {
       const res = await localBackend.fetch(`/api/cut/mic/${job}`);
-      if (!res.ok) return;
+      if (!res.ok || jobRef.current !== job) return;
       const data = (await res.json()) as { text?: string; status?: string; error?: string };
       if (typeof data.text === "string") {
         partialRef.current = data.text;
         setPartial(data.text);
       }
       // A session that died — a locale with no model on this Mac, a process
-      // that quit — has no transcript coming; the recording carries it instead.
-      if (data.status === "error") degrade(errorFromBody(data, new UserError("mic_engine_stopped", "Dictation stopped on this Mac.")));
+      // that quit — has no transcript coming; the hosted route carries it.
+      if (data.status === "error") degrade();
     } catch {
       // Transient poll failure; the next tick retries. An engine that is gone
       // shows up in the feeds, which are what carry the audio.
@@ -375,8 +394,8 @@ export function useMicTranscription(onResult: (text: string) => void): MicContro
     }
   }, []);
 
-  /** Build the live capture graph that streams PCM to the engine. False when
-   * the dictation ended here, its reason already on screen. */
+  /** Build the capture graph. False when the dictation ended here, its reason
+   * already on screen. */
   const buildCapture = useCallback(
     async (media: MediaStream): Promise<boolean> => {
       try {
@@ -397,7 +416,7 @@ export function useMicTranscription(onResult: (text: string) => void): MicContro
         });
         node.port.onmessage = (e: MessageEvent<{ pcm: Int16Array; last: boolean }>) => {
           gotAudioRef.current = true;
-          if (e.data.pcm.length > 0) queueRef.current.push(e.data.pcm);
+          if (e.data.pcm.length > 0) onPcm(e.data.pcm);
           if (e.data.last) tailRef.current?.();
         };
         // Web Audio pulls the graph from the destination, so the tap reaches it
@@ -410,78 +429,61 @@ export function useMicTranscription(onResult: (text: string) => void): MicContro
         mute.connect(ctx.destination);
         nodesRef.current = { source, node };
         // A context that leaves "running" mid-take stops delivering audio and
-        // says nothing; the dictation moves off the engine on the state change
-        // instead of on a transcript that quietly stopped growing.
+        // says nothing; the take ends there with what it has, and the reason.
         ctx.onstatechange = () => {
           if (ctxRef.current === ctx && ctx.state !== "running") {
-            degrade(new UserError("mic_capture_stopped", "The browser stopped audio capture for this page."));
+            void finishRef.current(new UserError("mic_capture_stopped", "The browser stopped audio capture for this page."));
           }
         };
         return true;
       } catch (e) {
-        return degrade(e instanceof Error ? e : new UserError("mic_capture_failed", "This browser could not capture the microphone."));
+        fail(e instanceof Error ? e : new UserError("mic_capture_failed", "This browser could not capture the microphone."));
+        return false;
       }
     },
-    [degrade]
+    [onPcm, fail]
   );
 
   const start = useCallback(async () => {
-    if (state !== "idle") return;
+    if (stateRef.current !== "idle") return;
     setError(null);
     setPartial("");
     partialRef.current = "";
-    setState("starting");
+    phase("starting");
     let media: MediaStream;
     try {
       media = await navigator.mediaDevices.getUserMedia({ audio: true });
     } catch {
-      setState("idle");
+      phase("idle");
       setError(new UserError("mic_blocked", "Microphone access was blocked. Allow the microphone for this site, then try again."));
       return;
     }
     streamRef.current = media;
-    const recording = startRecorder(media);
     // Dictation runs on the Mac whenever the app is there — on-device, free,
     // and live — whatever backend holds the project. The result still lands
     // through the project's own backend, so where the speech ran never decides
     // where the text goes.
     const onEngine = hasLocalCompute() && (await startEngineSession());
     modeRef.current = onEngine ? "engine" : "hosted";
-    // The engine now holds a session, so a capture graph that cannot be built
-    // hands it back rather than leaving a process waiting on audio.
-    if (onEngine && !(await buildCapture(media))) return;
-    if (modeRef.current === "hosted" && !recording) {
-      teardownAudio();
-      setState("idle");
-      setError(new UserError("mic_no_recorder", "This browser could not record the microphone."));
-      return;
-    }
+    cutterRef.current = onEngine ? null : new PhraseCutter();
+    if (!(await buildCapture(media))) return;
     setStream(media);
-    if (modeRef.current === "engine") {
+    if (onEngine) {
       feedTimer.current = setInterval(() => void flush(), FEED_MS);
       pollTimer.current = setInterval(() => void pollEngine(), POLL_MS);
     }
     armSilence();
-    setState("recording");
-  }, [state, startRecorder, startEngineSession, buildCapture, teardownAudio, flush, pollEngine, armSilence]);
+    phase("recording");
+  }, [phase, startEngineSession, buildCapture, flush, pollEngine, armSilence]);
 
   /** Close the engine's session and take its final transcript. Null when the
-   * engine could not answer, leaving the recording to carry the dictation. */
+   * engine could not answer, leaving the hosted route to carry the take. */
   const finishEngine = useCallback(async (): Promise<string | null> => {
     const job = jobRef.current;
     if (!job) return null;
-    // Stop pulling new audio, take the chunk the worklet is still filling,
-    // flush what's queued, then close the input so the model emits its final
-    // text.
-    if (feedTimer.current) clearInterval(feedTimer.current);
-    if (pollTimer.current) clearInterval(pollTimer.current);
-    if (silenceTimer.current) clearTimeout(silenceTimer.current);
-    feedTimer.current = null;
-    pollTimer.current = null;
-    silenceTimer.current = null;
-    nodesRef.current?.source.disconnect();
-    await drainTail();
-    // Wait out any in-flight feed, then send what the tail added.
+    // Flush what's queued, waiting out any in-flight feed, then close the
+    // input so the model emits its final text.
+    stopEngineTimers();
     while (feedingRef.current) await new Promise((r) => setTimeout(r, 20));
     await flush();
     jobRef.current = null;
@@ -494,81 +496,68 @@ export function useMicTranscription(onResult: (text: string) => void): MicContro
       void confirmEngine();
       return null;
     }
-  }, [drainTail, flush]);
+  }, [stopEngineTimers, flush]);
 
-  /** Close the recording and transcribe the whole take on the hosted route. */
+  /** Send the open phrase and wait for every phrase still out. */
   const finishHosted = useCallback(async (): Promise<string> => {
-    const rec = recorderRef.current;
-    recorderRef.current = null;
-    // Flush the recorder's tail. A recorder that never reports its stop cannot
-    // hold the composer: whatever it has handed over by the deadline is the take.
-    if (rec && rec.state !== "inactive") {
-      await new Promise<void>((resolve) => {
-        const timer = setTimeout(resolve, STOP_RECORDER_MS);
-        rec.onstop = () => {
-          clearTimeout(timer);
-          resolve();
-        };
-        try {
-          rec.stop();
-        } catch {
-          clearTimeout(timer);
-          resolve();
-        }
-      });
-    }
-    const blob = new Blob(recChunksRef.current, { type: rec?.mimeType || "audio/webm" });
-    recChunksRef.current = [];
-    teardownAudio();
-    if (blob.size === 0) {
-      setError(new UserError("mic_nothing_recorded", "Nothing was recorded from the microphone."));
-      return "";
-    }
-    try {
-      return await cloudTranscribeRecording(blob, navigator.language);
-    } catch (e) {
-      setError(e instanceof Error ? e : new UserError("mic_transcription_failed", "Transcription failed."));
-      // Whatever the engine had said before it dropped out beats nothing.
-      return partialRef.current;
-    }
-  }, [teardownAudio]);
+    const last = cutterRef.current?.flush();
+    if (last) sendPhrase(last);
+    while (pendingRef.current.size > 0) await Promise.all([...pendingRef.current]);
+    const said = phrasesRef.current.filter(Boolean).join(" ");
+    // Whatever the engine had said before it dropped out beats nothing.
+    return said || (hostedErrorRef.current ? engineSaidRef.current : "");
+  }, [sendPhrase]);
 
-  const confirm = useCallback(async () => {
-    if (state !== "recording") return;
-    setState("finishing");
-    let text: string | null = null;
-    if (modeRef.current === "engine") {
-      text = await finishEngine();
-      // The engine carried it; the recording was only the net under it.
-      if (text !== null) teardownAudio();
-    }
-    if (text === null) text = await finishHosted();
-    setState("idle");
-    setPartial("");
-    partialRef.current = "";
-    const trimmed = text.trim();
-    if (trimmed) onResultRef.current(trimmed);
-  }, [state, finishEngine, finishHosted, teardownAudio]);
+  /** End the take and deliver its transcript. `reason` is why the take ended
+   * early — a failed phrase, a capture that stopped — shown once it lands. */
+  const finish = useCallback(
+    async (reason?: Error) => {
+      if (stateRef.current !== "recording") return;
+      phase("finishing");
+      if (silenceTimer.current) clearTimeout(silenceTimer.current);
+      silenceTimer.current = null;
+      // Stop pulling new audio and take the chunk the worklet is still filling.
+      nodesRef.current?.source.disconnect();
+      await drainTail();
+      let text: string | null = null;
+      if (modeRef.current === "engine") text = await finishEngine();
+      if (text === null) {
+        if (modeRef.current === "engine") goHosted();
+        text = await finishHosted();
+      }
+      const failure = reason ?? hostedErrorRef.current;
+      teardownAudio();
+      phase("idle");
+      setPartial("");
+      partialRef.current = "";
+      if (failure) setError(failure);
+      const trimmed = text.trim();
+      if (trimmed) onResultRef.current(trimmed);
+    },
+    [phase, drainTail, finishEngine, goHosted, finishHosted, teardownAudio]
+  );
+  useLayoutEffect(() => {
+    finishRef.current = finish;
+  }, [finish]);
+
+  const confirm = useCallback(() => finish(), [finish]);
 
   const cancel = useCallback(() => {
-    const job = jobRef.current;
-    jobRef.current = null;
-    if (job) void localBackend.fetch(`/api/cut/mic/${job}/cancel`, { method: "POST" }).catch(() => {});
+    releaseJob();
     teardownAudio();
-    setState("idle");
+    phase("idle");
     setPartial("");
     partialRef.current = "";
     setError(null);
-  }, [teardownAudio]);
+  }, [releaseJob, teardownAudio, phase]);
 
   // Abandon a dictation if the composer unmounts mid-recording.
   useEffect(() => {
     return () => {
-      const job = jobRef.current;
-      if (job) void localBackend.fetch(`/api/cut/mic/${job}/cancel`, { method: "POST" }).catch(() => {});
+      releaseJob();
       teardownAudio();
     };
-  }, [teardownAudio]);
+  }, [releaseJob, teardownAudio]);
 
   return { state, stream, partial, error, start, confirm, cancel };
 }

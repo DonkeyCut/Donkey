@@ -8,8 +8,8 @@
 // this Mac (localStt.ts) or to the hosted route, which includes each
 // account's first chunks and meters the rest. The hosted path
 // chunks it as 16 kHz mono WAV, POSTs each chunk, and stitches the cues — each
-// word carrying its own timing — back into timeline time. Mic dictation reuses
-// the same chunk/post/stitch core on a MediaRecorder capture.
+// word carrying its own timing — back into timeline time. Mic dictation posts
+// one phrase at a time through the same chunk post.
 
 import { renderMix as mixAudio } from "./audioMix";
 import { apiFetch } from "./backend";
@@ -227,33 +227,18 @@ export async function transcribeSamples(
   return cues.sort((a, b) => a.start - b.start);
 }
 
-/** Transcribe a finished mic recording: decode it, downmix/resample to the
- * wire format, run the chunk pipeline, and join the cue texts. It posts to the
- * hosted route whatever backend the project lives on — the dictation reaches
- * here when this Mac's engine is not the one transcribing. */
-export async function cloudTranscribeRecording(blob: Blob, locale?: string): Promise<string> {
-  const bytes = await blob.arrayBuffer();
-  // Decode at the device rate, then resample/downmix through an offline
-  // render — decodeAudioData resamples to its context's rate, but the mono
-  // 16 kHz target length isn't known until after the decode.
-  const probe = new AudioContext();
-  let decoded: AudioBuffer;
-  try {
-    decoded = await probe.decodeAudioData(bytes);
-  } catch {
-    throw new UserError("recording_audio_unreadable", "Could not read the recording's audio.");
-  } finally {
-    void probe.close().catch(() => {});
+/** Transcribe one dictated phrase (16 kHz s16 mono, at most a few seconds)
+ * on the hosted route and return its text. Dictation posts here whatever
+ * backend the project lives on: this Mac's engine is the only other
+ * transcriber, and it is the one that is not carrying the take. */
+export async function transcribePhrase(pcm: Int16Array, locale?: string): Promise<string> {
+  const samples = new Float32Array(pcm.length);
+  for (let i = 0; i < pcm.length; i++) {
+    samples[i] = pcm[i] / 0x8000;
   }
-  const ctx = new OfflineAudioContext(1, Math.max(1, Math.ceil(decoded.duration * RATE)), RATE);
-  const src = ctx.createBufferSource();
-  src.buffer = decoded;
-  src.connect(ctx.destination);
-  src.start();
-  const mono = (await ctx.startRendering()).getChannelData(0);
-  const cues = await transcribeSamples(mono, locale, undefined, { request: cloudBackend.fetch });
-  return (cues ?? [])
-    .map((c) => c.text)
-    .join(" ")
-    .trim();
+  const cues = await postChunk(samples, 0, locale, false, cloudBackend.fetch);
+  return cues
+    .map((c) => c.text.trim())
+    .filter(Boolean)
+    .join(" ");
 }
