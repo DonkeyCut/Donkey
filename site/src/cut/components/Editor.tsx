@@ -30,6 +30,7 @@ import { refreshProjectPreviews } from "@/cut/lib/exportClient";
 import { captureRenderSnapshot, renderDoc, type ExportDoc } from "@/cut/lib/renderSnapshot";
 import { projectOperation, type ProjectOperation } from "@/cut/lib/projectOperation";
 import { createPreviewQueue } from "@/cut/lib/previewQueue";
+import { hasCardPreview } from "@/cut/lib/cardPreview";
 import {
   EMPTY_LIBRARY,
   fileZoneAt,
@@ -578,8 +579,15 @@ export function Editor({
       aspect: string;
       background: string;
     } | null = null;
+    // A cut of titles and shapes over the background has a picture to show;
+    // only an empty project has nothing to render a card from. A file still
+    // copying in has no stored bytes for the render to read; its landing is
+    // an asset change, which stages the cut again.
+    const renderable = (s: ReturnType<typeof useEditor.getState>) =>
+      projectDuration(s) > 0 && !uploadsPending(s.assets);
     const unsub = useEditor.subscribe((s) => {
       if (!s.loaded || s.projectId !== projectId) return;
+      const opening = last === null;
       const changed =
         last !== null &&
         (s.assets !== last.assets ||
@@ -598,13 +606,20 @@ export function Editor({
         aspect: s.aspect,
         background: s.background,
       };
-      if (!changed) return; // first tick just primes the baseline
-      // A cut of titles and shapes over the background has a picture to show;
-      // only an empty project has nothing to render a card from.
-      if (projectDuration(s) <= 0) return;
-      // A file still copying in has no stored bytes for the render to read;
-      // its landing is an asset change, which stages the cut again.
-      if (uploadsPending(s.assets)) return;
+      // A project that has never had a card rendered (a duplicate, a template
+      // install, a doc written by a script) stages one on opening, so its
+      // tile shows the edit and not the first clip's bare source frame. An
+      // edit made while the probe is out has already staged a newer cut.
+      if (opening && renderable(s)) {
+        const operation = projectOperation(projectId);
+        const doc = renderDoc(s);
+        void hasCardPreview(operation.backend, projectId).then((has) => {
+          if (has || closing || queue.getState().status !== "idle") return;
+          queue.stage({ operation, doc });
+        }, () => {});
+      }
+      if (!changed) return; // the first tick primes the baseline
+      if (!renderable(s)) return;
       queue.stage({ operation: projectOperation(projectId), doc: renderDoc(s) });
     });
     return () => {
