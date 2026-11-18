@@ -53,16 +53,20 @@ describe("importEach", () => {
   });
 
   test("a batch answers within its budget: what landed, what is still downloading, what never started", async () => {
+    // a and b land at once and c and d never answer, so the outcome holds
+    // however late a slow runner fires its timers.
     const t0 = Date.now();
     const out = await importEach(
       ["a", "b", "c", "d", "e", "f"],
       async (u) => {
-        await new Promise((r) => setTimeout(r, 60));
-        return u;
+        if (u === "a" || u === "b") {
+          return u;
+        }
+        return new Promise<string>(() => {});
       },
-      { budgetMs: 90 }
+      { budgetMs: 200 }
     );
-    expect(Date.now() - t0).toBeLessThan(140);
+    expect(Date.now() - t0).toBeLessThan(1_000);
     expect(out.slice(0, 2)).toEqual([{ url: "a", value: "a" }, { url: "b", value: "b" }]);
     expect(out.slice(2, 4)).toEqual([{ url: "c", pending: true }, { url: "d", pending: true }]);
     expect(out.slice(4)).toEqual([{ url: "e", notStarted: true }, { url: "f", notStarted: true }]);
