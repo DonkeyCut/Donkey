@@ -14,6 +14,7 @@ import { cueTemplateTour } from "@/cut/lib/onboarding";
 import { newProjectAllowed } from "@/cut/lib/projectLimit";
 import { patchProjects, refetchProjects } from "@/cut/lib/queries";
 import { backendFor, type Residency } from "@/cut/lib/residency";
+import { startAspect } from "@/cut/lib/startAspect";
 import { lastChosenAspect } from "@/cut/lib/store";
 import { localized } from "@/cut/lib/templateGallery";
 import { copyAsKind, copyTemplate } from "@/cut/lib/templateUse";
@@ -52,9 +53,10 @@ export function useHomeCreate(residency: Residency, folderId: string | null) {
   const [progress, setProgress] = useState<StartProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // An empty project, seeded so the editor opens on its first frame.
-  const emptyProject = async (): Promise<string> => {
-    const aspect = lastChosenAspect() ?? undefined;
+  // An empty project, seeded so the editor opens on its first frame. Picked
+  // pictures set that frame; with none, the last chosen size does.
+  const emptyProject = async (first: HomeHandoff | null): Promise<string> => {
+    const aspect = startAspect(first?.attachments ?? []) ?? lastChosenAspect() ?? undefined;
     const res = await backendFor(residency).fetch("/api/cut/projects", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -105,7 +107,7 @@ export function useHomeCreate(residency: Residency, folderId: string | null) {
       }
       // A message riding along, here or in ChatGPT, means the chat works in it.
       const tour: TourCue = first || source === "chatgpt_card" ? "quiet" : "tour";
-      const id = template ? await templateProject(template, tour) : await emptyProject();
+      const id = template ? await templateProject(template, tour) : await emptyProject(first);
       if (first) {
         saveHomeHandoff(id, first);
       }
