@@ -121,6 +121,7 @@
     "deleteFolder": "Supprimer le dossier",
     "delete": "Supprimer",
     "duplicate": "Dupliquer",
+    "duplicating": "Duplication…",
     "moveToLocal": "Déplacer vers Local",
     "moveToCloud": "Déplacer vers Cloud",
     "actions": "Actions du projet",

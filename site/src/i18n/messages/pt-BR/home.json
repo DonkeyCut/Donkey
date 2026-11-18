@@ -121,6 +121,7 @@
     "deleteFolder": "Excluir pasta",
     "delete": "Excluir",
     "duplicate": "Duplicar",
+    "duplicating": "Duplicando…",
     "moveToLocal": "Mover para Local",
     "moveToCloud": "Mover para Nuvem",
     "actions": "Ações do projeto",

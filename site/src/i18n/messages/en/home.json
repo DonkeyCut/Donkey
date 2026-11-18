@@ -121,6 +121,7 @@
     "deleteFolder": "Delete folder",
     "delete": "Delete",
     "duplicate": "Duplicate",
+    "duplicating": "Duplicating…",
     "moveToLocal": "Move to Local",
     "moveToCloud": "Move to Cloud",
     "actions": "Project actions",

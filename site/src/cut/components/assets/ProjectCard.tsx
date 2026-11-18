@@ -2,7 +2,7 @@
 
 import { useEffect, useState, type RefObject } from "react";
 import { useTranslations } from "next-intl";
-import { Cloud, Copy, Film, Laptop, LayoutTemplate, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
+import { Cloud, Copy, Film, Laptop, LayoutTemplate, Loader2, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -391,6 +391,40 @@ export function ProjectTile({
       </div>
       <div className="mt-2 truncate px-0.5 text-xs text-muted-foreground" style={{ maxWidth: box.width }}>
         {meta}
+      </div>
+    </div>
+  );
+}
+
+/** The card a duplicate holds while it is being made: the original's cached
+ * frame under a spinner. It takes no clicks; the real card replaces it when
+ * the listing carries the copy. */
+export function CopyingTile({
+  project: p,
+  residency,
+  box,
+}: {
+  project: ProjectSummary;
+  residency: Residency;
+  box: { width: number; height: number };
+}) {
+  const t = useTranslations("home.projects");
+  return (
+    <div className="max-w-full" aria-busy="true">
+      <div
+        className="relative grid place-items-center overflow-hidden rounded-2xl border border-border bg-muted"
+        style={{ width: box.width, height: box.height }}
+      >
+        <CardPreview project={p} residency={residency} offline />
+        <div className="absolute inset-0 grid place-items-center bg-black/45">
+          <Loader2 className="size-6 animate-spin text-white" />
+        </div>
+        <span className="absolute top-2 left-2 max-w-[70%] truncate rounded-lg bg-black/55 px-2 py-1 text-[11px] font-medium text-white backdrop-blur-sm">
+          {p.name}
+        </span>
+      </div>
+      <div className="mt-2 truncate px-0.5 text-xs text-muted-foreground" style={{ maxWidth: box.width }}>
+        {t("duplicating")}
       </div>
     </div>
   );

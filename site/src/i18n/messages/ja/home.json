@@ -121,6 +121,7 @@
     "deleteFolder": "フォルダーを削除",
     "delete": "削除",
     "duplicate": "複製",
+    "duplicating": "複製中…",
     "moveToLocal": "ローカルに移動",
     "moveToCloud": "クラウドに移動",
     "actions": "プロジェクト操作",

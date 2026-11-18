@@ -121,6 +121,7 @@
     "deleteFolder": "폴더 삭제",
     "delete": "삭제",
     "duplicate": "복제",
+    "duplicating": "복제 중…",
     "moveToLocal": "로컬로 이동",
     "moveToCloud": "클라우드로 이동",
     "actions": "프로젝트 작업",

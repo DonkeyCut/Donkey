@@ -121,6 +121,7 @@
     "deleteFolder": "Ordner löschen",
     "delete": "Löschen",
     "duplicate": "Duplizieren",
+    "duplicating": "Wird dupliziert…",
     "moveToLocal": "Nach Lokal verschieben",
     "moveToCloud": "In die Cloud verschieben",
     "actions": "Projektaktionen",

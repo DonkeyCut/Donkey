@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
+  CopyingTile,
   ProjectMenu,
   ProjectMenuItems,
   ProjectTile,
@@ -174,38 +175,52 @@ export function HomeProjects({
                     />
                   </CarouselItem>
                 ))
-              : shown.map((x) => {
-                  const { project: p, residency: r } = x;
-                  return (
+              : [
+                  ...actions.copying.map((c) => (
                     <CarouselItem
-                      key={p.id}
+                      key={c.key}
                       className="basis-auto pl-8 last:pr-2"
                     >
-                      <ProjectTile
-                        project={p}
-                        residency={r}
-                        offline={!live(r)}
-                        badge={dual ? "residency" : "none"}
-                        selected={marked.has(p.id)}
-                        box={projectTileSize(p.aspect)}
-                        meta={t("projects.cardMeta", {
-                          size: formatBytes(p.sizeBytes ?? 0, locale),
-                          date: formatDate(p.updatedAt, locale, t("justNow")),
-                        })}
-                        onClick={(e) => open(e, p.id)}
-                        onAuxClick={(e) => open(e, p.id)}
-                        menu={
-                          live(r) && (
-                            <ProjectMenu
-                              className="absolute top-1.5 right-1.5 opacity-0 group-hover:opacity-100 pointer-coarse:opacity-100 data-[state=open]:opacity-100"
-                              {...menuOf(x)}
-                            />
-                          )
-                        }
+                      <CopyingTile
+                        project={c.project}
+                        residency={c.residency}
+                        box={projectTileSize(c.project.aspect)}
                       />
                     </CarouselItem>
-                  );
-                })}
+                  )),
+                  ...shown.map((x) => {
+                    const { project: p, residency: r } = x;
+                    return (
+                      <CarouselItem
+                        key={p.id}
+                        className="basis-auto pl-8 last:pr-2"
+                      >
+                        <ProjectTile
+                          project={p}
+                          residency={r}
+                          offline={!live(r)}
+                          badge={dual ? "residency" : "none"}
+                          selected={marked.has(p.id)}
+                          box={projectTileSize(p.aspect)}
+                          meta={t("projects.cardMeta", {
+                            size: formatBytes(p.sizeBytes ?? 0, locale),
+                            date: formatDate(p.updatedAt, locale, t("justNow")),
+                          })}
+                          onClick={(e) => open(e, p.id)}
+                          onAuxClick={(e) => open(e, p.id)}
+                          menu={
+                            live(r) && (
+                              <ProjectMenu
+                                className="absolute top-1.5 right-1.5 opacity-0 group-hover:opacity-100 pointer-coarse:opacity-100 data-[state=open]:opacity-100"
+                                {...menuOf(x)}
+                              />
+                            )
+                          }
+                        />
+                      </CarouselItem>
+                    );
+                  }),
+                ]}
           </CarouselContent>
         </div>
 

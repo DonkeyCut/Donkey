@@ -110,7 +110,7 @@ import { DeleteConfirm, SelectionMenu, usePickWords, useSelectionMenu } from "@/
 import { ASSET_ROW, ASSET_ROW_PICKED, AssetTable } from "./assetTable";
 import { GraceBanner } from "./GraceBanner";
 import { useHomeCreate } from "@/cut/components/home/useHomeCreate";
-import { ProjectMenu, ProjectMenuItems, ProjectTile, ResidencyBadge } from "./ProjectCard";
+import { CopyingTile, ProjectMenu, ProjectMenuItems, ProjectTile, ResidencyBadge } from "./ProjectCard";
 import { useProjectActions } from "./projectActions";
 import {
   assetEntries,
@@ -660,6 +660,13 @@ export function AssetsView() {
   const actions = useProjectActions({ live, busy, setBusy, setFailure });
   const { moveDests, moveAcross } = actions;
 
+  // Duplicates on their way land in the original's folder, so their cards
+  // show where the original does.
+  const shownCopies =
+    searching || (tab !== "all" && tab !== "projects")
+      ? []
+      : actions.copying.filter((c) => (c.project.folderId ?? null) === openFolder);
+
   // A click opens the project; ⌘-click or a middle click opens it in a new
   // tab; shift-click adds it to the pick.
   const openProject = (e: React.MouseEvent, id: string) => {
@@ -1043,11 +1050,16 @@ export function AssetsView() {
   );
 
   const typeLabel = (x: AssetTypeTab) => t(`assets.types.${x}`);
-  const emptyHere = shownEntries.length === 0 && shownPending.length === 0 && shownFolders.length === 0;
+  const emptyHere =
+    shownEntries.length === 0 && shownPending.length === 0 && shownCopies.length === 0 && shownFolders.length === 0;
   // The list draws its frame once it has a row: a folder (or one being
   // named), a note, or a card on this tab.
   const listRows =
-    shownFolders.length > 0 || folderCreating || notesHere > 0 || (!loading && tab !== "notes" && shownEntries.length > 0);
+    shownFolders.length > 0 ||
+    folderCreating ||
+    notesHere > 0 ||
+    shownCopies.length > 0 ||
+    (!loading && tab !== "notes" && shownEntries.length > 0);
 
   return (
     <div
@@ -1226,6 +1238,18 @@ export function AssetsView() {
           <AssetTable framed={listRows}>
             {folderShelf("table")}
             {notesShown && notesView("table")}
+            {shownCopies.map((c) => (
+              <div key={c.key} aria-busy="true" className={cn(ASSET_ROW, "cursor-default")}>
+                <span className="flex min-w-0 items-center gap-2.5">
+                  <Loader2 className="size-4 shrink-0 animate-spin text-muted-foreground" />
+                  <span className="truncate font-medium">{c.project.name}</span>
+                </span>
+                <span />
+                <span />
+                <span className="text-xs text-muted-foreground">{t("projects.duplicating")}</span>
+                <span />
+              </div>
+            ))}
             {!loading && tab !== "notes" && shownEntries.map(renderRow)}
           </AssetTable>
         ) : (
@@ -1265,6 +1289,14 @@ export function AssetsView() {
                 onRetry={() => void p.run()}
                 onDismiss={() => dismissLibraryImport(p.id)}
                 opensOn="click"
+              />
+            ))}
+            {shownCopies.map((c) => (
+              <CopyingTile
+                key={c.key}
+                project={c.project}
+                residency={c.residency}
+                box={cardBox(projectFrame(c.project))}
               />
             ))}
             {shownEntries.map(renderCard)}

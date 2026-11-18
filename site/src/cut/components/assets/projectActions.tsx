@@ -38,6 +38,10 @@ const HTTP_NOT_FOUND = 404;
 /** A project and the shelf it lives on. */
 export type ShelvedProject = { project: ProjectSummary; residency: Residency };
 
+/** A duplicate on its way: the project it copies, under a key of its own so
+ * two copies of one project each hold a card. */
+export type PendingCopy = ShelvedProject & { key: string };
+
 /**
  * What a project card's ⋯ menu and right-click do — rename, duplicate, make
  * a template, move across shelves — shared by Assets and Home so a card
@@ -63,6 +67,7 @@ export function useProjectActions({
   const [renaming, setRenaming] = useState<ShelvedProject | null>(null);
   const [name, setName] = useState("");
   const [making, setMaking] = useState<ShelvedProject | null>(null);
+  const [copying, setCopying] = useState<PendingCopy[]>([]);
 
   // Purge what this browser keeps for a gone project: a live scene run, its
   // renders, its chat history and the cached copy of its document.
@@ -102,6 +107,11 @@ export function useProjectActions({
     }
     setBusy(true);
     setFailure(null);
+
+    // The copy holds a card from the click until the listing carries it: a
+    // cloud copy queues behind a job, and the shelf would otherwise sit still.
+    const key = crypto.randomUUID();
+    setCopying((c) => [{ key, project: p, residency }, ...c]);
     try {
       const res = await backendFor(residency).fetch(
         `/api/cut/projects/${p.id}/duplicate`,
@@ -144,6 +154,7 @@ export function useProjectActions({
     } catch (err) {
       setFailure(describeError(err, t("projects.duplicateFailed")));
     } finally {
+      setCopying((c) => c.filter((x) => x.key !== key));
       setBusy(false);
     }
   };
@@ -274,5 +285,5 @@ export function useProjectActions({
     </>
   );
 
-  return { menuFor, moveDests, moveAcross, remove, purge, dialogs };
+  return { menuFor, moveDests, moveAcross, remove, purge, dialogs, copying };
 }
