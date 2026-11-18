@@ -129,7 +129,6 @@
     "unread": "Respuesta de chat sin leer"
   },
   "dictation": {
-    "listening": "Escuchando…",
     "transcribing": "Transcribiendo…",
     "cancel": "Cancelar",
     "useTranscription": "Usar transcripción",

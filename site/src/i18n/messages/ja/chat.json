@@ -129,7 +129,6 @@
     "unread": "未読のチャット返信"
   },
   "dictation": {
-    "listening": "聞き取り中…",
     "transcribing": "文字起こし中…",
     "cancel": "キャンセル",
     "useTranscription": "文字起こしを使用",

@@ -25,7 +25,7 @@ import {
 import { MentionTextarea } from "@/cut/components/AssetRefs";
 import { AssetPickerDialog } from "@/cut/components/assets/AssetPickerDialog";
 import { useChatError } from "@/cut/components/chatError";
-import { DictationBody } from "@/cut/components/MicDictation";
+import { DictationBar, DictationText } from "@/cut/components/MicDictation";
 import { RefDropZone } from "@/cut/components/RefDropZone";
 import {
   collectRefs,
@@ -93,6 +93,13 @@ export function HomePrompt({
   const mic = useMicTranscription((said) =>
     setText((prev) => (prev.trim() ? `${prev.trim()} ${said}` : said)),
   );
+
+  // The box's height when dictation began, held so it never shrinks.
+  const [micHeight, setMicHeight] = useState(0);
+  const startDictation = () => {
+    setMicHeight(inputRef.current?.offsetHeight ?? 0);
+    void mic.start();
+  };
 
   const busy = create.busy || pending;
   const hasContent =
@@ -236,56 +243,66 @@ export function HomePrompt({
           onFocusCapture={() => setEngaged(true)}
           className="composer-lift flex flex-col gap-2.5 rounded-[26px] border border-border bg-card px-4 py-3 transition-colors focus-within:border-foreground/40 dark:bg-[color-mix(in_oklab,var(--card),white_3%)]"
         >
+          {uploads.chips.length + attachments.length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              {uploads.chips.map((chip) => (
+                <FileChip
+                  key={chip.id}
+                  chip={chip}
+                  onRemove={uploads.remove}
+                  onRetry={uploads.retry}
+                />
+              ))}
+              {attachments.map((ref) => (
+                <RefChip
+                  key={`${ref.scope}:${ref.kind}:${ref.id}`}
+                  refItem={ref}
+                  row={rows.find((r) => sameRef(r.ref, ref))}
+                  onRemove={detach}
+                />
+              ))}
+            </div>
+          )}
+
+          {/* Enter adds a line; only the send button starts the project. While
+              dictating, the words so far take the box's place at its height. */}
           {mic.state === "idle" ? (
-            <>
-              {uploads.chips.length + attachments.length > 0 && (
-                <div className="flex flex-wrap gap-2">
-                  {uploads.chips.map((chip) => (
-                    <FileChip
-                      key={chip.id}
-                      chip={chip}
-                      onRemove={uploads.remove}
-                      onRetry={uploads.retry}
-                    />
-                  ))}
-                  {attachments.map((ref) => (
-                    <RefChip
-                      key={`${ref.scope}:${ref.kind}:${ref.id}`}
-                      refItem={ref}
-                      row={rows.find((r) => sameRef(r.ref, ref))}
-                      onRemove={detach}
-                    />
-                  ))}
-                </div>
-              )}
+            <MentionTextarea
+              className="max-h-60 min-h-12 w-full resize-none overflow-y-auto bg-transparent p-1 text-base leading-6 outline-none placeholder:text-muted-foreground"
+              rows={2}
+              autoGrow
+              placeholder={
+                uploads.chips.length + attachments.length > 0
+                  ? t("placeholderFiles")
+                  : t("placeholder")
+              }
+              value={text}
+              onChange={setText}
+              candidates={candidates}
+              menuSide="bottom"
+              inputRef={inputRef}
+              attachedRefs={attachments}
+              onUpsertRef={(ref) =>
+                setAttachments((list) => upsertRef(list, ref))
+              }
+              onPasteFiles={(files) => void uploads.add(files)}
+              onRemoveLastRef={removeLastChip}
+              renderMenu={(menu) => <AtPicker menu={menu} rows={rows} />}
+              menuWidth={AT_MENU_WIDTH}
+              onPickRef={(ref) => attach([ref])}
+            />
+          ) : (
+            <DictationText
+              text={text}
+              mic={mic}
+              minHeight={micHeight}
+              className="max-h-60 p-1 text-base leading-6"
+            />
+          )}
 
-              {/* Enter adds a line; only the send button starts the project. */}
-              <MentionTextarea
-                className="max-h-60 min-h-12 w-full resize-none overflow-y-auto bg-transparent p-1 text-base leading-6 outline-none placeholder:text-muted-foreground"
-                rows={2}
-                autoGrow
-                placeholder={
-                  uploads.chips.length + attachments.length > 0
-                    ? t("placeholderFiles")
-                    : t("placeholder")
-                }
-                value={text}
-                onChange={setText}
-                candidates={candidates}
-                menuSide="bottom"
-                inputRef={inputRef}
-                attachedRefs={attachments}
-                onUpsertRef={(ref) =>
-                  setAttachments((list) => upsertRef(list, ref))
-                }
-                onPasteFiles={(files) => void uploads.add(files)}
-                onRemoveLastRef={removeLastChip}
-                renderMenu={(menu) => <AtPicker menu={menu} rows={rows} />}
-                menuWidth={AT_MENU_WIDTH}
-                onPickRef={(ref) => attach([ref])}
-              />
-
-              <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {mic.state === "idle" ? (
+              <>
                 <IconTip label={t("attach")}>
                   <Button
                     type="button"
@@ -317,7 +334,7 @@ export function HomePrompt({
                       className="size-9 rounded-full text-muted-foreground"
                       aria-label={t("voice")}
                       disabled={busy}
-                      onClick={() => void mic.start()}
+                      onClick={startDictation}
                     >
                       <Mic className="size-[18px]" />
                     </Button>
@@ -339,11 +356,11 @@ export function HomePrompt({
                     )}
                   </Button>
                 </IconTip>
-              </div>
-            </>
-          ) : (
-            <DictationBody text={text} mic={mic} />
-          )}
+              </>
+            ) : (
+              <DictationBar mic={mic} buttonClassName="size-9 rounded-full" />
+            )}
+          </div>
         </div>
       </RefDropZone>
 
@@ -405,11 +422,7 @@ function ChipTile({
     <div className="group relative shrink-0">
       <TooltipProvider>
         <Tooltip>
-          <TooltipTrigger
-            render={
-              <div className={ATTACHMENT_CARD} />
-            }
-          >
+          <TooltipTrigger render={<div className={ATTACHMENT_CARD} />}>
             {picture}
             {status}
           </TooltipTrigger>
@@ -484,7 +497,14 @@ function RefChip({
   const name = row?.label ?? refItem.name;
   // A template, snippet or project shows a picture like a clip does, so a
   // label on the picture says which it is.
-  const label = row?.tab === "templates" ? t("chipTemplate") : row?.tab === "snippets" ? t("chipSnippet") : row?.tab === "projects" ? t("chipProject") : null;
+  const label =
+    row?.tab === "templates"
+      ? t("chipTemplate")
+      : row?.tab === "snippets"
+        ? t("chipSnippet")
+        : row?.tab === "projects"
+          ? t("chipProject")
+          : null;
   return (
     <ChipTile
       name={name}
@@ -505,13 +525,31 @@ function RefChip({
  * paper with its title; a folder is the folder glyph over its name; a font is
  * a specimen over its name; anything else is its name and type.
  */
-function ChipFace({ name, preview }: { name: string; preview: AtRow["preview"] | undefined }) {
+function ChipFace({
+  name,
+  preview,
+}: {
+  name: string;
+  preview: AtRow["preview"] | undefined;
+}) {
   if (preview?.kind === "library" && preview.asset.type === "audio") {
     const a = preview.asset;
-    return <AudioFace url={libraryMediaUrl(a.proxyFile ?? a.fileName, a.residency)} duration={a.duration} name={name} />;
+    return (
+      <AudioFace
+        url={libraryMediaUrl(a.proxyFile ?? a.fileName, a.residency)}
+        duration={a.duration}
+        name={name}
+      />
+    );
   }
   if (preview?.kind === "note") {
-    return <NoteFace title={name} body={preview.body} colorIndex={preview.colorIndex} />;
+    return (
+      <NoteFace
+        title={name}
+        body={preview.body}
+        colorIndex={preview.colorIndex}
+      />
+    );
   }
   if (preview?.kind === "icon" && preview.icon === "folder") {
     return <FolderFace name={name} />;
@@ -523,7 +561,13 @@ function ChipFace({ name, preview }: { name: string; preview: AtRow["preview"] |
     return <TextFace name={name} badge={extensionOf(preview.asset.fileName)} />;
   }
   if (preview && preview.kind !== "icon") {
-    return <AtThumb preview={preview} active={false} className="absolute inset-0 size-full rounded-none border-0" />;
+    return (
+      <AtThumb
+        preview={preview}
+        active={false}
+        className="absolute inset-0 size-full rounded-none border-0"
+      />
+    );
   }
   return <TextFace name={name} />;
 }

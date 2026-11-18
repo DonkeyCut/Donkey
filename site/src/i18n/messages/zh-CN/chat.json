@@ -129,7 +129,6 @@
     "unread": "未读聊天回复"
   },
   "dictation": {
-    "listening": "正在聆听…",
     "transcribing": "正在转写…",
     "cancel": "取消",
     "useTranscription": "使用转写文本",

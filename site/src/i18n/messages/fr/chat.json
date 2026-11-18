@@ -129,7 +129,6 @@
     "unread": "Réponse non lue dans le chat"
   },
   "dictation": {
-    "listening": "Écoute en cours…",
     "transcribing": "Transcription en cours…",
     "cancel": "Annuler",
     "useTranscription": "Utiliser la transcription",

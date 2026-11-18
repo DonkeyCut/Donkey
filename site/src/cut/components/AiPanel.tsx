@@ -150,7 +150,7 @@ import { cardIconButton } from "@/cut/components/iconButton";
 import { MentionedText, MentionTextarea, RefChips, RefFace, refHasCard, UnmentionedRefCards } from "./AssetRefs";
 import { ATTACHMENT_CARD } from "./AttachmentFaces";
 import { ComposerQueue, type QueuedMessage } from "./ComposerQueue";
-import { DictationBody } from "./MicDictation";
+import { DictationBar, DictationText } from "./MicDictation";
 import { RECORD_RUNNING_TTL_MS, ToolOutputAssets } from "./ChatAssets";
 import { attachedRefKeys, cardIsAttached } from "@/cut/lib/chatCards";
 import { HostedErrorText, openCreditsWall } from "./hostedError";
@@ -1107,6 +1107,12 @@ function ChatSession({
   const mic = useMicTranscription((text) =>
     setInput((prev) => (prev.trim() ? `${prev.trim()} ${text}` : text)),
   );
+  // The composer's height when dictation began, held so it never shrinks.
+  const [micHeight, setMicHeight] = useState(0);
+  const startDictation = () => {
+    setMicHeight(composerRef.current?.offsetHeight ?? 0);
+    void mic.start();
+  };
   // When dictation ends the composer remounts; put the caret back at the end
   // so Enter (confirm) → Enter (send) chains without a click.
   const micWasActive = useRef(false);
@@ -2430,44 +2436,55 @@ function ChatSession({
                 {t("dropToAttach")}
               </div>
             )}
+            <ChipsReveal open={attachments.length > 0 || incoming}>
+              <RefChips
+                refs={attachments}
+                onRemove={(ref) =>
+                  setAttachments((p) => p.filter((x) => !sameRef(x, ref)))
+                }
+                onUpdate={(ref) =>
+                  setAttachments((p) => p.map((x) => (sameRef(x, ref) ? ref : x)))
+                }
+                className="px-2.5 pt-2.5"
+                // Chip-sized spacer riding the chip row while a frame is
+                // in flight: it claims the arriving chip's exact slot —
+                // opening the row, or wrapping a fresh one when the row
+                // is full — so the space is ready before the landing.
+                trailing={incoming ? <div className="size-14" /> : undefined}
+              />
+            </ChipsReveal>
+            {/* While dictating, the words so far take the box's place at
+                its height and the meter takes the toolbar's. */}
             {mic.state === "idle" ? (
-              <>
-                <ChipsReveal open={attachments.length > 0 || incoming}>
-                  <RefChips
-                    refs={attachments}
-                    onRemove={(ref) =>
-                      setAttachments((p) => p.filter((x) => !sameRef(x, ref)))
-                    }
-                    onUpdate={(ref) =>
-                      setAttachments((p) => p.map((x) => (sameRef(x, ref) ? ref : x)))
-                    }
-                    className="px-2.5 pt-2.5"
-                    // Chip-sized spacer riding the chip row while a frame is
-                    // in flight: it claims the arriving chip's exact slot —
-                    // opening the row, or wrapping a fresh one when the row
-                    // is full — so the space is ready before the landing.
-                    trailing={incoming ? <div className="size-14" /> : undefined}
-                  />
-                </ChipsReveal>
-                <MentionTextarea
-                  className="ai-input max-h-56 w-full resize-none overflow-y-auto bg-transparent px-3 pt-2 text-[12.5px] leading-relaxed outline-none placeholder:text-muted-foreground/70"
-                  rows={5}
-                  autoGrow
-                  placeholder={t("composerPlaceholder")}
-                  value={input}
-                  onChange={setInput}
-                  candidates={candidates}
-                  submitKey="enter"
-                  menuSide="top"
-                  inputRef={composerRef}
-                  onSubmit={() => send(input)}
-                  attachedRefs={attachments}
-                  onUpsertRef={(ref) => setAttachments((p) => upsertRef(p, ref))}
-                  onPasteFiles={attachFiles}
-                  onRemoveLastRef={() => setAttachments((p) => p.slice(0, -1))}
-                  onInsertTime={(mark) => setTimes((p) => [...p, mark])}
-                />
-                <div className="flex items-center gap-1 px-1.5 pb-1.5">
+              <MentionTextarea
+                className="ai-input max-h-56 w-full resize-none overflow-y-auto bg-transparent px-3 pt-2 text-[12.5px] leading-relaxed outline-none placeholder:text-muted-foreground/70"
+                rows={5}
+                autoGrow
+                placeholder={t("composerPlaceholder")}
+                value={input}
+                onChange={setInput}
+                candidates={candidates}
+                submitKey="enter"
+                menuSide="top"
+                inputRef={composerRef}
+                onSubmit={() => send(input)}
+                attachedRefs={attachments}
+                onUpsertRef={(ref) => setAttachments((p) => upsertRef(p, ref))}
+                onPasteFiles={attachFiles}
+                onRemoveLastRef={() => setAttachments((p) => p.slice(0, -1))}
+                onInsertTime={(mark) => setTimes((p) => [...p, mark])}
+              />
+            ) : (
+              <DictationText
+                text={input}
+                mic={mic}
+                minHeight={micHeight}
+                className="max-h-56 px-3 pt-2 text-[12.5px] leading-relaxed"
+              />
+            )}
+            <div className="flex items-center gap-1 px-1.5 pb-1.5">
+              {mic.state === "idle" ? (
+                <>
                   <ModelSelector
                     info={info}
                     model={model}
@@ -2482,7 +2499,7 @@ function ChatSession({
                       className="ai-mic text-muted-foreground"
                       title={t("dictate")}
                       disabled={busy}
-                      onClick={() => void mic.start()}
+                      onClick={startDictation}
                     >
                       <Mic className="size-3.5" />
                     </Button>
@@ -2520,11 +2537,11 @@ function ChatSession({
                       <ArrowUp className="size-3.5" />
                     </Button>
                   )}
-                </div>
-              </>
-            ) : (
-              <DictationBody text={input} mic={mic} />
-            )}
+                </>
+              ) : (
+                <DictationBar mic={mic} className="pl-1.5" />
+              )}
+            </div>
           </div>
         </div>
         {mic.error && (

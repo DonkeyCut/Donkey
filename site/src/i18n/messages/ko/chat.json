@@ -129,7 +129,6 @@
     "unread": "읽지 않은 채팅 답변"
   },
   "dictation": {
-    "listening": "듣는 중…",
     "transcribing": "텍스트 변환 중…",
     "cancel": "취소",
     "useTranscription": "변환된 텍스트 사용",
