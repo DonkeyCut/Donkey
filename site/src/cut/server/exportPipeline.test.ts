@@ -2104,13 +2104,61 @@ describe("an animated element's slideshow", () => {
     });
     const list = written.find((w) => w.file.endsWith("overlay_anim_0.ffconcat"))!.data;
     const durations = [...list.matchAll(/^duration (\S+)$/gm)].map((m) => Number(m[1]));
-    // Each picture starts where the timeline puts it, to the microsecond.
+    // Each picture starts on the frame the timeline puts it on, to the
+    // microsecond: 8.5333s sits a hair under frame 256.
     let at = durations[0];
-    expect(at).toBeCloseTo(START, 6);
+    expect(at).toBeCloseTo(256 / 30, 6);
     for (let k = 1; k <= N; k++) {
       at += durations[k];
-      expect(Math.abs(at - (START + k / 30))).toBeLessThan(2e-6);
+      expect(Math.abs(at - (256 + k) / 30)).toBeLessThan(2e-6);
     }
+  });
+
+  test("a moving element holds the frames a still one does", async () => {
+    // At 24 fps, [0.1, 3.35) holds frames 3 (0.125s) through 80 (3.333s).
+    // Both edges sit under half a frame past a frame, where a picture that
+    // starts on the nearest frame opens a frame early and closes a frame early.
+    const FPS = 24;
+    const START = 0.1;
+    const END = 3.35;
+    const BLANK = "b.png";
+    // One picture per output frame, the way a keyed pose ships.
+    const cuts = [START, ...[...Array(78).keys()].map((k) => (k + 3) / FPS), END];
+    await graphFor({
+      fps: FPS,
+      clips: [clip("a.mp4", { out: 4 })],
+      overlays: [
+        {
+          start: START,
+          end: END,
+          x: 0,
+          y: 0,
+          blank: BLANK,
+          frames: cuts.slice(1).map((c, k) => ({ file: `e_f${k}.png`, duration: c - cuts[k] })),
+        },
+      ],
+    });
+    const list = written.find((w) => w.file.endsWith("overlay_anim_0.ffconcat"))!.data;
+
+    // The demuxer stamps each picture at its start rounded to the nearest
+    // frame, and of two pictures on one frame the later one shows.
+    const files = [...list.matchAll(/^file '(.+)'$/gm)].map((m) => path.basename(m[1]));
+    const durations = [...list.matchAll(/^duration (\S+)$/gm)].map((m) => Math.round(Number(m[1]) * 1e6));
+    let us = 0;
+    const opens = files.map((file, i) => {
+      const frame = Math.round((us * FPS) / 1e6);
+      us += durations[i] ?? 0;
+      return { file, frame };
+    });
+    const shown: number[] = [];
+    for (let k = 0; k < 4 * FPS; k++) {
+      const on = opens.filter((o) => o.frame <= k).at(-1);
+      if (on && on.file !== BLANK) {
+        shown.push(k);
+      }
+    }
+    const still = [...Array(4 * FPS).keys()].filter((k) => k / FPS >= START && k / FPS < END);
+    expect(shown).toEqual(still);
   });
 });
 

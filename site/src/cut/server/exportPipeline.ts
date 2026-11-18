@@ -807,19 +807,21 @@ function regionPivot(
 
 /**
  * An ffconcat slideshow of pictures laid end to end from 0, each held until
- * its `to` second. Every duration is the gap between two microsecond-rounded
- * ends, so a long run of one-frame pictures never drifts off the timeline.
- * A picture whose end does not move past the one before is left out. Each
- * picture opens at the output rate: the demuxer stamps the slideshow in its
- * first picture's timebase, and a still's default of 25 fps would round
- * every start to 40 ms and drop one 30 fps picture in five.
+ * its `to` second. Every end moves to the first output frame at or after it,
+ * to the microsecond: the demuxer rounds each start to the nearest frame, so
+ * an end under half a frame past a frame would hand that frame to the next
+ * picture, and a moving element would drop its last frame where a still one
+ * keeps it. A picture whose end does not move past the one before is left
+ * out. Each picture opens at the output rate: the demuxer stamps the
+ * slideshow in its first picture's timebase, and a still's default of 25 fps
+ * would round every start to 40 ms and drop one 30 fps picture in five.
  */
 function concatList(holds: { file: string; to: number }[], fps: number): string {
   const lines = ["ffconcat version 1.0"];
   let at = 0;
   let last: string | null = null;
   for (const h of holds) {
-    const end = Math.round(h.to * CONCAT_US);
+    const end = Math.round((gridFrame(h.to, fps) / fps) * CONCAT_US);
     if (end <= at) {
       continue;
     }
