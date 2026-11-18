@@ -170,3 +170,16 @@ describe("browser store: an empty account starts empty", () => {
     expect(fresh.folders).toEqual([]);
   });
 });
+
+describe("browser store: a duplicate carries its card", () => {
+  test("the copy keeps the original's rendered preview", async () => {
+    const { body: made } = await call<{ id: string }>("/api/cut/projects", "POST", { name: "Card" });
+    await store.writeFileAt((await store.projectDir(made.id))!, "preview.mp4", "mp4");
+
+    const { body: copy } = await call<{ id: string; hasPreview: boolean }>(`/api/cut/projects/${made.id}/duplicate`, "POST");
+
+    expect(copy.hasPreview).toBe(true);
+    const card = await store.readFileAt(await store.projectDir(copy.id), "preview.mp4");
+    expect(await card?.text()).toBe("mp4");
+  });
+});

@@ -552,6 +552,9 @@ export async function duplicateProject(id: string, locale: Locale = DEFAULT_LOCA
   await mkdir(path.join(dir, "exports"), { recursive: true });
   setDirIndex(newId, dirName);
   await cp(mediaDir(id), path.join(dir, "media"), { recursive: true }).catch(() => {});
+
+  // The copy is the same cut, so the original's card is its card too.
+  await cp(previewPath(id), path.join(dir, "preview.mp4")).catch(() => {});
   const now = Date.now();
   const copy: ProjectDoc = { ...doc, id: newId, name, createdAt: now, updatedAt: now };
   await writeJsonAtomic(path.join(dir, "project.json"), copy);

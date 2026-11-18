@@ -1,5 +1,5 @@
 import { afterAll, expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { ProjectDoc } from "@/cut/lib/types";
@@ -28,4 +28,14 @@ test("a project card's length is where its timeline ends", async () => {
 
   const card = (await projects.listProjects()).find((p) => p.id === id);
   expect(card?.duration).toBeCloseTo(6, 5);
+});
+
+test("a duplicate carries its original's card", async () => {
+  // The copy is the same cut, so the card rendered for the original is its
+  // card too; without it the copy's tile shows the first clip's bare frame.
+  const { id } = await projects.createProject("Card Copy");
+  await writeFile(projects.previewPath(id), "mp4");
+  const copy = await projects.duplicateProject(id);
+  expect(copy.hasPreview).toBe(true);
+  expect(await readFile(projects.previewPath(copy.id), "utf8")).toBe("mp4");
 });

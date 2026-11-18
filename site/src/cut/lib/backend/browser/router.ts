@@ -149,6 +149,13 @@ async function duplicateProject(id: string): Promise<Response> {
         await store.saveMedia(newId, file, name);
       }
     }
+
+    // The copy is the same cut, so the original's card is its card too.
+    const card = await store.readFileAt(await store.projectDir(id), "preview.mp4");
+    const copyDir = await store.projectDir(newId);
+    if (card && copyDir) {
+      await store.writeFileAt(copyDir, "preview.mp4", card);
+    }
     return json(await store.summarize(newId, copy));
   } catch (e) {
     return caught(e, new UserError("project_duplicate_error", "Could not duplicate project."));
