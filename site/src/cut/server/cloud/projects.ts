@@ -7,6 +7,7 @@ import { DOC_SEQ_HEADER, DOC_WRITER_HEADER, HTTP_CONFLICT } from "@/cut/lib/back
 import { OUTPUT_SPACES } from "@donkeycut/effects-kit";
 import { isProjectKind, isTimelineId, normalizeAspect, sanitizeTimelines, type ProjectDoc, type ProjectSummary } from "@/cut/lib/types";
 import type { Prisma } from "@/generated/prisma/client";
+import { after } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { defaultNames } from "@/cut/lib/defaultNames";
 import { creatorLocaleOf } from "./creatorLocale";
@@ -17,6 +18,7 @@ import { addUsage } from "./usage";
 import { UserError } from "@/cut/lib/userError";
 import { caught, decodeFileParam, err, redirect } from "./util";
 import { assetFolderScope } from "./assetFolders";
+import { backfillCards } from "./cardBackfill";
 
 const HTTP_BAD_REQUEST = 400;
 const HTTP_NOT_FOUND = 404;
@@ -228,7 +230,23 @@ export const projectsCloud = {
       orderBy: { updatedAt: "desc" },
     });
     const sizes = await projectSizes(userId, rows.map((r) => r.id));
-    return Response.json(rows.map((r) => summarize(r, sizes.get(r.id) ?? 0)));
+    const cards = rows.map((r) => summarize(r, sizes.get(r.id) ?? 0));
+
+    // Projects with no card, or one older than their last save, get one
+    // drawn after the list answers.
+    after(() =>
+      backfillCards(
+        userId,
+        rows.map((r, i) => ({
+          id: r.id,
+          version: r.version,
+          previewKey: r.previewKey,
+          duration: cards[i].duration,
+          updatedAt: r.updatedAt.getTime(),
+        }))
+      )
+    );
+    return Response.json(cards);
   },
 
   async create(userId: string, req: Request) {
