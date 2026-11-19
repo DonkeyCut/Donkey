@@ -153,6 +153,14 @@ export function favoritesFirst<T>(items: readonly T[], idOf: (item: T) => string
   return [...top, ...items.filter((i) => !rank.has(idOf(i)))];
 }
 
+/** The starred ids, newest first, after one star goes on or comes off. */
+export function withFavorite(ids: readonly string[], id: string, mark: FavoriteMark): string[] {
+  if (mark === "remove") {
+    return ids.filter((x) => x !== id);
+  }
+  return ids.includes(id) ? [...ids] : [id, ...ids];
+}
+
 export type TemplateFilter = {
   category?: TemplateCategory;
   aspect?: TemplateAspect;

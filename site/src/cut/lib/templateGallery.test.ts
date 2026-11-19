@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { favoritesFirst, pageWindow } from "./templateGallery";
+import { favoritesFirst, pageWindow, withFavorite } from "./templateGallery";
 
 describe("pageWindow", () => {
   test("a short run shows every page", () => {
@@ -32,5 +32,23 @@ describe("favoritesFirst", () => {
 
   test("a star on an item the list lacks changes nothing", () => {
     expect(favoritesFirst(["a", "b"], id, ["z", "b"])).toEqual(["b", "a"]);
+  });
+});
+
+describe("withFavorite", () => {
+  test("a new star leads and a removed one leaves the rest alone", () => {
+    expect(withFavorite(["a"], "b", "add")).toEqual(["b", "a"]);
+    expect(withFavorite(["b", "a"], "b", "remove")).toEqual(["a"]);
+  });
+
+  test("a star already there, or already gone, changes nothing", () => {
+    expect(withFavorite(["b", "a"], "a", "add")).toEqual(["b", "a"]);
+    expect(withFavorite(["a"], "z", "remove")).toEqual(["a"]);
+  });
+
+  test("taking back one failed star keeps a later one", () => {
+    // A then B are starred; A's request fails and only A comes off.
+    const both = withFavorite(withFavorite([], "a", "add"), "b", "add");
+    expect(withFavorite(both, "a", "remove")).toEqual(["b"]);
   });
 });

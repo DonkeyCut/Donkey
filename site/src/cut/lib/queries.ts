@@ -17,7 +17,7 @@
  */
 
 import { keepPreviousData, useQueries, useQuery, useQueryClient, type QueryClient, type UseQueryResult } from "@tanstack/react-query";
-import { useEffect } from "react";
+import { useCallback, useEffect } from "react";
 
 import { confirmedEngineUser, currentEngineUser, engineLost, onEngineUserConfirmed } from "./api";
 import { cutMode } from "./backend";
@@ -27,7 +27,7 @@ import { fetchLibrary, type LibraryAsset, type LibraryData } from "./library";
 import { freeItemName } from "./itemName";
 import { renameLibraryFile } from "./libraryRename";
 import { fetchNotes, placeLooseNotes, type NotesData } from "./notes";
-import type { TemplateCandidate } from "./templateGallery";
+import { withFavorite, type TemplateCandidate } from "./templateGallery";
 import { fetchFavorites, fetchTemplateIndex, markFavorite, searchTemplateIndex } from "./templateUse";
 import {
   availableResidencies,
@@ -200,9 +200,12 @@ export function useTemplateSearch(query: string, own: TemplateCandidate[]) {
 
 const templateFavoritesKey = [...templateIndexKey, "favorites"] as const;
 
+/** The starred ids as a set, built once per read; it keeps the newest-first order. */
+const favoriteSet = (ids: string[]): ReadonlySet<string> => new Set(ids);
+
 /** The gallery templates the person starred, and a toggle for one. `ids` is
  * null while signed out or unread, so a surface shows no star it can't keep.
- * A toggle shows at once and snaps back if the account refuses it. */
+ * A toggle shows at once, and a refused one takes back its own star alone. */
 export function useTemplateFavorites(): {
   ids: ReadonlySet<string> | null;
   pending: boolean;
@@ -214,20 +217,30 @@ export function useTemplateFavorites(): {
     queryFn: fetchFavorites,
     staleTime: TEMPLATE_INDEX_STALE_MS,
     retry: false,
+    select: favoriteSet,
   });
-  const ids = query.data ? new Set(query.data) : null;
 
-  const toggle = (id: string) => {
-    const before = client.getQueryData<string[]>(templateFavoritesKey) ?? [];
-    const starred = before.includes(id);
-    client.setQueryData<string[]>(templateFavoritesKey, starred ? before.filter((x) => x !== id) : [id, ...before]);
-    markFavorite(id, starred ? "remove" : "add").catch(() => {
-      client.setQueryData(templateFavoritesKey, before);
-      void client.invalidateQueries({ queryKey: templateFavoritesKey });
-    });
-  };
+  const toggle = useCallback(
+    (id: string) => {
+      const starred = (client.getQueryData<string[]>(templateFavoritesKey) ?? []).includes(id);
+      const mark = starred ? "remove" : "add";
+      const write = (m: typeof mark) =>
+        client.setQueryData<string[]>(templateFavoritesKey, (ids) => withFavorite(ids ?? [], id, m));
 
-  return { ids, pending: query.isPending, toggle };
+      // A read already out holds the list from before the click; stop it so
+      // it cannot land over the star.
+      void client.cancelQueries({ queryKey: templateFavoritesKey });
+      write(mark);
+      markFavorite(id, mark).catch(() => {
+        // Only this star goes back; one clicked meanwhile keeps its own.
+        write(starred ? "add" : "remove");
+        void client.invalidateQueries({ queryKey: templateFavoritesKey });
+      });
+    },
+    [client],
+  );
+
+  return { ids: query.data ?? null, pending: query.isPending, toggle };
 }
 
 /**
