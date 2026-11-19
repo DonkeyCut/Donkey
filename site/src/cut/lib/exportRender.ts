@@ -113,6 +113,21 @@ export interface RenderedExport {
   discard(): Promise<void>;
 }
 
+/** Where a tab render's time went, in whole milliseconds per stage, so a slow
+ * export names the stage that was slow: `drawMs` is decoding and compositing,
+ * `decodeMs` the part of it spent waiting on source frames, and `encodeMs`
+ * the wait on the video encoder. */
+export interface RenderTiming {
+  frames: number;
+  spanSec: number;
+  audioMs: number;
+  prepareMs: number;
+  drawMs: number;
+  decodeMs: number;
+  encodeMs: number;
+  finalizeMs: number;
+}
+
 /**
  * Where an in-tab render writes its file while it is being made.
  *
@@ -153,26 +168,11 @@ export interface RenderOptions {
   /** Maps an asset's stored file name to a URL the reader can open. */
   resolve: (asset: MediaAsset) => string;
   onProgress?: (progress: RenderProgress) => void;
+  /** Called once, when an encoded render finishes, with its stage times. */
+  onTiming?: (timing: RenderTiming) => void;
   signal?: AbortSignal;
 }
 
-/** The bitrate the choice asks for — the model in `exportDelivery`, which
- * the engine and the dialog's estimate read too. */
-export function bitrateFor(settings: ExportSettings): number {
-  return videoBitrateFor(settings);
-}
-
-/** The stretch `[from, to]` of a rendered mix as a buffer of its own. */
-function sliceAudio(mix: AudioBuffer, from: number, to: number): AudioBuffer {
-  const a = Math.max(0, Math.min(mix.length, Math.round(from * mix.sampleRate)));
-  const b = Math.max(a + 1, Math.min(mix.length, Math.round(to * mix.sampleRate)));
-  const out = new AudioBuffer({
-    length: b - a,
-    numberOfChannels: mix.numberOfChannels,
-    sampleRate: mix.sampleRate,
-  });
-  for (let ch = 0; ch < mix.numberOfChannels; ch++) {
-    out.copyToChannel(mix.getChannelData(ch).subarray(a, b), ch);
 /** The AAC rate an export asks for when its settings name none. */
 const DEFAULT_AAC_RATE = 192_000;
 
@@ -224,6 +224,23 @@ async function encodableAudio(
   return bitrate ? { codec, bitrate } : null;
 }
 
+/** The bitrate the choice asks for — the model in `exportDelivery`, which
+ * the engine and the dialog's estimate read too. */
+export function bitrateFor(settings: ExportSettings): number {
+  return videoBitrateFor(settings);
+}
+
+/** The stretch `[from, to]` of a rendered mix as a buffer of its own. */
+function sliceAudio(mix: AudioBuffer, from: number, to: number): AudioBuffer {
+  const a = Math.max(0, Math.min(mix.length, Math.round(from * mix.sampleRate)));
+  const b = Math.max(a + 1, Math.min(mix.length, Math.round(to * mix.sampleRate)));
+  const out = new AudioBuffer({
+    length: b - a,
+    numberOfChannels: mix.numberOfChannels,
+    sampleRate: mix.sampleRate,
+  });
+  for (let ch = 0; ch < mix.numberOfChannels; ch++) {
+    out.copyToChannel(mix.getChannelData(ch).subarray(a, b), ch);
   }
   return out;
 }
@@ -1109,7 +1126,7 @@ export async function renderProjectToMp4(
   settings: ExportSettings,
   opts: RenderOptions
 ): Promise<RenderedExport> {
-  const { resolve, onProgress, signal } = opts;
+  const { resolve, onProgress, onTiming, signal } = opts;
   const trim = sourceExportPlan(doc, settings);
   if (trim && (settings.codec === "h264" || settings.codec === "hevc")) {
     const inputs = new Map<string, ReturnType<typeof openMedia>>();
@@ -1172,6 +1189,10 @@ export async function renderProjectToMp4(
     if (signal?.aborted) throw new DOMException("Export canceled.", "AbortError");
   };
 
+  // Stage clocks for the timing report.
+  const timing: RenderTiming = { frames: 0, spanSec: span, audioMs: 0, prepareMs: 0, drawMs: 0, decodeMs: 0, encodeMs: 0, finalizeMs: 0 };
+  const audioStart = performance.now();
+
   onProgress?.({ ratio: 0, stage: "audio" });
   const whole = await renderMix(mixSpecFor(doc, resolve), {
     sampleRate: settings.audioSampleRate ?? AUDIO_RATE,
@@ -1191,6 +1212,8 @@ export async function renderProjectToMp4(
     );
     stop();
   }
+
+  timing.audioMs = performance.now() - audioStart;
 
   const canvas = createRasterCanvas(settings.width, settings.height);
   // Elements shorter than an output frame widen onto the one they hold.
@@ -1240,6 +1263,7 @@ export async function renderProjectToMp4(
       if (!encodable) {
         throw new UserError("browser_aac_unsupported", "This browser can't encode AAC audio.");
       }
+      const audioCodec = encodable.codec;
       // The mix starts its encoder's priming early, so the edit list trims
       // the priming and the sound stays on its picture.
       const lead = await encoderLead(audioCodec, mix.sampleRate, mix.numberOfChannels);
@@ -1258,16 +1282,21 @@ export async function renderProjectToMp4(
     // frames rather than being interleaved with them.
     if (audio && mix) await audio.add(mix);
 
+    const prepareStart = performance.now();
     await painter.prepare();
+    timing.prepareMs = performance.now() - prepareStart;
     stop();
 
     for (let i = 0; i < frames; i++) {
       stop();
-      const audioCodec = encodable.codec;
       const t = i * frameDur;
+      const drawStart = performance.now();
       await painter.drawAt(exportFrameAt(from, i, settings.fps));
+      const drawn = performance.now();
 
       await video.add(t, frameDur);
+      timing.drawMs += drawn - drawStart;
+      timing.encodeMs += performance.now() - drawn;
       if (i % 15 === 0) {
         onProgress?.({ ratio: i / frames, stage: "video" });
         // Let the tab breathe: without a yield a long render starves every
@@ -1279,7 +1308,20 @@ export async function renderProjectToMp4(
     onProgress?.({ ratio: 1, stage: "finishing" });
     // Finalize fills in the reserved index and closes the scratch file, so the
     // handle reads back the finished MP4.
+    const finalizeStart = performance.now();
     await output.finalize();
+    timing.finalizeMs = performance.now() - finalizeStart;
+    timing.frames = frames;
+    onTiming?.({
+      frames,
+      spanSec: Math.round(span * 10) / 10,
+      audioMs: Math.round(timing.audioMs),
+      prepareMs: Math.round(timing.prepareMs),
+      drawMs: Math.round(timing.drawMs),
+      decodeMs: Math.round(painter.decodeMs),
+      encodeMs: Math.round(timing.encodeMs),
+      finalizeMs: Math.round(timing.finalizeMs),
+    });
     return { file: await scratchHandle.getFile(), discard };
   } catch (err) {
     await output.cancel().catch(() => {});
@@ -1668,9 +1710,9 @@ export class FramePainter {
   private async frameOf(span: ClipSpan, t: number): Promise<Frame> {
     const reader = this.readerFor(span.asset);
     const st = sourceTimeAt(span, t);
-    if (!smoothsAt(span.clip, retimeOf(span.clip), Math.max(0, t - span.start))) return reader.frameAt(st);
-    const pair = await reader.pairAt(st);
-    if (!pair) return reader.frameAt(st);
+    if (!smoothsAt(span.clip, retimeOf(span.clip), Math.max(0, t - span.start))) return this.timed(reader.frameAt(st));
+    const pair = await this.timed(reader.pairAt(st));
+    if (!pair) return this.timed(reader.frameAt(st));
     if (!pair.b) return frameOfWrapped(pair.a);
     const w = synthWeight(st, pair.a.timestamp, pair.b.timestamp);
     if (w <= SYNTH_EDGE) return frameOfWrapped(pair.a);
@@ -1680,6 +1722,20 @@ export class FramePainter {
     const key = `${span.asset.id}|${pair.a.timestamp.toFixed(4)}|${pair.b.timestamp.toFixed(4)}`;
     const image = await synth.mid(key, pair.a.canvas, pair.b.canvas, width, height, w);
     return { kind: "ready", image, width, height };
+  }
+
+  /** Milliseconds this painter has waited on source frames, for the render's
+   * timing report. */
+  decodeMs = 0;
+
+  /** Await a source read and add its wait to `decodeMs`. */
+  private async timed<T>(read: Promise<T>): Promise<T> {
+    const start = performance.now();
+    try {
+      return await read;
+    } finally {
+      this.decodeMs += performance.now() - start;
+    }
   }
 
   private readerFor(asset: MediaAsset): ClipReader {
@@ -1754,7 +1810,7 @@ export class FramePainter {
     // converted frame is reused until the read crosses into the next one.
     const stamp = matteStamp(m.assetId, mt);
     const held = alpha.held(stamp);
-    const frame = held ? null : await this.readerFor(asset).frameAt(matteReadTime(mt, dur));
+    const frame = held ? null : await this.timed(this.readerFor(asset).frameAt(matteReadTime(mt, dur)));
     const img = held ?? (frame?.kind === "ready" ? alpha.of(frame, stamp) : null);
     if (img) this.matteFrames.set(key, img);
   }
@@ -1777,7 +1833,7 @@ export class FramePainter {
       if (plan.incoming) await this.fetchRemovalMatte(plan.incoming, at);
       if (plan.backdrop) {
         await this.fetchRemovalMatte(plan.backdrop.span, at);
-        const frame = await this.readerFor(plan.backdrop.span.asset).frameAt(plan.backdrop.at);
+        const frame = await this.timed(this.readerFor(plan.backdrop.span.asset).frameAt(plan.backdrop.at));
         comp.drawLayer(frame, plan.backdrop.span.clip, false, 1, at);
       }
       const masterFrame = master.clip.hidden ? MISSING_FRAME : await this.frameOf(master, at);

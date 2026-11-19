@@ -22,7 +22,7 @@ import { deleteExport as dropStoredExport, exportsDir, projectDir, writeFileAt, 
 import { holdRegistered, registerBlobFile, releaseRegistered, resolveRegisteredBlob } from "./backend/browser/registry";
 import { captureCloudBackend } from "./backend/cloud";
 import { downloadFile, downloadFromUrl } from "./download";
-import { bitrateFor, canRenderInBrowser, renderProjectToMp4, renderStemsArchive, type RenderedExport, type SourceExportProfile } from "./exportRender";
+import { bitrateFor, canRenderInBrowser, renderProjectToMp4, renderStemsArchive, type RenderedExport, type RenderTiming, type SourceExportProfile } from "./exportRender";
 import { planStems, type StemDef } from "./stems";
 import { putSigned } from "./media";
 import { withAssetColors } from "./mediaRead";
@@ -1865,6 +1865,8 @@ export async function runBrowserExport(
     /** The reserved job's id, as soon as it exists — the dock hides that row
      * while this tab is the thing rendering it. */
     onClaimed?: (jobId: string) => void;
+    /** The tab render's stage times, for the finish report. */
+    onTiming?: (timing: RenderTiming) => void;
   } = {}
 ): Promise<string> {
   const backend = projectOperation(projectId).backend;
@@ -1928,6 +1930,7 @@ export async function runBrowserExport(
       resolve: (asset) =>
         renderAssetUrl(projectId, asset),
       signal: opts.signal,
+      onTiming: opts.onTiming,
       // The render is nearly all of the work; the upload is the tail of the bar.
       onProgress: ({ ratio }) => {
         reported = ratio * 0.9;
@@ -2039,6 +2042,7 @@ async function runEngineExport(
       resolve: (asset) =>
         renderAssetUrl(projectId, asset),
       signal: opts.signal,
+      onTiming: opts.onTiming,
       // The render is nearly all of the work; the hand-in to the engine on
       // this machine is the tail of the bar.
       onProgress: ({ ratio }) => {
@@ -2157,6 +2161,7 @@ async function runStoreExport(
       resolve: (asset) =>
         renderAssetUrl(projectId, asset),
       signal: opts.signal,
+      onTiming: opts.onTiming,
       onProgress: ({ ratio }) => {
         opts.onProgress?.(ratio);
         updateBrowserExportJob(job.id, { progress: ratio });

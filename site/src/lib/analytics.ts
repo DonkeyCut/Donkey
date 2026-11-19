@@ -85,10 +85,26 @@ export type AnalyticsEvents = {
   // the engine or the worker took it on, failed with the error code.
   // tabError is why the tab gave a render up to the machine behind it,
   // errorCause and errorStatus what lay under a failure, and freeStorageMb
-  // what this origin could still store when it failed.
+  // what this origin could still store when it failed. elapsedMs is the
+  // wait from the click to this report, and a tab render adds its frames,
+  // the seconds of cut it carries and the time each stage took. cores,
+  // memoryGb, hwEncoder and gpu are the machine it ran on.
   export_started: ExportShape;
   export_finished: ExportShape & {
     result: "done" | "queued" | "cancelled" | "failed";
+    elapsedMs: number;
+    frames?: number;
+    spanSec?: number;
+    audioMs?: number;
+    prepareMs?: number;
+    drawMs?: number;
+    decodeMs?: number;
+    encodeMs?: number;
+    finalizeMs?: number;
+    cores?: number;
+    memoryGb?: number;
+    hwEncoder?: boolean;
+    gpu?: string;
     error?: string;
     tabError?: string;
     errorCause?: string;

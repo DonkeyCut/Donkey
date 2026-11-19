@@ -213,3 +213,25 @@ test("a paced poll reads the cloud feed at most every few seconds; a direct refr
   await useExports.getState().refresh();
   expect(cloud.mock.calls.length).toBe(2);
 });
+
+test("a finished tab render reports its wait and its stage times", async () => {
+  const mode = spyOn(backend, "getBackend").mockReturnValue(exportBackend("cloud"));
+  const probe = spyOn(exportRender, "canRenderInBrowser").mockResolvedValue(true);
+  const timing = { frames: 1800, spanSec: 30, audioMs: 400, prepareMs: 900, drawMs: 52_000, decodeMs: 31_000, encodeMs: 7_000, finalizeMs: 120 };
+  const render = spyOn(exportClient, "runBrowserExport").mockImplementation(async (_id, _doc, _settings, opts) => {
+    opts?.onTiming?.(timing);
+    return "done";
+  });
+  restores.push(() => mode.mockRestore(), () => probe.mockRestore(), () => render.mockRestore());
+  const events = captured();
+  feed();
+
+  await useExports.getState().start("project", useEditor.getState(), {
+    width: 1280, height: 720, ...EXPORT_PRESETS[0].settings,
+  });
+  const finished = events.finished();
+  expect(finished).toMatchObject({ result: "done", ...timing });
+  expect(finished?.elapsedMs).toBeGreaterThanOrEqual(0);
+  expect(typeof finished?.cores).toBe("number");
+  expect(typeof finished?.hwEncoder).toBe("boolean");
+});

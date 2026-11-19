@@ -195,6 +195,12 @@ export const useExports = create<ExportsState>((set, get) => ({
     track("export_started", { ...shape, renderer });
     set((s) => ({
       local: [
+    // How long the person waits, and where a tab render spent it.
+    const startedAt = performance.now();
+    const elapsed = () => ({ elapsedMs: Math.round(performance.now() - startedAt) });
+    let timing: RenderTiming | undefined;
+    // The machine under the render; a probe that fails reports nothing.
+    const device = exportDevice(settings).catch(() => ({}));
         ...s.local,
         {
           id: localId,
@@ -290,7 +296,7 @@ export const useExports = create<ExportsState>((set, get) => ({
       }
       const freeStorageMb = tabError ? await freeStorage() : undefined;
       track("export_finished", {
-        ...shape, renderer, result: queued ? "queued" : "done",
+        ...shape, renderer, result: queued ? "queued" : "done", ...elapsed(), ...timing, ...(await device),
         ...(tabError ? { tabError } : {}),
         ...(freeStorageMb === undefined ? {} : { freeStorageMb }),
       });
@@ -317,7 +323,7 @@ export const useExports = create<ExportsState>((set, get) => ({
       // failure.
       if (err instanceof DOMException && err.name === "AbortError") {
         set((s) => ({ local: s.local.filter((r) => r.id !== localId) }));
-        track("export_finished", { ...shape, renderer, result: "cancelled" });
+        track("export_finished", { ...shape, renderer, result: "cancelled", ...elapsed(), ...(await device) });
         return;
       }
       // A refusal is the gate answering; anything else is a failure someone
@@ -327,7 +333,7 @@ export const useExports = create<ExportsState>((set, get) => ({
       }
       const freeStorageMb = await freeStorage();
       track("export_finished", {
-        ...shape, renderer, result: "failed", error: errorFields(err, String(err)).errorCode ?? "unknown",
+        ...shape, renderer, result: "failed", error: errorFields(err, String(err)).errorCode ?? "unknown", ...elapsed(), ...(await device),
         ...(tabError ? { tabError } : {}),
         ...(freeStorageMb === undefined ? {} : { freeStorageMb }),
         ...causeFields(err),
