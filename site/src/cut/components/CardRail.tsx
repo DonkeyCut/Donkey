@@ -57,7 +57,7 @@ function CardTabs() {
   useHostReady(true);
 
   return (
-    <nav data-card-tabs className="shrink-0 border-b border-border">
+    <nav data-card-tabs className="shrink-0">
       <div className={cn(CARD_COLUMN, "flex items-center gap-1 overflow-x-auto py-2")}>
       {CARD_TABS.map(({ tab, icon: Icon }) => {
         const href = homeHref(base, tab);
