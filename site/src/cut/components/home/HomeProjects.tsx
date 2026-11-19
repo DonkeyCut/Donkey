@@ -63,6 +63,13 @@ const SLIDE: Record<HomeDensity, string> = {
   compact: "basis-auto pl-5 last:pr-2",
 };
 
+// The track's pull to the left: the gap less the viewport's 8px bleed, so the
+// first card starts on the heading's edge with its border inside the clip.
+const TRACK: Record<HomeDensity, string> = {
+  roomy: "-ml-6",
+  compact: "-ml-3",
+};
+
 /** The tile that leads the row in the ChatGPT card and makes a project. */
 export type NewProjectTile = { busy: boolean; onClick: () => void };
 
@@ -178,7 +185,7 @@ export function HomeProjects({
             viewport: 8px each side, 12px above and below. items-start lines
             every card up along the top, wide and tall alike. */}
         <div className="-mx-2" onContextMenu={(e) => void ctx.onContextMenu(e)}>
-          <CarouselContent className="-ml-6 items-start py-3">
+          <CarouselContent className={cn(TRACK[density], "items-start py-3")}>
             {create && (
               <CarouselItem className={SLIDE[density]}>
                 <NewTile
