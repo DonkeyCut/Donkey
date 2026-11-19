@@ -58,9 +58,8 @@ jobs:
         run: npm ci
 
       - name: Install media test tools
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq ffmpeg
+        timeout-minutes: 5
+        run: ../scripts/install-ci-ffmpeg.sh
 
       - name: Generate Prisma client
         run: npx prisma generate
@@ -121,9 +120,8 @@ jobs:
         run: npx prisma generate
 
       - name: Install ffmpeg
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq ffmpeg
+        timeout-minutes: 5
+        run: ../scripts/install-ci-ffmpeg.sh
 
       # The fixture evals drive the Chrome the runner already carries. The two
       # ChatGPT evals drive Playwright's own Chromium, which is a download.
@@ -201,9 +199,8 @@ jobs:
         run: npx prisma generate
 
       - name: Install ffmpeg
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq ffmpeg
+        timeout-minutes: 5
+        run: ../scripts/install-ci-ffmpeg.sh
 
       # Placeholder values: the eval's project lives on the dev server's own
       # disk and the page answers its session check itself, so nothing reads
