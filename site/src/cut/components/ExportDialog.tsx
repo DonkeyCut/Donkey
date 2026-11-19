@@ -42,6 +42,8 @@ import {
 import { useCutMode } from "@/cut/lib/backend/hooks";
 import { downloadText } from "@/cut/lib/download";
 import { deliverySpan, exportBaseName } from "@/cut/lib/exportDelivery";
+import { estimateRenderMs, formatTimeEstimate, readPace } from "@/cut/lib/exportPace";
+import { sourceExportPlan } from "@/cut/lib/sourceExportPlan";
 import { canRenderInBrowser, sourceExportProfile, sourceFrameRateKey, type SourceExportProfile } from "@/cut/lib/exportRender";
 import { useExports } from "@/cut/lib/exportStore";
 import { projectDuration, useEditor } from "@/cut/lib/store";
@@ -231,6 +233,28 @@ export function ExportDialog() {
   };
 
   const sizeEstimate = formatSizeEstimate(estimateExportBytes(settings, span), locale);
+
+  // How long the render takes here, from this device's own past renders:
+  // "~2 min". Empty before its first render, for a render the machine behind
+  // the project does, and for a cut that copies its source without encoding.
+  const timeEstimate = (() => {
+    const tabEncodes = inTab && !hdr && (settings.codec === "h264" || settings.codec === "hevc");
+    const pace = tabEncodes ? readPace() : null;
+    if (pace === null) {
+      return "";
+    }
+
+    const { background } = useEditor.getState();
+    const copies = sourceExportPlan({ aspect, assets, clips, audioClips, overlays, subtitles, background, colorSpace }, settings);
+    return copies ? "" : formatTimeEstimate(estimateRenderMs(settings, span, pace), locale);
+  })();
+
+  // The button names what the click costs: "Export video · ~13 MB · ~2 min".
+  const exportLabel = !sizeEstimate
+    ? t("exportVideo")
+    : timeEstimate
+      ? t("exportVideoTimed", { size: sizeEstimate, time: timeEstimate })
+      : t("exportVideoSized", { size: sizeEstimate });
   // The rung names: the source frame reads in the page's language, the fixed
   // sizes ("4K", "1080p") read as they are.
   const rungLabel = (r: { id: string; label: string }) => (r.id === "source" ? t("source") : r.label);
@@ -523,8 +547,8 @@ export function ExportDialog() {
         </DialogBody>
 
         <DialogFooter className="mx-0 mb-0 flex-col gap-3 rounded-b-xl bg-muted/40 px-6 py-5 sm:flex-col">
-          <div className="flex items-center justify-between gap-3 text-sm text-muted-foreground">
-            <span className="truncate">
+          <div className="text-sm text-muted-foreground">
+            <span className="block truncate">
               {t("size", { width: settings.width, height: settings.height })} · {t("fps", { fps: settings.fps })} ·{" "}
               {FORMATS.find((f) => f.id === formatId)?.label ?? formatId} · {settings.audioCodec.toUpperCase()}
               {hdr ? ` · ${t(`colorSpaces.${colorSpace}`)}` : ""}
@@ -532,10 +556,9 @@ export function ExportDialog() {
               {settings.loudness !== undefined ? ` · ${t("lufs", { lufs: String(settings.loudness).replace("-", "−") })}` : ""}
               {stems ? ` · ${t("stemsTag")}` : ""}
             </span>
-            <span className="shrink-0 tabular-nums">{sizeEstimate}</span>
           </div>
           <Button className="h-11 w-full text-base" onClick={run} disabled={waiting}>
-            {waiting ? t("reading") : t("exportVideo")}
+            {waiting ? t("reading") : exportLabel}
           </Button>
         </DialogFooter>
       </DialogContent>

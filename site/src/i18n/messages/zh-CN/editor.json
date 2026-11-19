@@ -285,6 +285,8 @@
     "stemsTag": "分轨",
     "reading": "正在读取素材…",
     "exportVideo": "导出视频",
+    "exportVideoSized": "导出视频 · {size}",
+    "exportVideoTimed": "导出视频 · {size} · {time}",
     "scalePresets": "{label} 预设"
   },
   "topBar": {

@@ -285,6 +285,8 @@
     "stemsTag": "stems",
     "reading": "Reading the footage…",
     "exportVideo": "Export video",
+    "exportVideoSized": "Export video · {size}",
+    "exportVideoTimed": "Export video · {size} · {time}",
     "scalePresets": "{label} presets"
   },
   "topBar": {

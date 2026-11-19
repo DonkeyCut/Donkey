@@ -285,6 +285,8 @@
     "stemsTag": "stems",
     "reading": "Lecture des rushs…",
     "exportVideo": "Exporter la vidéo",
+    "exportVideoSized": "Exporter la vidéo · {size}",
+    "exportVideoTimed": "Exporter la vidéo · {size} · {time}",
     "scalePresets": "Préréglages {label}"
   },
   "topBar": {

@@ -285,6 +285,8 @@
     "stemsTag": "stems",
     "reading": "Footage wird eingelesen…",
     "exportVideo": "Video exportieren",
+    "exportVideoSized": "Video exportieren · {size}",
+    "exportVideoTimed": "Video exportieren · {size} · {time}",
     "scalePresets": "{label}-Presets"
   },
   "topBar": {

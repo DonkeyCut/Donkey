@@ -285,6 +285,8 @@
     "stemsTag": "스팀",
     "reading": "영상 읽는 중…",
     "exportVideo": "비디오 내보내기",
+    "exportVideoSized": "비디오 내보내기 · {size}",
+    "exportVideoTimed": "비디오 내보내기 · {size} · {time}",
     "scalePresets": "{label} 프리셋"
   },
   "topBar": {

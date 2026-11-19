@@ -285,6 +285,8 @@
     "stemsTag": "ステム",
     "reading": "フッテージを読み込み中…",
     "exportVideo": "ビデオを書き出し",
+    "exportVideoSized": "動画の書き出し · {size}",
+    "exportVideoTimed": "動画の書き出し · {size} · {time}",
     "scalePresets": "{label}のプリセット"
   },
   "topBar": {

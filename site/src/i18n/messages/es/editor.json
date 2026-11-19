@@ -285,6 +285,8 @@
     "stemsTag": "stems",
     "reading": "Leyendo el metraje…",
     "exportVideo": "Exportar video",
+    "exportVideoSized": "Exportar video · {size}",
+    "exportVideoTimed": "Exportar video · {size} · {time}",
     "scalePresets": "Ajustes predefinidos de {label}"
   },
   "topBar": {

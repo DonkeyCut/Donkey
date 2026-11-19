@@ -20,7 +20,9 @@ import {
   type ExportSettings,
 } from "./exportClient";
 import type { ExportDoc } from "./renderSnapshot";
-import { canRenderInBrowser, sourceExportProfile } from "./exportRender";
+import { exportDevice } from "./exportDevice";
+import { recordPace } from "./exportPace";
+import { canRenderInBrowser, sourceExportProfile, type RenderTiming } from "./exportRender";
 import { useGenNotify } from "./genNotify";
 import { STORAGE_FULL } from "./operationFailure";
 import { emitStorageQuota } from "./storageQuota";
@@ -193,14 +195,14 @@ export const useExports = create<ExportsState>((set, get) => ({
     let renderer: "tab" | "machine" = inBrowser ? "tab" : "machine";
     const shape = { residency: backend.kind, width: settings.width, height: settings.height, fps: settings.fps, codec: settings.codec };
     track("export_started", { ...shape, renderer });
-    set((s) => ({
-      local: [
     // How long the person waits, and where a tab render spent it.
     const startedAt = performance.now();
     const elapsed = () => ({ elapsedMs: Math.round(performance.now() - startedAt) });
     let timing: RenderTiming | undefined;
     // The machine under the render; a probe that fails reports nothing.
     const device = exportDevice(settings).catch(() => ({}));
+    set((s) => ({
+      local: [
         ...s.local,
         {
           id: localId,
@@ -247,6 +249,11 @@ export const useExports = create<ExportsState>((set, get) => ({
         set((s) => ({
           local: s.local.map((r) => (r.id === localId ? { ...r, progress } : r)),
         })),
+      onTiming: (t: RenderTiming) => {
+        timing = t;
+        // The dialog's next time estimate reads this device's pace.
+        recordPace(t, settings);
+      },
     };
     // The machine behind the project renders what the tab could not: the
     // engine has a Mac project's media, the worker a cloud project's, and a
