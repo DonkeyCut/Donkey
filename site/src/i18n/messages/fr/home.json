@@ -411,6 +411,7 @@
     "upload": "Importer",
     "search": "Rechercher projets, clips, audio, polices, notes",
     "clearSearch": "Effacer la recherche",
+    "typeFilter": "Filtrer par type",
     "types": {
       "all": "Tout",
       "projects": "Projets",

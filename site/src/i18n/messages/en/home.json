@@ -411,6 +411,7 @@
     "upload": "Upload",
     "search": "Search projects, clips, audio, fonts, notes",
     "clearSearch": "Clear search",
+    "typeFilter": "Filter by type",
     "types": {
       "all": "All",
       "projects": "Projects",

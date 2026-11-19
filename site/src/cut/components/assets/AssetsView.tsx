@@ -10,6 +10,7 @@ import {
   Film,
   FolderOpen,
   FolderPlus,
+  Funnel,
   Image as ImageIcon,
   LayoutGrid,
   Layers,
@@ -31,6 +32,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useDeleteKey } from "@/cut/hooks/useDeleteKey";
 import { useSelectAllKey } from "@/cut/hooks/useSelectAllKey";
 import { useProjectShelves } from "@/cut/hooks/useProjectShelves";
@@ -1157,9 +1159,9 @@ export function AssetsView() {
           />
         </div>
 
-        {/* Search, the type tabs, and grid or list. */}
-        <div className="mb-5 flex flex-col gap-3">
-          <label className="flex h-9 w-full items-center gap-2 rounded-full border border-foreground/20 bg-background px-3.5 text-sm focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50 dark:border-foreground/25">
+        {/* One row: search, the type menu, and grid or list. */}
+        <div className="mb-5 flex items-center gap-2">
+          <label className="flex h-9 min-w-0 flex-1 items-center gap-2 rounded-full border border-foreground/20 bg-background px-3.5 text-sm focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50 dark:border-foreground/25">
             <Search className="size-4 shrink-0 text-muted-foreground" aria-hidden />
             <input
               type="search"
@@ -1186,50 +1188,50 @@ export function AssetsView() {
               </button>
             )}
           </label>
-          <div className="flex items-center justify-between gap-3">
-            <div role="tablist" className="-mx-1 flex min-w-0 gap-1.5 overflow-x-auto px-1 py-1">
+          <Select
+            value={tab}
+            onValueChange={(x) => {
+              if (x) {
+                gotoTab(x);
+              }
+            }}
+          >
+            <SelectTrigger
+              aria-label={t("assets.typeFilter")}
+              className="w-36 shrink-0 rounded-full border-foreground/20 pr-2.5 pl-3.5 text-[13px] font-medium data-[size=default]:h-9 dark:border-foreground/25"
+            >
+              <Funnel className="size-3.5 text-muted-foreground" aria-hidden />
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent align="end" alignItemWithTrigger={false}>
               {ASSET_TYPES.map((x) => (
-                <button
-                  key={x}
-                  type="button"
-                  role="tab"
-                  aria-selected={tab === x}
-                  onClick={() => gotoTab(x)}
-                  className={cn(
-                    "h-8 shrink-0 rounded-full border px-3 text-[13px] font-medium outline-none transition-colors focus-visible:ring-3 focus-visible:ring-ring/50",
-                    tab === x
-                      ? "border-foreground bg-foreground text-background"
-                      : "border-foreground/20 text-muted-foreground hover:bg-muted hover:text-foreground dark:border-foreground/25",
-                  )}
-                >
+                <SelectItem key={x} value={x}>
                   {typeLabel(x)}
-                </button>
+                </SelectItem>
               ))}
-            </div>
-            {tab !== "notes" && entries.length > 0 && (
-              <div className="flex shrink-0 rounded-lg border border-border bg-card p-0.5">
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  aria-label={t("projects.galleryView")}
-                  aria-pressed={view === "gallery"}
-                  className={cn(view === "gallery" && "bg-muted text-foreground")}
-                  onClick={() => switchView("gallery")}
-                >
-                  <LayoutGrid />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  aria-label={t("projects.listView")}
-                  aria-pressed={view === "list"}
-                  className={cn(view === "list" && "bg-muted text-foreground")}
-                  onClick={() => switchView("list")}
-                >
-                  <List />
-                </Button>
-              </div>
-            )}
+            </SelectContent>
+          </Select>
+          <div className="flex shrink-0 rounded-lg border border-border bg-card p-0.5">
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label={t("projects.galleryView")}
+              aria-pressed={view === "gallery"}
+              className={cn(view === "gallery" && "bg-muted text-foreground")}
+              onClick={() => switchView("gallery")}
+            >
+              <LayoutGrid />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label={t("projects.listView")}
+              aria-pressed={view === "list"}
+              className={cn(view === "list" && "bg-muted text-foreground")}
+              onClick={() => switchView("list")}
+            >
+              <List />
+            </Button>
           </div>
         </div>
 

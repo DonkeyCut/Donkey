@@ -411,6 +411,7 @@
     "upload": "上传",
     "search": "搜索项目、片段、音频、字体、笔记",
     "clearSearch": "清除搜索",
+    "typeFilter": "按类型筛选",
     "types": {
       "all": "全部",
       "projects": "项目",

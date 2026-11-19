@@ -411,6 +411,7 @@
     "upload": "업로드",
     "search": "프로젝트, 클립, 오디오, 폰트, 메모 검색",
     "clearSearch": "검색 지우기",
+    "typeFilter": "유형별 필터",
     "types": {
       "all": "전체",
       "projects": "프로젝트",
