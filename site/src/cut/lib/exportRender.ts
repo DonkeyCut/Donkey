@@ -18,6 +18,7 @@
 
 import {
   CanvasSource,
+  canEncodeAudio,
   getFirstEncodableAudioCodec,
   getFirstEncodableVideoCodec,
   MovOutputFormat,
@@ -172,6 +173,57 @@ function sliceAudio(mix: AudioBuffer, from: number, to: number): AudioBuffer {
   });
   for (let ch = 0; ch < mix.numberOfChannels; ch++) {
     out.copyToChannel(mix.getChannelData(ch).subarray(a, b), ch);
+/** The AAC rate an export asks for when its settings name none. */
+const DEFAULT_AAC_RATE = 192_000;
+
+/** Rates every platform's AAC encoder carries. Windows offers these four and
+ * refuses every rate between them, so a rate copied from a source file
+ * (185,803 bps) fails there. */
+const AAC_RATE_RUNGS = [96_000, 128_000, 160_000, 192_000];
+
+/** The AAC rate this browser encodes for a wanted one: the wanted rate when
+ * the encoder carries it, the nearest rung otherwise (185,803 → 192,000), and
+ * null when no rate encodes. */
+export async function aacRateFor(
+  wanted: number,
+  canEncode: (bitrate: number) => Promise<boolean>
+): Promise<number | null> {
+  if (await canEncode(wanted)) {
+    return wanted;
+  }
+
+  const nearestFirst = [...AAC_RATE_RUNGS].sort((a, b) => Math.abs(a - wanted) - Math.abs(b - wanted));
+  for (const rate of nearestFirst) {
+    if (await canEncode(rate)) {
+      return rate;
+    }
+  }
+  return null;
+}
+
+/** The audio track this browser can encode for the settings: the delivery
+ * codec, with an AAC rate its encoder carries. Null hands the render on. */
+async function encodableAudio(
+  settings: ExportSettings
+): Promise<{ codec: AudioCodec; bitrate?: number } | null> {
+  const shape = {
+    numberOfChannels: settings.audioChannels ?? AUDIO_CHANNELS,
+    sampleRate: settings.audioSampleRate ?? AUDIO_RATE,
+  };
+  const codec = await getFirstEncodableAudioCodec([deliveryAudioCodec(settings)], shape);
+  if (!codec) {
+    return null;
+  }
+  if (codec !== "aac") {
+    return { codec };
+  }
+
+  const bitrate = await aacRateFor(settings.audioBitrate ?? DEFAULT_AAC_RATE, (rate) =>
+    canEncodeAudio("aac", { ...shape, bitrate: rate })
+  );
+  return bitrate ? { codec, bitrate } : null;
+}
+
   }
   return out;
 }
@@ -1184,11 +1236,8 @@ export async function renderProjectToMp4(
       // PCM is packed by the muxer itself; AAC needs the browser's encoder,
       // and a cut with sound keeps it: an Opus stand-in plays nowhere the
       // user is taking the file, so a browser without AAC hands the render on.
-      const audioCodec = await getFirstEncodableAudioCodec([deliveryAudioCodec(settings)], {
-        numberOfChannels: settings.audioChannels ?? AUDIO_CHANNELS,
-        sampleRate: settings.audioSampleRate ?? AUDIO_RATE,
-      });
-      if (!audioCodec) {
+      const encodable = await encodableAudio(settings);
+      if (!encodable) {
         throw new UserError("browser_aac_unsupported", "This browser can't encode AAC audio.");
       }
       // The mix starts its encoder's priming early, so the edit list trims
@@ -1197,7 +1246,7 @@ export async function renderProjectToMp4(
       audio = new AudioBufferSource(
         {
           codec: audioCodec,
-          ...(audioCodec === "aac" ? { quality: new Quality({ bitrate: settings.audioBitrate ?? 192_000 }) } : {}),
+          ...(encodable.bitrate ? { quality: new Quality({ bitrate: encodable.bitrate }) } : {}),
         },
         { startTimestamp: -lead }
       );
@@ -1214,6 +1263,7 @@ export async function renderProjectToMp4(
 
     for (let i = 0; i < frames; i++) {
       stop();
+      const audioCodec = encodable.codec;
       const t = i * frameDur;
       await painter.drawAt(exportFrameAt(from, i, settings.fps));
 
@@ -1946,10 +1996,7 @@ export async function canRenderInBrowser(
     // no AAC encoder would otherwise render the whole thing and fail at the
     // muxer, or hand back a video whose sound went missing.
     if (!mixHasSound(mixSpecFor(doc, (a) => a.url))) return true;
-    return !!(await getFirstEncodableAudioCodec([deliveryAudioCodec(settings)], {
-      numberOfChannels: settings.audioChannels ?? AUDIO_CHANNELS,
-      sampleRate: settings.audioSampleRate ?? AUDIO_RATE,
-    }));
+    return !!(await encodableAudio(settings));
   } catch {
     return false;
   }

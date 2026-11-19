@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { planAnimatedLayers } from "@donkeycut/effects-kit";
 import { foldClips } from "./audioMix";
-import { bitrateFor, exportFrameAt, mixSpecFor } from "./exportRender";
+import { aacRateFor, bitrateFor, exportFrameAt, mixSpecFor } from "./exportRender";
 import type { ExportDoc } from "./renderSnapshot";
 import type { MediaAsset, VideoClip } from "./types";
 
@@ -218,4 +218,24 @@ describe("exportFrameAt", () => {
       }
     });
   }
+});
+
+describe("aacRateFor", () => {
+  // Windows' AAC encoder carries four rates and refuses everything between.
+  const fourRates = async (rate: number) => [96_000, 128_000, 160_000, 192_000].includes(rate);
+
+  test("keeps a rate the encoder carries", async () => {
+    expect(await aacRateFor(192_000, fourRates)).toBe(192_000);
+    expect(await aacRateFor(185_803, async () => true)).toBe(185_803);
+  });
+
+  test("moves a source's own rate to the nearest rate the encoder carries", async () => {
+    expect(await aacRateFor(185_803, fourRates)).toBe(192_000);
+    expect(await aacRateFor(76_673, fourRates)).toBe(96_000);
+    expect(await aacRateFor(131_000, fourRates)).toBe(128_000);
+  });
+
+  test("answers null when the browser encodes no AAC", async () => {
+    expect(await aacRateFor(192_000, async () => false)).toBeNull();
+  });
 });
