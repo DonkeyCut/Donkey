@@ -463,6 +463,10 @@ export function TopBar({
     );
   };
 
+  // ChatGPT's own bar has the back arrow, which steps the frame back to the
+  // page the project was opened from.
+  const hostBack = chatgpt;
+
   // ChatGPT draws its own Donkey Cut header above the frame, so the card's bar
   // carries the project name alone.
   const logo = chatgpt ? null : (
@@ -478,7 +482,7 @@ export function TopBar({
     // toward whichever side has slack instead of colliding with the rail.
     <header ref={headerRef} className="relative flex items-center border-b border-border bg-card">
       <div ref={leftRef} className="flex shrink-0 items-center gap-1 pl-2">
-        {backHeld ? (
+        {hostBack ? null : backHeld ? (
           // aria-disabled keeps the hover that shows why.
           <TooltipProvider>
             <Tooltip>
