@@ -58,14 +58,13 @@ function CardHome() {
 
   return (
     <main className="relative min-h-full pt-6 pb-10">
-      <div className={cn(CARD_COLUMN, "flex flex-col gap-10")}>
+      <div className={cn(CARD_COLUMN, "flex flex-col gap-14")}>
         <div className="flex flex-col gap-2">
           <HomeProjects
             projects={projects}
             loading={loading}
             live={live}
             dual={dual}
-            density="compact"
             create={{ busy, onClick: () => void create() }}
           />
           {error && (
@@ -74,7 +73,7 @@ function CardHome() {
             </p>
           )}
         </div>
-        <HomeTemplates panel={panel.nav} density="compact" />
+        <HomeTemplates panel={panel.nav} />
       </div>
 
       {panel.template && (
@@ -155,9 +154,8 @@ function WebHome() {
           loading={loading}
           live={live}
           dual={dual}
-          density="roomy"
         />
-        <HomeTemplates panel={panel.nav} density="roomy" />
+        <HomeTemplates panel={panel.nav} />
       </div>
 
       {panel.template && (

@@ -44,7 +44,7 @@ import { assetsHref, projectHref, useCutBase } from "@/cut/lib/nav";
 import { formatDate } from "@/cut/lib/time";
 import { formatBytes } from "@/lib/bytes";
 import { cn } from "@/lib/utils";
-import { projectTileSize, TILE_LONG_SIDE, type HomeDensity } from "./projectTile";
+import { projectTileSize, TILE_LONG_SIDE } from "./projectTile";
 import type { HomeProject } from "./useHomeProjects";
 
 // MouseEvent.button for the middle (wheel) button.
@@ -55,20 +55,6 @@ const RECENT_PROJECTS = 24;
 
 // Placeholder cards while the first listing loads.
 const SKELETON_CARDS = 5;
-
-// A slide's left padding is the gap between cards: 32px on the web, 20px in
-// the card.
-const SLIDE: Record<HomeDensity, string> = {
-  roomy: "basis-auto pl-8 last:pr-2",
-  compact: "basis-auto pl-5 last:pr-2",
-};
-
-// The track's pull to the left: the gap less the viewport's 8px bleed, so the
-// first card starts on the heading's edge with its border inside the clip.
-const TRACK: Record<HomeDensity, string> = {
-  roomy: "-ml-6",
-  compact: "-ml-3",
-};
 
 /** The tile that leads the row in the ChatGPT card and makes a project. */
 export type NewProjectTile = { busy: boolean; onClick: () => void };
@@ -85,14 +71,12 @@ export function HomeProjects({
   loading,
   live,
   dual,
-  density,
   create,
 }: {
   projects: HomeProject[];
   loading: boolean;
   live: (r: HomeProject["residency"]) => boolean;
   dual: boolean;
-  density: HomeDensity;
   create?: NewProjectTile;
 }) {
   const t = useTranslations("home");
@@ -185,23 +169,23 @@ export function HomeProjects({
             viewport: 8px each side, 12px above and below. items-start lines
             every card up along the top, wide and tall alike. */}
         <div className="-mx-2" onContextMenu={(e) => void ctx.onContextMenu(e)}>
-          <CarouselContent className={cn(TRACK[density], "items-start py-3")}>
+          <CarouselContent className="-ml-6 items-start py-3">
             {create && (
-              <CarouselItem className={SLIDE[density]}>
+              <CarouselItem className="basis-auto pl-8 last:pr-2">
                 <NewTile
                   create={create}
-                  box={projectTileSize("9:16", density)}
+                  box={projectTileSize("9:16")}
                 />
               </CarouselItem>
             )}
             {loading && projects.length === 0
               ? Array.from({ length: SKELETON_CARDS }, (_, i) => (
-                  <CarouselItem key={i} className={SLIDE[density]}>
+                  <CarouselItem key={i} className="basis-auto pl-8 last:pr-2">
                     <Skeleton
                       className="rounded-2xl"
                       style={{
-                        width: projectTileSize("9:16", density).width,
-                        height: TILE_LONG_SIDE[density],
+                        width: projectTileSize("9:16").width,
+                        height: TILE_LONG_SIDE,
                       }}
                     />
                   </CarouselItem>
@@ -210,12 +194,12 @@ export function HomeProjects({
                   ...actions.copying.map((c) => (
                     <CarouselItem
                       key={c.key}
-                      className={SLIDE[density]}
+                      className="basis-auto pl-8 last:pr-2"
                     >
                       <CopyingTile
                         project={c.project}
                         residency={c.residency}
-                        box={projectTileSize(c.project.aspect, density)}
+                        box={projectTileSize(c.project.aspect)}
                       />
                     </CarouselItem>
                   )),
@@ -224,7 +208,7 @@ export function HomeProjects({
                     return (
                       <CarouselItem
                         key={p.id}
-                        className={SLIDE[density]}
+                        className="basis-auto pl-8 last:pr-2"
                       >
                         <ProjectTile
                           project={p}
@@ -232,7 +216,7 @@ export function HomeProjects({
                           offline={!live(r)}
                           badge={dual ? "residency" : "none"}
                           selected={marked.has(p.id)}
-                          box={projectTileSize(p.aspect, density)}
+                          box={projectTileSize(p.aspect)}
                           meta={t("projects.cardMeta", {
                             size: formatBytes(p.sizeBytes ?? 0, locale),
                             date: formatDate(p.updatedAt, locale, t("justNow")),
