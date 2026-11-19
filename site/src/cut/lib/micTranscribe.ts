@@ -169,16 +169,9 @@ export function useMicTranscription(onResult: (text: string) => void): MicContro
     pollTimer.current = null;
   }, []);
 
-  /** Release everything the dictation holds: timers, graph, microphone, and
-   * the take. */
-  const teardownAudio = useCallback(() => {
-    sessionRef.current += 1;
-    stopEngineTimers();
-    queueRef.current = [];
-    feedingRef.current = false;
-    failuresRef.current = 0;
-    if (silenceTimer.current) clearTimeout(silenceTimer.current);
-    silenceTimer.current = null;
+  /** Close the capture graph and hand the microphone back. The take captured
+   * so far stays, so its transcript can still be waited on. */
+  const releaseMic = useCallback(() => {
     tailRef.current = null;
     const nodes = nodesRef.current;
     nodesRef.current = null;
@@ -195,6 +188,20 @@ export function useMicTranscription(onResult: (text: string) => void): MicContro
     }
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
+    setStream(null);
+  }, []);
+
+  /** Release everything the dictation holds: timers, graph, microphone, and
+   * the take. */
+  const teardownAudio = useCallback(() => {
+    sessionRef.current += 1;
+    stopEngineTimers();
+    queueRef.current = [];
+    feedingRef.current = false;
+    failuresRef.current = 0;
+    if (silenceTimer.current) clearTimeout(silenceTimer.current);
+    silenceTimer.current = null;
+    releaseMic();
     gotAudioRef.current = false;
     takeRef.current = [];
     engineSaidRef.current = "";
@@ -202,8 +209,7 @@ export function useMicTranscription(onResult: (text: string) => void): MicContro
     phrasesRef.current = [];
     pendingRef.current.clear();
     hostedErrorRef.current = null;
-    setStream(null);
-  }, [stopEngineTimers]);
+  }, [stopEngineTimers, releaseMic]);
 
   /** Hand the engine its session back without waiting for an answer. */
   const releaseJob = useCallback(() => {
@@ -444,8 +450,16 @@ export function useMicTranscription(onResult: (text: string) => void): MicContro
     [onPcm, fail]
   );
 
-  const start = useCallback(async () => {
-    if (stateRef.current !== "idle") return;
+  /** Whether a start is still coming up or unwinding. A cancelled start
+   * finishes unwinding before the next one begins, so the two never share
+   * a session, a graph, or a microphone. */
+  const bootingRef = useRef(false);
+
+  const boot = useCallback(async () => {
+    // A cancel or a failure while this start waits bumps the session; the
+    // start then hands back whatever it opened after that and stops.
+    const session = sessionRef.current;
+    const cancelled = () => sessionRef.current !== session;
     setError(null);
     setPartial("");
     partialRef.current = "";
@@ -454,8 +468,13 @@ export function useMicTranscription(onResult: (text: string) => void): MicContro
     try {
       media = await navigator.mediaDevices.getUserMedia({ audio: true });
     } catch {
+      if (cancelled()) return;
       phase("idle");
       setError(new UserError("mic_blocked", "Microphone access was blocked. Allow the microphone for this site, then try again."));
+      return;
+    }
+    if (cancelled()) {
+      media.getTracks().forEach((t) => t.stop());
       return;
     }
     streamRef.current = media;
@@ -464,9 +483,20 @@ export function useMicTranscription(onResult: (text: string) => void): MicContro
     // through the project's own backend, so where the speech ran never decides
     // where the text goes.
     const onEngine = hasLocalCompute() && (await startEngineSession());
+    if (cancelled()) {
+      releaseJob();
+      return;
+    }
     modeRef.current = onEngine ? "engine" : "hosted";
     cutterRef.current = onEngine ? null : new PhraseCutter();
-    if (!(await buildCapture(media))) return;
+    const built = await buildCapture(media);
+    if (cancelled()) {
+      // The graph came up after the cancel: close it and the engine's session.
+      releaseJob();
+      teardownAudio();
+      return;
+    }
+    if (!built) return;
     setStream(media);
     if (onEngine) {
       feedTimer.current = setInterval(() => void flush(), FEED_MS);
@@ -474,7 +504,17 @@ export function useMicTranscription(onResult: (text: string) => void): MicContro
     }
     armSilence();
     phase("recording");
-  }, [phase, startEngineSession, buildCapture, flush, pollEngine, armSilence]);
+  }, [phase, startEngineSession, buildCapture, flush, pollEngine, armSilence, releaseJob, teardownAudio]);
+
+  const start = useCallback(async () => {
+    if (stateRef.current !== "idle" || bootingRef.current) return;
+    bootingRef.current = true;
+    try {
+      await boot();
+    } finally {
+      bootingRef.current = false;
+    }
+  }, [boot]);
 
   /** Close the engine's session and take its final transcript. Null when the
    * engine could not answer, leaving the hosted route to carry the take. */
@@ -519,6 +559,9 @@ export function useMicTranscription(onResult: (text: string) => void): MicContro
       // Stop pulling new audio and take the chunk the worklet is still filling.
       nodesRef.current?.source.disconnect();
       await drainTail();
+      // The take is whole: the microphone goes back now, and the bar says it
+      // is transcribing while the last words are waited on.
+      releaseMic();
       let text: string | null = null;
       if (modeRef.current === "engine") text = await finishEngine();
       if (text === null) {
@@ -534,7 +577,7 @@ export function useMicTranscription(onResult: (text: string) => void): MicContro
       const trimmed = text.trim();
       if (trimmed) onResultRef.current(trimmed);
     },
-    [phase, drainTail, finishEngine, goHosted, finishHosted, teardownAudio]
+    [phase, drainTail, releaseMic, finishEngine, goHosted, finishHosted, teardownAudio]
   );
   useLayoutEffect(() => {
     finishRef.current = finish;
