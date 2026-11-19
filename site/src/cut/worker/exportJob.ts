@@ -12,6 +12,7 @@ import { STORAGE_FULL } from "../lib/operationFailure";
 import { UserError } from "../lib/userError";
 import { isTabExport, specMediaFiles, STEMS_MIME, stemsArchiveName } from "../lib/exportDelivery";
 import { runnerSession } from "./session";
+import { pointCardAt } from "./cardPointer";
 import type { DocExportAudio } from "../lib/exportPresets";
 
 /** The stored spec of an export/preview CutRenderJob: the engine export spec
@@ -245,20 +246,7 @@ export async function runExportJob(
       throw err;
     }
     if (preview) {
-      await prisma.$transaction(async (tx) => {
-        const project = await tx.cutProject.findUnique({ where: { id: projectId }, select: { previewKey: true } });
-        if (!project) return;
-        const newest = await tx.cutRenderJob.findFirst({
-          where: { userId: job.userId, projectId, kind: "preview" },
-          orderBy: [{ createdAt: "desc" }, { id: "desc" }], select: { id: true },
-        });
-        if (newest?.id !== job.id) return;
-        // A newer completion changes the pointer, so this write cannot replace it.
-        await tx.cutProject.updateMany({
-          where: { id: projectId, userId: job.userId, previewKey: project.previewKey },
-          data: { previewKey: key },
-        });
-      });
+      await pointCardAt(job, projectId, key);
     }
     return { outputKey: key, outName };
   });

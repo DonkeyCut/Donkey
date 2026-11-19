@@ -25,7 +25,11 @@ type CardRow = {
   updatedAt: number;
 };
 
-const dependencies = { db: prisma, render: previewFromDoc };
+// A project saved this recently may be open in an editor, which renders its
+// own card once the edit settles; a stale card waits that long for it.
+const CARD_SETTLE_MS = 30_000;
+
+const dependencies = { db: prisma, render: previewFromDoc, now: Date.now };
 
 /** The revision a card job rendered, e.g. "cloud:7" for doc version 7. */
 const revisionOf = (spec: unknown) =>
@@ -51,7 +55,7 @@ async function lastDrawn(db: typeof prisma, userId: string, ids: string[]) {
 export async function backfillCards(
   userId: string,
   rows: CardRow[],
-  { db, render } = dependencies,
+  { db, render, now } = dependencies,
 ) {
   const drawable = rows.filter((r) => r.duration > 0);
   if (drawable.length === 0) {
@@ -64,8 +68,11 @@ export async function backfillCards(
     userId,
     drawable.map((r) => r.id),
   );
+  const settled = now() - CARD_SETTLE_MS;
   const missing = drawable.filter(
-    (r) => r.previewKey == null || (drawn.get(r.id) ?? 0) < r.updatedAt,
+    (r) =>
+      r.previewKey == null ||
+      ((drawn.get(r.id) ?? 0) < r.updatedAt && r.updatedAt <= settled),
   );
   if (missing.length === 0) {
     return;

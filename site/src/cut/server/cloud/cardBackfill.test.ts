@@ -22,7 +22,7 @@ function harness(jobs: Job[] = [], drawn: Drawn[] = []) {
   const db = {
     cutRenderJob: { findMany, groupBy },
   } as unknown as typeof prisma;
-  return { render, findMany, deps: { db, render: render as never } };
+  return { render, findMany, deps: { db, render: render as never, now: () => NOW } };
 }
 
 const card = (
@@ -42,8 +42,9 @@ const card = (
   ...extra,
 });
 
-// When every test project was last saved.
+// When every test project was last saved, and when the listing runs.
 const SAVED = Date.UTC(2026, 10, 18, 6, 8);
+const NOW = SAVED + 10 * 60_000;
 
 test("a listed project with no card has one rendered from its saved doc", async () => {
   const h = harness(
@@ -123,4 +124,17 @@ test("a card drawn before the project's last save is drawn again", async () => {
     h.deps,
   );
   expect(h.render.mock.calls).toEqual([["owner", "old"]]);
+});
+
+test("a stale card saved a moment ago is left to the editor's own render", async () => {
+  const h = harness();
+  await backfillCards(
+    "owner",
+    [
+      card("editing", { previewKey: "k1", updatedAt: NOW - 1000 }),
+      card("fresh", { updatedAt: NOW - 1000 }),
+    ],
+    h.deps,
+  );
+  expect(h.render.mock.calls).toEqual([["owner", "fresh"]]);
 });
