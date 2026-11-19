@@ -48,6 +48,7 @@ import {
 } from "@/cut/lib/replaceFlow";
 import { useEditor } from "@/cut/lib/store";
 import { formatTime } from "@/cut/lib/time";
+import { waveGain } from "@/cut/lib/waveform";
 import {
   isLinkedAssetType,
   previewUrl,
@@ -693,6 +694,73 @@ function Peaks({
   );
 }
 
+/** A film strip's sound band, px tall, and the pitch its bars are drawn at:
+ * a 2px bar every 3px, as the timeline draws them. */
+const STRIP_WAVE_H = 22;
+const WAVE_BAR_W = 2;
+const WAVE_BAR_PITCH = 3;
+
+/** The stretch of a waveform the strip shows, as bars on one canvas the
+ * strip's width. Only the bars in view are drawn, each the loudest peak of
+ * the source it covers, so a long file costs what a short one does.
+ *
+ *   peaks:  ▁▂▇▇▃▁▁▁▁▅▇▆▂▁    the whole source, `total` px wide
+ *   view:       [pan … pan + width]   the bars drawn */
+function StripWave({
+  peaks,
+  pan,
+  width,
+  total,
+}: {
+  peaks: number[];
+  pan: number;
+  width: number;
+  total: number;
+}) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  // Drawn against the file's loudest moment, as the timeline draws it.
+  const gain = useMemo(() => waveGain(peaks), [peaks]);
+
+  useEffect(() => {
+    const canvas = ref.current;
+    if (!canvas || !(width > 0) || !(total > 0)) {
+      return;
+    }
+
+    // Sized in device pixels, so the bars stay sharp on a dense screen.
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = Math.round(width * dpr);
+    canvas.height = Math.round(STRIP_WAVE_H * dpr);
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      return;
+    }
+    ctx.scale(dpr, dpr);
+    ctx.fillStyle = "rgba(255,255,255,0.9)";
+
+    // One bar per pitch across the view, each over its own run of peaks.
+    const perPx = peaks.length / total;
+    const bars = Math.ceil(width / WAVE_BAR_PITCH);
+    for (let i = 0; i < bars; i++) {
+      const a = Math.floor((pan + i * WAVE_BAR_PITCH) * perPx);
+      if (a >= peaks.length) {
+        break;
+      }
+      const b = Math.max(a + 1, Math.ceil((pan + (i + 1) * WAVE_BAR_PITCH) * perPx));
+      let p = 0;
+      for (let j = a; j < b && j < peaks.length; j++) {
+        if (peaks[j] > p) {
+          p = peaks[j];
+        }
+      }
+      const h = Math.max(1.5, Math.min(1, p * gain) * (STRIP_WAVE_H - 4));
+      ctx.fillRect(i * WAVE_BAR_PITCH, (STRIP_WAVE_H - h) / 2, WAVE_BAR_W, h);
+    }
+  }, [peaks, gain, pan, width, total]);
+
+  return <canvas ref={ref} aria-hidden className="block w-full" style={{ height: STRIP_WAVE_H }} />;
+}
+
 /** Adjust: the window step on the clip's own file, starting on the part it
  * plays now. Confirming slides the clip's in and out together, so it keeps
  * its place and its length on the timeline. */
@@ -768,9 +836,10 @@ function WindowStep({
   // The file itself, as the Media panel's viewer plays it.
   const src = asset.url;
 
-  // Sound draws its waveform; the peaks may still be on their way.
+  // Sound draws its waveform, a video's along the foot of its film; the peaks
+  // may still be on their way.
   useEffect(() => {
-    if (asset.type === "audio") {
+    if (asset.type === "audio" || asset.type === "video") {
       void ensurePeaks(asset);
     }
   }, [asset]);
@@ -1084,6 +1153,13 @@ function WindowStrip({
             className="absolute inset-y-2 h-[calc(100%-16px)] text-white/70"
             style={{ left: -pan, width: total }}
           />
+        )}
+        {/* A video's sound along the foot of its film, so a quiet stretch
+            shows before the window lands on it. */}
+        {asset.type === "video" && !!peaks?.length && (
+          <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/75 to-black/0">
+            <StripWave peaks={peaks} pan={pan} width={width} total={total} />
+          </div>
         )}
         {/* What stays out of the slot dims on both sides of the window. */}
         {pps > 0 && (
