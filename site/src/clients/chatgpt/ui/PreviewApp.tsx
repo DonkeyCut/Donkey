@@ -97,13 +97,19 @@ function EditorSkeleton() {
   </div>;
 }
 
-/** The projects home's shape while it loads: the card rail and a shelf of
- * project tiles. */
+/** The projects home's shape while it loads: the tabs across the top, a row
+ * of project cards, and the template chips over their grid. */
 function HomeSkeleton() {
   const t = useTranslations("chatgpt.widget");
   return <div className="skeleton home" role="status" aria-label={t("openingHome")}>
-    <div className="rail">{[0, 1, 2].map((i) => <i key={i} className="slab" />)}</div>
-    <div className="tiles"><i className="slab head" />{[0, 1, 2, 3, 4, 5].map((i) => <i key={i} className="slab" />)}</div>
+    <div className="tabs">{[0, 1, 2].map((i) => <i key={i} className="slab" />)}</div>
+    <div className="shelf">
+      <i className="slab head" />
+      <div className="cards">{[0, 1, 2, 3, 4, 5, 6].map((i) => <i key={i} className="slab" />)}</div>
+      <i className="slab head" />
+      <div className="chips">{[0, 1, 2, 3].map((i) => <i key={i} className="slab" />)}</div>
+      <div className="grid">{[0, 1, 2, 3, 4, 5].map((i) => <i key={i} className="slab" />)}</div>
+    </div>
   </div>;
 }
 
