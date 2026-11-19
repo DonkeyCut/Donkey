@@ -27,6 +27,8 @@ test("every tool call is reported with its outcome", async () => {
     await client.callTool({ name: "read_skill", arguments: { name: "no-such-guide" } });
     // A write without the write scope answers a scope challenge.
     await client.callTool({ name: "create_project", arguments: { name: "Cut" } });
+    // The card polls this on a timer; a poll is no one's use of the app.
+    await client.callTool({ name: "get_preview_status", arguments: { projectId: "p", jobId: "j" } });
   } finally {
     await client.close();
     await server.close();

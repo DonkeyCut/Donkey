@@ -5,6 +5,10 @@ import { prisma } from "@/lib/prisma";
 // Installs and usage of the ChatGPT app: one ChatgptEvent row per approved
 // connection and per tool call. scripts/chatgpt-usage.ts reads them back.
 
+// The card calls these on a timer while it is open, so a call says nothing
+// about anyone using the app and is left out of the count.
+const POLLED_TOOLS: ReadonlySet<string> = new Set(["get_preview_status"]);
+
 export type UsageEvent =
   | { kind: "connect"; userId: string }
   | { kind: "tool"; userId: string; tool: string; ok: boolean };
@@ -41,8 +45,11 @@ export function trackEvent(event: UsageEvent): void {
 /** Report every call to a tool the server registers from here on. */
 export function reportToolCalls(server: McpServer, sink: ToolCallSink): void {
   const register = server.registerTool.bind(server) as (...args: unknown[]) => ReturnType<RegisterTool>;
-  server.registerTool = ((name: string, definition: unknown, handler: ToolHandler) =>
-    register(name, definition, async (...args: unknown[]) => {
+  server.registerTool = ((name: string, definition: unknown, handler: ToolHandler) => {
+    if (POLLED_TOOLS.has(name)) {
+      return register(name, definition, handler);
+    }
+    return register(name, definition, async (...args: unknown[]) => {
       try {
         const result = (await handler(...args)) as { isError?: boolean };
         sink(name, result.isError !== true);
@@ -51,5 +58,6 @@ export function reportToolCalls(server: McpServer, sink: ToolCallSink): void {
         sink(name, false);
         throw error;
       }
-    })) as unknown as RegisterTool;
+    });
+  }) as unknown as RegisterTool;
 }
