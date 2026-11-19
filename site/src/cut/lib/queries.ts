@@ -28,7 +28,7 @@ import { freeItemName } from "./itemName";
 import { renameLibraryFile } from "./libraryRename";
 import { fetchNotes, placeLooseNotes, type NotesData } from "./notes";
 import type { TemplateCandidate } from "./templateGallery";
-import { fetchTemplateIndex, searchTemplateIndex } from "./templateUse";
+import { fetchFavorites, fetchTemplateIndex, markFavorite, searchTemplateIndex } from "./templateUse";
 import {
   availableResidencies,
   backendFor,
@@ -196,6 +196,38 @@ export function useTemplateSearch(query: string, own: TemplateCandidate[]) {
     enabled: query.length > 0,
     staleTime: TEMPLATE_INDEX_STALE_MS,
   });
+}
+
+const templateFavoritesKey = [...templateIndexKey, "favorites"] as const;
+
+/** The gallery templates the person starred, and a toggle for one. `ids` is
+ * null while signed out or unread, so a surface shows no star it can't keep.
+ * A toggle shows at once and snaps back if the account refuses it. */
+export function useTemplateFavorites(): {
+  ids: ReadonlySet<string> | null;
+  pending: boolean;
+  toggle: (id: string) => void;
+} {
+  const client = useQueryClient();
+  const query = useQuery({
+    queryKey: templateFavoritesKey,
+    queryFn: fetchFavorites,
+    staleTime: TEMPLATE_INDEX_STALE_MS,
+    retry: false,
+  });
+  const ids = query.data ? new Set(query.data) : null;
+
+  const toggle = (id: string) => {
+    const before = client.getQueryData<string[]>(templateFavoritesKey) ?? [];
+    const starred = before.includes(id);
+    client.setQueryData<string[]>(templateFavoritesKey, starred ? before.filter((x) => x !== id) : [id, ...before]);
+    markFavorite(id, starred ? "remove" : "add").catch(() => {
+      client.setQueryData(templateFavoritesKey, before);
+      void client.invalidateQueries({ queryKey: templateFavoritesKey });
+    });
+  };
+
+  return { ids, pending: query.isPending, toggle };
 }
 
 /**

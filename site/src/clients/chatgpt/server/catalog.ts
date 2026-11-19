@@ -105,6 +105,7 @@ const EFFECTS: Record<string, Effect> = {
   add_shape: "add", add_sticker: "add", create_sticker: "add", add_effect: "add",
   subtitles_add_track: "add", voiceover_generate: "add",
   generate_music: "add", read_subtitles_aloud: "add",
+  template_favorite: "set",
   template_add: "add", save_template: "add", copy_project_media: "add", make_template: "add",
   note_source: "set", detect_beats: "set", find_picture: "set", set_guides: "set", trim_clip: "set", place_clip: "set",
   set_clip_muted: "set", rename_item: "set", set_clip_hidden: "set", set_track_hidden: "set",

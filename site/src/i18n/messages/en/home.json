@@ -337,6 +337,7 @@
     },
     "sources": {
       "default": "Default",
+      "favorites": "Favorites",
       "mine": "My templates"
     },
     "aspects": {
@@ -381,11 +382,14 @@
       "elegant": "Elegant"
     },
     "empty": "No templates match these filters.",
+    "noFavorites": "No favorites yet. Star a template to keep it here.",
     "clearFilters": "Clear filters",
     "search": "Search templates",
     "clearSearch": "Clear search",
     "searchFailed": "Template search isn't available right now.",
     "noMatches": "No templates match this search.",
+    "favorite": "Add to favorites",
+    "unfavorite": "Remove from favorites",
     "detail": {
       "close": "Back to templates",
       "use": "Use as new project",

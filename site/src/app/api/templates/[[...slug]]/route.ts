@@ -12,3 +12,5 @@ const handle = (request: Request) => templatesCatchAll(request);
 export const GET = handle;
 export const POST = handle;
 export const HEAD = handle;
+export const PUT = handle;
+export const DELETE = handle;

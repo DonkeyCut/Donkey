@@ -14,7 +14,10 @@ interface TemplateRoute extends RouteEntry {
 const TEMPLATE_ROUTES: TemplateRoute[] = [
   { method: "GET", path: "/api/templates", handler: () => templatesApi.list() },
   { method: "POST", path: "/api/templates/search", handler: (r) => templatesApi.search(r) },
+  { method: "GET", path: "/api/templates/favorites", handler: (r) => templatesApi.favorites(r) },
   { method: "GET", path: "/api/templates/:id", handler: (_r, p) => templatesApi.meta(p.id) },
+  { method: "PUT", path: "/api/templates/:id/favorite", handler: (r, p) => templatesApi.favorite(p.id, r) },
+  { method: "DELETE", path: "/api/templates/:id/favorite", handler: (r, p) => templatesApi.unfavorite(p.id, r) },
   { method: "GET", path: "/api/templates/:id/poster", handler: (_r, p) => templatesApi.poster(p.id) },
   { method: "GET", path: "/api/templates/:id/frames/:clip", handler: (_r, p) => templatesApi.frame(p.id, p.clip) },
   { method: "GET", path: "/api/templates/:id/peaks", handler: (_r, p) => templatesApi.peaks(p.id) },

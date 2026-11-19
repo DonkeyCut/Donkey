@@ -337,6 +337,7 @@
     },
     "sources": {
       "default": "기본",
+      "favorites": "즐겨찾기",
       "mine": "내 템플릿"
     },
     "aspects": {
@@ -381,11 +382,14 @@
       "elegant": "우아함"
     },
     "empty": "이 필터와 일치하는 템플릿이 없어요.",
+    "noFavorites": "즐겨찾기가 아직 없어요. 템플릿에 별표를 표시해 여기에 보관해 보세요.",
     "clearFilters": "필터 초기화",
     "search": "템플릿 검색",
     "clearSearch": "검색 지우기",
     "searchFailed": "지금은 템플릿 검색을 이용할 수 없어요.",
     "noMatches": "검색과 일치하는 템플릿이 없어요.",
+    "favorite": "즐겨찾기에 추가",
+    "unfavorite": "즐겨찾기에서 제거",
     "detail": {
       "close": "템플릿 목록으로",
       "use": "새 프로젝트로 사용",

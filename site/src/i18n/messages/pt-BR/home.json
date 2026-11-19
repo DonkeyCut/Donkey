@@ -337,6 +337,7 @@
     },
     "sources": {
       "default": "Padrão",
+      "favorites": "Favoritos",
       "mine": "Meus modelos"
     },
     "aspects": {
@@ -381,11 +382,14 @@
       "elegant": "Elegante"
     },
     "empty": "Nenhum modelo corresponde a estes filtros.",
+    "noFavorites": "Nenhum favorito ainda. Marque um modelo com estrela para mantê-lo aqui.",
     "clearFilters": "Limpar filtros",
     "search": "Buscar modelos",
     "clearSearch": "Limpar busca",
     "searchFailed": "A busca de modelos não está disponível no momento.",
     "noMatches": "Nenhum modelo corresponde a esta busca.",
+    "favorite": "Adicionar aos favoritos",
+    "unfavorite": "Remover dos favoritos",
     "detail": {
       "close": "Voltar aos modelos",
       "use": "Usar como novo projeto",

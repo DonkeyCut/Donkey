@@ -337,6 +337,7 @@
     },
     "sources": {
       "default": "Par défaut",
+      "favorites": "Favoris",
       "mine": "Mes modèles"
     },
     "aspects": {
@@ -381,11 +382,14 @@
       "elegant": "Élégant"
     },
     "empty": "Aucun modèle ne correspond à ces filtres.",
+    "noFavorites": "Aucun favori pour le moment. Marquez un modèle d'une étoile pour le conserver ici.",
     "clearFilters": "Effacer les filtres",
     "search": "Rechercher des modèles",
     "clearSearch": "Effacer la recherche",
     "searchFailed": "La recherche de modèles n'est pas disponible pour le moment.",
     "noMatches": "Aucun modèle ne correspond à cette recherche.",
+    "favorite": "Ajouter aux favoris",
+    "unfavorite": "Retirer des favoris",
     "detail": {
       "close": "Retour aux modèles",
       "use": "Utiliser comme nouveau projet",

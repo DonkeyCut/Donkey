@@ -24,6 +24,8 @@ import { requestSharing } from "@/cut/lib/sharingClient";
 import { copyLibraryForSharing } from "@/cut/lib/libraryShareCopy";
 import { CUT_HOSTED_ORIGIN, DONKEYCUT_CANONICAL } from "@/cut/lib/hosts";
 import {
+  FAVORITE_MARKS,
+  favoritesFirst,
   filterTemplates,
   TEMPLATE_ASPECTS,
   TEMPLATE_CATEGORIES,
@@ -34,7 +36,14 @@ import {
   templatePage,
 } from "@/cut/lib/templateGallery";
 import { footageSlots } from "@/cut/lib/templateFill";
-import { copyAsKind, copyTemplate, fetchTemplateIndex, searchTemplateIndex } from "@/cut/lib/templateUse";
+import {
+  copyAsKind,
+  copyTemplate,
+  fetchFavorites,
+  fetchTemplateIndex,
+  markFavorite,
+  searchTemplateIndex,
+} from "@/cut/lib/templateUse";
 import { CUT_APP_BASE, homeHref, projectHref } from "@/cut/lib/nav";
 import { appQueryClient } from "@/queries/appClient";
 
@@ -5751,13 +5760,18 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
   template_gallery: async (_s, input) => {
       const pick = <T extends string>(value: unknown, allowed: readonly T[]): T | undefined =>
         allowed.includes(value as T) ? (value as T) : undefined;
-      const { templates } = await fetchTemplateIndex();
-      const filtered = filterTemplates(templates, {
+      const [{ templates }, starred] = await Promise.all([fetchTemplateIndex(), fetchFavorites()]);
+      const favorites = new Set(starred);
+      const kept = filterTemplates(templates, {
         category: pick(input.category, TEMPLATE_CATEGORIES),
         aspect: pick(input.aspect, TEMPLATE_ASPECTS),
         length: pick(input.length, TEMPLATE_LENGTHS),
         style: pick(input.style, TEMPLATE_STYLES),
       });
+      // Starred templates lead, the latest star first, as on the Templates
+      // page; source "favorites" keeps only those.
+      const listed = favoritesFirst(kept, (t) => t.id, starred);
+      const filtered = input.source === "favorites" ? listed.filter((t) => favorites.has(t.id)) : listed;
 
       // A described search keeps the templates that fit it, best fit first.
       const query = typeof input.query === "string" ? input.query.trim() : "";
@@ -5786,9 +5800,23 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
           footage_slots: t.slots,
           texts: t.texts,
           music: t.music ?? false,
+          ...(favorites.has(t.id) ? { favorite: true } : {}),
           link: `${CUT_HOSTED_ORIGIN}${templatePage(t.id)}`,
         })),
       };
+  },
+
+  template_favorite: async (_s, input) => {
+      const id = String(input.id ?? "");
+      const action = FAVORITE_MARKS.find((m) => m === input.action);
+      if (!action) {
+        throw new ToolError(`action is "add" or "remove".`);
+      }
+      if (!(await fetchTemplateIndex()).templates.some((t) => t.id === id)) {
+        throw new ToolError(`No gallery template has id "${id}"; template_gallery lists them.`);
+      }
+      await markFavorite(id, action);
+      return { id, favorite: action === "add" };
   },
 
   template_use: async (s, input) => {

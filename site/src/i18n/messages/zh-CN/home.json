@@ -337,6 +337,7 @@
     },
     "sources": {
       "default": "默认",
+      "favorites": "收藏",
       "mine": "我的模板"
     },
     "aspects": {
@@ -381,11 +382,14 @@
       "elegant": "优雅"
     },
     "empty": "没有符合这些筛选条件的模板。",
+    "noFavorites": "暂无收藏。为模板加星标即可保存在此处。",
     "clearFilters": "清除筛选",
     "search": "搜索模板",
     "clearSearch": "清除搜索",
     "searchFailed": "模板搜索暂时不可用。",
     "noMatches": "未找到匹配的模板。",
+    "favorite": "添加至收藏",
+    "unfavorite": "取消收藏",
     "detail": {
       "close": "返回模板",
       "use": "以此创建新项目",

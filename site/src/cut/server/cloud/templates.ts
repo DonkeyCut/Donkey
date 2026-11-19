@@ -23,6 +23,7 @@ import { errorBody, UserError } from "@/cut/lib/userError";
 import { COPY_PROGRESS_TYPE, type CopyProgressLine } from "@/cut/lib/templateGallery";
 import { mediaObjectUrl, mediaUrlLifetime } from "./mediaCdn";
 import { copy, getObject, head, projectMediaKey } from "./r2";
+import { favoritesApi } from "./templateFavorites";
 import { searchTemplates } from "./templateSearch";
 import { caught, decodeFileParam, err, redirect } from "./util";
 
@@ -197,6 +198,11 @@ export const templatesApi = {
       return caught(e, "Could not read the templates.");
     }
   },
+
+  /** The signed-in person's starred templates, and starring one. */
+  favorites: (req: Request) => favoritesApi.list(req),
+  favorite: (id: string, req: Request) => favoritesApi.add(id, req, async (t) => !!(await publishedTemplate(t))),
+  unfavorite: (id: string, req: Request) => favoritesApi.remove(id, req),
 
   /** The viewer's meta, in the shape a share's meta answers. */
   async meta(id: string) {

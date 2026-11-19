@@ -337,6 +337,7 @@
     },
     "sources": {
       "default": "Standard",
+      "favorites": "Favoriten",
       "mine": "Meine Vorlagen"
     },
     "aspects": {
@@ -381,11 +382,14 @@
       "elegant": "Elegant"
     },
     "empty": "Keine Vorlagen entsprechen diesen Filtern.",
+    "noFavorites": "Noch keine Favoriten. Markiere eine Vorlage mit einem Stern, um sie hier zu behalten.",
     "clearFilters": "Filter zurücksetzen",
     "search": "Vorlagen suchen",
     "clearSearch": "Suche löschen",
     "searchFailed": "Die Vorlagensuche ist gerade nicht verfügbar.",
     "noMatches": "Keine Vorlagen entsprechen dieser Suche.",
+    "favorite": "Zu Favoriten hinzufügen",
+    "unfavorite": "Aus Favoriten entfernen",
     "detail": {
       "close": "Zurück zu Vorlagen",
       "use": "Als neues Projekt verwenden",

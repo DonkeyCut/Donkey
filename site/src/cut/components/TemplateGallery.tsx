@@ -1,21 +1,11 @@
 "use client";
 
-import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
 import { useLocale, useTranslations } from "next-intl";
-import { LayoutTemplate, Loader2, MoreHorizontal, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import {
   Select,
   SelectContent,
@@ -33,18 +23,15 @@ import {
   PaginationPrevious,
 } from "@/components/ui/pagination";
 import { useDescribeError } from "@/i18n/describeError";
-import { apiJson } from "@/cut/lib/api";
-import { homeHref, projectHref, useCutBase } from "@/cut/lib/nav";
-import { newProjectAllowed } from "@/cut/lib/projectLimit";
-import { forgetProject } from "@/cut/lib/projectPurge";
+import { homeHref, useCutBase } from "@/cut/lib/nav";
 import {
-  refetchProjects,
   useOwnTemplates,
+  useTemplateFavorites,
   useTemplateIndex,
   useTemplateSearch,
 } from "@/cut/lib/queries";
-import { backendFor, type Residency } from "@/cut/lib/residency";
 import {
+  favoritesFirst,
   filterTemplates,
   lengthOf,
   localized,
@@ -59,26 +46,20 @@ import {
   type TemplateFilter,
   type TemplateMatch,
 } from "@/cut/lib/templateGallery";
-import { copyAsKind } from "@/cut/lib/templateUse";
-import { formatTime } from "@/cut/lib/time";
-import type { ProjectSummary } from "@/cut/lib/types";
-import { errorFromBody } from "@/cut/lib/userError";
-import { track } from "@/lib/analytics";
-import { CardPreview } from "./assets/ProjectCard";
-import { DeleteConfirm } from "./selectionMenu";
+import { GalleryTile, type PanelNav } from "./GalleryTile";
 import {
-  GalleryTile,
-  TemplateCaption,
-  TemplateFacts,
-  type PanelNav,
-} from "./GalleryTile";
+  DEFAULT_ASPECT,
+  OwnTemplateCard,
+  type OwnTemplate,
+} from "./OwnTemplateCard";
 import { TemplateDetail } from "./TemplateDetail";
 import { TemplateSearch } from "./TemplateSearch";
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
 import { Dialog, DialogPortal } from "@/components/ui/dialog";
 
 // The gallery's filters, each a URL param so Back and reload keep the view.
-// Source shows Donkey's templates by default, or the person's own.
+// Source shows Donkey's templates by default, the ones the person starred,
+// or the person's own.
 const FILTER_KEYS = [
   "source",
   "category",
@@ -88,7 +69,7 @@ const FILTER_KEYS = [
 ] as const;
 type FilterKey = (typeof FILTER_KEYS)[number];
 
-const TEMPLATE_SOURCES = ["mine"] as const;
+const TEMPLATE_SOURCES = ["favorites", "mine"] as const;
 type TemplateSource = (typeof TEMPLATE_SOURCES)[number];
 type Filter = TemplateFilter & { source?: TemplateSource };
 
@@ -103,10 +84,6 @@ const OPTIONS: Record<FilterKey, readonly string[]> = {
   style: TEMPLATE_STYLES,
 };
 
-// Projects without an aspect are 9:16.
-const DEFAULT_ASPECT = "9:16";
-
-type OwnTemplate = { project: ProjectSummary; residency: Residency };
 type Card =
   | { kind: "own"; template: OwnTemplate }
   | { kind: "gallery"; template: GalleryTemplate };
@@ -184,19 +161,14 @@ function byFit<T>(
  * filter chips. */
 export function TemplateGallery() {
   const t = useTranslations("home.templates");
-  const tp = useTranslations("home.projects");
-  const tk = useTranslations("home.pick");
   const describeError = useDescribeError();
   const params = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
   const base = useCutBase();
-  const client = useQueryClient();
   const mine = useOwnTemplates();
   const index = useTemplateIndex();
-  const [busy, setBusy] = useState<string | null>(null);
-  const [deleting, setDeleting] = useState<OwnTemplate | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const favorites = useTemplateFavorites();
   // The template the panel shows sits at its own page's URL, pushed over the
   // gallery's, so a reload or a shared link lands on that page. The grid
   // behind keeps reading the gallery's own query while the panel is open.
@@ -216,16 +188,26 @@ export function TemplateGallery() {
   const search = useTemplateSearch(query, ownCandidates);
   const matches = query ? (search.data ?? []) : null;
 
+  // Starred templates lead, the latest star first; a search ranks by fit.
+  // Favorites keeps only the starred.
   const own = byFit(filterOwn(mine, filter), (o) => o.project.id, matches);
+  const listed = favoritesFirst(
+    filterTemplates(index.data?.templates ?? [], filter),
+    (tpl) => tpl.id,
+    favorites.ids,
+  );
   const gallery = byFit(
     filter.source === "mine"
       ? []
-      : filterTemplates(index.data?.templates ?? [], filter),
+      : filter.source === "favorites"
+        ? listed.filter((tpl) => favorites.ids?.has(tpl.id))
+        : listed,
     (tpl) => tpl.id,
     matches,
   );
   const loading =
     (filter.source !== "mine" && index.isPending) ||
+    (filter.source === "favorites" && favorites.pending) ||
     (!!query && search.isPending);
 
   // One page of the grid: the source's templates.
@@ -300,52 +282,6 @@ export function TemplateGallery() {
       return t(`lengths.${value as (typeof TEMPLATE_LENGTHS)[number]}`);
     }
     return t(`styles.${value as GalleryTemplate["style"]}`);
-  };
-
-  // A copy of the template on its own shelf, marked a project, opened.
-  const startFrom = async ({ project: p, residency: r }: OwnTemplate) => {
-    setError(null);
-    if (!(await newProjectAllowed(client))) {
-      return;
-    }
-    setBusy(p.id);
-    try {
-      const id = await copyAsKind(r, p.id, "project", p.name);
-      void refetchProjects(client, r);
-      track("project_created", { source: "template" });
-      router.push(projectHref(base, id, "home"));
-    } catch (e) {
-      setError(describeError(e, t("detail.failed")));
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const remove = async () => {
-    if (!deleting) {
-      return;
-    }
-    const { project, residency } = deleting;
-    setBusy(project.id);
-    try {
-      const res = await backendFor(residency).fetch(
-        `/api/cut/projects/${project.id}`,
-        { method: "DELETE" },
-      );
-      if (!res.ok) {
-        throw errorFromBody(
-          await apiJson<object>(res),
-          tp("deleteProjectFailed"),
-        );
-      }
-      forgetProject(project.id, residency);
-      void refetchProjects(client, residency);
-      setDeleting(null);
-    } catch (e) {
-      setError(describeError(e, tp("deleteProjectFailed")));
-    } finally {
-      setBusy(null);
-    }
   };
 
   const active = FILTER_KEYS.some((k) => filter[k]) || !!query;
@@ -453,10 +389,8 @@ export function TemplateGallery() {
               )}
             </TemplateSearch>
 
-            {(error ?? searchError) && (
-              <p className="text-[13px] text-destructive">
-                {error ?? searchError}
-              </p>
+            {searchError && (
+              <p className="text-[13px] text-destructive">{searchError}</p>
             )}
           </div>
         </div>
@@ -475,7 +409,12 @@ export function TemplateGallery() {
             </div>
           ) : cards.length === 0 ? (
             <p className="py-16 text-center text-sm text-muted-foreground">
-              {query ? t("noMatches") : t("empty")}
+              {query
+                ? t("noMatches")
+                : filter.source === "favorites" &&
+                    FILTER_KEYS.every((k) => k === "source" || !filter[k])
+                  ? t("noFavorites")
+                  : t("empty")}
             </p>
           ) : (
             <div className="grid grid-cols-1 gap-x-6 gap-y-10 pt-1 sm:grid-cols-2 lg:grid-cols-3">
@@ -484,9 +423,7 @@ export function TemplateGallery() {
                   <OwnTemplateCard
                     key={card.template.project.id}
                     template={card.template}
-                    busy={busy}
-                    onUse={() => void startFrom(card.template)}
-                    onDelete={() => setDeleting(card.template)}
+                    from="templates"
                   />
                 ) : (
                   <GalleryTile
@@ -519,22 +456,6 @@ export function TemplateGallery() {
           panel={panel}
         />
       )}
-
-      <DeleteConfirm
-        open={!!deleting}
-        title={
-          deleting
-            ? tp("deleteTitle", {
-                what: tk("named", { name: deleting.project.name }),
-              })
-            : ""
-        }
-        description={`${tp("deletesFolders", { count: 1 })} ${tp("cannotUndo")}`}
-        action={tp("deleteProjects", { count: 1 })}
-        busy={busy !== null}
-        onClose={() => setDeleting(null)}
-        onConfirm={() => void remove()}
-      />
     </div>
   );
 }
@@ -589,76 +510,6 @@ function GalleryPages({
         </PaginationItem>
       </PaginationContent>
     </Pagination>
-  );
-}
-
-/** One of the person's own templates: a project of theirs marked as one. It
- * opens in the editor like any project; its menu makes a new project from it. */
-function OwnTemplateCard({
-  template: { project: p, residency: r },
-  busy,
-  onUse,
-  onDelete,
-}: {
-  template: OwnTemplate;
-  busy: string | null;
-  onUse: () => void;
-  onDelete: () => void;
-}) {
-  const t = useTranslations("home.templates");
-  const tp = useTranslations("home.projects");
-  const base = useCutBase();
-  return (
-    <div className="group relative">
-      <Link
-        href={projectHref(base, p.id, "templates")}
-        className="flex min-w-0 flex-col gap-3 outline-none"
-      >
-        <div className="relative grid aspect-video place-items-center overflow-hidden rounded-2xl border border-border bg-black transition-shadow group-hover:shadow-[0_6px_28px_rgba(0,0,0,0.12)] group-has-focus-visible:ring-3 group-has-focus-visible:ring-ring/50">
-          {/* The project's own frame shape, whole in the tile, as gallery
-              tiles stand their stills. */}
-          <div
-            className="relative h-full max-w-full"
-            style={{
-              aspectRatio: (p.aspect ?? DEFAULT_ASPECT).replace(":", " / "),
-            }}
-          >
-            <CardPreview project={p} residency={r} />
-          </div>
-          {busy === p.id && (
-            <span className="absolute inset-0 grid place-items-center bg-black/40">
-              <Loader2 className="size-5 animate-spin text-white" />
-            </span>
-          )}
-          <TemplateFacts facts={[t("sources.mine"), formatTime(p.duration)]} />
-        </div>
-        <TemplateCaption name={p.name} />
-      </Link>
-      <DropdownMenu>
-        <DropdownMenuTrigger
-          render={
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label={tp("actions")}
-              disabled={busy !== null}
-              className="absolute top-2 right-2 bg-black/40 text-white opacity-0 group-hover:opacity-100 hover:bg-black/60 hover:text-white focus-visible:opacity-100 data-popup-open:opacity-100"
-            />
-          }
-        >
-          <MoreHorizontal />
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
-          <DropdownMenuItem onClick={onUse}>
-            <LayoutTemplate /> {t("detail.use")}
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem variant="destructive" onClick={onDelete}>
-            <Trash2 /> {tp("delete")}
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-    </div>
   );
 }
 

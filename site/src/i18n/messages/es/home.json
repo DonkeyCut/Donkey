@@ -337,6 +337,7 @@
     },
     "sources": {
       "default": "Predeterminado",
+      "favorites": "Favoritos",
       "mine": "Mis plantillas"
     },
     "aspects": {
@@ -381,11 +382,14 @@
       "elegant": "Elegante"
     },
     "empty": "Ninguna plantilla coincide con estos filtros.",
+    "noFavorites": "Aún no tienes favoritos. Marca una plantilla con una estrella para guardarla aquí.",
     "clearFilters": "Borrar filtros",
     "search": "Buscar plantillas",
     "clearSearch": "Borrar búsqueda",
     "searchFailed": "La búsqueda de plantillas no está disponible en este momento.",
     "noMatches": "Ninguna plantilla coincide con esta búsqueda.",
+    "favorite": "Agregar a favoritos",
+    "unfavorite": "Quitar de favoritos",
     "detail": {
       "close": "Volver a plantillas",
       "use": "Usar como nuevo proyecto",

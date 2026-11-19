@@ -238,6 +238,22 @@ html:has(.app-surface) {
   }
 }
 
+/* A template's star filling in: it swells, tips, and settles. */
+@keyframes cut-star-pop {
+  0% {
+    transform: scale(1) rotate(0deg);
+  }
+  35% {
+    transform: scale(1.4) rotate(-12deg);
+  }
+  65% {
+    transform: scale(0.9) rotate(4deg);
+  }
+  100% {
+    transform: scale(1) rotate(0deg);
+  }
+}
+
 /* The mention pill's stand-in caret: the real one blinks in the textarea
    underneath the pill cover's left edge. */
 @keyframes mention-caret {

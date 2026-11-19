@@ -9,7 +9,7 @@ import { DonkeyMark } from "@/components/DonkeyMark";
 import { homeHref, useCutBase } from "@/cut/lib/nav";
 import { useTemplateIndex } from "@/cut/lib/queries";
 import { localized, similarTemplates, type GalleryTemplate, type TemplateAspect } from "@/cut/lib/templateGallery";
-import { GalleryTile, inPanel, type PanelNav } from "./GalleryTile";
+import { FavoriteStar, GalleryTile, inPanel, type PanelNav } from "./GalleryTile";
 import { TemplateUseDialog } from "./TemplateUseView";
 
 // How many related templates the panel offers.
@@ -91,11 +91,15 @@ export function TemplateInfo({ template, panel }: { template: GalleryTemplate; p
 
   return (
     <div className="flex flex-col gap-5 p-5">
-      <div>
-        <h1 className="text-base font-semibold tracking-tight">{localized(template.name, locale)}</h1>
-        <p className="mt-1 text-[13px] text-muted-foreground">
-          {t(`categories.${template.category}`)} · {t(`styles.${template.style}`)}
-        </p>
+      {/* The name and its kind, with the star that favorites it beside them. */}
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h1 className="text-base font-semibold tracking-tight">{localized(template.name, locale)}</h1>
+          <p className="mt-1 text-[13px] text-muted-foreground">
+            {t(`categories.${template.category}`)} · {t(`styles.${template.style}`)}
+          </p>
+        </div>
+        <FavoriteStar id={template.id} look="panel" />
       </div>
 
       <div className="flex flex-col gap-2">

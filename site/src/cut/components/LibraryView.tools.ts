@@ -16,6 +16,8 @@ import { bool, num, obj, str, type AiToolDef } from "@/cut/lib/aiToolDef";
 
 import { LIBRARY_SHARE_ACTIONS, LIBRARY_SHARE_KINDS, SHARE_ACCESS } from "@/cut/lib/librarySharing";
 import {
+  FAVORITE_MARKS,
+  GALLERY_SOURCES,
   TEMPLATE_ASPECTS,
   TEMPLATE_CATEGORIES,
   TEMPLATE_LENGTHS,
@@ -91,16 +93,26 @@ export const LIBRARY_TOOLS = [
   {
     name: "template_gallery",
     description:
-      "List Donkey's template gallery — ready-made edits every account can start from, each with sample footage in its clips, styled titles and effects, and often a soundtrack timed to its cuts. Each entry gives its id, name, what it is for, frame shape, length, how many footage slots and texts it has, whether it carries music, and its link. Filter by category, aspect, length or style, and pass `query` to find templates from a description in the user's own words, best fit first; all are optional. Results come a page at a time with the total; `next` is the offset of the following page.",
+      "List Donkey's template gallery — ready-made edits every account can start from, each with sample footage in its clips, styled titles and effects, and often a soundtrack timed to its cuts. Each entry gives its id, name, what it is for, frame shape, length, how many footage slots and texts it has, whether it carries music, and its link. Entries the user starred carry favorite true and come first, latest star first; source \"favorites\" lists only those. Filter by category, aspect, length or style, and pass `query` to find templates from a description in the user's own words, best fit first; all are optional. Results come a page at a time with the total; `next` is the offset of the following page.",
     inputSchema: obj({
       query: str(`What the user is looking for, described in their words (up to ${TEMPLATE_QUERY_MAX} characters): subject, purpose, mood, look`),
       category: { type: "string", enum: [...TEMPLATE_CATEGORIES] },
       aspect: { type: "string", enum: [...TEMPLATE_ASPECTS] },
       length: { type: "string", enum: [...TEMPLATE_LENGTHS], description: "short ≤15 s, medium ≤30 s, long beyond" },
       style: { type: "string", enum: [...TEMPLATE_STYLES] },
+      source: { type: "string", enum: [...GALLERY_SOURCES], description: "favorites: only the templates the user starred (default all)" },
       offset: num("Where the page starts; pass the previous page's next"),
       limit: num(`Templates per page, 1..${TEMPLATE_PAGE_MAX} (default ${TEMPLATE_PAGE_DEFAULT})`),
     }),
+  },
+  {
+    name: "template_favorite",
+    description:
+      "Star a gallery template for the user, or take its star off. Starred templates show under Favorites on the Templates page, on every device. Only when the user asked.",
+    inputSchema: obj({
+      id: str("Gallery template id from template_gallery"),
+      action: { type: "string", enum: [...FAVORITE_MARKS], description: "add stars it, remove takes the star off" },
+    }, ["id", "action"]),
   },
   {
     name: "template_use",

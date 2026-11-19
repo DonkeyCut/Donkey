@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { pageWindow } from "./templateGallery";
+import { favoritesFirst, pageWindow } from "./templateGallery";
 
 describe("pageWindow", () => {
   test("a short run shows every page", () => {
@@ -15,5 +15,22 @@ describe("pageWindow", () => {
 
   test("a single skipped page still reads as a gap", () => {
     expect(pageWindow(4, 6)).toEqual([1, null, 3, 4, 5, 6]);
+  });
+});
+
+describe("favoritesFirst", () => {
+  const id = (s: string) => s;
+
+  test("starred items lead, the latest star first, the rest keep their order", () => {
+    expect(favoritesFirst(["a", "b", "c", "d"], id, ["d", "b"])).toEqual(["d", "b", "a", "c"]);
+  });
+
+  test("no stars leaves the list as it was", () => {
+    expect(favoritesFirst(["a", "b"], id, null)).toEqual(["a", "b"]);
+    expect(favoritesFirst(["a", "b"], id, [])).toEqual(["a", "b"]);
+  });
+
+  test("a star on an item the list lacks changes nothing", () => {
+    expect(favoritesFirst(["a", "b"], id, ["z", "b"])).toEqual(["b", "a"]);
   });
 });

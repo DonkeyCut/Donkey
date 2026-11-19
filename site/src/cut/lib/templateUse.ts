@@ -14,7 +14,10 @@ import type { Residency } from "./residency";
 import { backendFor } from "./residency";
 import {
   COPY_PROGRESS_TYPE,
+  TEMPLATE_FAVORITES_API,
   TEMPLATE_SEARCH_API,
+  templateFavoriteApi,
+  type FavoriteMark,
   TEMPLATES_API,
   type CopyProgressLine,
   type GalleryTemplate,
@@ -56,6 +59,27 @@ export async function searchTemplateIndex(query: string, own: TemplateCandidate[
     throw errorFromBody(body, SEARCH_FAILED);
   }
   return body.matches ?? [];
+}
+
+const FAVORITES_FAILED = new UserError("template_favorites_failed", "Could not read your favorite templates.");
+const FAVORITE_FAILED = new UserError("template_favorite_failed", "Could not change the template's favorite.");
+
+/** The gallery templates the signed-in person starred, newest first. */
+export async function fetchFavorites(): Promise<string[]> {
+  const res = await cloudRequest(TEMPLATE_FAVORITES_API);
+  const body = (await res.json().catch(() => ({}))) as { ids?: string[] };
+  if (!res.ok) {
+    throw errorFromBody(body, FAVORITES_FAILED);
+  }
+  return body.ids ?? [];
+}
+
+/** Star a gallery template, or take its star off. */
+export async function markFavorite(id: string, mark: FavoriteMark): Promise<void> {
+  const res = await cloudRequest(templateFavoriteApi(id), { method: mark === "add" ? "PUT" : "DELETE" });
+  if (!res.ok) {
+    throw errorFromBody(await res.json().catch(() => ({})), FAVORITE_FAILED);
+  }
 }
 
 /** Make a new project from a gallery template in `target` and return its id. */

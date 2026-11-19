@@ -51,6 +51,10 @@ const MEDIUM_MAX_S = 30;
 export const TEMPLATE_PAGE_DEFAULT = 25;
 export const TEMPLATE_PAGE_MAX = 100;
 
+/** What a chat's template_gallery lists: every template, or the starred. */
+export const GALLERY_SOURCES = ["all", "favorites"] as const;
+export type GallerySource = (typeof GALLERY_SOURCES)[number];
+
 /** Where a chat's template_use puts a template. */
 export const TEMPLATE_TARGETS = ["new_project", "timeline"] as const;
 export type TemplateTarget = (typeof TEMPLATE_TARGETS)[number];
@@ -105,6 +109,12 @@ export const TEMPLATE_OWN_MAX = 200;
 export type TemplateCandidate = { id: string; label: string };
 export type TemplateMatch = { id: string; fit: number };
 
+// Favorites: the gallery templates a person starred, kept on their account.
+export const TEMPLATE_FAVORITES_API = `${TEMPLATES_API}/favorites`;
+export const templateFavoriteApi = (id: string) => `${TEMPLATES_API}/${encodeURIComponent(id)}/favorite`;
+export const FAVORITE_MARKS = ["add", "remove"] as const;
+export type FavoriteMark = (typeof FAVORITE_MARKS)[number];
+
 // A template copy into the cloud answers as JSON lines with this type when
 // the client asks for its progress: counts of files copied, then the project
 // or the failure.
@@ -132,6 +142,15 @@ export function lengthOf(seconds: number): TemplateLength {
 /** Every category a template is listed under, its own first. */
 export function categoriesOf(t: GalleryTemplate): TemplateCategory[] {
   return [t.category, ...(t.alsoIn ?? [])];
+}
+
+/** The starred items first, the latest star leading, then the rest in their
+ * own order. `starred` lists ids newest first, e.g. ["b", "d"] turns
+ * [a, b, c, d] into [b, d, a, c]. */
+export function favoritesFirst<T>(items: readonly T[], idOf: (item: T) => string, starred: Iterable<string> | null): T[] {
+  const rank = new Map([...(starred ?? [])].map((id, i) => [id, i]));
+  const top = items.filter((i) => rank.has(idOf(i))).sort((a, b) => rank.get(idOf(a))! - rank.get(idOf(b))!);
+  return [...top, ...items.filter((i) => !rank.has(idOf(i)))];
 }
 
 export type TemplateFilter = {
