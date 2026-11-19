@@ -6,7 +6,8 @@ import { usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { FolderOpen, House, LayoutTemplate } from "lucide-react";
 import { AppSidebar } from "@/cut/components/AppSidebar";
-import { useEnvironment } from "@/cut/lib/environment";
+import { setCardTabSlot } from "@/cut/components/cardTabSlot";
+import { CARD_COLUMN, useEnvironment } from "@/cut/lib/environment";
 import { useHostReady } from "@/cut/lib/hostBridge";
 import { homeHref, useCutBase, type CutTab } from "@/cut/lib/nav";
 import { cn } from "@/lib/utils";
@@ -46,8 +47,8 @@ function useDropSelectionOnNav() {
 /**
  * The home inside the ChatGPT card. The host draws the app's name and owns
  * the account, so a bar across the top carries only Home, Templates and
- * Assets, on the layout's background. The layout stacks under it by the
- * `data-card-tabs` mark.
+ * Assets, on the layout's background and in the pages' column. The layout
+ * stacks under it by the `data-card-tabs` mark.
  */
 function CardTabs() {
   const t = useTranslations("home");
@@ -56,10 +57,8 @@ function CardTabs() {
   useHostReady(true);
 
   return (
-    <nav
-      data-card-tabs
-      className="flex shrink-0 items-center gap-1 overflow-x-auto border-b border-border px-3 py-2"
-    >
+    <nav data-card-tabs className="shrink-0 border-b border-border">
+      <div className={cn(CARD_COLUMN, "flex items-center gap-1 overflow-x-auto py-2")}>
       {CARD_TABS.map(({ tab, icon: Icon }) => {
         const href = homeHref(base, tab);
         const active = pathname === href;
@@ -80,6 +79,11 @@ function CardTabs() {
           </Link>
         );
       })}
+      {/* Assets puts its Upload and menu here, at the bar's right end. */}
+      {pathname === homeHref(base, "assets") && (
+        <div ref={setCardTabSlot} className="ml-auto flex shrink-0 items-center gap-2 pl-3" />
+      )}
+      </div>
     </nav>
   );
 }

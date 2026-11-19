@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useEnvironment } from "@/cut/lib/environment";
 import { cn } from "@/lib/utils";
 import {
   Select,
@@ -161,6 +162,7 @@ function byFit<T>(
  * filter chips. */
 export function TemplateGallery() {
   const t = useTranslations("home.templates");
+  const { chatgpt } = useEnvironment();
   const describeError = useDescribeError();
   const params = useSearchParams();
   const router = useRouter();
@@ -338,8 +340,9 @@ export function TemplateGallery() {
   return (
     <div className="relative h-full">
       <div ref={gridRef} className="h-full overflow-y-auto">
-        <div className="mx-auto w-full max-w-7xl px-4 pt-6 sm:px-10">
-          <h1 className="text-lg font-semibold tracking-tight">{t("title")}</h1>
+        {/* In the ChatGPT card the Templates tab above is the title. */}
+        <div className={cn("mx-auto w-full max-w-7xl px-4 sm:px-10", chatgpt ? "pt-3" : "pt-6")}>
+          <h1 className={chatgpt ? "sr-only" : "text-lg font-semibold tracking-tight"}>{t("title")}</h1>
         </div>
 
         <div className="sticky top-0 z-10 bg-background">

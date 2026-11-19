@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { createPortal } from "react-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { useLocale, useTranslations } from "next-intl";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -87,6 +88,8 @@ import { errorFromBody } from "@/cut/lib/userError";
 import { useDescribeError } from "@/i18n/describeError";
 import { formatBytes } from "@/lib/bytes";
 import { track } from "@/lib/analytics";
+import { useCardTabSlot } from "@/cut/components/cardTabSlot";
+import { CARD_COLUMN, useEnvironment } from "@/cut/lib/environment";
 import { cn } from "@/lib/utils";
 import { LibraryCard, LIBRARY_AUDIO_TILE_AREA, LIBRARY_SQUARE } from "@/cut/components/LibraryCard";
 import { LibraryImportCard } from "@/cut/components/LibraryImportCard";
@@ -220,6 +223,8 @@ function useLegacyMacFolders(engineUp: boolean): boolean {
  */
 export function AssetsView() {
   const t = useTranslations("home");
+  const { chatgpt } = useEnvironment();
+  const tabSlot = useCardTabSlot();
   const locale = useLocale();
   const describeError = useDescribeError();
   const { pickLabel, foldersGoNote, phoneGoNote } = usePickWords();
@@ -1061,6 +1066,21 @@ export function AssetsView() {
     shownCopies.length > 0 ||
     (!loading && tab !== "notes" && shownEntries.length > 0);
 
+  // The page's two actions, sized to the tab bar's pills inside the card.
+  const pageActions = (
+    <div className="flex items-center gap-2">
+      <Button size={chatgpt ? "sm" : "default"} onClick={() => setAddOpen(true)}>
+        <Upload data-icon="inline-start" /> {t("assets.upload")}
+      </Button>
+      <DropdownMenu>
+        <DropdownMenuTrigger render={<Button variant="outline" size={chatgpt ? "icon-sm" : "icon"} aria-label={t("assets.more")} />}>
+          <MoreHorizontal />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">{pageItems}</DropdownMenuContent>
+      </DropdownMenu>
+    </div>
+  );
+
   return (
     <div
       ref={rootRef}
@@ -1101,12 +1121,13 @@ export function AssetsView() {
         void upload(e.dataTransfer.files);
       }}
     >
-      <div className="mx-auto w-full max-w-6xl px-4 py-9 sm:px-10">
+      <div className={chatgpt ? cn(CARD_COLUMN, "pt-6 pb-9") : "mx-auto w-full max-w-6xl px-4 py-9 sm:px-10"}>
         {/* Title or the way down to the open folder, then the page's two
-            actions. */}
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+            actions. In the ChatGPT card the Assets tab is the title and the
+            actions sit in the tab bar, so only an open folder's trail shows. */}
+        <div className={cn("flex flex-wrap items-center justify-between gap-3", (!chatgpt || openFolder !== null) && "mb-4")}>
           {openFolder === null ? (
-            <h1 className="text-lg font-semibold tracking-tight">{t("tabs.assets")}</h1>
+            <h1 className={chatgpt ? "sr-only" : "text-lg font-semibold tracking-tight"}>{t("tabs.assets")}</h1>
           ) : (
             <FolderCrumb
               root={t("tabs.assets")}
@@ -1119,17 +1140,7 @@ export function AssetsView() {
               onDropFolders={(ids, id) => void moveFolders(ids, id)}
             />
           )}
-          <div className="flex items-center gap-2">
-            <Button onClick={() => setAddOpen(true)}>
-              <Upload data-icon="inline-start" /> {t("assets.upload")}
-            </Button>
-            <DropdownMenu>
-              <DropdownMenuTrigger render={<Button variant="outline" size="icon" aria-label={t("assets.more")} />}>
-                <MoreHorizontal />
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">{pageItems}</DropdownMenuContent>
-            </DropdownMenu>
-          </div>
+          {chatgpt ? tabSlot && createPortal(pageActions, tabSlot) : pageActions}
           <input
             ref={inputRef}
             type="file"

@@ -43,6 +43,11 @@ function rememberedCard(): boolean {
   }
 }
 
+/** The column every page of the card's home sits in, tabs included: the
+ * template gallery's own, so the tabs and each page's content share one left
+ * edge and one width. */
+export const CARD_COLUMN = "mx-auto w-full max-w-7xl px-4 sm:px-10";
+
 const subscribe = () => () => {};
 const serverHost = (): EditorHost => "web";
 

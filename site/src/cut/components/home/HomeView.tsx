@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import type { PanelNav } from "@/cut/components/GalleryTile";
 import { TemplatePanel, templateAt } from "@/cut/components/TemplateGallery";
 import { useTabTitle } from "@/cut/hooks/useTabTitle";
-import { useEnvironment } from "@/cut/lib/environment";
+import { CARD_COLUMN, useEnvironment } from "@/cut/lib/environment";
 import { homeHref, useCutBase } from "@/cut/lib/nav";
 import { useTemplateIndex } from "@/cut/lib/queries";
 import { templatePage, type GalleryTemplate } from "@/cut/lib/templateGallery";
@@ -57,8 +57,8 @@ function CardHome() {
   useTabTitle(t("tabs.home"));
 
   return (
-    <main className="relative min-h-full px-6 pt-6 pb-10">
-      <div className="mx-auto flex max-w-[1080px] flex-col gap-10">
+    <main className="relative min-h-full pt-6 pb-10">
+      <div className={cn(CARD_COLUMN, "flex flex-col gap-10")}>
         <div className="flex flex-col gap-2">
           <HomeProjects
             projects={projects}
