@@ -75,17 +75,22 @@ describe("@ picker rows", () => {
 
 describe("project tiles", () => {
   test("every card covers the same area, so a square is smaller than a wide card is wide", () => {
-    expect(projectTileSize("9:16")).toEqual({ width: 158, height: 280 });
-    expect(projectTileSize("16:9")).toEqual({ width: 280, height: 158 });
-    expect(projectTileSize("1:1")).toEqual({ width: 210, height: 210 });
-    expect(projectTileSize("4:5")).toEqual({ width: 188, height: 235 });
+    expect(projectTileSize("9:16", "roomy")).toEqual({ width: 158, height: 280 });
+    expect(projectTileSize("16:9", "roomy")).toEqual({ width: 280, height: 158 });
+    expect(projectTileSize("1:1", "roomy")).toEqual({ width: 210, height: 210 });
+    expect(projectTileSize("4:5", "roomy")).toEqual({ width: 188, height: 235 });
   });
 
   test("a card past 16:9 stops at the long side", () => {
-    expect(projectTileSize("21:9")).toEqual({ width: 280, height: 120 });
+    expect(projectTileSize("21:9", "roomy")).toEqual({ width: 280, height: 120 });
+  });
+
+  test("the ChatGPT card's row holds the same shapes on a shorter long side", () => {
+    expect(projectTileSize("9:16", "compact")).toEqual({ width: 96, height: 170 });
+    expect(projectTileSize("16:9", "compact")).toEqual({ width: 170, height: 96 });
   });
 
   test("a project with no aspect is tall", () => {
-    expect(projectTileSize(undefined)).toEqual({ width: 158, height: 280 });
+    expect(projectTileSize(undefined, "roomy")).toEqual({ width: 158, height: 280 });
   });
 });

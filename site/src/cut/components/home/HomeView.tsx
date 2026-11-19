@@ -19,6 +19,7 @@ import { HomeProjects } from "./HomeProjects";
 import { HomePrompt } from "./HomePrompt";
 import { HomeTemplates } from "./HomeTemplates";
 import { StorageSwitcher } from "./StorageSwitcher";
+import { useCardCreate } from "@/cut/components/EmbeddedNewProject";
 import { useHomeCreate, useHomeResidency } from "./useHomeCreate";
 import { useHomeProjects } from "./useHomeProjects";
 import { useHomeUploads } from "./useHomeUploads";
@@ -34,20 +35,69 @@ const FILES_TYPE = "Files";
 // the 56px column gap. The hero is the heading, an empty prompt and the pill.
 const EMPTY_LIFT = "calc(-0.5 * (max(0px, (100dvh - 16rem - 244px) / 2) + 56px))";
 
-/**
- * Home: one prompt box that starts a project, a Blank project pill under it,
- * the newest projects in a row, and a taste of the template gallery. Files
- * dropped anywhere on the page go into the prompt.
- */
+/** Home: the web's, or the ChatGPT card's. */
 export function HomeView() {
-  const t = useTranslations("home");
   const { chatgpt } = useEnvironment();
-  const picked = useHomeResidency();
-  const { projects, loading, live, dual } = useHomeProjects();
+  return chatgpt ? <CardHome /> : <WebHome />;
+}
 
-  // Inside ChatGPT, projects and files go to the cloud, where ChatGPT's tools
-  // can see them.
-  const residency = chatgpt ? "cloud" : picked;
+/**
+ * Home inside the ChatGPT card: the newest projects in a row led by a New
+ * project tile, and a taste of the template gallery. The conversation around
+ * the card is the prompt, and new projects go to the cloud, where ChatGPT's
+ * tools can see them. It sits on the layout's background, the one color the
+ * tabs, Templates and Assets share.
+ */
+function CardHome() {
+  const t = useTranslations("home");
+  const { projects, loading, live, dual } = useHomeProjects();
+  const { create, busy, error } = useCardCreate();
+  const panel = useTemplatePanel();
+
+  useTabTitle(t("tabs.home"));
+
+  return (
+    <main className="relative min-h-full px-6 pt-6 pb-10">
+      <div className="mx-auto flex max-w-[1080px] flex-col gap-10">
+        <div className="flex flex-col gap-2">
+          <HomeProjects
+            projects={projects}
+            loading={loading}
+            live={live}
+            dual={dual}
+            density="compact"
+            create={{ busy, onClick: () => void create() }}
+          />
+          {error && (
+            <p role="alert" className="text-xs text-destructive">
+              {error}
+            </p>
+          )}
+        </div>
+        <HomeTemplates panel={panel.nav} density="compact" />
+      </div>
+
+      {panel.template && (
+        <TemplatePanel
+          template={panel.template}
+          open={panel.open}
+          closeHref={homeHref(panel.base, "home")}
+          panel={panel.nav}
+        />
+      )}
+    </main>
+  );
+}
+
+/**
+ * Home on the web: one prompt box that starts a project, a Blank project pill
+ * under it, the newest projects in a row, and a taste of the template
+ * gallery. Files dropped anywhere on the page go into the prompt.
+ */
+function WebHome() {
+  const t = useTranslations("home");
+  const residency = useHomeResidency();
+  const { projects, loading, live, dual } = useHomeProjects();
   const create = useHomeCreate(residency, null);
   const uploads = useHomeUploads(residency);
   const page = useRef<HTMLElement>(null);
@@ -65,8 +115,7 @@ export function HomeView() {
       ref={page}
       className="relative min-h-full bg-[#fcfcfc] px-6 pt-[72px] pb-20 sm:px-10 dark:bg-background"
     >
-      {/* The ChatGPT card keeps its projects in the cloud; there is no choice. */}
-      {!chatgpt && <StorageSwitcher className="absolute top-5 right-6 z-10" />}
+      <StorageSwitcher className="absolute top-5 right-6 z-10" />
 
       <div className="mx-auto flex max-w-[1080px] flex-col gap-14">
         <section
@@ -106,8 +155,9 @@ export function HomeView() {
           loading={loading}
           live={live}
           dual={dual}
+          density="roomy"
         />
-        <HomeTemplates panel={panel.nav} />
+        <HomeTemplates panel={panel.nav} density="roomy" />
       </div>
 
       {panel.template && (

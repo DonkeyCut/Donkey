@@ -22,6 +22,7 @@ import {
 } from "@/cut/lib/templateGallery";
 import { cn } from "@/lib/utils";
 import { startTemplateRef } from "./atRows";
+import type { HomeDensity } from "./projectTile";
 
 // How many templates the preview shows; Browse all has the rest.
 const PREVIEW_TEMPLATES = 18;
@@ -33,6 +34,12 @@ const FAVORITES = "favorites" as const;
 const MINE = "mine" as const;
 type Chip = TemplateCategory | typeof ALL | typeof FAVORITES | typeof MINE;
 
+// The grid's columns and gaps: three across the ChatGPT card's width.
+const GRID: Record<HomeDensity, string> = {
+  roomy: "grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-x-6 gap-y-10",
+  compact: "grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-x-4 gap-y-6",
+};
+
 /**
  * A taste of the template gallery: a grid of Donkey's templates, starred
  * ones first, under chips for favorites, the person's own templates and the
@@ -40,7 +47,13 @@ type Chip = TemplateCategory | typeof ALL | typeof FAVORITES | typeof MINE;
  * the template over the page, the way it opens over the gallery, and drags
  * into the prompt box as the project's starting point.
  */
-export function HomeTemplates({ panel }: { panel: PanelNav }) {
+export function HomeTemplates({
+  panel,
+  density,
+}: {
+  panel: PanelNav;
+  density: HomeDensity;
+}) {
   const t = useTranslations("home");
   const locale = useLocale();
   const base = useCutBase();
@@ -141,7 +154,7 @@ export function HomeTemplates({ panel }: { panel: PanelNav }) {
       <div
         ref={grid}
         style={{ minHeight: floor }}
-        className="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] content-start gap-x-6 gap-y-10"
+        className={cn("grid content-start", GRID[density])}
       >
         {index.isPending
           ? Array.from({ length: PREVIEW_TEMPLATES }, (_, i) => (

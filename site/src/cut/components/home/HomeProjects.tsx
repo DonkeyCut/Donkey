@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
+import { Plus } from "lucide-react";
 import {
   Carousel,
   CarouselContent,
@@ -43,7 +44,7 @@ import { assetsHref, projectHref, useCutBase } from "@/cut/lib/nav";
 import { formatDate } from "@/cut/lib/time";
 import { formatBytes } from "@/lib/bytes";
 import { cn } from "@/lib/utils";
-import { projectTileSize, TILE_LONG_SIDE } from "./projectTile";
+import { projectTileSize, TILE_LONG_SIDE, type HomeDensity } from "./projectTile";
 import type { HomeProject } from "./useHomeProjects";
 
 // MouseEvent.button for the middle (wheel) button.
@@ -55,22 +56,37 @@ const RECENT_PROJECTS = 24;
 // Placeholder cards while the first listing loads.
 const SKELETON_CARDS = 5;
 
+// A slide's left padding is the gap between cards: 32px on the web, 20px in
+// the card.
+const SLIDE: Record<HomeDensity, string> = {
+  roomy: "basis-auto pl-8 last:pr-2",
+  compact: "basis-auto pl-5 last:pr-2",
+};
+
+/** The tile that leads the row in the ChatGPT card and makes a project. */
+export type NewProjectTile = { busy: boolean; onClick: () => void };
+
 /**
  * The newest projects in a carousel: arrows by the heading step a page of
  * cards, and a dot per page sits under the row. Each card keeps its
  * project's shape with the same long side, so a wide card sits centred
- * against the tall ones around it.
+ * against the tall ones around it. With `create`, a New project tile leads
+ * the row and the row shows even with no projects.
  */
 export function HomeProjects({
   projects,
   loading,
   live,
   dual,
+  density,
+  create,
 }: {
   projects: HomeProject[];
   loading: boolean;
   live: (r: HomeProject["residency"]) => boolean;
   dual: boolean;
+  density: HomeDensity;
+  create?: NewProjectTile;
 }) {
   const t = useTranslations("home");
   const locale = useLocale();
@@ -105,7 +121,7 @@ export function HomeProjects({
     setMarked(new Set());
   };
 
-  if (!loading && projects.length === 0) {
+  if (!loading && projects.length === 0 && !create) {
     return null;
   }
 
@@ -163,14 +179,22 @@ export function HomeProjects({
             every card up along the top, wide and tall alike. */}
         <div className="-mx-2" onContextMenu={(e) => void ctx.onContextMenu(e)}>
           <CarouselContent className="-ml-6 items-start py-3">
+            {create && (
+              <CarouselItem className={SLIDE[density]}>
+                <NewTile
+                  create={create}
+                  box={projectTileSize("9:16", density)}
+                />
+              </CarouselItem>
+            )}
             {loading && projects.length === 0
               ? Array.from({ length: SKELETON_CARDS }, (_, i) => (
-                  <CarouselItem key={i} className="basis-auto pl-8 last:pr-2">
+                  <CarouselItem key={i} className={SLIDE[density]}>
                     <Skeleton
                       className="rounded-2xl"
                       style={{
-                        width: projectTileSize("9:16").width,
-                        height: TILE_LONG_SIDE,
+                        width: projectTileSize("9:16", density).width,
+                        height: TILE_LONG_SIDE[density],
                       }}
                     />
                   </CarouselItem>
@@ -179,12 +203,12 @@ export function HomeProjects({
                   ...actions.copying.map((c) => (
                     <CarouselItem
                       key={c.key}
-                      className="basis-auto pl-8 last:pr-2"
+                      className={SLIDE[density]}
                     >
                       <CopyingTile
                         project={c.project}
                         residency={c.residency}
-                        box={projectTileSize(c.project.aspect)}
+                        box={projectTileSize(c.project.aspect, density)}
                       />
                     </CarouselItem>
                   )),
@@ -193,7 +217,7 @@ export function HomeProjects({
                     return (
                       <CarouselItem
                         key={p.id}
-                        className="basis-auto pl-8 last:pr-2"
+                        className={SLIDE[density]}
                       >
                         <ProjectTile
                           project={p}
@@ -201,7 +225,7 @@ export function HomeProjects({
                           offline={!live(r)}
                           badge={dual ? "residency" : "none"}
                           selected={marked.has(p.id)}
-                          box={projectTileSize(p.aspect)}
+                          box={projectTileSize(p.aspect, density)}
                           meta={t("projects.cardMeta", {
                             size: formatBytes(p.sizeBytes ?? 0, locale),
                             date: formatDate(p.updatedAt, locale, t("justNow")),
@@ -290,6 +314,34 @@ export function HomeProjects({
         }}
       />
     </Carousel>
+  );
+}
+
+/** An empty project in one click: a dashed card in the row's tall shape. */
+function NewTile({
+  create,
+  box,
+}: {
+  create: NewProjectTile;
+  box: { width: number; height: number };
+}) {
+  const t = useTranslations("home.start");
+  return (
+    <button
+      type="button"
+      disabled={create.busy}
+      onClick={create.onClick}
+      style={{ width: box.width, height: box.height }}
+      className="flex flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-foreground/25 text-xs font-medium text-foreground transition-colors outline-none hover:border-foreground/50 hover:bg-muted/60 focus-visible:ring-3 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50"
+    >
+      <span
+        aria-hidden
+        className="grid size-9 place-items-center rounded-full bg-foreground text-background"
+      >
+        <Plus className="size-4" />
+      </span>
+      {t("newProject")}
+    </button>
   );
 }
 

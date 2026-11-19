@@ -24,10 +24,9 @@ import { useDescribeError } from "@/i18n/describeError";
 import { track } from "@/lib/analytics";
 import type { StartTemplate } from "./atRows";
 
-/** What started a project on Home, for the creation event; `chatgpt_card` is
- * a prompt Home's box sends to the conversation around the card, and
- * `assets_new` is New project in an Assets folder. */
-type HomeSource = "home_prompt" | "home_blank" | "chatgpt_card" | "assets_new";
+/** What started a project on Home, for the creation event; `assets_new` is
+ * New project in an Assets folder. */
+type HomeSource = "home_prompt" | "home_blank" | "assets_new";
 
 /** Whether a template copy cues the template tour: `quiet` when the chat
  * starts working in the project on arrival. */
@@ -105,8 +104,8 @@ export function useHomeCreate(residency: Residency, folderId: string | null) {
       if (!(await newProjectAllowed(client))) {
         return null;
       }
-      // A message riding along, here or in ChatGPT, means the chat works in it.
-      const tour: TourCue = first || source === "chatgpt_card" ? "quiet" : "tour";
+      // A message riding along means the chat works in it.
+      const tour: TourCue = first ? "quiet" : "tour";
       const id = template ? await templateProject(template, tour) : await emptyProject(first);
       if (first) {
         saveHomeHandoff(id, first);

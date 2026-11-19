@@ -34,8 +34,6 @@ import {
   type AssetRef,
 } from "@/cut/lib/assetRef";
 import { useCutCaps } from "@/cut/lib/backend/hooks";
-import { useEnvironment } from "@/cut/lib/environment";
-import { promptThroughHost } from "@/cut/lib/hostBridge";
 import { useMicTranscription } from "@/cut/lib/micTranscribe";
 import {
   ATTACHMENT_CARD,
@@ -74,7 +72,6 @@ export function HomePrompt({
 }) {
   const t = useTranslations("home.start");
   const chatError = useChatError();
-  const { chatgpt } = useEnvironment();
   const caps = useCutCaps();
   const [text, setText] = useState("");
   const [attachments, setAttachments] = useState<AssetRef[]>([]);
@@ -113,9 +110,9 @@ export function HomePrompt({
     uploads.clear();
   };
 
-  // The prompt goes out into a new project: its chat sends it on arrival, or
-  // inside ChatGPT's card, ChatGPT's conversation does. Picked things and
-  // dropped files ride as chips; a token typed by hand still picks its ref.
+  // The prompt goes out into a new project: its chat sends it on arrival.
+  // Picked things and dropped files ride as chips; a token typed by hand
+  // still picks its ref.
   const deliver = async () => {
     const { refs, text: plain } = collectRefs(
       text.trim(),
@@ -132,24 +129,6 @@ export function HomePrompt({
     );
     const body = plain.trim();
     const rest = refs.filter((r) => !isStartTemplateRef(r));
-
-    // Inside ChatGPT the conversation is ChatGPT's. The project opens in the
-    // card as on the web, then ChatGPT gets the words, with every picked and
-    // uploaded thing named so its tools can find it, and edits it on screen.
-    if (chatgpt) {
-      const names = rest.map((r) => r.name).join(", ");
-      const message = [body, names ? t("fromAssets", { names }) : ""]
-        .filter(Boolean)
-        .join("\n\n");
-      if (!message) {
-        return;
-      }
-      const id = await create.start("chatgpt_card", null, startRow?.start ?? null);
-      if (id && promptThroughHost(message, id)) {
-        reset();
-      }
-      return;
-    }
 
     const first =
       body || rest.length > 0 ? { text: body, attachments: rest, model } : null;
@@ -316,15 +295,12 @@ export function HomePrompt({
                   </Button>
                 </IconTip>
                 <div className="flex-1" />
-                {/* Inside ChatGPT the chat runs on ChatGPT's own model. */}
-                {!chatgpt && (
-                  <ModelSelector
-                    info={info}
-                    model={model}
-                    onSelect={selectModel}
-                    className="h-9 gap-1.5 rounded-full px-3 text-[13px]"
-                  />
-                )}
+                <ModelSelector
+                  info={info}
+                  model={model}
+                  onSelect={selectModel}
+                  className="h-9 gap-1.5 rounded-full px-3 text-[13px]"
+                />
                 {caps.liveMic && (
                   <IconTip label={t("voice")}>
                     <Button

@@ -65,16 +65,6 @@ export function openExternal(url: string) {
   window.open(url, "_blank", "noopener,noreferrer");
 }
 
-/** Hand a prompt written on the card's Home to the conversation around it,
- * with the project Home just opened for it: the card tells the assistant
- * that project is the one on screen, then sends the words as the person's
- * next message. Answers whether the host took it. */
-export function promptThroughHost(text: string, projectId: string): boolean {
-  if (editorHost() !== "chatgpt") return false;
-  window.parent.postMessage({ type: "donkeycut:prompt", text, projectId }, "*");
-  return true;
-}
-
 /** Save text made in the frame — a captions file — through the host. */
 export function saveThroughHost(text: string, name: string, mimeType: string): boolean {
   if (editorHost() !== "chatgpt") return false;
