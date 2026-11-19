@@ -31,6 +31,7 @@ import {
   type ProjectResult,
 } from "@/clients/chatgpt/server/projects";
 import { serveListing, type ToolListing } from "@/clients/chatgpt/server/reviewedListing";
+import { reportToolCalls, trackEvent, type ToolCallSink } from "@/clients/chatgpt/server/usage";
 import { widgetHtml } from "@/clients/chatgpt/widget.generated";
 import { searchLinksOf, splitToolDisplay } from "@/cut/lib/toolDisplay";
 import { mcpLocale } from "@/clients/chatgpt/server/locale";
@@ -155,6 +156,7 @@ export function createChatgptServer(
   projects = projectTools(identity, config),
   t: ChatgptTranslator = ENGLISH,
   listing: ToolListing = "reviewed",
+  onToolCall?: ToolCallSink,
 ) {
   const server = new McpServer(
     { name: "donkey-cut", title: "Donkey Cut", version: "1.3.0" },
@@ -165,6 +167,12 @@ export function createChatgptServer(
     },
   );
   serveListing(server, listing);
+
+  // Usage tracking sees every call, whichever tool it reaches.
+  if (onToolCall) {
+    reportToolCalls(server, onToolCall);
+  }
+
   const readMetadata = {
     securitySchemes: [{ type: "oauth2", scopes: ["projects:read"] }],
   };
@@ -652,6 +660,7 @@ export async function mcpEndpoint(request: Request) {
     config,
     projectTools(identity, config, prisma, locale),
     await translatorFor(locale, "chatgpt"),
+    (tool, ok) => trackEvent({ kind: "tool", userId: identity.userId, tool, ok }),
   );
   try {
     const response = await handler.fetch(request);
@@ -679,9 +688,10 @@ export function chatgptHttpHandler(
   config: ChatgptConfig,
   projects?: ReturnType<typeof projectTools>,
   t?: ChatgptTranslator,
+  onToolCall?: ToolCallSink,
 ) {
   return createMcpHandler(
-    () => createChatgptServer(identity, config, projects, t),
+    () => createChatgptServer(identity, config, projects, t, "reviewed", onToolCall),
     {
       onerror: (error) =>
         console.warn("[chatgpt] mcp request rejected", error.message),

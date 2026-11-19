@@ -28,3 +28,17 @@ model ChatgptToken {
   @@index([grantId])
   @@index([expiresAt])
 }
+
+// One row per approved connection and per tool call: installs and usage.
+model ChatgptEvent {
+  id        String @id @default(cuid())
+  userId    String
+  user      User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  kind      String // connect | tool
+  tool      String?
+  ok        Boolean @default(true)
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([userId])
+}

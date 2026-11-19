@@ -35,6 +35,7 @@ import {
 import { identitySigner, openIdMetadata } from "@/clients/chatgpt/server/oidc";
 import { signInReturnCookie } from "@/lib/signInReturn";
 import { escapeHtml } from "@/clients/chatgpt/server/locale";
+import { trackEvent } from "@/clients/chatgpt/server/usage";
 import { requestLocale } from "@/i18n/requestLocale";
 import type { Locale } from "@/i18n/locales";
 import { translatorFor } from "@/i18n/translator";
@@ -218,6 +219,7 @@ export const consent = withDonkeyAuth(async (request) => {
     callbackUrl.searchParams.set("error", "access_denied");
   } else {
     const code = await createCode(request.donkey.userId, authorization, config);
+    trackEvent({ kind: "connect", userId: request.donkey.userId });
     callbackUrl.searchParams.set("code", code);
   }
 

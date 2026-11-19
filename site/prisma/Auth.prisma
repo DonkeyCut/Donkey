@@ -27,6 +27,7 @@ model User {
   creditAutoReload CreditAutoReload?
   apiKeys       Apikey[]
   chatgptGrants ChatgptGrant[]
+  chatgptEvents ChatgptEvent[]
   proSubscription ProSubscription?
   introOfferView IntroOfferView?
   avatar        UserAvatar?
