@@ -2,9 +2,9 @@
 // out. The client renders the timeline's audible mix, chunks it, and stitches
 // the results (lib/cloudTranscribe.ts); this route only turns one chunk of
 // speech into cues with the Gemini speech model, which returns every word
-// with its own start and end. Each account's allowance of chunks is included
-// (Pro per billing period, free per month — see withinFreeAllowance); chunks
-// past that meter against the user's inference credits like every
+// with its own start and end. Each account's allowance of audio is included
+// (Pro per billing period, free per month — see withinFreeAllowance); audio
+// past that meters against the user's inference credits like every
 // /api/inference route.
 import {
   creditErrorResponse,
@@ -28,9 +28,10 @@ import type { JsonValue } from "@/lib/inference/providers";
 import { UserError } from "@/cut/lib/userError";
 import { err } from "./util";
 
-// The client sends 16 kHz 16-bit mono PCM in chunks of at most 20 seconds; the
-// allowance below counts chunks, so the chunk itself is held to that length
-// (with a little room), or an oversized chunk would be minutes on the house.
+// The client sends 16 kHz 16-bit mono PCM in chunks of at most 20 seconds, and
+// dictation sends each phrase of a few seconds as its own chunk. The allowance
+// below counts each chunk's seconds, so a phrase costs what it holds.
+const CHUNK_SECONDS = 20;
 const PCM_BYTES_PER_SECOND = 32_000;
 const MAX_CHUNK_SECONDS = 30;
 const MAX_AUDIO_BYTES = 44 + MAX_CHUNK_SECONDS * PCM_BYTES_PER_SECOND;
@@ -40,11 +41,11 @@ const PROVIDER = "gemini";
 // priced in provider-pricing.ts.
 const MODEL = geminiModelRoles.transcription;
 
-// Each account's first chunks in its allowance window are on the house, so
+// Each account's first audio in its allowance window is on the house, so
 // transcripts fill in for every project — the background sweep included —
 // before any charge appears. A chunk is at most 20 seconds of speech-bearing
 // audio (silent chunks never reach this route), at about $0.001 provider
-// cost each. Pro includes 2 hours per billing period, aligned to the
+// cost for a full one. Pro includes 2 hours per billing period, aligned to the
 // subscription's own cycle; a free account gets 30 minutes per UTC calendar
 // month. Past the allowance, chunks bill the credit balance as usual; a
 // `freeOnly` caller is turned away instead.
@@ -53,14 +54,31 @@ const MODEL = geminiModelRoles.transcription;
 // transcribes what nobody asked for, so the user's own caption runs always
 // find at least the other half included. Sweep chunks record under their own
 // request kind, which is how the halves are told apart.
-const PRO_FREE_CHUNKS = 360; // 2 hours at 20s per chunk
-const FREE_CHUNKS = 90; // 30 minutes
+const PRO_FREE_SECONDS = 2 * 60 * 60;
+const FREE_SECONDS = 30 * 60;
 const USER_KIND = "transcribe";
 const SWEEP_KIND = "transcribe_sweep";
 export const freeTranscriptionExhausted = "free_transcription_exhausted";
 
-/** Whether this chunk fits the caller's remaining allowance. Used chunks are
- * counted from the route's own "included" usage events since the window
+/** The seconds of audio a set of included chunks used, and the sweep's share
+ * of them. Each event carries its chunk's length; one recorded before lengths
+ * were kept counts as a full chunk. */
+export function allowanceSeconds(rows: { requestKind: string; metadata: unknown }[]) {
+  let total = 0;
+  let sweep = 0;
+  for (const row of rows) {
+    const kept = isJsonObject(row.metadata as JsonValue) ? (row.metadata as { seconds?: unknown }).seconds : undefined;
+    const seconds = typeof kept === "number" ? kept : CHUNK_SECONDS;
+    total += seconds;
+    if (row.requestKind === SWEEP_KIND) {
+      sweep += seconds;
+    }
+  }
+  return { total, sweep };
+}
+
+/** Whether this chunk fits the caller's remaining allowance. Used seconds are
+ * summed from the route's own "included" usage events since the window
  * opened, so the ledger is the tracker and no separate counter can drift
  * from it. Concurrent chunks can each pass the check before any of them
  * records, so the allowance can overshoot by the posts-in-flight few —
@@ -70,9 +88,8 @@ async function withinFreeAllowance(userId: string, sweep: boolean): Promise<bool
   const now = new Date();
   const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
   const windowStart = pro?.currentPeriodStart ?? monthStart;
-  const used = await prisma.inferenceUsageEvent.groupBy({
-    by: ["requestKind"],
-    _count: { _all: true },
+  const rows = await prisma.inferenceUsageEvent.findMany({
+    select: { requestKind: true, metadata: true },
     where: {
       userId,
       route: ROUTE,
@@ -81,13 +98,12 @@ async function withinFreeAllowance(userId: string, sweep: boolean): Promise<bool
       createdAt: { gte: windowStart },
     },
   });
-  const total = used.reduce((n, u) => n + u._count._all, 0);
+  const used = allowanceSeconds(rows);
   // Pro and Max carry the two hours; Plus and free accounts the half hour.
-  const cap = pro && pro.planKey !== "plus" ? PRO_FREE_CHUNKS : FREE_CHUNKS;
-  if (total >= cap) return false;
+  const cap = pro && pro.planKey !== "plus" ? PRO_FREE_SECONDS : FREE_SECONDS;
+  if (used.total >= cap) return false;
   if (!sweep) return true;
-  const sweepUsed = used.find((u) => u.requestKind === SWEEP_KIND)?._count._all ?? 0;
-  return sweepUsed < Math.floor(cap / 2);
+  return used.sweep < cap / 2;
 }
 
 interface WireWord {
@@ -318,6 +334,8 @@ export const transcribeCloud = {
       await recordInferenceUsage({
         billingMode: included ? "included" : "credits",
         clientId: null,
+        // The chunk's length, which is what the allowance counts.
+        metadata: { seconds: audioSeconds },
         model: MODEL,
         provider: PROVIDER,
         requestKind: freeOnly ? SWEEP_KIND : USER_KIND,

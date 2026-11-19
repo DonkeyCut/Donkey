@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { groupWordsIntoCues, transcribeLanguageCode } from "./transcribe";
+import { allowanceSeconds, groupWordsIntoCues, transcribeLanguageCode } from "./transcribe";
 
 describe("transcribeLanguageCode", () => {
   test("keeps a locale the model lists", () => {
@@ -45,5 +45,24 @@ describe("groupWordsIntoCues", () => {
 
   test("returns nothing for no words", () => {
     expect(groupWordsIntoCues([])).toEqual([]);
+  });
+});
+
+describe("allowanceSeconds", () => {
+  test("a dictated phrase counts for its own length", () => {
+    const rows = [
+      { requestKind: "transcribe", metadata: { seconds: 2.5 } },
+      { requestKind: "transcribe", metadata: { seconds: 4 } },
+    ];
+    expect(allowanceSeconds(rows)).toEqual({ total: 6.5, sweep: 0 });
+  });
+
+  test("a chunk recorded before lengths were kept counts as a full one", () => {
+    const rows = [
+      { requestKind: "transcribe", metadata: null },
+      { requestKind: "transcribe_sweep", metadata: null },
+      { requestKind: "transcribe_sweep", metadata: { seconds: 12 } },
+    ];
+    expect(allowanceSeconds(rows)).toEqual({ total: 52, sweep: 32 });
   });
 });

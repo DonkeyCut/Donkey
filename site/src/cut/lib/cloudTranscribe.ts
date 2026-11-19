@@ -37,10 +37,10 @@ export interface CloudTranscribeSpec {
 }
 
 const RATE = 16000; // the wire format the hosted route expects
-// The hosted route's included allowance counts chunks and holds each to this
-// length (its MAX_CHUNK_SECONDS leaves a little room), so the chunk is the
-// unit of accounting: short enough that a few round trips overlap, long
-// enough that a sentence keeps its context.
+// The hosted route's included allowance counts each chunk's seconds and holds
+// a chunk to this length (its MAX_CHUNK_SECONDS leaves a little room): short
+// enough that a few round trips overlap, long enough that a sentence keeps
+// its context.
 const CHUNK_SECONDS = 20;
 const OVERLAP_SECONDS = 3; // audio shared across chunk seams for stitching
 const POSTS_IN_FLIGHT = 4; // short chunks mean more round-trips; overlap them
