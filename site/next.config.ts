@@ -43,6 +43,8 @@ const nextConfig: NextConfig = {
   experimental: {
     serverActions: { bodySizeLimit: "4gb" },
     proxyClientMaxBodySize: "4gb",
+    // Next's upgrade nudges offer security releases only.
+    agentUpgrade: "security",
   },
   // Build assets are fetched by search crawlers to render pages, which puts
   // every chunk, stylesheet and font in Search Console as a candidate page.
