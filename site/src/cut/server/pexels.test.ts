@@ -42,6 +42,19 @@ describe("pexelsFileUrl", () => {
     );
   });
 
+  test("a video shot 4096 tall keeps its 1080p at 1080 by 2048", async () => {
+    const has = cdn(["4620921-uhd_2160_4096_25fps.mp4", "4620921-hd_1080_2048_25fps.mp4", "4620921-sd_506_960_25fps.mp4"]);
+    expect(await pexelsFileUrl("4620921", has)).toBe(
+      "https://videos.pexels.com/video-files/4620921/4620921-hd_1080_2048_25fps.mp4"
+    );
+  });
+
+  test("a video shot 4096 wide keeps its 1080p at 2048 by 1080", async () => {
+    expect(await pexelsFileUrl("5", cdn(["5-hd_2048_1080_25fps.mp4", "5-sd_960_506_25fps.mp4"]))).toBe(
+      "https://videos.pexels.com/video-files/5/5-hd_2048_1080_25fps.mp4"
+    );
+  });
+
   test("an old video with no 1080p falls back to the largest it has", async () => {
     expect(await pexelsFileUrl("1581362", cdn(["1581362-sd_960_540_30fps.mp4", "1581362-sd_640_360_30fps.mp4"]))).toBe(
       "https://videos.pexels.com/video-files/1581362/1581362-sd_960_540_30fps.mp4"

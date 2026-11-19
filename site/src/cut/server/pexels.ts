@@ -12,18 +12,29 @@ const FILE_RE = /^https?:\/\/videos\.pexels\.com\/video-files\/(\d+)\/[^/?#]+\.(
 
 /** The renditions worth importing, best first: 1080p either way up, then the
  * larger and smaller sizes a video shot before 1080p or above it may hold
- * instead. */
+ * instead. A video shot 4096 across keeps its sizes at that wider shape:
+ * its 1080p is 2048 by 1080. */
 const SIZES = [
   "hd_1920_1080",
   "hd_1080_1920",
+  "hd_2048_1080",
+  "hd_1080_2048",
   "uhd_2560_1440",
   "uhd_1440_2560",
+  "uhd_2732_1440",
+  "uhd_1440_2732",
   "hd_1280_720",
   "hd_720_1280",
+  "hd_1366_720",
+  "hd_720_1366",
   "uhd_3840_2160",
   "uhd_2160_3840",
+  "uhd_4096_2160",
+  "uhd_2160_4096",
   "sd_960_540",
   "sd_540_960",
+  "sd_960_506",
+  "sd_506_960",
   "sd_640_360",
   "sd_360_640",
 ];
