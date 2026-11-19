@@ -1,6 +1,6 @@
 {
-  "version": "1.1.1",
-  "review": "submitted",
+  "version": "1.1.2",
+  "review": "draft",
   "tools": [
     {
       "name": "account_status",
@@ -8771,7 +8771,7 @@
     {
       "name": "set_aspect",
       "title": "Set aspect",
-      "description": "Set the open timeline's output frame ratio as \"W:H\"; each timeline keeps its own. The frame is the user's own setting, so call this only when they asked for a shape or a format (\"make it vertical\", \"for TikTok\", \"square\") — never inferred from a reference image's shape, a platform named in passing, or what would suit a generation you are about to run. Presets: 16:9 (YouTube), 9:16 (TikTok/Reels/Shorts), 1:1, 4:3, 3:4, 2:1 — but any ratio up to an 8:1 shape works, with whole or decimal sides (\"9:5\", \"2.39:1\" — stored reduced, so 2.39:1 becomes 239:100). The frame renders with its short side at 1080px: 9:16 → 1080×1920, 16:9 → 1920×1080, 9:5 → 1944×1080. It overwrites an existing value; the same call again gives the same result.",
+      "description": "Set the open timeline's output frame ratio as \"W:H\"; each timeline keeps its own. The frame is the user's own setting, so call this only when they asked for a shape or a format (\"make it vertical\", \"for TikTok\", \"square\") — never inferred from a reference image's shape, a platform named in passing, or what would suit a generation you are about to run. A project started from Home opens at the shape of the biggest picture sent with its first message; a shape or format that message asks for overrides it, so set it before the first edit. Presets: 16:9 (YouTube), 9:16 (TikTok/Reels/Shorts), 1:1, 4:3, 3:4, 2:1 — but any ratio up to an 8:1 shape works, with whole or decimal sides (\"9:5\", \"2.39:1\" — stored reduced, so 2.39:1 becomes 239:100). The frame renders with its short side at 1080px: 9:16 → 1080×1920, 16:9 → 1920×1080, 9:5 → 1944×1080. It overwrites an existing value; the same call again gives the same result.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -11774,7 +11774,7 @@
     {
       "name": "set_transition",
       "title": "Set transition",
-      "description": "Set the transition from this clip into the next clip on its track (any video track), in seconds (0 clears it, max 2). 0.5s suits a blend on the picture; the cross dissolve (audiocross) wants about 0.3s, since it is centered on the cut and both clips sound through it. A transition is a blend across the cut — it never moves, trims or overlaps clips, and it plays only while the pair touches. On upper tracks every style blends as an alpha dissolve (the tracks beneath show through). Only valid when a next same-track clip exists. Each edge holds one effect: setting a transition clears the animations adjacent to its joint (and set_animation on that edge replaces the transition). Read the transitions-and-fades skill before styling cuts. It overwrites an existing value; the same call again gives the same result.",
+      "description": "Set the transition from this clip into the next clip on its track (any video track), in seconds (0 clears it, max 2). 0.5s suits a blend on the picture; the cross dissolve (audiocross) wants about 0.3s, since it is centered on the cut and both clips sound through it. A transition is a blend across the cut — it never moves, trims or overlaps clips, and it plays only while the pair touches. On upper tracks every style plays as on track 0, and the tracks beneath show wherever the pair leaves the frame clear. Only valid when a next same-track clip exists. Each edge holds one effect: setting a transition clears the animations adjacent to its joint (and set_animation on that edge replaces the transition). Read the transitions-and-fades skill before styling cuts. It overwrites an existing value; the same call again gives the same result.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -12482,9 +12482,49 @@
       }
     },
     {
+      "name": "template_favorite",
+      "title": "Template favorite",
+      "description": "Star a gallery template for the user, or take its star off. Starred templates show under Favorites on the Templates page, on every device. Only when the user asked. It overwrites an existing value; the same call again gives the same result.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "description": "The cloud project's id"
+          },
+          "id": {
+            "type": "string",
+            "description": "Gallery template id from template_gallery"
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "add",
+              "remove"
+            ],
+            "description": "add stars it, remove takes the star off"
+          }
+        },
+        "required": [
+          "projectId",
+          "id",
+          "action"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
       "name": "template_gallery",
       "title": "Template gallery",
-      "description": "List Donkey's template gallery — ready-made edits every account can start from, each with sample footage in its clips, styled titles and effects, and often a soundtrack timed to its cuts. Each entry gives its id, name, what it is for, frame shape, length, how many footage slots and texts it has, whether it carries music, and its link. Filter by category, aspect, length or style, and pass `query` to find templates from a description in the user's own words, best fit first; all are optional. Results come a page at a time with the total; `next` is the offset of the following page. Read-only: it changes nothing in the project or the account.",
+      "description": "List Donkey's template gallery — ready-made edits every account can start from, each with sample footage in its clips, styled titles and effects, and often a soundtrack timed to its cuts. Each entry gives its id, name, what it is for, frame shape, length, how many footage slots and texts it has, whether it carries music, and its link. Entries the user starred carry favorite true and come first, latest star first; source \"favorites\" lists only those. Filter by category, aspect, length or style, and pass `query` to find templates from a description in the user's own words, best fit first; all are optional. Results come a page at a time with the total; `next` is the offset of the following page. Read-only: it changes nothing in the project or the account.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -12516,6 +12556,7 @@
               "celebration",
               "product",
               "explainer",
+              "design",
               "titles",
               "logo",
               "trailer",
@@ -12550,6 +12591,14 @@
               "retro",
               "elegant"
             ]
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "all",
+              "favorites"
+            ],
+            "description": "favorites: only the templates the user starred (default all)"
           },
           "offset": {
             "type": "number",
