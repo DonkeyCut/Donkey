@@ -6,15 +6,10 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useLocale, useTranslations } from "next-intl";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
-  AudioLines,
-  Film,
   FolderOpen,
   FolderPlus,
   Funnel,
-  Image as ImageIcon,
   LayoutGrid,
-  Layers,
-  LayoutTemplate,
   Link as LinkIcon,
   List,
   Loader2,
@@ -24,7 +19,6 @@ import {
   SquarePlus,
   StickyNote,
   Trash2,
-  Type,
   Upload,
   X,
 } from "lucide-react";
@@ -55,7 +49,6 @@ import {
   renameTemplate,
   unifiedFolders,
   updateLibraryFolder,
-  type LibraryAsset,
   type LibraryData,
   type LibraryTemplateItem,
 } from "@/cut/lib/library";
@@ -115,6 +108,7 @@ import { DeleteConfirm, SelectionMenu, usePickWords, useSelectionMenu } from "@/
 import { ASSET_ROW, ASSET_ROW_PICKED, AssetTable } from "./assetTable";
 import { GraceBanner } from "./GraceBanner";
 import { useHomeCreate } from "@/cut/components/home/useHomeCreate";
+import { RowThumb } from "./RowThumb";
 import { CopyingTile, ProjectMenu, ProjectMenuItems, ProjectTile, ResidencyBadge } from "./ProjectCard";
 import { useProjectActions } from "./projectActions";
 import {
@@ -161,15 +155,6 @@ const subscribeView = (notify: () => void) => {
 /** What a delete is about to take: folders and cards, picked together. */
 type DeleteSet = { folders: AssetFolder[]; entries: AssetEntry[] };
 const NO_PICK: DeleteSet = { folders: [], entries: [] };
-
-// Each media type's list icon.
-const TYPE_ICON: Record<LibraryAsset["type"], typeof Film> = {
-  video: Film,
-  image: ImageIcon,
-  audio: AudioLines,
-  font: Type,
-  lut: LayoutTemplate,
-};
 
 const isTypeTab = (v: string | null): v is AssetTypeTab => !!v && (ASSET_TYPES as readonly string[]).includes(v);
 
@@ -945,7 +930,6 @@ export function AssetsView() {
   // The list: one row per card, the same pick and menus.
   const renderRow = (e: AssetEntry) => {
     const offline = !live(e.residency);
-    const Icon = e.kind === "project" ? Film : e.kind === "template" ? Layers : TYPE_ICON[e.asset.type];
     const length = e.kind === "project" ? e.project.duration : e.kind === "media" ? e.asset.duration : e.template.duration;
     const size = e.kind === "project" ? formatBytes(e.project.sizeBytes ?? 0, locale) : "";
     const openRow = (ev: React.MouseEvent) => {
@@ -978,7 +962,7 @@ export function AssetsView() {
         onAuxClick={e.kind === "project" ? openRow : undefined}
       >
         <span className="flex min-w-0 items-center gap-2.5">
-          <Icon className="size-4 shrink-0 text-muted-foreground" />
+          <RowThumb entry={e} offline={offline} />
           <span className="truncate font-medium">{e.name}</span>
           {dual && <ResidencyBadge residency={e.residency} offline={offline} className="shrink-0 text-muted-foreground" />}
         </span>
