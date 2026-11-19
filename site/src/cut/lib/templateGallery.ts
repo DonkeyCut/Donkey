@@ -26,6 +26,7 @@ export const TEMPLATE_CATEGORIES = [
   "celebration",
   "product",
   "explainer",
+  "design",
   "titles",
   "logo",
   "trailer",
@@ -70,6 +71,9 @@ export type GalleryTemplate = {
   name: LocalizedText;
   description: LocalizedText;
   category: TemplateCategory;
+  /** Further categories the template is listed under, e.g. a design lesson
+   * told on camera sits in talkingHead and design. */
+  alsoIn?: TemplateCategory[];
   aspect: TemplateAspect;
   style: TemplateStyle;
   seconds: number;
@@ -125,6 +129,11 @@ export function lengthOf(seconds: number): TemplateLength {
   return "long";
 }
 
+/** Every category a template is listed under, its own first. */
+export function categoriesOf(t: GalleryTemplate): TemplateCategory[] {
+  return [t.category, ...(t.alsoIn ?? [])];
+}
+
 export type TemplateFilter = {
   category?: TemplateCategory;
   aspect?: TemplateAspect;
@@ -135,7 +144,7 @@ export type TemplateFilter = {
 export function filterTemplates(all: readonly GalleryTemplate[], f: TemplateFilter): GalleryTemplate[] {
   return all.filter(
     (t) =>
-      (!f.category || t.category === f.category) &&
+      (!f.category || categoriesOf(t).includes(f.category)) &&
       (!f.aspect || t.aspect === f.aspect) &&
       (!f.length || lengthOf(t.seconds) === f.length) &&
       (!f.style || t.style === f.style)

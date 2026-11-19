@@ -10,6 +10,7 @@ import { noul, type Entry, type NoulAnswer } from "@/cut/lib/judge";
 import {
   TEMPLATE_OWN_MAX,
   TEMPLATE_QUERY_MAX,
+  categoriesOf,
   type GalleryTemplate,
   type TemplateCandidate,
   type TemplateMatch,
@@ -46,7 +47,7 @@ const key = (i: number) => `t${i}`;
 function galleryLabel(t: GalleryTemplate): string {
   const parts = [
     `${t.name.en}: ${t.description.en}`,
-    `category ${t.category}`,
+    `category ${categoriesOf(t).join(", ")}`,
     `style ${t.style}`,
     `frame ${t.aspect}`,
     `${t.seconds}s long`,

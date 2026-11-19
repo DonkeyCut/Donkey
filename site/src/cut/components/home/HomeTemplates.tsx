@@ -10,6 +10,7 @@ import { useTemplateIndex } from "@/cut/lib/queries";
 import {
   localized,
   TEMPLATE_CATEGORIES,
+  categoriesOf,
   type TemplateCategory,
 } from "@/cut/lib/templateGallery";
 import { cn } from "@/lib/utils";
@@ -47,13 +48,13 @@ export function HomeTemplates({ panel }: { panel: PanelNav }) {
   const all = index.data?.templates ?? [];
 
   // Only categories that hold a template get a chip, in the gallery's order.
-  const present = new Set(all.map((tpl) => tpl.category));
+  const present = new Set(all.flatMap(categoriesOf));
   const chips: Chip[] = [
     ALL,
     ...TEMPLATE_CATEGORIES.filter((c) => present.has(c)),
   ];
   const shown = (
-    chip === ALL ? all : all.filter((tpl) => tpl.category === chip)
+    chip === ALL ? all : all.filter((tpl) => categoriesOf(tpl).includes(chip))
   ).slice(0, PREVIEW_TEMPLATES);
 
   if (!index.isPending && all.length === 0) {

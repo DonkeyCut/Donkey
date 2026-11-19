@@ -5779,6 +5779,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
           name: t.name.en,
           description: t.description.en,
           category: t.category,
+          ...(t.alsoIn?.length ? { also_in: t.alsoIn } : {}),
           aspect: t.aspect,
           style: t.style,
           seconds: t.seconds,

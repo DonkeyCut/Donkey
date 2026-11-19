@@ -114,7 +114,7 @@ const ID_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 // What a project keeps for its maker, never for the people who start from it.
 const MAKER_FIELDS = ["renders", "genvideo", "publish", "notes", "firstOpen", "ui", "kind"] as const;
 
-type Meta = Pick<GalleryTemplate, "id" | "name" | "description" | "category" | "style" | "fps" | "tags">;
+type Meta = Pick<GalleryTemplate, "id" | "name" | "description" | "category" | "alsoIn" | "style" | "fps" | "tags">;
 
 // A template's gallery text: its card's name and the sentence under it.
 type TemplateText = Pick<GalleryTemplate, "name" | "description">;
@@ -235,6 +235,9 @@ function checkMeta(meta: Meta) {
   }
   if (!TEMPLATE_CATEGORIES.includes(meta.category)) {
     throw new Error(`category is one of ${TEMPLATE_CATEGORIES.join(", ")}.`);
+  }
+  if (meta.alsoIn !== undefined && !(Array.isArray(meta.alsoIn) && meta.alsoIn.every((c) => TEMPLATE_CATEGORIES.includes(c) && c !== meta.category))) {
+    throw new Error(`alsoIn, when given, lists other categories from ${TEMPLATE_CATEGORIES.join(", ")}.`);
   }
   if (!TEMPLATE_STYLES.includes(meta.style)) {
     throw new Error(`style is one of ${TEMPLATE_STYLES.join(", ")}.`);
