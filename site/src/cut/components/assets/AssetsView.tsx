@@ -119,6 +119,7 @@ import {
   folderItemCount,
   mergeFolders,
   nameMatches,
+  notesLayoutOn,
   projectFrame,
   type AssetEntry,
   type AssetFolder,
@@ -1027,10 +1028,10 @@ export function AssetsView() {
       onDropFiles={(files, fid) => void upload(files, fid)}
     />
   );
-  const notesView = (layout: FolderLayout) => (
+  const notesView = () => (
     <NotesView
       ref={noteView}
-      layout={layout === "table" ? "rows" : "tiles"}
+      layout={notesLayoutOn(tab, view)}
       query={searching ? query : ""}
       library={{
         folderId: openFolder,
@@ -1234,7 +1235,7 @@ export function AssetsView() {
         {view === "list" ? (
           <AssetTable framed={listRows}>
             {folderShelf("table")}
-            {notesShown && notesView("table")}
+            {notesView()}
             {shownCopies.map((c) => (
               <div key={c.key} aria-busy="true" className={cn(ASSET_ROW, "cursor-default")}>
                 <span className="flex min-w-0 items-center gap-2.5">
@@ -1252,7 +1253,7 @@ export function AssetsView() {
         ) : (
           <>
             {folderShelf("tiles")}
-            {notesShown && notesView("tiles")}
+            {notesView()}
           </>
         )}
 

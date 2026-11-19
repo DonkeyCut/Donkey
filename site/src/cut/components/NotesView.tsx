@@ -163,8 +163,9 @@ type Props = {
   /** A search: when set, every note whose title or text holds it shows,
    * whatever folder it is filed in. */
   query?: string;
-  /** Paper tiles by default; `rows` fills the Assets list's columns. */
-  layout?: "tiles" | "rows";
+  /** Paper tiles by default; `rows` fills the Assets list's columns; `hidden`
+   * lists nothing and keeps the open note and `create` working. */
+  layout?: "tiles" | "rows" | "hidden";
   ref?: Ref<NotesViewHandle>;
 };
 export function NotesView({ library, query = "", layout = "tiles", ref }: Props) {
@@ -202,7 +203,8 @@ export function NotesView({ library, query = "", layout = "tiles", ref }: Props)
   const params = useSearchParams();
   const openNoteId = params.get("note");
   // What is filed right here: the notes the open Library folder holds.
-  const shown = notesShownIn(list, library, query);
+  // A hidden view lists nothing, so select-all and delete reach no note.
+  const shown = layout === "hidden" ? [] : notesShownIn(list, library, query);
   // Notes pick the way every tile grid does, and a pick reaches only the
   // notes on screen: a note picked in another folder never rides a delete.
   const shownIds = shown.map((n) => n.id);

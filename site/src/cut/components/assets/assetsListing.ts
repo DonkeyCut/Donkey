@@ -162,3 +162,14 @@ export function cardArea(frame: { w: number; h: number }, long = CARD_LONG_SIDE)
   const longest = Math.max(frame.w, frame.h);
   return Math.round((long * long * short) / longest);
 }
+
+/** How the notes view draws on a tab. All and Notes list notes in the page's
+ * view. Every other tab keeps the view mounted with nothing listed, so Add
+ * note and a note the URL names open there too. */
+export function notesLayoutOn(tab: AssetTypeTab, view: "gallery" | "list"): "tiles" | "rows" | "hidden" {
+  if (tab !== "all" && tab !== "notes") {
+    return "hidden";
+  }
+
+  return view === "list" ? "rows" : "tiles";
+}

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { LibraryAsset, LibraryData, LibraryFolder, LibraryTemplateItem } from "@/cut/lib/library";
 import type { ProjectSummary } from "@/cut/lib/types";
-import { assetEntries, cardArea, cardBox, entryOnTab, folderItemCount, mergeFolders, nameMatches } from "./assetsListing";
+import { assetEntries, cardArea, cardBox, entryOnTab, folderItemCount, mergeFolders, nameMatches, notesLayoutOn } from "./assetsListing";
 
 const folder = (id: string, residency: LibraryFolder["residency"] = "cloud"): LibraryFolder => ({
   id,
@@ -90,4 +90,17 @@ test("a folder counts its cards, subfolders and notes", () => {
     ],
   });
   expect(count).toBe(4);
+});
+
+describe("notesLayoutOn", () => {
+  test("lists notes on All and Notes in the page's view", () => {
+    expect(notesLayoutOn("all", "gallery")).toBe("tiles");
+    expect(notesLayoutOn("notes", "list")).toBe("rows");
+  });
+
+  // Add note runs through the notes view, so every tab keeps one mounted.
+  test("keeps the notes view on every other tab, listing nothing", () => {
+    expect(notesLayoutOn("projects", "gallery")).toBe("hidden");
+    expect(notesLayoutOn("videos", "list")).toBe("hidden");
+  });
 });
