@@ -85,7 +85,7 @@ release process, deploy the site and cloud worker, then turn the setting
 on.
 
 Set the same `CUT_RUNNER_SECRET` on the hosted site and the
-`donkey-cut-worker` Cloudflare Worker before deployment. The Worker passes it
+`donkey-cut-worker` Cloudflare Worker. The Worker passes it
 to the render container.
 
 Create a ChatGPT developer-mode app pointing at
@@ -93,8 +93,7 @@ Create a ChatGPT developer-mode app pointing at
 ID `donkey-chatgpt`, no client secret, and scopes
 `projects:read previews:render projects:write openid email`.
 Configure the exact redirect URI supplied by ChatGPT in `chatgptApp.redirectUris`.
-Discovery advertises issuer identification, and every authorization redirect
-includes `iss`. The embedded
+The embedded
 resource declares `https://chatgpt.donkeycut.com` as its widget domain, from
 which ChatGPT derives a sandbox origin. The widget HTML arrives through MCP,
 its scripts and styles load from `donkeycut.com`, and video loads from
@@ -104,11 +103,12 @@ Public submission verifies control of `donkeycut.com` with a token from the
 portal. `npm run chatgpt:plugin -- --demo <url>` builds the ZIP the portal
 imports as a new draft: the listing, review cases and guides as skills.
 
-Run the client tests with `bun test src/clients/chatgpt`. The browser fixture
-`bun run scripts/eval-chatgpt-widget.ts` checks the widget against a mock
-host. With the dev server up,
-`bun run scripts/eval-chatgpt-workflow.ts` drives the editing workflow through
-the MCP tools in process.
+`bun test src/clients/chatgpt` runs the client tests,
+`scripts/eval-chatgpt-widget.ts` checks the widget against a mock host, and
+`scripts/eval-chatgpt-workflow.ts` drives the MCP tools against the dev server.
+
+Every approved connection and tool call writes a usage row;
+`scripts/chatgpt-usage.ts` reports installs and calls per tool.
 
 ## Publishing changes
 
