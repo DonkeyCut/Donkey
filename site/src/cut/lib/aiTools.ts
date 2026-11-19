@@ -5760,7 +5760,15 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
   template_gallery: async (_s, input) => {
       const pick = <T extends string>(value: unknown, allowed: readonly T[]): T | undefined =>
         allowed.includes(value as T) ? (value as T) : undefined;
-      const [{ templates }, starred] = await Promise.all([fetchTemplateIndex(), fetchFavorites()]);
+      // The gallery lists without the favorites: a caller whose stars cannot
+      // be read sees none starred. Only a favorites listing needs the read.
+      const stars = fetchFavorites().catch((error: unknown): string[] => {
+        if (input.source === "favorites") {
+          throw error;
+        }
+        return [];
+      });
+      const [{ templates }, starred] = await Promise.all([fetchTemplateIndex(), stars]);
       const favorites = new Set(starred);
       const kept = filterTemplates(templates, {
         category: pick(input.category, TEMPLATE_CATEGORIES),
