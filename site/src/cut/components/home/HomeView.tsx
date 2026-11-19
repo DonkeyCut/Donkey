@@ -79,7 +79,7 @@ export function HomeView() {
           <h1
             className={cn(
               headingFont.className,
-              "flex items-center justify-center gap-3 text-center text-[34px] leading-10 font-medium tracking-[-0.05em]",
+              "mb-5 flex items-center justify-center gap-3 text-center text-[34px] leading-10 font-medium tracking-[-0.05em]",
             )}
           >
             <span className="size-10 shrink-0">
