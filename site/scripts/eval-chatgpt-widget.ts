@@ -44,7 +44,7 @@ const hostHtml = `<!doctype html><html><body><iframe title="Donkey Cut preview" 
 const frame = document.querySelector('iframe');
 const project = {id:'project',name:'Launch film',revision:'cloud:2',url:'https://donkeycut.com/app/p/project'};
 let count = 0, renewals = 0;
-window.calls = []; window.contexts = []; window.said = []; window.links = []; window.modes = []; window.editable = false; window.holdMs = 0; window.readyMs = 0; window.freshCard = false; window.signedOut = false; window.failOpen = false; window.missing = false; window.editorCodes = 0;
+window.calls = []; window.contexts = []; window.links = []; window.modes = []; window.editable = false; window.holdMs = 0; window.readyMs = 0; window.freshCard = false; window.signedOut = false; window.failOpen = false; window.missing = false; window.editorCodes = 0;
 const view = (selected, preview = null) => ({view:selected?'project':'projects',projects:selected?[]:[project],nextCursor:null,project:selected?project:null,preview,canRender:true,canEdit:window.editable,export:null,job:null,results:[],changed:false,account:null,missing:null});
 const missingView = () => ({...view(false),view:'missing',projects:[],missing:{id:project.id}});
 const editorLink = () => ({url:location.origin+'/embed?embed=chatgpt&code=one-use-'+ ++window.editorCodes +'&project=project',expiresAt:Date.now()+60000});
@@ -76,8 +76,7 @@ window.addEventListener('message', ({source,data}) => {
    reply(data.id,result(view(true,{id:'job',status:done?'done':'running',progress:done?1:count/3,revision:'cloud:2'}),done?{url:location.origin+'/preview.mp4?v='+renewals++,expiresAt:Date.now()+3600000}:null));
   }
  }
- if(data.method === 'ui/update-model-context') { window.contexts.push(data.params); window.said.push('context'); reply(data.id,{}); }
- if(data.method === 'ui/message') { window.said.push('message:' + data.params.content[0].text); reply(data.id,{}); }
+ if(data.method === 'ui/update-model-context') { window.contexts.push(data.params); reply(data.id,{}); }
  if(data.method === 'ui/open-link') { window.links.push(data.params.url); reply(data.id,{}); }
  if(data.method === 'ui/request-display-mode') { window.modes.push(data.params.mode); reply(data.id,{mode:data.params.mode}); }
 });
@@ -126,14 +125,6 @@ try {
   await homeFrame.evaluate(() => parent.postMessage({ type: "donkeycut:page", projectId: "project", name: "Launch film" }, "*"));
   await page.waitForFunction(() => (window as unknown as Contexts).contexts.at(-1)?.structuredContent?.projectId === "project");
   assert.equal(await page.evaluate(() => (window as unknown as Contexts).contexts.at(-1)?.structuredContent?.name), "Launch film", "the model knows which project the frame shows");
-  // A prompt from the framed Home arrives with the project Home opened for it:
-  // the model learns that project first, then hears the words.
-  type Said = Contexts & { said: string[] };
-  await homeFrame.evaluate(() => parent.postMessage({ type: "donkeycut:prompt", text: "a 10s video about dogs", projectId: "started" }, "*"));
-  await page.waitForFunction(() => (window as unknown as Said).said.includes("message:a 10s video about dogs"));
-  const said = await page.evaluate(() => (window as unknown as Said).said);
-  assert.deepEqual(said.slice(-2), ["context", "message:a 10s video about dogs"], "the started project reaches the model before the prompt");
-  assert.equal(await page.evaluate(() => (window as unknown as Said).contexts.at(-1)?.structuredContent?.projectId), "started", "the model builds in the started project");
   // A project the assistant makes on its own opens in the frame, as a new
   // card would on the web, and the frame keeps its link.
   const editorUrl = await app.locator("iframe.editor").getAttribute("src");
@@ -258,7 +249,7 @@ try {
   await app.locator(".skeleton").waitFor({ state: "detached" });
   assert.deepEqual(await page.evaluate(() => (window as unknown as Host).calls), ["open_project", "create_project"], "a deleted project creates a new one in its place");
   assert.deepEqual(errors, []);
-  console.log("PASS: project selection, prompt into a started project, frame follows the assistant, repeated polling, native playback, URL recovery, hidden pause, Open in Donkey Cut, editor in the card, authenticated download redirects, download errors, skeleton until ready, waking editor card, session renewal and retry, deleted project, decoder teardown, lazy HLS.");
+  console.log("PASS: project selection, frame follows the assistant, repeated polling, native playback, URL recovery, hidden pause, Open in Donkey Cut, editor in the card, authenticated download redirects, download errors, skeleton until ready, waking editor card, session renewal and retry, deleted project, decoder teardown, lazy HLS.");
 } finally {
   await browser.close(); server.stop(true); mediaServer.stop(true); await rm(scratch, { recursive: true, force: true });
 }

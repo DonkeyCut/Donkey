@@ -26,8 +26,7 @@
       "generic": "La solicitud falló.",
       "videoFailed": "No se pudo cargar el video. Intenta abrir el proyecto de nuevo.",
       "openFailed": "No se pudo abrir Donkey Cut.",
-      "saveFailed": "No se pudo guardar {name}.",
-      "promptFailed": "No se pudo enviar tu prompt a ChatGPT."
+      "saveFailed": "No se pudo guardar {name}."
     }
   },
   "status": {

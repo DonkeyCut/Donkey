@@ -233,23 +233,6 @@ export function useProjectApp() {
     } catch { setError({ key: "saveFailed", name }); }
   }, []);
 
-  /** A prompt written on the framed Home: the person's next message in the
-   * conversation, which the assistant answers with Donkey's tools in the
-   * project Home just opened for it. The assistant learns that project
-   * before the words arrive, so it builds there. */
-  const promptFromFrame = useCallback(async (text: string, projectId: string) => {
-    const app = appRef.current;
-    if (!app) return;
-    try {
-      if (app.getHostCapabilities()?.updateModelContext) {
-        const started = `The person started the Donkey Cut project with projectId ${projectId} from the card for the request that follows, and the card shows it. Make the request in this project.`;
-        await app.updateModelContext({ content: [{ type: "text", text: started }], structuredContent: { projectId, name: null } }).catch(() => {});
-      }
-      const result = await app.sendMessage({ role: "user", content: [{ type: "text", text }] });
-      if (result.isError) setError({ key: "promptFailed" });
-    } catch { setError({ key: "promptFailed" }); }
-  }, []);
-
   useEffect(() => {
     if (!ready || editorRequest === null || editor || requested.current === editorRequest) {
       return;
@@ -287,5 +270,5 @@ export function useProjectApp() {
       setHostInset(full ? (app.getHostContext()?.safeAreaInsets?.bottom ?? 120) : 0);
     } catch { /* the inline card still works */ }
   }, []);
-  return { ready, view, playback, editor, fullscreen, hostInset, edges, theme, error, busy, visible, run, playbackFailed, openDonkey, openFromFrame, saveFromFrame, promptFromFrame, requestFullscreen, retryEditor, createProject, framePage, follow };
+  return { ready, view, playback, editor, fullscreen, hostInset, edges, theme, error, busy, visible, run, playbackFailed, openDonkey, openFromFrame, saveFromFrame, requestFullscreen, retryEditor, createProject, framePage, follow };
 }

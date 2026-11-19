@@ -54,8 +54,8 @@ The widget polls while visible, renews playback URLs through the host bridge,
 and holds no account cookie or token.
 
 Editable cards frame the editor or Home through a one-use, one-minute session
-link. The frame opens each tool result's project, and Home's prompt starts one
-before ChatGPT hears it. Revoking the connection ends the sessions.
+link. The frame opens each tool result's project. Revoking the connection ends
+the sessions.
 
 ## Account linking
 
