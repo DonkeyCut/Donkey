@@ -296,6 +296,11 @@ function PeekVideo({ item }: { item: AssetRef }) {
       v.muted = true;
       void v.play().catch(() => {});
     });
+
+    // The peek stops when the window goes away; the pointer never leaves it then.
+    const pause = () => v.pause();
+    window.addEventListener("blur", pause);
+    return () => window.removeEventListener("blur", pause);
   }, []);
   return (
     <div className="relative aspect-square w-full border border-border bg-muted">
@@ -305,6 +310,7 @@ function PeekVideo({ item }: { item: AssetRef }) {
         src={item.url}
         loop
         playsInline
+        disablePictureInPicture
         className="size-full object-cover"
       />
       {item.duration !== undefined && (

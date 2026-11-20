@@ -20,6 +20,34 @@ export function isRealHover(e: HoverMove, focused: boolean) {
   return e.movementX !== 0 || e.movementY !== 0;
 }
 
+/** The tile previewing on hover right now, and how it goes back to rest. */
+let hovering: { video: HTMLVideoElement; rest: () => void } | null = null;
+
+/**
+ * A preview stops when the window goes away. The pointer never leaves a tile
+ * in a window that was minimized or switched from, so without this the clip
+ * keeps playing behind it, sound and all.
+ */
+function restOnLeave() {
+  hovering?.rest();
+  hovering = null;
+}
+
+function startHover(video: HTMLVideoElement, rest: () => void) {
+  hovering = { video, rest };
+}
+
+function endHover(video: HTMLVideoElement) {
+  if (hovering?.video === video) {
+    hovering = null;
+  }
+}
+
+if (typeof window !== "undefined") {
+  window.addEventListener("blur", restOnLeave);
+  document.addEventListener("visibilitychange", restOnLeave);
+}
+
 /**
  * Hover-to-play for a muted <video> poster: moving over it plays (with sound
  * when asked; if the browser refuses sound, playback falls back to silent),
@@ -36,6 +64,10 @@ export function useHoverPlay(restTime = 0.1, audio: HoverAudio = "sound") {
         return;
       }
       v.muted = audio === "silent";
+      // A tile preview is never the page's video: the browser's automatic
+      // picture-in-picture would float it once the window goes away.
+      v.disablePictureInPicture = true;
+      startHover(v, () => rest(v));
       void v.play().catch(() => {
         v.muted = true;
         void v.play().catch(() => {});
@@ -46,10 +78,16 @@ export function useHoverPlay(restTime = 0.1, audio: HoverAudio = "sound") {
       if (!v) {
         return;
       }
-      v.pause();
-      v.muted = true;
-      v.currentTime = restTime;
+      endHover(v);
+      rest(v);
     },
   };
+
+  // Paused, silent, back on the poster frame.
+  function rest(v: HTMLVideoElement) {
+    v.pause();
+    v.muted = true;
+    v.currentTime = restTime;
+  }
   return { ref, handlers };
 }
