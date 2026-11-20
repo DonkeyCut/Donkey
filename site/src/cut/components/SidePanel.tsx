@@ -109,6 +109,8 @@ import { useGenerate, type GenerateJob } from "@/cut/lib/generate";
 import { CAPTION_LIMIT, normalizeTags } from "@/cut/lib/publish";
 import { assetClipUses, useEditor } from "@/cut/lib/store";
 import { useEnvironment } from "@/cut/lib/environment";
+import { LibraryShareDialog } from "@/cut/components/LibraryShareDialog";
+import type { LibraryShareTarget } from "@/cut/lib/librarySharing";
 import { useLocalPref } from "@/cut/lib/uiState";
 import type { MediaAsset, SidePanelTab } from "@/cut/lib/types";
 import { cn } from "@/lib/utils";
@@ -1697,6 +1699,17 @@ function LibraryPanel({ projectId, onImport }: {
   // What a delete is about to take: the pick when the card is in it, else
   // the one card. Null while nothing is being asked.
   const [deleting, setDeleting] = useState<LibraryDeleteSet | null>(null);
+
+  // The folder or asset whose share dialog is open. Inside ChatGPT the card
+  // carries no Share, so the panel offers none either.
+  const { chatgpt } = useEnvironment();
+  const [sharing, setSharing] = useState<(LibraryShareTarget & { residency: Residency }) | null>(null);
+  const shareFolder = chatgpt ? undefined : (id: string) => {
+    const f = folders.find((x) => x.id === id);
+    if (f) {
+      setSharing({ kind: "folder", id, residency: f.residency });
+    }
+  };
   // The folder whose name field is open, when the right-click menu opened it.
   const [renamingFolder, setRenamingFolder] = useState<string | null>(null);
   const arrivals = useLibraryImports((state) => state.items);
@@ -1970,6 +1983,7 @@ function LibraryPanel({ projectId, onImport }: {
               renaming={renamingFolder}
               onRenamingChange={setRenamingFolder}
               onOpen={(id) => setOpenFolder(id)}
+              onShare={shareFolder}
               onRename={renameFolder}
               // A folder in a pick with others takes the pick to the
               // confirm; alone, itself.
@@ -2078,6 +2092,7 @@ function LibraryPanel({ projectId, onImport }: {
                     onUse={
                       isLinkedAssetType(a.type) ? undefined : () => void addLibraryAssetToProject(projectId, a)
                     }
+                    onShare={chatgpt ? undefined : () => setSharing({ kind: "asset", id: a.id, residency: a.residency })}
                     onDelete={() => setDeleting(setOf(a))}
                     onRename={(name) => renameInLibrary(client, a, name)}
                     onDragStartExtra={(e) => onCardDragExtra(e, a)}
@@ -2098,6 +2113,7 @@ function LibraryPanel({ projectId, onImport }: {
       <SelectionMenu menu={ctx.menu} onClose={ctx.close}>
         {ctxFolder ? (
           <FolderMenuItems
+            onShare={shareFolder && (() => shareFolder(ctxFolder.id))}
             onRename={() => setRenamingFolder(ctxFolder.id)}
             onDelete={() => setDeleting({ folders: [ctxFolder], items: [] })}
           />
@@ -2118,6 +2134,16 @@ function LibraryPanel({ projectId, onImport }: {
         onClose={() => setDeleting(null)}
         onConfirm={() => deleting && void remove(deleting)}
       />
+
+      {sharing && library.data && (
+        <LibraryShareDialog
+          key={`${sharing.kind}:${sharing.id}`}
+          target={sharing}
+          library={library.data}
+          onClose={() => setSharing(null)}
+          onCopied={(x) => setOpenFolder(x.kind === "folder" ? x.id : null)}
+        />
+      )}
     </div>
   );
 }
