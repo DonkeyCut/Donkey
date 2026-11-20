@@ -7,12 +7,13 @@ import { prisma } from "@/lib/prisma";
 import { graceDeadline } from "./grace";
 import { cutLimitsFor, FREE_STORAGE_BYTES } from "./limits";
 import { collectable, listSweepableLadders, pruneLadder, readLadder } from "./ladderStore";
-import { deleteLibraryAssetCascade } from "./library";
+import { deleteLibraryAssetCascade, libraryCloud } from "./library";
 import { deleteProjectCascade } from "./projects";
 import {
   del,
   deletePrefix,
   INFERENCE_PREFIX,
+  libraryCardKey,
   listCommonPrefixes,
   listOlderThan,
   projectHlsRoot,
@@ -295,6 +296,60 @@ async function sweepStaleOverlays(): Promise<number> {
   return removed;
 }
 
+/** How many asset shares the link-preview backfill reads per page. */
+const CARD_BACKFILL_PAGE = 200;
+
+type SharedAssetRow = { id: string; userId: string; meta: unknown };
+
+/** The shared library videos that have no link-preview still: shares made
+ * before stills existed, or whose run failed. A share only counts for an
+ * asset its owner holds. */
+export function videosWithoutCards(
+  shares: { userId: string; targetId: string }[],
+  assets: SharedAssetRow[],
+  stored: Set<string>,
+): SharedAssetRow[] {
+  const shared = new Set(shares.map((s) => `${s.userId}/${s.targetId}`));
+  return assets.filter((a) =>
+    shared.has(`${a.userId}/${a.id}`) &&
+    (a.meta as { type?: string } | null)?.type === "video" &&
+    !stored.has(libraryCardKey(a.userId, a.id)));
+}
+
+/** Queue the still for every shared library video missing one, so an old
+ * link unfurls with its first frame the first time it is pasted. */
+async function backfillLibraryCards(): Promise<number> {
+  let queued = 0;
+  let cursor: string | undefined;
+  for (;;) {
+    const shares = await prisma.cutLibraryShare.findMany({
+      where: { kind: "asset" },
+      orderBy: { id: "asc" },
+      take: CARD_BACKFILL_PAGE,
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      select: { id: true, userId: true, targetId: true },
+    });
+    if (!shares.length) {
+      return queued;
+    }
+    cursor = shares.at(-1)!.id;
+
+    // One read each for the shared assets and their stored stills.
+    const assets = await prisma.cutLibraryAsset.findMany({
+      where: { id: { in: shares.map((s) => s.targetId) }, deletedAt: null },
+      select: { id: true, userId: true, meta: true },
+    });
+    const cards = await prisma.cutMediaObject.findMany({
+      where: { r2Key: { in: assets.map((a) => libraryCardKey(a.userId, a.id)) }, uploadState: "complete" },
+      select: { r2Key: true },
+    });
+    for (const a of videosWithoutCards(shares, assets, new Set(cards.map((c) => c.r2Key)))) {
+      await libraryCloud.queueCard(a.userId, a.id);
+      queued++;
+    }
+  }
+}
+
 export async function runGc(): Promise<Response> {
   // Existing derived files adopt the same accounting as newly rendered ones.
   const chargedDerived = await prisma.cutMediaObject.findMany({
@@ -482,6 +537,7 @@ export async function runGc(): Promise<Response> {
   });
 
   const reclaimed = await reclaimOverQuota();
+  const libraryCards = await backfillLibraryCards();
 
   return Response.json({
     pendingObjects: pending.length,
@@ -491,6 +547,7 @@ export async function runGc(): Promise<Response> {
     staleOverlays: overlays,
     renderJobs: jobs.count,
     libraryTombstones: tombstones.count,
+    libraryCards,
     staleLadderProjects: ladders.projects,
     staleLadderVersions: ladders.versions,
     staleLadderObjects: ladders.objects,
