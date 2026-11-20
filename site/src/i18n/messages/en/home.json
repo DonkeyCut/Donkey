@@ -203,7 +203,8 @@
     "emptyFolder": "This folder is empty.",
     "pages": "Pages",
     "firstPage": "First page",
-    "nextPage": "Next page"
+    "nextPage": "Next page",
+    "viewOnlyAsset": "View only"
   },
   "card": {
     "renameFailed": "Could not rename the file.",

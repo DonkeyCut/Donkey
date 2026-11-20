@@ -203,7 +203,8 @@
     "emptyFolder": "이 폴더는 비어 있어요.",
     "pages": "페이지",
     "firstPage": "첫 페이지",
-    "nextPage": "다음 페이지"
+    "nextPage": "다음 페이지",
+    "viewOnlyAsset": "보기 전용"
   },
   "card": {
     "renameFailed": "파일 이름을 변경할 수 없어요.",

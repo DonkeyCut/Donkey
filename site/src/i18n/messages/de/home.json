@@ -203,7 +203,8 @@
     "emptyFolder": "Dieser Ordner ist leer.",
     "pages": "Seiten",
     "firstPage": "Erste Seite",
-    "nextPage": "Nächste Seite"
+    "nextPage": "Nächste Seite",
+    "viewOnlyAsset": "Nur Ansicht"
   },
   "card": {
     "renameFailed": "Datei konnte nicht umbenannt werden.",

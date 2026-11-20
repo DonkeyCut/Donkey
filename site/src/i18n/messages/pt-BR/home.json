@@ -203,7 +203,8 @@
     "emptyFolder": "Esta pasta está vazia.",
     "pages": "Páginas",
     "firstPage": "Primeira página",
-    "nextPage": "Próxima página"
+    "nextPage": "Próxima página",
+    "viewOnlyAsset": "Apenas visualização"
   },
   "card": {
     "renameFailed": "Não foi possível renomear o arquivo.",

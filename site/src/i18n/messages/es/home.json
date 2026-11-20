@@ -203,7 +203,8 @@
     "emptyFolder": "Esta carpeta está vacía.",
     "pages": "Páginas",
     "firstPage": "Primera página",
-    "nextPage": "Página siguiente"
+    "nextPage": "Página siguiente",
+    "viewOnlyAsset": "Solo lectura"
   },
   "card": {
     "renameFailed": "No se pudo renombrar el archivo.",

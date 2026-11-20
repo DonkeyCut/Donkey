@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { LUT_FILE_ICON } from "@/cut/lib/linkedLibrary";
 import { isLinkedAssetType } from "@/cut/lib/types";
 import { Check, Copy, FileText, Loader2, Music, Plus, X } from "lucide-react";
@@ -119,18 +119,7 @@ export function Lightbox() {
   const picture = item.kind === "video" || item.kind === "image";
   const unshaped = picture && !ratio;
   const onRatio = (r: number) => setMeasured({ src: item.src, ratio: r });
-  const width =
-    item.kind === "audio"
-      ? "min(92vw, 480px)"
-      : item.kind === "font"
-        ? "min(92vw, 72vh)"
-        : item.kind === "lut"
-          ? "min(92vw, 360px)"
-        : item.kind === "text"
-          ? "min(92vw, 720px)"
-          : ratio
-            ? `min(92vw, 860px, ${Math.round(68 * ratio * 100) / 100}vh)`
-            : "min(92vw, 860px)";
+  const width = mediaWidth(item.kind, ratio);
 
   return (
     <div
@@ -211,6 +200,40 @@ export function Lightbox() {
       </div>
     </div>
   );
+}
+
+/** The lightbox's media laid inline at the same size, with what sits under
+ * it — the page a shared asset opens on. */
+export function MediaViewer({ item, children }: { item: LightboxItem; children?: ReactNode }) {
+  const [measured, setMeasured] = useState<{ src: string; ratio: number } | null>(null);
+  const ratio = item.ratio ?? (measured?.src === item.src ? measured.ratio : undefined);
+  const unshaped = (item.kind === "video" || item.kind === "image") && !ratio;
+  return (
+    <div
+      className={cn("flex flex-col gap-3", unshaped && "invisible")}
+      style={{ width: mediaWidth(item.kind, ratio) }}
+    >
+      <LightboxMedia item={item} ratio={ratio} onRatio={(r) => setMeasured({ src: item.src, ratio: r })} />
+      {children}
+    </div>
+  );
+}
+
+/** How wide the viewer draws an item, per the sizing rule above. */
+function mediaWidth(kind: LightboxItem["kind"], ratio?: number) {
+  if (kind === "audio") {
+    return "min(92vw, 480px)";
+  }
+  if (kind === "font") {
+    return "min(92vw, 72vh)";
+  }
+  if (kind === "lut") {
+    return "min(92vw, 360px)";
+  }
+  if (kind === "text") {
+    return "min(92vw, 720px)";
+  }
+  return ratio ? `min(92vw, 860px, ${Math.round(68 * ratio * 100) / 100}vh)` : "min(92vw, 860px)";
 }
 
 function LightboxMedia({

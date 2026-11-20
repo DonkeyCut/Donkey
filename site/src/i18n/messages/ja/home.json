@@ -203,7 +203,8 @@
     "emptyFolder": "このフォルダーは空です。",
     "pages": "ページ",
     "firstPage": "最初のページ",
-    "nextPage": "次のページ"
+    "nextPage": "次のページ",
+    "viewOnlyAsset": "閲覧のみ"
   },
   "card": {
     "renameFailed": "ファイル名を変更できませんでした。",

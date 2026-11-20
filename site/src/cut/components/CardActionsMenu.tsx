@@ -21,7 +21,6 @@ export function CardActionsMenu({
   shareDisabled,
   onRename,
   onDownload,
-  downloadHref,
   downloadDisabled,
   onOpenOriginal,
   extra,
@@ -40,15 +39,13 @@ export function CardActionsMenu({
   shareDisabled?: boolean;
   onRename?: () => void;
   onDownload?: () => void;
-  /** A protected link to save the file from, for a viewer outside the library. */
-  downloadHref?: string;
   downloadDisabled?: boolean;
   onOpenOriginal?: () => void;
   extra?: ReactNode;
   onDelete?: () => void;
 }) {
   const t = useTranslations("home.cardMenu");
-  const middle = !!(onShare || onRename || onDownload || downloadHref || onOpenOriginal || extra);
+  const middle = !!(onShare || onRename || onDownload || onOpenOriginal || extra);
   if (!onUse && !middle && !onDelete) return null;
   return (
     <DropdownMenu>
@@ -87,15 +84,11 @@ export function CardActionsMenu({
             <Pencil /> {t("rename")}
           </DropdownMenuItem>
         )}
-        {downloadHref ? (
-          <DropdownMenuItem render={<a href={downloadHref} />}>
-            <Download /> {t("download")}
-          </DropdownMenuItem>
-        ) : onDownload ? (
+        {onDownload && (
           <DropdownMenuItem disabled={downloadDisabled} onClick={onDownload}>
             <Download /> {t("download")}
           </DropdownMenuItem>
-        ) : null}
+        )}
         {onOpenOriginal && (
           // An imported clip keeps the link it came from, so the post it was
           // cut out of is one click away.

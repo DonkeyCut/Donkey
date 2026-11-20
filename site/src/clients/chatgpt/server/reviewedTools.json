@@ -1,6 +1,6 @@
 {
-  "version": "1.1.2",
-  "review": "settled",
+  "version": "1.1.3",
+  "review": "draft",
   "tools": [
     {
       "name": "account_status",
@@ -5609,7 +5609,7 @@
     {
       "name": "library_share",
       "title": "Library share",
-      "description": "Manage a read-only link to a Library folder and all its descendants, or one asset. Get reads current settings; save replaces access and the email allowlist; remove revokes this link. Public access lets anyone with the link preview and download. Restricted access requires the owner or a signed-in invited email. Local items require copy_to_cloud:true on save; this creates an independent cloud copy and returns its target id. Use that returned id to manage its share. Share only when the user asks. Adding emails grants access; give the user the link to send. It opens a public link that anyone holding it can use.",
+      "description": "Manage a read-only link to a Library folder and all its descendants, or one asset. Get reads current settings; save replaces access and the email allowlist; remove revokes this link. Public access lets anyone with the link view it; links are view only. Restricted access requires the owner or a signed-in invited email. Local items require copy_to_cloud:true on save; this creates an independent cloud copy and returns its target id. Use that returned id to manage its share. Share only when the user asks. Adding emails grants access; give the user the link to send. It opens a public link that anyone holding it can use.",
       "inputSchema": {
         "type": "object",
         "properties": {

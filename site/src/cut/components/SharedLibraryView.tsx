@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
-import { Download, Folder, Loader2 } from "lucide-react";
+import { Folder, Loader2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { buttonVariants } from "@/components/ui/button";
 import { useSharedLibrary } from "@/queries/sharing";
@@ -10,19 +10,39 @@ import { ApiError } from "@/queries/apiClient";
 import { librarySharePath, type SharedLibraryAsset } from "@/cut/lib/librarySharing";
 import { authHrefFor } from "@/app/_components/landing/useAppEntryHref";
 import { LibraryCard, LIBRARY_TILE_AREA, LIBRARY_AUDIO_TILE_AREA } from "@/cut/components/LibraryCard";
-import { Lightbox } from "@/cut/components/Lightbox";
+import { Lightbox, MediaViewer } from "@/cut/components/Lightbox";
 import { useCutBase } from "@/cut/lib/nav";
 
-function Asset({ asset, token }: { asset: SharedLibraryAsset; token: string }) {
+/** Where a shared asset's file, poster, and playable copy live. */
+function sharedMediaOf(asset: SharedLibraryAsset, token: string) {
   const src = `/api/cut-shared/library/${encodeURIComponent(token)}/media/${encodeURIComponent(asset.id)}`;
   const poster = asset.hasPoster ? `${src}?poster=1` : undefined;
-  // A master the browser cannot decode plays from its copy; the download is the master.
+  // A master the browser cannot decode plays from its copy.
   const play = asset.hasProxy ? `${src}?proxy=1` : undefined;
+  return { src, play, poster };
+}
+
+function Asset({ asset, token }: { asset: SharedLibraryAsset; token: string }) {
   return <LibraryCard
     asset={{ ...asset, addedAt: 0, residency: "cloud" }}
     area={asset.type === "video" || asset.type === "image" ? LIBRARY_TILE_AREA : LIBRARY_AUDIO_TILE_AREA}
-    sharedMedia={{ src, play, poster, downloadHref: `${src}?download=1` }}
+    sharedMedia={sharedMediaOf(asset, token)}
   />;
+}
+
+/** A link to one asset opens on it: the player centered on the page, its name
+ * under it. */
+function SharedAssetPage({ asset, token }: { asset: SharedLibraryAsset; token: string }) {
+  const media = sharedMediaOf(asset, token);
+  return <div className="flex justify-center">
+    <MediaViewer item={{
+      kind: asset.type, src: media.play ?? media.src, name: asset.name, prompt: "", assetId: null, bare: true,
+      duration: asset.duration, poster: media.poster,
+      ...(asset.width && asset.height ? { ratio: asset.width / asset.height } : {}),
+    }}>
+      <h1 className="min-w-0 text-lg font-semibold break-words">{asset.name}</h1>
+    </MediaViewer>
+  </div>;
 }
 
 export function SharedLibraryView() {
@@ -47,7 +67,7 @@ export function SharedLibraryView() {
     <div className="mx-auto max-w-6xl px-5 py-9 sm:px-10">
       <header className="mb-8 flex items-center justify-between gap-4">
         <Link href={base} className="text-lg font-semibold">Donkey Cut</Link>
-        <span className="text-xs text-muted-foreground">{t("viewOnly")}</span>
+        <span className="text-xs text-muted-foreground">{data?.kind === "asset" ? t("viewOnlyAsset") : t("viewOnly")}</span>
       </header>
       {query.isPending ? <div role="status" className="grid min-h-64 place-items-center"><Loader2 aria-label={t("loading")} className="size-5 animate-spin" /></div>
         : query.isError ? <div className="flex min-h-64 flex-col items-center justify-center gap-4 text-center">
@@ -55,7 +75,8 @@ export function SharedLibraryView() {
           {status === 401 || status === 403
             ? <Link href={authHrefFor("/sign-in", href(folder, offset))} className={buttonVariants()}>{t("signIn")}</Link>
             : status !== 404 && <button onClick={() => void query.refetch()} className={buttonVariants({ variant: "outline" })}>{t("tryAgain")}</button>}
-        </div> : data && <>
+        </div> : data?.kind === "asset" && data.assets[0] ? <SharedAssetPage asset={data.assets[0]} token={token} />
+        : data && <>
           <nav aria-label={t("breadcrumb")} className="mb-5 flex flex-wrap items-center gap-2 text-lg font-semibold">
             {data.trail.length ? data.trail.map((f, i) => <span key={f.id} className="flex items-center gap-2">
               {i > 0 && <span className="text-muted-foreground">/</span>}
@@ -73,7 +94,7 @@ export function SharedLibraryView() {
           {data.templates.map((tpl) => <section key={tpl.id} className="mt-5 rounded-xl border p-4">
             <h2 className="mb-2 text-sm font-medium">{tpl.name}</h2>
             <p className="mb-2 text-xs text-muted-foreground">{t("templateMedia")}</p>
-            {tpl.files.map((f, i) => <a key={i} className="flex items-center gap-2 py-1 text-sm hover:underline" href={`/api/cut-shared/library/${encodeURIComponent(token)}/media/${encodeURIComponent(tpl.id)}?${new URLSearchParams({ template: tpl.id, file: f.fileName, download: "1" })}`}><Download className="size-3" />{f.name}</a>)}
+            {tpl.files.map((f, i) => <p key={i} className="py-1 text-sm">{f.name}</p>)}
           </section>)}
           {!data.folders.length && !data.assets.length && !data.templates.length && <p className="py-16 text-center text-sm text-muted-foreground">{t("emptyFolder")}</p>}
           <nav aria-label={t("pages")} className="mt-6 flex justify-between">

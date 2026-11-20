@@ -44,7 +44,7 @@ export const LIBRARY_SQUARE = Math.round(Math.sqrt(LIBRARY_AUDIO_TILE_AREA));
 
 /** A share viewer's media URLs: the file, what plays when a copy stands in
  * for an undecodable master, its cover, and the download. */
-type SharedMedia = { src: string; play?: string; poster?: string; downloadHref: string };
+type SharedMedia = { src: string; play?: string; poster?: string };
 
 /** A Library tile's box. Pictures take their own aspect at the shared area;
  * every other file is the square the sound tile is. Without an area the tile
@@ -505,7 +505,6 @@ export function LibraryCard({
               onShare={onShare}
               shareDisabled={offline}
               onRename={onRename && !offline ? () => setRenaming(true) : undefined}
-              downloadHref={sharedMedia?.downloadHref}
               onDownload={sharedMedia ? undefined : () => downloadLibraryAsset(a)}
               downloadDisabled={offline}
               onOpenOriginal={a.source?.url ? () => openExternal(a.source!.url) : undefined}

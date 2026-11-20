@@ -38,7 +38,7 @@ export const LIBRARY_TOOLS = [
   },
   {
     name: "library_share",
-    description: "Manage a read-only link to a Library folder and all its descendants, or one asset. Get reads current settings; save replaces access and the email allowlist; remove revokes this link. Public access lets anyone with the link preview and download. Restricted access requires the owner or a signed-in invited email. Local items require copy_to_cloud:true on save; this creates an independent cloud copy and returns its target id. Use that returned id to manage its share. Share only when the user asks. Adding emails grants access; give the user the link to send.",
+    description: "Manage a read-only link to a Library folder and all its descendants, or one asset. Get reads current settings; save replaces access and the email allowlist; remove revokes this link. Public access lets anyone with the link view it; links are view only. Restricted access requires the owner or a signed-in invited email. Local items require copy_to_cloud:true on save; this creates an independent cloud copy and returns its target id. Use that returned id to manage its share. Share only when the user asks. Adding emails grants access; give the user the link to send.",
     inputSchema: obj({
       action: { type: "string", enum: [...LIBRARY_SHARE_ACTIONS] },
       kind: { type: "string", enum: [...LIBRARY_SHARE_KINDS] },

@@ -203,7 +203,8 @@
     "emptyFolder": "Ce dossier est vide.",
     "pages": "Pages",
     "firstPage": "Première page",
-    "nextPage": "Page suivante"
+    "nextPage": "Page suivante",
+    "viewOnlyAsset": "Lecture seule"
   },
   "card": {
     "renameFailed": "Impossible de renommer le fichier.",
