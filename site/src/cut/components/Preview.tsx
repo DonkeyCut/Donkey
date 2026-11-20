@@ -35,6 +35,7 @@ import {
   DropdownMenuItem,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
+import { fitPipStage, setPipStage } from "./previewPip";
 import { MaskGizmoCore, OverlayChromeHost, OverlayLayer, StagePress } from "./OverlayLayer";
 import { GuideHandles, GuideOverlay } from "./GuideOverlay";
 import { RemovalBrush } from "./RemovalBrush";
@@ -371,6 +372,15 @@ export function Preview() {
     return () => setPreviewCanvas(null);
   }, []);
 
+  // The stage is what picture-in-picture floats: canvas and overlays, shown at
+  // the editor's stage size and scaled to the window.
+  const stageRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    setPipStage(stageRef.current);
+    return () => setPipStage(null);
+  }, []);
+  useEffect(() => fitPipStage(stage.w, stage.h), [stage.w, stage.h]);
+
   useCachedFirstFrame(canvasRef, presentRef);
 
   // The canvas backing store matches the pixels the screen will actually show,
@@ -634,6 +644,7 @@ export function Preview() {
           style={{ width: stage.w, height: stage.h }}
         >
         <div
+          ref={stageRef}
           className={cn(
             "stage absolute inset-0 cursor-grab overflow-hidden bg-black shadow-[0_0_0_1px_rgba(0,0,0,0.08),0_12px_36px_rgba(0,0,0,0.18)] active:cursor-grabbing"
           )}

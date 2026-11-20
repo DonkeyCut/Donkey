@@ -70,6 +70,11 @@ import { disposeDetailGpu } from "@/cut/lib/detailGpu";
  * schedules no frames at all.
  */
 
+/** Sent to a preview canvas when the window it is shown in changes: the
+ * stage floating into picture-in-picture and back, or one of those windows
+ * being shown or hidden. */
+export const SURFACE_MOVED = "cut-surface-moved";
+
 /** How far ahead of the playhead a clip's decoder is opened and started. */
 const WARM_HORIZON_S = 2.5;
 /** Inside this, an upcoming clip is walked as well as opened. */
@@ -223,6 +228,10 @@ class Engine {
   private behind = new SubjectMaskCompositor(true);
 
   private raf = 0;
+  /** The window the pending frame is booked on: the canvas's own, which is a
+   * picture-in-picture window while the stage floats there. */
+  private rafView: Window = window;
+  private onMoved: () => void;
   private disposed = false;
   /** Set when something changed that the canvas has yet to show. */
   private dirty = true;
@@ -324,8 +333,19 @@ class Engine {
     // stays out of the machine's reach for as long as the tab sits there,
     // which is exactly when the person has gone to do something else with it.
     // Letting go costs one keyframe seek per visible clip on return.
+    // A frame booked on a window that is no longer the one showing the stage
+    // would wait for that window to be shown again.
+    this.onMoved = () => {
+      if (!this.raf) return;
+      this.rafView.cancelAnimationFrame(this.raf);
+      this.raf = 0;
+      this.schedule();
+    };
+    canvas.addEventListener(SURFACE_MOVED, this.onMoved);
     this.onHidden = () => {
       if (document.visibilityState !== "hidden" || useEditor.getState().playing) return;
+      // The stage is floating in picture-in-picture, on screen.
+      if (this.canvas.ownerDocument !== document) return;
       engineLog(`engine ${this.serial} backgrounded, releasing`);
       this.pool.closeAll();
       this.behind.clear();
@@ -392,7 +412,8 @@ class Engine {
     engineLog(`engine ${this.serial} disposed`);
     flushMeter();
     this.disposed = true;
-    if (this.raf) cancelAnimationFrame(this.raf);
+    if (this.raf) this.rafView.cancelAnimationFrame(this.raf);
+    this.canvas.removeEventListener(SURFACE_MOVED, this.onMoved);
     this.unsubscribe();
     this.unwatch();
     this.sizeWatch.disconnect();
@@ -490,7 +511,12 @@ class Engine {
    */
   private schedule() {
     if (this.raf || this.disposed) return;
-    this.raf = requestAnimationFrame(this.tick);
+    // Frames come from the window the canvas is shown in. A floating stage
+    // whose window is covered borrows the editor's while that one is showing.
+    const own = this.canvas.ownerDocument;
+    const borrow = own.visibilityState === "hidden" && document.visibilityState === "visible";
+    this.rafView = borrow ? window : (own.defaultView ?? window);
+    this.raf = this.rafView.requestAnimationFrame(this.tick);
   }
 
   /** Every open decoder and what it is doing, for the perf eval's pool dump. */
