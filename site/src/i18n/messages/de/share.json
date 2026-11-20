@@ -4,7 +4,9 @@
     "restrictedDescription": "Dieses Projekt ist mit bestimmten Personen geteilt.",
     "title": "{name} · Donkey Cut",
     "description": "Schau dir {name} im Browser an.",
-    "libraryTitle": "Geteilte Mediathek · Donkey Cut"
+    "libraryTitle": "Geteilte Mediathek · Donkey Cut",
+    "libraryRestrictedDescription": "Dies ist mit bestimmten Personen geteilt.",
+    "libraryDescription": "Sieh dir {name} im Browser an."
   },
   "view": {
     "signInPrompt": "Dieses Projekt ist mit bestimmten Personen geteilt – melde dich an, um zu sehen, ob du dazugehörst.",

@@ -21,7 +21,7 @@ import { MEDIA_REDIRECT_HEADERS, mediaObjectUrl, mediaUrlLifetime } from "./medi
 import { deleteProjectCascade, getProject, takenMediaNames } from "./projects";
 import { ASSET_FOLDER_SCOPE, assetFolderScope, roleFolderIdOf } from "./assetFolders";
 import { isFolderRole } from "@/cut/lib/folderRole";
-import { copy, del, head, libraryKey, presignPut, projectMediaKey } from "./r2";
+import { copy, del, head, libraryCardKey, libraryKey, presignPut, projectMediaKey } from "./r2";
 import { addUsage, quotaCheck } from "./usage";
 import { renderJobCheck } from "./limits";
 import { wakeRenderWorker } from "./wake";
@@ -37,6 +37,9 @@ const PRESIGN_GET_BATCH_MAX = 500;
 
 /** The one job that builds an asset's playable copy, so a second ask joins it. */
 export const libraryProxyJobId = (assetId: string) => `library-proxy-${assetId}`;
+const libraryCardJobId = (assetId: string) => `library-card-${assetId}`;
+/** The worker job kind that draws a shared library video's link-preview still. */
+export const LIBRARY_CARD_JOB = "library_card";
 
 /** The objects under this account's library prefix: its files, and the
  * playable copies (kind "proxy", no project) built beside them. */
@@ -255,7 +258,9 @@ export async function deleteLibraryAssetCascade(
   const proxy = proxyName
     ? await prisma.cutMediaObject.findFirst({ where: { userId, projectId: null, kind: "proxy", fileName: proxyName } })
     : null;
-  const objects = [obj, poster, original, proxy].filter((o): o is NonNullable<typeof o> => !!o);
+  // A shared video's link-preview still is derived from it alone as well.
+  const card = await prisma.cutMediaObject.findFirst({ where: { userId, r2Key: libraryCardKey(userId, id) } });
+  const objects = [obj, poster, original, proxy, card].filter((o): o is NonNullable<typeof o> => !!o);
   // An exempt object never counted toward usage, so it frees nothing.
   const freed = objects
     .filter((o) => o.uploadState === "complete" && !o.quotaExempt)
@@ -738,6 +743,35 @@ export const libraryCloud = {
     } catch (e) {
       return caught(e, new UserError("playable_copy_make_failed", "Could not make the playable copy."));
     }
+  },
+
+  /** Queue the link-preview still of a shared library video. A card already
+   * stored, or a run already on its way or finished, needs nothing; a failed
+   * run goes again. One fixed job per asset bounds the work. */
+  async queueCard(userId: string, id: string) {
+    const card = await prisma.cutMediaObject.findFirst({
+      where: { userId, r2Key: libraryCardKey(userId, id), uploadState: "complete" },
+      select: { id: true },
+    });
+    if (card) {
+      return;
+    }
+    const jobId = libraryCardJobId(id);
+    const existing = await prisma.cutRenderJob.findFirst({ where: { id: jobId, userId }, select: { state: true } });
+    if (existing && existing.state !== "error") {
+      wakeRenderWorker();
+      return;
+    }
+    const spec = { assetId: id } as Prisma.InputJsonValue;
+    if (existing) {
+      await prisma.cutRenderJob.updateMany({
+        where: { id: jobId, userId, state: "error" },
+        data: { state: "queued", progress: 0, error: null, claimedAt: null, spec },
+      });
+    } else {
+      await prisma.cutRenderJob.create({ data: { id: jobId, userId, projectId: null, kind: LIBRARY_CARD_JOB, spec } });
+    }
+    wakeRenderWorker();
   },
 
   async remove(userId: string, id: string) {

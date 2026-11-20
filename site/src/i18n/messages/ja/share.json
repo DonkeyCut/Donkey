@@ -4,7 +4,9 @@
     "restrictedDescription": "このプロジェクトは特定のユーザーに共有されています。",
     "title": "{name} · Donkey Cut",
     "description": "ブラウザで{name}を視聴できます。",
-    "libraryTitle": "共有ライブラリ · Donkey Cut"
+    "libraryTitle": "共有ライブラリ · Donkey Cut",
+    "libraryRestrictedDescription": "特定の人と共有されています。",
+    "libraryDescription": "{name}をブラウザで表示します。"
   },
   "view": {
     "signInPrompt": "このプロジェクトは特定のユーザーに共有されています。アクセス権を確認するにはサインインしてください。",

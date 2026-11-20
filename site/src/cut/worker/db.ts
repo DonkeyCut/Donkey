@@ -4,6 +4,7 @@ import { cutLimitsFor, quotaMarginFor, storageCeiling } from "../server/cloud/li
 import { STORAGE_FULL } from "../lib/operationFailure";
 import { prisma } from "@/lib/prisma";
 import { WORKER_BATCH } from "../server/cloud/batchKinds";
+import { LIBRARY_CARD_JOB } from "../server/cloud/library";
 import { Prisma } from "@/generated/prisma/client";
 import { resolveSettings } from "@/lib/config/resolve";
 
@@ -57,7 +58,7 @@ export async function claimNextJob(): Promise<ClaimedJob | null> {
   // A batch the editor in the card claims stays queued for it.
   // Proxies come next: opening a cloud project queues one for every heavy
   // clip, and an export asked for a moment later must not wait behind them.
-  for (const kind of [{ in: WATCHED_KINDS }, { in: ["proxy"] }, { in: ["preview", "card", "hls"] }]) {
+  for (const kind of [{ in: WATCHED_KINDS }, { in: ["proxy"] }, { in: ["preview", "card", "hls", LIBRARY_CARD_JOB] }]) {
     const candidates = await prisma.cutRenderJob.findMany({
       where: { state: "queued", kind },
       orderBy: { createdAt: "asc" },

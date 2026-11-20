@@ -34,12 +34,13 @@ function harness() {
     },
   };
   const session = mock(async () => null);
-  const sign = mock((key: string, opts?: { version?: string; downloadName?: string }) => {
+  const sign = mock((key: string, opts?: { version?: string; minLifetimeSeconds?: number }) => {
     void opts;
     return `https://media.test/${key}`;
   });
-  const api = createLibrarySharing(db as unknown as typeof prisma, session, async () => 2, sign);
-  return { api, db, session, sign };
+  const queueCard = mock(async (userId: string, assetId: string) => { void userId; void assetId; });
+  const api = createLibrarySharing(db as unknown as typeof prisma, session, async () => 2, sign, queueCard);
+  return { api, db, session, sign, queueCard };
 }
 
 describe("library sharing", () => {
@@ -114,6 +115,42 @@ describe("library sharing", () => {
     expect((await api.manage(request("DELETE"), "owner", "folder", "root")).status).toBe(200);
     expect(remove.mock.calls[0][0]).toEqual({ where: { userId: "owner", kind: "folder", targetId: "root" } });
   });
+  test("sharing a video queues its link-preview still; other files queue nothing", async () => {
+    const { api, db, queueCard } = harness();
+    expect((await api.manage(request("PUT", { access: "public", emails: [] }), "owner", "asset", "asset")).status).toBe(200);
+    expect(queueCard).not.toHaveBeenCalled();
+    db.cutLibraryAsset.findFirst.mockResolvedValue({ ...asset, meta: { name: "Beach.mov", type: "video" } });
+    expect((await api.manage(request("PUT", { access: "public", emails: [] }), "owner", "asset", "asset")).status).toBe(200);
+    expect(queueCard.mock.calls).toEqual([["owner", "asset"]]);
+  });
+
+  test("a shared video unfurls with its stored first frame, or its drawn name until one lands", async () => {
+    const { api, db, sign, queueCard } = harness();
+    db.cutLibraryShare.findUnique.mockResolvedValue({ ...share, kind: "asset", targetId: "asset" });
+    db.cutLibraryAsset.findFirst.mockResolvedValue({ ...asset, meta: { name: "Beach.mov", type: "video" } });
+    const stored = await api.card(request(), token);
+    expect(stored.status).toBe(302);
+    expect(stored.headers.get("Cache-Control")?.startsWith("public")).toBe(true);
+    expect(sign.mock.calls[0][0]).toBe("cut/owner/library/sound.mp3");
+    expect(db.cutMediaObject.findFirst.mock.calls[0][0]).toEqual({
+      where: { userId: "owner", r2Key: "cut/owner/library-cards/asset.jpg", uploadState: "complete" },
+    });
+    db.cutMediaObject.findFirst.mockResolvedValue(null as never);
+    const drawn = await api.card(request(), token);
+    expect(drawn.status).toBe(200);
+    expect(drawn.headers.get("Content-Type")).toBe("image/png");
+    expect(queueCard.mock.calls).toEqual([["owner", "asset"]]);
+  });
+
+  test("page metadata names only a public share's item", async () => {
+    const { api, db } = harness();
+    db.cutLibraryShare.findUnique.mockResolvedValue({ ...share, kind: "asset", targetId: "asset", access: "restricted" });
+    expect(await api.meta(token)).toEqual({ isPublic: false });
+    db.cutLibraryShare.findUnique.mockResolvedValue({ ...share, kind: "asset", targetId: "asset" });
+    db.cutLibraryAsset.findFirst.mockResolvedValue({ ...asset, meta: { name: "Beach.mov", title: "Beach", type: "video" } as typeof asset.meta });
+    expect(await api.meta(token)).toEqual({ isPublic: true, name: "Beach", type: "video", version: now.getTime() });
+  });
+
   test("folder listings expose only their scoped page and omit owner metadata", async () => {
     const { api, db } = harness();
     const response = await api.list(request(), token);
@@ -133,12 +170,12 @@ describe("library sharing", () => {
     expect(db.cutLibraryAsset.findMany).not.toHaveBeenCalled();
   });
 
-  test("authorized media resolves the owner's complete object and preserves the download filename", async () => {
+  test("authorized media resolves the owner's complete object as a view-only link", async () => {
     const { api, db, sign } = harness();
     const response = await api.media(new Request(`${request().url}?download=1`), token, "asset");
     expect(response.status).toBe(302);
     expect(response.headers.get("Cache-Control")).toBe("private, no-store");
-    expect(sign.mock.calls[0]).toEqual(["cut/owner/library/sound.mp3", { version: String(now.getTime()), downloadName: "sound.mp3" }]);
+    expect(sign.mock.calls[0]).toEqual(["cut/owner/library/sound.mp3", { version: String(now.getTime()) }]);
     expect(db.cutMediaObject.findFirst.mock.calls[0][0]).toEqual({ where: { userId: "owner", kind: "library", uploadState: "complete", id: "object" } });
     db.cutLibraryAsset.findFirst.mockResolvedValue(null);
     expect((await api.media(request(), token, "asset")).status).toBe(404);

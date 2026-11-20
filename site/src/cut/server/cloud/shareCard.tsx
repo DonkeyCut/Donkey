@@ -9,6 +9,7 @@
 // Until a card has rendered (a link shared seconds ago, a project shared
 // before cards existed) the page still needs something to point at, so this
 // also draws the placeholder: the project's name on Cut's own backdrop.
+import { headers } from "next/headers";
 import { ImageResponse } from "next/og";
 import { prisma } from "@/lib/prisma";
 import { MediaNotConfiguredError, mediaObjectUrl } from "./mediaCdn";
@@ -93,6 +94,14 @@ export async function shareMetaForToken(token: string): Promise<ShareMeta | null
   });
   if (!project) return null;
   return { name: project.name, version: project.version, isPublic: share.access === "public" };
+}
+
+/** Absolute origin for this request — card URLs must be absolute for crawlers. */
+export async function requestOrigin(): Promise<string> {
+  const h = await headers();
+  const host = h.get("host") ?? "donkeycut.com";
+  const proto = h.get("x-forwarded-proto") ?? (host.startsWith("localhost") ? "http" : "https");
+  return `${proto}://${host}`;
 }
 
 /** The stand-in card, drawn rather than rendered: no ffmpeg runs on the hosted

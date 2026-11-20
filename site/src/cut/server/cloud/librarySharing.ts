@@ -8,8 +8,10 @@ import {
   type LibraryShareTarget, type SharedLibraryPage,
 } from "@/cut/lib/librarySharing";
 import { libraryShareAccess, sharedFolderTrail } from "@/cut/server/cloud/libraryShareAccess";
-import { assetView, templateView } from "@/cut/server/cloud/library";
+import { assetView, libraryCloud, templateView } from "@/cut/server/cloud/library";
 import { mediaObjectUrl } from "@/cut/server/cloud/mediaCdn";
+import { libraryCardKey } from "@/cut/server/cloud/r2";
+import { CARD_CACHE_SECONDS, CARD_STALE_SECONDS, placeholderCard } from "@/cut/server/cloud/shareCard";
 import { assetFolderScope } from "@/cut/server/cloud/assetFolders";
 import { UserError, errorBody } from "@/cut/lib/userError";
 
@@ -27,7 +29,23 @@ export function createLibrarySharing(
   getSession: (headers: Headers) => Promise<{ user: { id: string; email: string; emailVerified: boolean } } | null>,
   getPageSize: () => Promise<number>,
   signMedia: typeof mediaObjectUrl = mediaObjectUrl,
+  queueCard: (userId: string, assetId: string) => Promise<void> = libraryCloud.queueCard,
 ) {
+  // A shared video's link preview is drawn in the background; the share
+  // stands whether or not the still lands.
+  const askCard = (userId: string, assetId: string) => {
+    queueCard(userId, assetId).catch((e: unknown) => console.error("[library-share] card queue failed", e));
+  };
+
+  /** What a shared item is called and, for an asset, what kind of file it is. */
+  function describe(target: LibraryShareTarget, row: NonNullable<Awaited<ReturnType<typeof ownedTarget>>>) {
+    if (target.kind === "folder") {
+      return { name: (row as { name: string }).name, type: null };
+    }
+    const view = assetView(row as Parameters<typeof assetView>[0], { fileName: "" });
+    return { name: view.title || view.name, type: view.type };
+  }
+
   async function ownedTarget(userId: string, target: LibraryShareTarget) {
     return target.kind === "folder"
       ? db.cutFolder.findFirst({ where: { id: target.id, userId, scope: assetFolderScope } })
@@ -38,7 +56,8 @@ export function createLibrarySharing(
     async manage(req: Request, userId: string, kind: string, id: string) {
       const parsed = libraryShareTargetSchema.safeParse({ kind, id });
       if (!parsed.success) return err("Invalid share target.", 400);
-      if (!(await ownedTarget(userId, parsed.data))) return err("Not found.", 404);
+      const owned = await ownedTarget(userId, parsed.data);
+      if (!owned) return err("Not found.", 404);
       const where = { userId_kind_targetId: { userId, kind, targetId: id } };
       if (req.method === "DELETE") {
         await db.cutLibraryShare.deleteMany({ where: { userId, kind, targetId: id } });
@@ -55,6 +74,11 @@ export function createLibrarySharing(
         create: { id: randomBytes(24).toString("base64url"), userId, kind, targetId: id, ...body.data },
         update: body.data,
       });
+      // A shared video gets its link-preview still now, so the link unfurls
+      // with its first frame by the time it is pasted.
+      if (describe(parsed.data, owned).type === "video") {
+        askCard(userId, id);
+      }
       return json({ share: { id: row.id, ...body.data } });
     },
 
@@ -118,53 +142,104 @@ export function createLibrarySharing(
       return json(body);
     },
 
+    /** What the share page's document says about the link. Only a public
+     * share names its item; a restricted one stays a neutral invite. The
+     * version changes once a video's still lands, so a crawler that saw the
+     * drawn card asks again. */
+    async meta(token: string) {
+      if (!tokenSchema.safeParse(token).success) return null;
+      const share = await db.cutLibraryShare.findUnique({ where: { id: token } });
+      const target = libraryShareTargetSchema.safeParse({ kind: share?.kind, id: share?.targetId });
+      if (!share || !target.success) return null;
+      if (share.access !== "public") return { isPublic: false as const };
+      const owned = await ownedTarget(share.userId, target.data);
+      if (!owned) return null;
+      const { name, type } = describe(target.data, owned);
+      const card = type === "video"
+        ? await db.cutMediaObject.findFirst({
+          where: { userId: share.userId, r2Key: libraryCardKey(share.userId, target.data.id), uploadState: "complete" },
+          select: { updatedAt: true },
+        })
+        : null;
+      return { isPublic: true as const, name, type, version: card ? card.updatedAt.getTime() : 0 };
+    },
+
+    /** The image a link to this share unfurls with: a video's first frame, an
+     * image itself, or the drawn card with the item's name until a still
+     * exists. A public share's answer is cacheable by anyone; a restricted
+     * one depends on the viewer's session. */
+    async card(req: Request, token: string) {
+      const resolved = await resolve(req, token);
+      if (resolved instanceof Response) return resolved;
+      const { share, target, owned } = resolved;
+      const cacheable = share.access === "public";
+      const headers = cacheable
+        ? { "Cache-Control": `public, s-maxage=${CARD_CACHE_SECONDS}, stale-while-revalidate=${CARD_STALE_SECONDS}` }
+        : privateHeaders;
+      const { name, type } = describe(target, owned);
+      const redirectTo = (key: string, version: Date) => new Response(null, {
+        status: 302,
+        headers: { ...headers, Location: signMedia(key, {
+          version: String(version.getTime()),
+          minLifetimeSeconds: CARD_CACHE_SECONDS + CARD_STALE_SECONDS,
+        }) },
+      });
+
+      // A video unfurls with its stored first frame, an image with itself.
+      if (type === "video" || type === "image") {
+        const object = await db.cutMediaObject.findFirst({
+          where: type === "video"
+            ? { userId: share.userId, r2Key: libraryCardKey(share.userId, target.id), uploadState: "complete" }
+            : { userId: share.userId, id: (owned as { mediaObjectId: string }).mediaObjectId, uploadState: "complete" },
+        });
+        if (object) {
+          return redirectTo(object.r2Key, object.updatedAt);
+        }
+        if (type === "video") {
+          askCard(share.userId, target.id);
+        }
+      }
+
+      // No still yet: the drawn card, on a short leash so the real one takes over.
+      const short = cacheable ? "public, s-maxage=60, stale-while-revalidate=600" : "private, no-store";
+      return new Response(placeholderCard(name).body, {
+        status: 200,
+        headers: { "Content-Type": "image/png", "Cache-Control": short },
+      });
+    },
+
     async media(req: Request, token: string, assetId: string) {
       const resolved = await resolve(req, token);
       if (resolved instanceof Response) return resolved;
       const { share, target } = resolved;
       if (!z.string().min(1).max(128).safeParse(assetId).success) return err("Not found.", 404);
       const query = z.object({
-        template: z.string().min(1).max(128).optional(),
-        file: z.string().min(1).max(512).optional(),
-        download: z.enum(["1"]).optional(),
         poster: z.enum(["1"]).optional(),
         proxy: z.enum(["1"]).optional(),
         resolve: z.enum(["1"]).optional(),
       }).safeParse(Object.fromEntries(new URL(req.url).searchParams));
       if (!query.success) return err("Invalid media request.", 400);
-      let folderId: string | null;
       let fileName: string;
       let mediaObjectId: string | undefined;
       // The playable copy is an object of kind "proxy" beside the library's files.
       let proxyFile: string | undefined;
-      if (query.data.template) {
-        if (query.data.poster || target.kind !== "folder" || query.data.template !== assetId) return err("Not found.", 404);
-        const row = await db.cutTemplate.findFirst({ where: { id: assetId, userId: share.userId } });
-        if (!row) return err("Not found.", 404);
-        const template = templateView(row);
-        const media = template.media.find((m) => m.fileName === query.data.file);
-        if (!media) return err("Not found.", 404);
-        folderId = template.folderId ?? null;
-        fileName = media.fileName;
+      if (target.kind === "asset" && target.id !== assetId) return err("Not found.", 404);
+      const row = await db.cutLibraryAsset.findFirst({
+        where: { id: assetId, userId: share.userId, deletedAt: null },
+      });
+      if (!row) return err("Not found.", 404);
+      const folderId = row.folderId;
+      if (query.data.poster) {
+        const posterFile = assetView(row, { fileName: "" }).posterFile;
+        if (!posterFile) return err("Not found.", 404);
+        fileName = posterFile;
+      } else if (query.data.proxy) {
+        proxyFile = assetView(row, { fileName: "" }).proxyFile;
+        if (!proxyFile) return err("Not found.", 404);
+        fileName = proxyFile;
       } else {
-        if (target.kind === "asset" && target.id !== assetId) return err("Not found.", 404);
-        const row = await db.cutLibraryAsset.findFirst({
-          where: { id: assetId, userId: share.userId, deletedAt: null },
-        });
-        if (!row) return err("Not found.", 404);
-        folderId = row.folderId;
-        if (query.data.poster) {
-          const posterFile = assetView(row, { fileName: "" }).posterFile;
-          if (!posterFile) return err("Not found.", 404);
-          fileName = posterFile;
-        } else if (query.data.proxy) {
-          proxyFile = assetView(row, { fileName: "" }).proxyFile;
-          if (!proxyFile) return err("Not found.", 404);
-          fileName = proxyFile;
-        } else {
-          mediaObjectId = row.mediaObjectId;
-          fileName = "";
-        }
+        mediaObjectId = row.mediaObjectId;
+        fileName = "";
       }
       if (target.kind === "folder") {
         if (!folderId || !(await sharedFolderTrail(target.id, folderId, (id) =>
@@ -177,10 +252,7 @@ export function createLibrarySharing(
           ...(mediaObjectId ? { id: mediaObjectId } : { fileName }) },
       });
       if (!object) return err("Not found.", 404);
-      const url = signMedia(object.r2Key, {
-        version: String(object.updatedAt.getTime()),
-        ...(query.data.download ? { downloadName: object.fileName } : {}),
-      });
+      const url = signMedia(object.r2Key, { version: String(object.updatedAt.getTime()) });
       if (query.data.resolve) return json({ url });
       return new Response(null, { status: 302, headers: { ...privateHeaders, Location: url } });
     },
@@ -196,8 +268,9 @@ export function createLibrarySharing(
     const session = share.access === "public" ? null : await getSession(req.headers);
     const status = libraryShareAccess({ ...settings.data, userId: share.userId }, session?.user ?? null);
     if (status !== 200) return err(status === 401 ? new UserError("share_sign_in", "Sign in to view this share.") : new UserError("share_no_access", "You don't have access to this share."), status);
-    if (!(await ownedTarget(share.userId, target.data))) return err("Not found.", 404);
-    return { share, target: target.data };
+    const owned = await ownedTarget(share.userId, target.data);
+    if (!owned) return err("Not found.", 404);
+    return { share, target: target.data, owned };
   }
 
   return handlers;

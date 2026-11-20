@@ -5,6 +5,8 @@ import { overlayKeysOf, runExportJob } from "./exportJob";
 import { runHlsJob } from "./hlsJob";
 import { runConvertJob } from "./convertJob";
 import { runProxyJob } from "./proxyJob";
+import { runLibraryCardJob } from "./libraryCardJob";
+import { LIBRARY_CARD_JOB } from "../server/cloud/library";
 import { runImportUrlJob } from "./importUrlJob";
 import { runTurnJob } from "./turnJob";
 import { runCommandJob } from "./commandJob";
@@ -193,6 +195,12 @@ async function runJob(job: ClaimedJob): Promise<void> {
       });
     } else if (job.kind === "proxy") {
       const result = await runProxyJob(job, handle, () => entry.canceled);
+      await prisma.cutRenderJob.updateMany({
+        where: { id: job.id, state: "running" },
+        data: { state: "done", progress: 1, result: result as unknown as Prisma.InputJsonValue },
+      });
+    } else if (job.kind === LIBRARY_CARD_JOB) {
+      const result = await runLibraryCardJob(job, handle, () => entry.canceled);
       await prisma.cutRenderJob.updateMany({
         where: { id: job.id, state: "running" },
         data: { state: "done", progress: 1, result: result as unknown as Prisma.InputJsonValue },

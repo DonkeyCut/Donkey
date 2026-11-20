@@ -4,7 +4,9 @@
     "restrictedDescription": "Este proyecto está compartido con personas específicas.",
     "title": "{name} · Donkey Cut",
     "description": "Mira {name} en el navegador.",
-    "libraryTitle": "Biblioteca compartida · Donkey Cut"
+    "libraryTitle": "Biblioteca compartida · Donkey Cut",
+    "libraryRestrictedDescription": "Está compartido con personas específicas.",
+    "libraryDescription": "Mira {name} en el navegador."
   },
   "view": {
     "signInPrompt": "Este proyecto está compartido con personas específicas: inicia sesión para ver si tienes acceso.",

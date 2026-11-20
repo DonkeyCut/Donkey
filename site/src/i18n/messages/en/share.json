@@ -4,7 +4,9 @@
     "restrictedDescription": "This project is shared with specific people.",
     "title": "{name} · Donkey Cut",
     "description": "Watch {name} in the browser.",
-    "libraryTitle": "Shared library · Donkey Cut"
+    "libraryTitle": "Shared library · Donkey Cut",
+    "libraryRestrictedDescription": "This is shared with specific people.",
+    "libraryDescription": "View {name} in the browser."
   },
   "view": {
     "signInPrompt": "This project is shared with specific people — sign in to see if that's you.",

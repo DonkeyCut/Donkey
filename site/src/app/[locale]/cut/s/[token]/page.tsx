@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
-import { headers } from "next/headers";
 import { getTranslations } from "next-intl/server";
-import { shareMetaForToken } from "@/cut/server/cloud/shareCard";
+import { requestOrigin, shareMetaForToken } from "@/cut/server/cloud/shareCard";
 import { NoSessionReplay } from "@/app/_components/NoSessionReplay";
 import { SharedProjectView } from "./SharedProjectView";
 
@@ -14,14 +13,6 @@ import { SharedProjectView } from "./SharedProjectView";
 // means nothing without the right account, so it unfurls as a neutral invite
 // and stays out of search: naming the project there would leak it to anyone
 // holding the URL.
-
-/** Absolute origin for this request — card URLs must be absolute for crawlers. */
-async function origin(): Promise<string> {
-  const h = await headers();
-  const host = h.get("host") ?? "donkeycut.com";
-  const proto = h.get("x-forwarded-proto") ?? (host.startsWith("localhost") ? "http" : "https");
-  return `${proto}://${host}`;
-}
 
 /** The public path of this share, mirroring the link the Share dialog copies. */
 function sharePath(token: string): string {
@@ -42,7 +33,7 @@ export async function generateMetadata({
       robots: { index: false, follow: false },
     };
   }
-  const base = await origin();
+  const base = await requestOrigin();
   const url = `${base}${sharePath(token)}`;
   const card = (kind: "gif" | "jpg") => `${url}/card/${kind}?v=${meta.version}`;
   const description = t("description", { name: meta.name });

@@ -67,6 +67,9 @@ export const projectCardKey = (userId: string, projectId: string, ext: "jpg" | "
   `cut/${userId}/projects/${projectId}/card.${ext}`;
 export const libraryKey = (userId: string, fileName: string) =>
   `cut/${userId}/library/${fileName}`;
+/** A shared library video's link-preview still: its first frame, one per asset. */
+export const libraryCardKey = (userId: string, assetId: string) =>
+  `cut/${userId}/library-cards/${assetId}.jpg`;
 /** Per-user root of the bucket, and the overlay tree under it. `overlayPrefix`
  * is what the sweep walks: one listing per user that has any objects, found
  * through `listCommonPrefixes(USER_ROOT)`. */

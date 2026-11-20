@@ -59,7 +59,7 @@ async function bytesOf(file: string): Promise<number> {
 
 /** Still frame at t=0 — the video's actual first frame, not a poster picked
  * from the middle. */
-async function renderStill(handle: RenderHandle, source: string, dest: string): Promise<number> {
+export async function renderStill(handle: RenderHandle, source: string, dest: string): Promise<number> {
   await ffmpeg(handle, ["-i", source, "-frames:v", "1", "-q:v", "3", dest]);
   return bytesOf(dest);
 }

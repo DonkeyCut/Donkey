@@ -4,7 +4,9 @@
     "restrictedDescription": "이 프로젝트는 특정 사용자에게만 공유되어 있어요.",
     "title": "{name} · Donkey Cut",
     "description": "브라우저에서 {name}을(를) 시청해 보세요.",
-    "libraryTitle": "공유된 라이브러리 · Donkey Cut"
+    "libraryTitle": "공유된 라이브러리 · Donkey Cut",
+    "libraryRestrictedDescription": "특정 사용자와 공유되어 있어요.",
+    "libraryDescription": "브라우저에서 {name}을(를) 확인해 보세요."
   },
   "view": {
     "signInPrompt": "이 프로젝트는 특정 사용자에게만 공유되어 있어요. 본인 계정인지 확인하려면 로그인해 주세요.",
