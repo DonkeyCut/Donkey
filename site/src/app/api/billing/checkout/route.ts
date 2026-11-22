@@ -4,20 +4,12 @@ import { z } from "zod";
 
 import { requestLocale } from "@/i18n/requestLocale";
 import { auth } from "@/lib/auth";
-import { introCouponId } from "@/lib/billing/intro-offer";
 import { chargeCurrency, currencyFor } from "@/lib/billing/charge-currency";
 import { CURRENCIES } from "@/lib/billing/currencies";
-import { introCoupon, openIntroOffer } from "@/lib/billing/intro-offer-server";
 import { ensureLocalPrice } from "@/lib/billing/local-price";
 import { metaCheckoutMetadata, trackCheckoutStarted } from "@/lib/billing/meta-checkout";
 import { PAID_PLANS, PLAN_NAMES, planPrice, planRank, type PaidPlan, type PlanTermsTable } from "@/lib/billing/plans";
-import {
-  declinedUpgrade,
-  dropIntroDiscount,
-  INTRO_OFFER_METADATA_KEY,
-  liftScheduledCancel,
-  upgradeKey,
-} from "@/lib/billing/plan-upgrade";
+import { declinedUpgrade, liftScheduledCancel, upgradeKey } from "@/lib/billing/plan-upgrade";
 import {
   getActiveSubscription,
   isActiveProStatus,
@@ -29,7 +21,7 @@ import {
 import { STRIPE_LOCALE } from "@/lib/billing/stripe-locale";
 import { drainStripe, ensureStripeCustomer, getStripe } from "@/lib/billing/stripe";
 import { countryFromHeaders } from "@/lib/config/country";
-import { contextFromRequest, getGlobalSetting } from "@/lib/config/effective";
+import { getGlobalSetting } from "@/lib/config/effective";
 import { verifyCreditOfferToken } from "@/lib/credits/offers";
 import { openOfferForSubscribing, SUBSCRIBE_BONUS_METADATA_KEY } from "@/lib/credits/subscribe-bonus-claim";
 import {
@@ -112,18 +104,11 @@ export const POST = withDonkeyAuth(async (request) => {
   // A Pro checkout started while an offer for subscribing is open carries the
   // offer, so the webhook lands the credit on the subscription it creates.
   const offer = plan === "pro" ? await openOfferForSubscribing(session.user.id, namedOfferId) : null;
-  // An account the intro offer is open to checks out of Pro with the
-  // discount already on, its window starting here if no surface started it.
-  // Stripe takes either a discount or a promotion code field, never both.
-  const intro = plan === "pro" ? await openIntroOffer(await contextFromRequest(request)) : null;
-  const pricing = intro
-    ? { discounts: [{ coupon: await introCoupon(intro) }] }
-    : { allow_promotion_codes: true };
   await ensureLocalPrice(priceId, planPrice(terms[plan], currency), currency);
   const stripe = getStripe();
   const origin = request.nextUrl.origin;
   const checkout = await stripe.checkout.sessions.create({
-    ...pricing,
+    allow_promotion_codes: true,
     cancel_url: `${origin}/app/settings?checkout=cancelled`,
     client_reference_id: session.user.id,
     currency,
@@ -136,7 +121,6 @@ export const POST = withDonkeyAuth(async (request) => {
       metadata: {
         userId: session.user.id,
         ...(offer ? { [SUBSCRIBE_BONUS_METADATA_KEY]: offer.id } : {}),
-        ...(intro ? { [INTRO_OFFER_METADATA_KEY]: introCouponId(intro) } : {}),
       },
     },
     success_url: `${origin}/app/settings?checkout=success`,
@@ -202,7 +186,7 @@ async function upgradeInPlace(
   }
 
   const stripe = getStripe();
-  const subscription = await stripe.subscriptions.retrieve(subscriptionId, { expand: ["discounts"] });
+  const subscription = await stripe.subscriptions.retrieve(subscriptionId);
   const line = await livePlan(subscription);
   const toPrice = prices[plan]!;
   if (!line || planRank(plan) <= planRank(line.plan)) {
@@ -220,7 +204,6 @@ async function upgradeInPlace(
       subscription.id,
       {
         ...liftScheduledCancel(subscription),
-        ...dropIntroDiscount(subscription),
         billing_cycle_anchor: "now",
         items: [{ id: line.item.id, price: toPrice }],
         payment_behavior: "error_if_incomplete",

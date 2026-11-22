@@ -12,9 +12,6 @@
     "subscribeBody": "{price}에 Pro를 구독하고 추가 {credits}을 받으세요.",
     "expiresIn": "혜택 종료까지 {hours}시간 {minutes}분 {seconds}초"
   },
-  "intro": {
-    "terms": "{months, plural, other {{percent}% 할인: 첫 #개월간 {price}/월, 이후 {full}/월.}}"
-  },
   "upgrade": {
     "projectsTitle": "무제한 프로젝트 이용하기",
     "projectsBody": "Pro 및 Max 요금제는 프로젝트 제한이 없어요."
@@ -81,7 +78,6 @@
     "paidOutBody": "{plan} 크레딧은 {date}에 다시 충전돼요.",
     "topOutTitle": "{plan} 크레딧 충전일: {date}",
     "bestValue": "최고 혜택",
-    "introThen": "{months, plural, other {첫 #개월 이용 후 월 {price}}}",
     "stickerPercent": "{percent}%",
     "stickerOff": "할인",
     "get": "{plan} 선택",

@@ -59,11 +59,9 @@
     "subtitle": "El editor es gratis. Paga solo por la multimedia generada por IA y el almacenamiento.",
     "bestValue": "Mejor opción",
     "getPlan": "Obtén {plan}",
-    "getProOff": "Obtén {percent}% de descuento en Pro",
     "continueFree": "Continuar gratis",
     "continue": "Continuar",
-    "paywallSubtitle": "Elige un plan para comenzar. Editas en una computadora: inicia sesión ahí con esta cuenta.",
-    "covers": "{months, plural, one {Durante tu primer mes, luego {price}/mes} other {Al mes durante tus primeros # meses, luego {price}/mes}}"
+    "paywallSubtitle": "Elige un plan para comenzar. Editas en una computadora: inicia sesión ahí con esta cuenta."
   },
   "tour": {
     "play": {

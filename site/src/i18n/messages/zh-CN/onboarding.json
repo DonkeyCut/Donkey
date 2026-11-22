@@ -59,11 +59,9 @@
     "subtitle": "编辑器免费。仅需为 AI 生成的媒体和存储空间付费。",
     "bestValue": "最超值",
     "getPlan": "获取 {plan}",
-    "getProOff": "立享 {percent}% 优惠升级 Pro",
     "continueFree": "继续使用免费版",
     "continue": "继续",
-    "paywallSubtitle": "选择方案以开始。剪辑需在电脑上进行：使用此账号在电脑端登录即可。",
-    "covers": "{months, plural, other {前 # 个月每月此价格，之后 {price}/月}}"
+    "paywallSubtitle": "选择方案以开始。剪辑需在电脑上进行：使用此账号在电脑端登录即可。"
   },
   "tour": {
     "play": {

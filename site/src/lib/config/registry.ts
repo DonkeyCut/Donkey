@@ -230,23 +230,6 @@ export const SETTINGS = defineSettings({
     description:
       "How many days before a cancelled Pro plan ends the editor starts showing the days left. Until then a plan set to cancel looks like one that renews.",
   },
-  introOffer: {
-    schema: z
-      .object({
-        // Percent off the Pro price; 0 makes no offer.
-        percentOff: z.number().int().min(0).max(90),
-        // Billing months the discount covers.
-        months: z.number().int().min(1).max(12),
-        // Hours the offer stays open after the account first sees it.
-        windowHours: z.number().int().min(1).max(24 * 30),
-      })
-      .strict(),
-    default: { percentOff: 0, months: 1, windowHours: 24 },
-    public: true,
-    title: "Intro offer",
-    description:
-      "A discount on the first months of Pro for an account that has never held a plan. It opens the first time the account sees it and closes this many hours later, for good. Checkout applies it on its own.",
-  },
   freeProjectLimit: {
     schema: z
       .object({

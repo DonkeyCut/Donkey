@@ -12,9 +12,6 @@
     "subscribeBody": "{price}でProに登録すると、追加で{credits}を獲得できます。",
     "expiresIn": "オファー終了まであと{hours}時間{minutes}分{seconds}秒"
   },
-  "intro": {
-    "terms": "{months, plural, other {{percent}%オフ：最初の#か月は{price}/月、その後は{full}/月。}}"
-  },
   "upgrade": {
     "projectsTitle": "プロジェクトを無制限に作成",
     "projectsBody": "ProとMaxにはプロジェクト数の上限がありません。"
@@ -81,7 +78,6 @@
     "paidOutBody": "{plan}のクレジットは{date}に補充されます。",
     "topOutTitle": "{plan}のクレジットは{date}に補充されます",
     "bestValue": "最もお得",
-    "introThen": "{months, plural, other {最初の#か月、その後は{price}/月}}",
     "stickerPercent": "{percent}%",
     "stickerOff": "OFF",
     "get": "{plan}を入手",

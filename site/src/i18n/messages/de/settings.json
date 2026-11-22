@@ -30,7 +30,6 @@
     "activePromotionOpen": "Jeder neue Monat enthält {allowance}.",
     "bonusLanded": "Dein {credits} {origin, select, app {Abo-Bonus} other {Credit-Angebot}} wurde deinen Credits gutgeschrieben.",
     "subscribeOffer": "Abonniere für {price} bis zum {deadline} und erhalte einmalig {credits}.{lifeClause}",
-    "introDeadline": "{terms} Abonniere bis zum {deadline}.",
     "opening": "Wird geöffnet…",
     "manage": "Abrechnung verwalten",
     "unavailable": "Abrechnung ist momentan nicht verfügbar.",

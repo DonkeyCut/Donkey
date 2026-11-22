@@ -2,11 +2,7 @@
 
 import { useFormatter, useLocale, useTranslations } from "next-intl";
 
-import {
-  useIntroOffer,
-  useOpenBillingPortal,
-  useProSubscription,
-} from "@/queries/billing";
+import { useOpenBillingPortal, useProSubscription } from "@/queries/billing";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -22,7 +18,6 @@ import { useChargeCurrency } from "@/app/_components/ChargeCurrencyProvider";
 import { usePlanTerms } from "@/app/_components/PlanTermsProvider";
 import { activeProPromotion, useCutPlan } from "@/app/[locale]/cut/_components/landing/cutPricingPlans";
 import { useApiErrorText } from "@/app/[locale]/cut/app/(home)/settings/_components/useApiErrorText";
-import { useIntroTerms } from "@/cut/components/IntroOffer";
 import { useCreditLifeClause, useFormatDeadline } from "@/cut/components/SubscribeBonusPill";
 import { openUpgrade } from "@/cut/lib/upgrade";
 import { track } from "@/lib/analytics";
@@ -47,7 +42,6 @@ export function ProCard() {
   const lastDayLabel = (day: string) =>
     format.dateTime(new Date(`${day}T00:00:00Z`), { day: "numeric", month: "long", timeZone: "UTC" });
 
-  const introTerms = useIntroTerms();
   const formatDeadline = useFormatDeadline();
   const creditLifeClause = useCreditLifeClause();
   const pro = useProSubscription();
@@ -56,7 +50,6 @@ export function ProCard() {
   const config = useAccountConfig({ enabled: true });
   const terms = usePlanTerms();
   const promotion = config.data ? activeProPromotion(config.data.settings.proAllowancePromotion, terms.pro) : null;
-  const intro = useIntroOffer({ enabled: pro.data?.isActive === false });
   const charge = useChargeCurrency();
 
   if (pro.isLoading || charge.isPending) {
@@ -151,11 +144,6 @@ export function ProCard() {
             credits: formatCredits(offer.dollars, locale),
             lifeClause: creditLifeClause(offer),
           })}
-        </CardContent>
-      ) : null}
-      {intro.data && !isActive ? (
-        <CardContent className="text-sm text-foreground">
-          {t("introDeadline", { terms: introTerms(intro.data), deadline: formatDeadline(intro.data.endsAt) })}
         </CardContent>
       ) : null}
       <CardFooter className="gap-3">

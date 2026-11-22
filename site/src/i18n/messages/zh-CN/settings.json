@@ -30,7 +30,6 @@
     "activePromotionOpen": "每个新月份均包含 {allowance}。",
     "bonusLanded": "你的 {credits} {origin, select, app {订阅奖励} other {特惠点数}}已计入点数余额。",
     "subscribeOffer": "在 {deadline} 前以 {price} 订阅，即可获赠一次性 {credits}。{lifeClause}",
-    "introDeadline": "{terms} 请在 {deadline} 前订阅。",
     "opening": "正在打开…",
     "manage": "管理账单",
     "unavailable": "账单服务目前不可用。",

@@ -63,9 +63,8 @@ export function RequireSession({ children }: { children: ReactNode }) {
     reportExposures(config.data);
   }, [userId, config.data]);
 
-  // The account's currency and intro offer, loaded with the account so every
-  // card that sells a plan has them on its first frame. Loading it starts no
-  // offer window.
+  // The account's currency, loaded with the account so every card that sells
+  // a plan has it on its first frame.
   const queryClient = useQueryClient();
   useEffect(() => {
     if (!userId) {

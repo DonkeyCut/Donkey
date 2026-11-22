@@ -68,9 +68,8 @@ export type AnalyticsEvents = {
   // account back to the tour.
   onboarding_tour_step: { step: TourStep | TemplateTourStep };
   onboarding_tour_resumed: void;
-  // The sequence's plans slide came up; intro as on the plans modal.
-  // exit is "paywall" on a phone, where the slide has no free way on.
-  onboarding_plans_shown: { source: OnboardingRun; intro: number; exit: "free" | "paywall" };
+  // The sequence's plans slide came up. exit is "paywall" on a phone, where the slide has no free way on.
+  onboarding_plans_shown: { source: OnboardingRun; exit: "free" | "paywall" };
   // A phone reached the app past the sequence and was asked for a computer.
   phone_gate_shown: void;
   // The first things a new account does in the editor. An import reports
@@ -126,10 +125,9 @@ export type AnalyticsEvents = {
   cut_storage_move_done: { to: "local" | "browser" | "cloud" };
   cut_storage_move_failed: { to: "local" | "browser" | "cloud"; error: string };
   // The plans modal: shown, and closed without a checkout after `seconds` up.
-  // entry is the button or limit that raised it; intro is the open discount's
-  // percent, 0 for none.
-  upgrade_dialog_shown: { reason: PlansReason; entry: UpgradeEntry; pro: boolean; plan: string; intro: number };
-  upgrade_dialog_closed: { reason: PlansReason; entry: UpgradeEntry; plan: string; intro: number; seconds: number };
+  // entry is the button or limit that raised it.
+  upgrade_dialog_shown: { reason: PlansReason; entry: UpgradeEntry; pro: boolean; plan: string };
+  upgrade_dialog_closed: { reason: PlansReason; entry: UpgradeEntry; plan: string; seconds: number };
   project_limit_hit: { limit: number };
   cut_grace_banner_shown: void;
   // First exposure to an experiment variant; the same value rides every

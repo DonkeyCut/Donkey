@@ -30,7 +30,6 @@
     "activePromotionOpen": "Each new month includes {allowance}.",
     "bonusLanded": "Your {credits} {origin, select, app {subscribe bonus} other {credit offer}} landed in your credits.",
     "subscribeOffer": "Subscribe for {price} by {deadline} and get a one-time {credits}.{lifeClause}",
-    "introDeadline": "{terms} Subscribe by {deadline}.",
     "opening": "Opening…",
     "manage": "Manage billing",
     "unavailable": "Billing is unavailable right now.",

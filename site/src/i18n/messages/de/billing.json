@@ -12,9 +12,6 @@
     "subscribeBody": "Abonniere Pro für {price} und erhalte zusätzlich {credits}.",
     "expiresIn": "Angebot endet in {hours}h {minutes}m {seconds}s"
   },
-  "intro": {
-    "terms": "{months, plural, one {{percent} % Rabatt: {price} für deinen ersten Monat, danach {full}/Monat.} other {{percent} % Rabatt: {price}/Monat für deine ersten # Monate, danach {full}/Monat.}}"
-  },
   "upgrade": {
     "projectsTitle": "Hol dir unbegrenzte Projekte",
     "projectsBody": "Pro und Max haben kein Projektlimit."
@@ -81,7 +78,6 @@
     "paidOutBody": "Deine {plan}-Credits werden am {date} aufgeladen.",
     "topOutTitle": "Deine {plan}-Credits werden am {date} aufgeladen",
     "bestValue": "Bestes Angebot",
-    "introThen": "{months, plural, one {Erster Monat, danach {price}/Monat} other {Erste # Monate, danach {price}/Monat}}",
     "stickerPercent": "{percent}%",
     "stickerOff": "Rabatt",
     "get": "{plan} holen",

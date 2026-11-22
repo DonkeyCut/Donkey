@@ -59,11 +59,9 @@
     "subtitle": "エディタは無料です。お支払いはAI生成メディアとストレージのみです。",
     "bestValue": "最もお得",
     "getPlan": "{plan}を入手",
-    "getProOff": "Proを{percent}%オフで利用",
     "continueFree": "無料で続ける",
     "continue": "続ける",
-    "paywallSubtitle": "プランを選んで始めましょう。編集はコンピューターで行います。そちらでこのアカウントでサインインしてください。",
-    "covers": "{months, plural, other {最初の#か月間の月額、以降は{price}/月}}"
+    "paywallSubtitle": "プランを選んで始めましょう。編集はコンピューターで行います。そちらでこのアカウントでサインインしてください。"
   },
   "tour": {
     "play": {

@@ -30,7 +30,6 @@
     "activePromotionOpen": "매달 {allowance}이 제공돼요.",
     "bonusLanded": "{origin, select, app {구독 보너스} other {크레딧 혜택}} {credits}이 크레딧 잔액에 지급되었어요.",
     "subscribeOffer": "{deadline}까지 {price}에 구독하고 1회성 {credits}을 받으세요.{lifeClause}",
-    "introDeadline": "{terms} {deadline}까지 구독하세요.",
     "opening": "여는 중…",
     "manage": "결제 관리",
     "unavailable": "지금은 결제 기능을 이용할 수 없어요.",

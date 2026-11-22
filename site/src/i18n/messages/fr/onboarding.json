@@ -59,11 +59,9 @@
     "subtitle": "L'éditeur est gratuit. Ne payez que pour les médias générés par l'IA et le stockage.",
     "bestValue": "Meilleure offre",
     "getPlan": "Obtenir {plan}",
-    "getProOff": "Obtenez {percent} % de réduction sur Pro",
     "continueFree": "Continuer avec la version gratuite",
     "continue": "Continuer",
-    "paywallSubtitle": "Choisissez un forfait pour commencer. Le montage se fait sur ordinateur : connectez-vous-y avec ce compte.",
-    "covers": "{months, plural, one {Pour votre premier mois, puis {price}/mois} other {Par mois pendant vos # premiers mois, puis {price}/mois}}"
+    "paywallSubtitle": "Choisissez un forfait pour commencer. Le montage se fait sur ordinateur : connectez-vous-y avec ce compte."
   },
   "tour": {
     "play": {

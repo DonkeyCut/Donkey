@@ -6,7 +6,7 @@
 // be bought again.
 import { useEffect, useRef } from "react";
 import { ArrowLeft, Check, Loader2, Sparkles } from "lucide-react";
-import { useLocale, useTranslations } from "next-intl";
+import { useTranslations } from "next-intl";
 
 import { useChargeCurrency } from "@/app/_components/ChargeCurrencyProvider";
 import { useApiErrorText } from "@/app/[locale]/cut/app/(home)/settings/_components/useApiErrorText";
@@ -14,14 +14,12 @@ import { useCutPlans, type PlanCopy, type PlanFeature } from "@/app/[locale]/cut
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogBody, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { BLUE_FILL, BLUE_TEXT } from "@/cut/components/accent";
-import { OfferSticker } from "@/cut/components/OfferSticker";
 import { usePlanCheckout } from "@/cut/lib/proUpgrade";
 import type { UpgradeEntry } from "@/cut/lib/upgrade";
 import { track } from "@/lib/analytics";
-import { formatMinorPrice } from "@/lib/billing/format-price";
 import { planRank, RECOMMENDED_PLAN, type PaidPlan } from "@/lib/billing/plans";
 import { cn } from "@/lib/utils";
-import { useIntroOffer, useProSubscription, type IntroOffer } from "@/queries/billing";
+import { useProSubscription } from "@/queries/billing";
 
 // A glow of the accent around the card, so it stands off the dark editor
 // behind it. The light theme keeps the dialog's own shadow.
@@ -63,15 +61,12 @@ export function PlansDialog({
   const charge = useChargeCurrency();
   const subscription = useProSubscription();
   const current = subscription.data?.plan ?? null;
-  const intro = useIntroOffer({ enabled: subscription.data?.isActive === false });
   const checkout = usePlanCheckout({ surface: "plans_dialog", reason: source, entry });
   // Held until the plan and the currency are known, so no column opens
   // buyable and then locks, or repaints in another currency. A billing read
   // that fails still opens it, with the failure said, so a refusal is never
   // followed by nothing.
-  const ready =
-    subscription.isError ||
-    (subscription.isSuccess && !charge.isPending && (current !== null || !intro.isPending));
+  const ready = subscription.isError || (subscription.isSuccess && !charge.isPending);
   const error = checkout.error ?? subscription.error;
 
   // Opening focuses the card itself, so no plan's button starts out looking
@@ -88,9 +83,8 @@ export function PlansDialog({
       entry,
       pro: current !== null,
       plan: current ?? "free",
-      intro: intro.data?.percentOff ?? 0,
     });
-  }, [ready, source, entry, current, intro.data]);
+  }, [ready, source, entry, current]);
 
   // A close is a dismissal: a picked plan leaves the page for checkout.
   const close = () => {
@@ -99,7 +93,6 @@ export function PlansDialog({
       reason: source,
       entry,
       plan: current ?? "free",
-      intro: intro.data?.percentOff ?? 0,
       seconds,
     });
     onClose();
@@ -128,16 +121,14 @@ export function PlansDialog({
           </DialogHeader>
         </div>
         <DialogBody className="mx-0 px-6 pt-1 pb-2 sm:px-10">
-          {/* Each column spans the same six rows, so a line one plan adds
-              (the struck price, the offer's terms) lowers that row in every
-              column and the buttons stay level. */}
-          <div className="grid gap-10 md:grid-cols-3 md:grid-rows-[repeat(5,auto)_1fr] md:gap-0 md:divide-x md:divide-border">
+          {/* Each column spans the same five rows, so a line one plan adds
+              lowers that row in every column and the buttons stay level. */}
+          <div className="grid gap-10 md:grid-cols-3 md:grid-rows-[repeat(4,auto)_1fr] md:gap-0 md:divide-x md:divide-border">
             {plans.map((copy) => (
               <PlanColumn
                 key={copy.plan}
                 copy={copy}
                 current={current}
-                offer={copy.plan === "pro" ? (intro.data ?? null) : null}
                 pendingPlan={checkout.pendingPlan}
                 onPick={checkout.start}
               />
@@ -169,14 +160,11 @@ export function PlansDialog({
 function PlanColumn({
   copy,
   current,
-  offer,
   pendingPlan,
   onPick,
 }: {
   copy: PlanCopy;
   current: PaidPlan | null;
-  // The intro discount, on the column it applies to.
-  offer: IntroOffer | null;
   pendingPlan: PaidPlan | null;
   onPick: (plan: PaidPlan) => void;
 }) {
@@ -185,10 +173,8 @@ function PlanColumn({
   const held = planRank(copy.plan) <= planRank(current);
 
   return (
-    <section className="relative flex flex-col md:row-span-6 md:grid md:grid-rows-subgrid md:px-7 md:first:pl-0 md:last:pr-0">
-      {/* An open offer's sticker sits beside the heading, which makes room. */}
-      {offer ? <OfferSticker offer={offer} tone="blue" className="absolute top-0 right-0 md:right-7" /> : null}
-      <div className={cn("flex h-7 items-center gap-2", offer && "pr-24")}>
+    <section className="relative flex flex-col md:row-span-5 md:grid md:grid-rows-subgrid md:px-7 md:first:pl-0 md:last:pr-0">
+      <div className="flex h-7 items-center gap-2">
         <h3 className="text-lg font-semibold">{copy.name}</h3>
         {recommended ? (
           <span className={cn("rounded-full px-2.5 py-0.5 text-xs font-semibold", BLUE_FILL)}>
@@ -196,10 +182,9 @@ function PlanColumn({
           </span>
         ) : null}
       </div>
-      <p className={cn("mt-1 min-h-10 text-sm leading-snug text-muted-foreground", offer && "pr-24")}>{copy.body}</p>
+      <p className="mt-1 min-h-10 text-sm leading-snug text-muted-foreground">{copy.body}</p>
 
-      <Price copy={copy} offer={offer} />
-      <OfferTerms offer={offer} />
+      <Price copy={copy} />
 
       <PlanButton
         copy={copy}
@@ -223,36 +208,13 @@ function PlanColumn({
   );
 }
 
-// The monthly price, large, with its cadence beside it. An open intro offer
-// shows its discounted price, with the struck list price above it. The row
-// sits at the bottom of its grid row, so the large prices share a line.
-function Price({ copy, offer }: { copy: PlanCopy; offer: IntroOffer | null }) {
-  const locale = useLocale();
+// The monthly price, large, with its cadence beside it. The row sits at the
+// bottom of its grid row, so the large prices share a line.
+function Price({ copy }: { copy: PlanCopy }) {
   return (
-    <div className="mt-4 md:self-end">
-      {offer ? (
-        <div className="text-sm font-medium text-muted-foreground line-through tabular-nums">{copy.amount}</div>
-      ) : null}
-      <div className="flex items-baseline gap-1.5">
-        <span className="text-4xl font-semibold tracking-tight tabular-nums">
-          {offer ? formatMinorPrice(offer.introMinor, offer.currency, locale) : copy.amount}
-        </span>
-        <span className="text-sm text-muted-foreground">{copy.cadence}</span>
-      </div>
-    </div>
-  );
-}
-
-// What follows the offer's first months. Rendered empty without an offer, so
-// every column fills the same grid row.
-function OfferTerms({ offer }: { offer: IntroOffer | null }) {
-  const t = useTranslations("billing.plans");
-  const locale = useLocale();
-  return (
-    <div className={cn("mt-1 text-xs font-medium", BLUE_TEXT)}>
-      {offer
-        ? t("introThen", { months: offer.months, price: formatMinorPrice(offer.priceMinor, offer.currency, locale) })
-        : null}
+    <div className="mt-4 flex items-baseline gap-1.5 md:self-end">
+      <span className="text-4xl font-semibold tracking-tight tabular-nums">{copy.amount}</span>
+      <span className="text-sm text-muted-foreground">{copy.cadence}</span>
     </div>
   );
 }

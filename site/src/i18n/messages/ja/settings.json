@@ -30,7 +30,6 @@
     "activePromotionOpen": "毎月{allowance}が含まれます。",
     "bonusLanded": "{credits}の{origin, select, app {登録ボーナス} other {クレジット特典}}が残高に付与されました。",
     "subscribeOffer": "{deadline}までに{price}で登録すると、1回限りの{credits}が付与されます。{lifeClause}",
-    "introDeadline": "{terms} {deadline}までにご登録ください。",
     "opening": "開いています…",
     "manage": "請求の管理",
     "unavailable": "現在、請求機能を利用できません。",

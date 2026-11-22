@@ -29,7 +29,6 @@ model User {
   chatgptGrants ChatgptGrant[]
   chatgptEvents ChatgptEvent[]
   proSubscription ProSubscription?
-  introOfferView IntroOfferView?
   avatar        UserAvatar?
   onboarding    UserOnboarding?
   emailSettings UserEmailSettings?

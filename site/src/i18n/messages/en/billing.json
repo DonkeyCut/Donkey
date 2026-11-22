@@ -12,9 +12,6 @@
     "subscribeBody": "Subscribe to Pro for {price} and get an extra {credits}.",
     "expiresIn": "Offer expires in {hours}h {minutes}m {seconds}s"
   },
-  "intro": {
-    "terms": "{months, plural, one {{percent}% off: {price} for your first month, then {full}/month.} other {{percent}% off: {price}/month for your first # months, then {full}/month.}}"
-  },
   "upgrade": {
     "projectsTitle": "Get unlimited projects",
     "projectsBody": "Pro and Max have no project limit."
@@ -81,7 +78,6 @@
     "paidOutBody": "Your {plan} credits refill on {date}.",
     "topOutTitle": "Your {plan} credits refill on {date}",
     "bestValue": "Best value",
-    "introThen": "{months, plural, one {First month, then {price}/month} other {First # months, then {price}/month}}",
     "stickerPercent": "{percent}%",
     "stickerOff": "off",
     "get": "Get {plan}",

@@ -12,9 +12,6 @@
     "subscribeBody": "以 {price} 订阅 Pro，即可获赠额外 {credits}。",
     "expiresIn": "优惠将在 {hours} 小时 {minutes} 分 {seconds} 秒后到期"
   },
-  "intro": {
-    "terms": "{months, plural, other {立享 {percent}% 优惠：前 # 个月 {price}/月，之后 {full}/月。}}"
-  },
   "upgrade": {
     "projectsTitle": "获取无限制项目",
     "projectsBody": "Pro 和 Max 没有项目数量限制。"
@@ -81,7 +78,6 @@
     "paidOutBody": "你的 {plan} 积分将于 {date} 充值补满。",
     "topOutTitle": "你的 {plan} 积分将于 {date} 充值补满",
     "bestValue": "超值推荐",
-    "introThen": "{months, plural, other {前 # 个月，之后 {price}/月}}",
     "stickerPercent": "{percent}%",
     "stickerOff": "优惠",
     "get": "获取 {plan}",

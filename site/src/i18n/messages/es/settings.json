@@ -30,7 +30,6 @@
     "activePromotionOpen": "Cada nuevo mes incluye {allowance}.",
     "bonusLanded": "Tus {credits} de {origin, select, app {bonificación por suscripción} other {oferta de créditos}} ya están en tus créditos.",
     "subscribeOffer": "Suscríbete por {price} antes del {deadline} y recibe {credits} por única vez.{lifeClause}",
-    "introDeadline": "{terms} Suscríbete antes del {deadline}.",
     "opening": "Abriendo…",
     "manage": "Administrar facturación",
     "unavailable": "La facturación no está disponible en este momento.",

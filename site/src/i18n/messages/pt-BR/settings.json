@@ -30,7 +30,6 @@
     "activePromotionOpen": "Cada novo mês inclui {allowance}.",
     "bonusLanded": "{origin, select, app {Seu bônus de assinatura} other {Sua oferta de créditos}} de {credits} foi adicionado aos seus créditos.",
     "subscribeOffer": "Assine por {price} até {deadline} e ganhe {credits} de uso único.{lifeClause}",
-    "introDeadline": "{terms} Assine até {deadline}.",
     "opening": "Abrindo…",
     "manage": "Gerenciar faturamento",
     "unavailable": "O faturamento não está disponível no momento.",

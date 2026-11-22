@@ -2,9 +2,6 @@ import type Stripe from "stripe";
 
 import { stripeId } from "@/lib/billing/stripe";
 
-// The subscription metadata key checkout stamps the intro coupon under.
-export const INTRO_OFFER_METADATA_KEY = "introOffer";
-
 type CancelFields = Pick<Stripe.SubscriptionUpdateParams, "cancel_at" | "cancel_at_period_end">;
 
 // Moving up keeps the plan, so a scheduled cancel is lifted. Stripe takes one
@@ -18,30 +15,6 @@ export function liftScheduledCancel(subscription: Stripe.Subscription): CancelFi
     return { cancel_at: "" };
   }
   return {};
-}
-
-// The intro discount sells Pro alone, so moving up drops it and keeps every
-// other discount. Reads the subscription with its discounts expanded; an
-// empty result leaves the discounts as they are.
-export function dropIntroDiscount(
-  subscription: Stripe.Subscription,
-): Pick<Stripe.SubscriptionUpdateParams, "discounts"> {
-  const intro = subscription.metadata?.[INTRO_OFFER_METADATA_KEY];
-  if (!intro) {
-    return {};
-  }
-
-  const discounts = subscription.discounts.map((d) => {
-    if (typeof d === "string") {
-      throw new Error("Read the subscription with expand: [\"discounts\"].");
-    }
-    return d;
-  });
-  const kept = discounts.filter((d) => stripeId(d.source.coupon) !== intro);
-  if (kept.length === discounts.length) {
-    return {};
-  }
-  return { discounts: kept.length ? kept.map((d) => ({ discount: d.id })) : "" };
 }
 
 // The subscription metadata key counting declined upgrades. Stripe keeps a
