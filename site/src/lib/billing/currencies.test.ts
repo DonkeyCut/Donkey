@@ -6,6 +6,9 @@ test("a country pays in its own currency, and one with none in USD", () => {
   expect(marketCurrency("DE")).toBe("eur");
   expect(marketCurrency("BR")).toBe("brl");
   expect(marketCurrency("JP")).toBe("jpy");
+  expect(marketCurrency("IN")).toBe("inr");
+  expect(marketCurrency("ID")).toBe("idr");
+  expect(marketCurrency("PH")).toBe("php");
   expect(marketCurrency("PL")).toBe("usd");
   expect(marketCurrency(null)).toBe("usd");
 });

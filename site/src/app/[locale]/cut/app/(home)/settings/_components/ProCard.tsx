@@ -21,7 +21,7 @@ import { useApiErrorText } from "@/app/[locale]/cut/app/(home)/settings/_compone
 import { useCreditLifeClause, useFormatDeadline } from "@/cut/components/SubscribeBonusPill";
 import { openUpgrade } from "@/cut/lib/upgrade";
 import { track } from "@/lib/analytics";
-import { PAID_PLANS, PLAN_NAMES } from "@/lib/billing/plans";
+import { PAID_PLANS, PLAN_NAMES, planCredits } from "@/lib/billing/plans";
 import { creditCountLabel, creditsFromDollars, formatCreditCount, formatCredits } from "@/lib/credits/format-credits";
 import type { Locale } from "@/i18n/locales";
 import { useSubscribeBonus } from "@/queries/credits";
@@ -49,8 +49,10 @@ export function ProCard() {
   const bonus = useSubscribeBonus();
   const config = useAccountConfig({ enabled: true });
   const terms = usePlanTerms();
-  const promotion = config.data ? activeProPromotion(config.data.settings.proAllowancePromotion, terms.pro) : null;
   const charge = useChargeCurrency();
+  const promotion = config.data
+    ? activeProPromotion(config.data.settings.proAllowancePromotion, terms, charge.currency)
+    : null;
 
   if (pro.isLoading || charge.isPending) {
     return (
@@ -90,12 +92,12 @@ export function ProCard() {
                 day: lastDayLabel(promotion.lastDay),
                 allowance: creditCountLabel(promotion.allowanceCredits, locale),
                 multiplier: format.number(promotion.multiplier),
-                usual: creditCountLabel(terms.pro.monthlyCredits, locale),
+                usual: creditCountLabel(planCredits(terms, "pro", charge.currency), locale),
               })
             : t("promotionOpen", {
                 allowance: creditCountLabel(promotion.allowanceCredits, locale),
                 multiplier: format.number(promotion.multiplier),
-                usual: creditCountLabel(terms.pro.monthlyCredits, locale),
+                usual: creditCountLabel(planCredits(terms, "pro", charge.currency), locale),
               })}
         </CardContent>
       ) : null}

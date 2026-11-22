@@ -96,8 +96,21 @@ describe("planAllowanceMicros", () => {
   // 1,000 credits a dollar; a dollar is a million micros.
   test("grants each plan's credits", () => {
     const terms = SETTINGS.planTerms.default;
-    expect(planAllowanceMicros(terms.plus)).toBe(BigInt(5_000_000));
-    expect(planAllowanceMicros(terms.pro)).toBe(BigInt(20_000_000));
-    expect(planAllowanceMicros(terms.max)).toBe(BigInt(60_000_000));
+    expect(planAllowanceMicros(terms, "plus", "usd")).toBe(BigInt(5_000_000));
+    expect(planAllowanceMicros(terms, "pro", "usd")).toBe(BigInt(20_000_000));
+    expect(planAllowanceMicros(terms, "max", "usd")).toBe(BigInt(60_000_000));
+  });
+
+  test("grants a local plan the credits its price buys in dollars", () => {
+    // A made-up price and rate: R$20 at 8 a dollar is $2.50.
+    const base = SETTINGS.planTerms.default;
+    const terms = {
+      ...base,
+      plus: { ...base.plus, localPrices: { brl: 20 } },
+      pro: { ...base.pro, localPrices: { brl: 80 } },
+      max: { ...base.max, localPrices: { brl: 200 } },
+      usdRates: { brl: 8 },
+    };
+    expect(planAllowanceMicros(terms, "plus", "brl")).toBe(BigInt(2_500_000));
   });
 });

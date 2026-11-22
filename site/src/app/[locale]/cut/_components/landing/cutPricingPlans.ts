@@ -5,8 +5,9 @@ import { useChargeCurrency } from "@/app/_components/ChargeCurrencyProvider";
 import { usePlanTerms } from "@/app/_components/PlanTermsProvider";
 import type { CardColor } from "@/app/_components/landing/theme";
 import { promotionCovers, type AllowancePromotion } from "@/lib/billing/allowance-promotion";
+import type { Currency } from "@/lib/billing/currencies";
 import { formatPrice } from "@/lib/billing/format-price";
-import { PAID_PLANS, PLAN_NAMES, planPrice, RECOMMENDED_PLAN, type PaidPlan, type PlanTerms } from "@/lib/billing/plans";
+import { PAID_PLANS, PLAN_NAMES, planCredits, planPrice, RECOMMENDED_PLAN, type PaidPlan, type PlanTermsTable } from "@/lib/billing/plans";
 import { formatCreditCount } from "@/lib/credits/format-credits";
 
 // The Free plan's cloud storage, as its card states it.
@@ -43,7 +44,7 @@ export function useCutPlans(): PlanCopy[] {
     const belowTerms = below ? table[below] : null;
     const amount = formatPrice(planPrice(terms, currency), currency, locale);
     const features: PlanFeature[] = [
-      { kind: "credits", text: t("credits", { credits: formatCreditCount(terms.monthlyCredits, locale) }) },
+      { kind: "credits", text: t("credits", { credits: formatCreditCount(planCredits(table, plan, currency), locale) }) },
       ...(below ? [{ kind: "inherits" as const, text: t("everythingIn", { plan: PLAN_NAMES[below] }) }] : []),
       { kind: "check", text: t("storage", { gb: terms.storageGb }) },
       ...(terms.unlimitedProjects && !belowTerms?.unlimitedProjects
@@ -70,16 +71,18 @@ export function useCutPlan(plan: PaidPlan): PlanCopy {
 }
 
 // The allowance promotion as the Pro card states it, while a period starting
-// now would get it: the multiplied allowance in credits and the last day.
+// now would get it: the multiplied allowance in credits in the account's
+// currency, and the last day.
 // Null when the plain plan applies.
 export function activeProPromotion(
   promotion: AllowancePromotion,
-  pro: PlanTerms,
+  table: PlanTermsTable,
+  currency: Currency,
   now = new Date(),
 ): { allowanceCredits: number; multiplier: number; lastDay: string | null } | null {
   if (!promotionCovers(promotion, now)) return null;
   return {
-    allowanceCredits: pro.monthlyCredits * promotion.multiplier,
+    allowanceCredits: planCredits(table, "pro", currency) * promotion.multiplier,
     multiplier: promotion.multiplier,
     lastDay: promotion.lastDay,
   };

@@ -2,12 +2,14 @@
 
 import { createContext, useContext, type ReactNode } from "react";
 
+import { usePlanTerms } from "@/app/_components/PlanTermsProvider";
 import type { Currency } from "@/lib/billing/currencies";
+import { sellingCurrency } from "@/lib/billing/plans";
 import { useAccountCurrency } from "@/queries/billing";
 
 // The currency every card that sells a plan prices in. The landing has it
 // from its address, which the proxy picks from the visitor's country, and
-// provides it below. Everywhere else a card prices for the signed-in account:
+// provides it below; a currency su has not priced reads as USD. Everywhere else a card prices for the signed-in account:
 // the currency Stripe already bills it in, or its country's, from the pricing
 // read the app loads as it starts. isPending holds a card until that read
 // lands, so a figure never repaints in another currency.
@@ -16,8 +18,9 @@ export type ChargeCurrency = { currency: Currency; isPending: boolean };
 const ChargeCurrencyContext = createContext<ChargeCurrency | null>(null);
 
 export function ChargeCurrencyProvider({ currency, children }: { currency: Currency; children: ReactNode }) {
+  const sold = sellingCurrency(usePlanTerms(), currency);
   return (
-    <ChargeCurrencyContext.Provider value={{ currency, isPending: false }}>{children}</ChargeCurrencyContext.Provider>
+    <ChargeCurrencyContext.Provider value={{ currency: sold, isPending: false }}>{children}</ChargeCurrencyContext.Provider>
   );
 }
 

@@ -13,5 +13,5 @@ test("an account never billed pays in its country's currency", () => {
 });
 
 test("a customer billed in a currency no plan sells in is refused", () => {
-  expect(() => currencyFor("inr", "IN")).toThrow();
+  expect(() => currencyFor("chf", "CH")).toThrow();
 });

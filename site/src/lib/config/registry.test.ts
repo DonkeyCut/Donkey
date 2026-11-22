@@ -22,12 +22,13 @@ describe("the product's settings registry", () => {
     expect(resolved.invalid).toEqual([{ key: "databasePool", layer: "override" }]);
   });
 
-  test("plan terms saved before local prices read the default ones", () => {
+  test("plan terms saved before USD rates read none", () => {
     const { plus, pro, max } = SETTINGS.planTerms.default;
-    const strip = ({ localPrices: _, ...rest }: PlanTerms) => rest;
-    const resolved = resolveSettings({ planTerms: { plus: strip(plus), pro: strip(pro), max: strip(max) } }, []);
+    const priced = (terms: PlanTerms) => ({ ...terms, localPrices: { brl: 50 } });
+    const resolved = resolveSettings({ planTerms: { plus: priced(plus), pro: priced(pro), max: priced(max) } }, []);
     expect(resolved.invalid).toEqual([]);
-    expect(resolved.settings.planTerms.pro.localPrices).toEqual(pro.localPrices);
+    expect(resolved.settings.planTerms.usdRates).toEqual({});
+    expect(resolved.settings.planTerms.pro.localPrices).toEqual({ brl: 50 });
   });
 
   test("the signup grant is set to the cent", () => {

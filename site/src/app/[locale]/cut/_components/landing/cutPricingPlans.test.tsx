@@ -14,11 +14,20 @@ function Prices() {
   return <>{useCutPlans().map((plan) => plan.price).join(" | ")}</>;
 }
 
+// Made-up local prices and rates: the real ones live in the planTerms setting.
+const base = SETTINGS.planTerms.default;
+const terms = {
+  plus: { ...base.plus, localPrices: { jpy: 600, brl: 20 } },
+  pro: { ...base.pro, localPrices: { jpy: 2_400, brl: 80 } },
+  max: { ...base.max, localPrices: { jpy: 6_000, brl: 200 } },
+  usdRates: { jpy: 120, brl: 8 },
+};
+
 const render = (currency: Currency) =>
   renderToStaticMarkup(
     <QueryClientProvider client={new QueryClient()}>
       <NextIntlClientProvider locale="en" messages={{ common }} timeZone="UTC">
-        <PlanTermsProvider terms={SETTINGS.planTerms.default}>
+        <PlanTermsProvider terms={terms}>
           <ChargeCurrencyProvider currency={currency}>
             <Prices />
           </ChargeCurrencyProvider>
@@ -29,6 +38,10 @@ const render = (currency: Currency) =>
 
 test("the plan cards price in the currency they were given", () => {
   expect(render("usd")).toBe("$5/month | $20/month | $49/month");
-  expect(render("jpy")).toBe("¥700/month | ¥2,800/month | ¥6,800/month");
-  expect(render("brl")).toBe("R$15/month | R$59/month | R$149/month");
+  expect(render("jpy")).toBe("¥600/month | ¥2,400/month | ¥6,000/month");
+  expect(render("brl")).toBe("R$20/month | R$80/month | R$200/month");
+});
+
+test("a currency su has not priced shows USD", () => {
+  expect(render("eur")).toBe("$5/month | $20/month | $49/month");
 });

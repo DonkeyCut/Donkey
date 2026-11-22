@@ -7,7 +7,8 @@ import {
 } from "@/lib/billing/stripe";
 import { promotedAllowanceMicros } from "@/lib/billing/allowance-promotion";
 import { getGlobalSetting } from "@/lib/config/effective";
-import { isPaidPlan, PAID_PLANS, PLAN_NAMES, type PaidPlan, type PlanTerms } from "@/lib/billing/plans";
+import { isCurrency, type Currency } from "@/lib/billing/currencies";
+import { isPaidPlan, PAID_PLANS, PLAN_NAMES, planCredits, type PaidPlan, type PlanTermsTable } from "@/lib/billing/plans";
 import { creditStringToMicros, zeroCreditMicros } from "@/lib/credits/amounts";
 import { creditsPerDollar } from "@/lib/credits/format-credits";
 import { grantCredits } from "@/lib/credits/inference";
@@ -63,9 +64,19 @@ export async function planPriceId(plan: PaidPlan): Promise<string | null> {
   return (await readPlanPrices())[plan];
 }
 
-// The credits a plan's billing period starts with, as ledger micros.
-export function planAllowanceMicros(terms: PlanTerms): bigint {
-  return creditStringToMicros(String(terms.monthlyCredits / creditsPerDollar));
+// The credits a plan's billing period starts with in a currency, as ledger
+// micros.
+export function planAllowanceMicros(table: PlanTermsTable, plan: PaidPlan, currency: Currency): bigint {
+  return creditStringToMicros(String(planCredits(table, plan, currency) / creditsPerDollar));
+}
+
+// The currency Stripe bills a subscription in. Checkout opens plans only in
+// a currency they sell in, so any other is a broken subscription.
+function billedIn(subscription: Stripe.Subscription): Currency {
+  if (!isCurrency(subscription.currency)) {
+    throw new Error(`Subscription ${subscription.id} bills in ${subscription.currency.toUpperCase()}, which no plan sells in`);
+  }
+  return subscription.currency;
 }
 
 // The account's running subscription, whichever plan it is on; null for a
@@ -156,7 +167,7 @@ export async function syncProSubscription(
   const periodEnd = unixToDate(item.current_period_end);
   const cancelAt = subscriptionCancelAt(subscription);
   const endedAt = unixToDate(subscription.ended_at);
-  const plainMicros = planAllowanceMicros((await getGlobalSetting("planTerms"))[plan]);
+  const plainMicros = planAllowanceMicros(await getGlobalSetting("planTerms"), plan, billedIn(subscription));
   const allowanceMicros = periodStart
     ? promotedAllowanceMicros(plainMicros, await getGlobalSetting("proAllowancePromotion"), periodStart)
     : plainMicros;

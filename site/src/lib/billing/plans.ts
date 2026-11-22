@@ -4,7 +4,7 @@
 // can't say two things in two parts of the product. Client-safe: no server
 // imports.
 
-import type { Currency, LocalCurrency } from "@/lib/billing/currencies";
+import { LOCAL_CURRENCIES, type Currency, type LocalCurrency } from "@/lib/billing/currencies";
 
 // Cheapest first; a plan's place in this list is its rank.
 export const PAID_PLANS = ["plus", "pro", "max"] as const;
@@ -19,9 +19,9 @@ export const PLAN_NAMES: Record<PaidPlan, string> = { plus: "Plus", pro: "Pro", 
 export type PlanTerms = {
   // The monthly price in USD; su checks it against the plan's Stripe price.
   monthlyDollars: number;
-  // The monthly price in each other currency, in whole units (59 is R$59).
-  // su adds them to the plan's Stripe price.
-  localPrices: Record<LocalCurrency, number>;
+  // The monthly price in each other currency su prices it in, in whole units
+  // (59 is R$59). su adds them to the plan's Stripe price.
+  localPrices: Partial<Record<LocalCurrency, number>>;
   // The AI credits each billing period starts with.
   monthlyCredits: number;
   storageGb: number;
@@ -31,7 +31,12 @@ export type PlanTerms = {
   rendersPerDay: number;
 };
 
-export type PlanTermsTable = Record<PaidPlan, PlanTerms>;
+// Units of each local currency per US dollar, as su sets them. A local plan's
+// credits follow its price at this rate, so a credit costs the same in every
+// currency.
+export type UsdRates = Partial<Record<LocalCurrency, number>>;
+
+export type PlanTermsTable = Record<PaidPlan, PlanTerms> & { usdRates: UsdRates };
 
 // The plan every upsell marks as the best value.
 export const RECOMMENDED_PLAN: PaidPlan = "pro";
@@ -45,7 +50,55 @@ export function planRank(plan: PaidPlan | null): number {
   return plan === null ? 0 : PAID_PLANS.indexOf(plan) + 1;
 }
 
+/** Whether the plans sell in a currency: USD always, any other once su has
+ * set its rate and every plan's price in it. */
+export function sellsIn(table: PlanTermsTable, currency: Currency): boolean {
+  if (currency === "usd") {
+    return true;
+  }
+  return table.usdRates[currency] !== undefined && PAID_PLANS.every((plan) => table[plan].localPrices[currency] !== undefined);
+}
+
+/** The currencies the plans sell in besides USD. */
+export function soldLocalCurrencies(table: PlanTermsTable): LocalCurrency[] {
+  return LOCAL_CURRENCIES.filter((currency) => sellsIn(table, currency));
+}
+
+/** The currency a visitor from `market` pays in: that one when the plans
+ * sell in it, USD otherwise. */
+export function sellingCurrency(table: PlanTermsTable, market: Currency): Currency {
+  return sellsIn(table, market) ? market : "usd";
+}
+
 /** What a plan costs a month in a currency, in whole units of it. */
 export function planPrice(terms: PlanTerms, currency: Currency): number {
-  return currency === "usd" ? terms.monthlyDollars : terms.localPrices[currency];
+  if (currency === "usd") {
+    return terms.monthlyDollars;
+  }
+  const price = terms.localPrices[currency];
+  if (price === undefined) {
+    throw new Error(`No plan price is set in ${currency.toUpperCase()}`);
+  }
+  return price;
+}
+
+// Local credits round down to a whole hundred, so no currency buys a credit
+// for less than USD does.
+const CREDIT_STEP = 100;
+
+/** The credits a plan's period starts with when paid in `currency`: the USD
+ * plan's credits per dollar times the local price in dollars, at su's rate.
+ * Storage and the other limits are the plan's in every currency. */
+export function planCredits(table: PlanTermsTable, plan: PaidPlan, currency: Currency): number {
+  const terms = table[plan];
+  if (currency === "usd") {
+    return terms.monthlyCredits;
+  }
+
+  const rate = table.usdRates[currency];
+  if (rate === undefined) {
+    throw new Error(`No USD rate is set for ${currency.toUpperCase()}`);
+  }
+  const credits = (terms.monthlyCredits * planPrice(terms, currency)) / rate / terms.monthlyDollars;
+  return Math.floor(credits / CREDIT_STEP) * CREDIT_STEP;
 }

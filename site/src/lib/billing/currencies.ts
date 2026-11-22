@@ -1,10 +1,11 @@
-// The currencies the plans sell in. USD is every plan's Stripe default; each
-// other currency is a hand-set amount on the same Stripe price (its
+// The currencies the plans can sell in. USD is every plan's Stripe default;
+// each other currency is a hand-set amount on the same Stripe price (its
 // currency_options), so a subscription keeps its currency through every move
-// between plans. A visitor's country picks the currency, and a country with
-// none of its own pays in USD. Client-safe: no server imports.
+// between plans. A visitor's country picks the currency; a country with none
+// of its own, or one whose currency su has not priced (plans.ts sellsIn),
+// pays in USD. Client-safe: no server imports.
 
-export const CURRENCIES = ["usd", "eur", "gbp", "cad", "aud", "jpy", "krw", "brl", "mxn"] as const;
+export const CURRENCIES = ["usd", "eur", "gbp", "cad", "aud", "jpy", "krw", "brl", "mxn", "inr", "idr", "php"] as const;
 export type Currency = (typeof CURRENCIES)[number];
 
 // The currencies a plan's terms set by hand; USD is its monthlyDollars.
@@ -32,6 +33,9 @@ const MARKET_BY_COUNTRY: ReadonlyMap<string, Currency> = new Map([
   ["KR", "krw"],
   ["BR", "brl"],
   ["MX", "mxn"],
+  ["IN", "inr"],
+  ["ID", "idr"],
+  ["PH", "php"],
 ]);
 
 export function isCurrency(value: unknown): value is Currency {
