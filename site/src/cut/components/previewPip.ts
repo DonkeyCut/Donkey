@@ -32,8 +32,12 @@ import { SURFACE_MOVED } from "@/cut/hooks/usePlayback";
 /** The box a new window opens to fit, in CSS pixels. */
 const PIP_BOX = { w: 640, h: 360 };
 
-/** The silent loop's format: half a second of 8 kHz mono 16-bit PCM. */
-const SILENCE = { rate: 8000, seconds: 0.5 };
+/** The silent loop's format: 8 kHz mono 8-bit PCM. Chrome counts media of 5
+ * seconds or less as a sound effect, which never takes audio focus, so the
+ * loop runs past that. */
+const SILENCE = { rate: 8000, seconds: 10 };
+/** Silence in unsigned 8-bit PCM sits at the middle of the range. */
+const PCM8_ZERO = 128;
 
 /** What the browser exposes; the DOM typings do not carry it yet. */
 type PipApi = {
@@ -124,28 +128,31 @@ function releaseFocus() {
   navigator.mediaSession.playbackState = "none";
 }
 
-/** A short WAV of silence, as an object URL. */
+/** A WAV of silence, as an object URL. */
 function silentWav(): string {
   const samples = SILENCE.rate * SILENCE.seconds;
-  const bytes = new DataView(new ArrayBuffer(44 + samples * 2));
+  const bytes = new DataView(new ArrayBuffer(44 + samples));
   const text = (at: number, value: string) => {
     for (let i = 0; i < value.length; i++) {
       bytes.setUint8(at + i, value.charCodeAt(i));
     }
   };
   text(0, "RIFF");
-  bytes.setUint32(4, 36 + samples * 2, true);
+  bytes.setUint32(4, 36 + samples, true);
   text(8, "WAVE");
   text(12, "fmt ");
   bytes.setUint32(16, 16, true);
   bytes.setUint16(20, 1, true);
   bytes.setUint16(22, 1, true);
   bytes.setUint32(24, SILENCE.rate, true);
-  bytes.setUint32(28, SILENCE.rate * 2, true);
-  bytes.setUint16(32, 2, true);
-  bytes.setUint16(34, 16, true);
+  bytes.setUint32(28, SILENCE.rate, true);
+  bytes.setUint16(32, 1, true);
+  bytes.setUint16(34, 8, true);
   text(36, "data");
-  bytes.setUint32(40, samples * 2, true);
+  bytes.setUint32(40, samples, true);
+  for (let i = 0; i < samples; i++) {
+    bytes.setUint8(44 + i, PCM8_ZERO);
+  }
   return URL.createObjectURL(new Blob([bytes.buffer], { type: "audio/wav" }));
 }
 
