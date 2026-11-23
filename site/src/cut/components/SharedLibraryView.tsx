@@ -67,9 +67,11 @@ export function SharedLibraryView() {
   const data = query.data;
   const status = query.error instanceof ApiError ? query.error.status : 0;
   return <main className="app-surface min-h-dvh min-w-0 bg-background font-system text-foreground">
-    {/* A single shared asset takes the whole window; a folder keeps the
-        reading width its grid is laid out for. */}
-    <div className={cn("mx-auto flex min-h-dvh flex-col px-5 py-9 sm:px-10", data?.kind !== "asset" && "max-w-6xl")}>
+    {/* A single shared asset takes the whole window, at a fixed height: the
+        viewer's size container only reports a height its column pins down,
+        and a column that merely grows to fill the window reports none. A
+        folder scrolls at the reading width its grid is laid out for. */}
+    <div className={cn("mx-auto flex flex-col px-5 py-9 sm:px-10", data?.kind === "asset" ? "h-dvh" : "min-h-dvh max-w-6xl")}>
       <header className="mb-8 flex items-center justify-between gap-4">
         <Link href={base} className="text-lg font-semibold">Donkey Cut</Link>
         <span className="text-xs text-muted-foreground">{data?.kind === "asset" ? t("viewOnlyAsset") : t("viewOnly")}</span>
