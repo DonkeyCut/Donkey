@@ -107,8 +107,6 @@
     "galleryView": "갤러리 보기",
     "listView": "목록 보기",
     "loadFailed": "이 프로젝트를 불러오지 못했어요.",
-    "loadFailedCloud": "클라우드 프로젝트를 불러오지 못했어요.",
-    "loadFailedLocal": "이 Mac에 있는 프로젝트를 불러오지 못했어요.",
     "emptyTitle": "시작하려면 새 프로젝트를 만드세요",
     "renameTitle": "프로젝트 이름 변경",
     "rename": "이름 변경",
@@ -247,8 +245,6 @@
     "untitledNote": "제목 없는 메모",
     "saveFailed": "메모를 저장하지 못했어요.",
     "reopen": "다시 열고 재시도",
-    "loadFailed": "메모를 불러오지 못했어요.",
-    "retry": "재시도",
     "delete": "삭제",
     "deleteTitle": "{what}을(를) 삭제할까요?",
     "removedFromPhone": "{count, plural, other {휴대폰에서도 삭제돼요.}}"

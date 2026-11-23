@@ -107,8 +107,6 @@
     "galleryView": "Galerieansicht",
     "listView": "Listenansicht",
     "loadFailed": "Diese Projekte konnten nicht geladen werden.",
-    "loadFailedCloud": "Cloud-Projekte konnten nicht geladen werden.",
-    "loadFailedLocal": "Projekte auf diesem Mac konnten nicht geladen werden.",
     "emptyTitle": "Erstelle ein neues Projekt, um loszulegen",
     "renameTitle": "Projekt umbenennen",
     "rename": "Umbenennen",
@@ -247,8 +245,6 @@
     "untitledNote": "Unbenannte Notiz",
     "saveFailed": "Notiz konnte nicht gespeichert werden.",
     "reopen": "Erneut öffnen und wiederholen",
-    "loadFailed": "Notizen konnten nicht geladen werden.",
-    "retry": "Wiederholen",
     "delete": "Löschen",
     "deleteTitle": "{what} löschen?",
     "removedFromPhone": "{count, plural, =1 {Wird auch von deinem Smartphone entfernt.} other {Werden auch von deinem Smartphone entfernt.}}"

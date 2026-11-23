@@ -107,8 +107,6 @@
     "galleryView": "画廊视图",
     "listView": "列表视图",
     "loadFailed": "无法加载这些项目。",
-    "loadFailedCloud": "无法加载云端项目。",
-    "loadFailedLocal": "无法加载此 Mac 上的项目。",
     "emptyTitle": "创建新项目以开始",
     "renameTitle": "重命名项目",
     "rename": "重命名",
@@ -247,8 +245,6 @@
     "untitledNote": "未命名笔记",
     "saveFailed": "无法保存笔记。",
     "reopen": "重新打开并重试",
-    "loadFailed": "无法加载笔记。",
-    "retry": "重试",
     "delete": "删除",
     "deleteTitle": "删除{what}？",
     "removedFromPhone": "{count, plural, other {也会从你的手机中移除。}}"

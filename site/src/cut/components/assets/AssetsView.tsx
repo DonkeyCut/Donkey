@@ -1222,15 +1222,6 @@ export function AssetsView() {
 
         <GraceBanner enabled={cloudListed} />
         {(failure ?? create.error) && <p className="mb-4 text-sm text-destructive">{failure ?? create.error}</p>}
-        {residencies.map(
-          (r) =>
-            sections[r].isError &&
-            !sections[r].data && (
-              <p key={r} className="mb-4 text-sm text-muted-foreground">
-                {r === "cloud" ? t("projects.loadFailedCloud") : t("projects.loadFailedLocal")}
-              </p>
-            ),
-        )}
 
         {view === "list" ? (
           <AssetTable framed={listRows}>

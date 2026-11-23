@@ -107,8 +107,6 @@
     "galleryView": "Vue Galerie",
     "listView": "Vue Liste",
     "loadFailed": "Impossible de charger ces projets.",
-    "loadFailedCloud": "Impossible de charger les projets cloud.",
-    "loadFailedLocal": "Impossible de charger les projets sur ce Mac.",
     "emptyTitle": "Créez un nouveau projet pour commencer",
     "renameTitle": "Renommer le projet",
     "rename": "Renommer",
@@ -247,8 +245,6 @@
     "untitledNote": "Note sans titre",
     "saveFailed": "Impossible d'enregistrer la note.",
     "reopen": "Rouvrir et réessayer",
-    "loadFailed": "Impossible de charger les notes.",
-    "retry": "Réessayer",
     "delete": "Supprimer",
     "deleteTitle": "Supprimer {what} ?",
     "removedFromPhone": "{count, plural, one {L'élément sera aussi supprimé de votre téléphone.} other {Ils seront aussi supprimés de votre téléphone.}}"

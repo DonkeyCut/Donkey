@@ -107,8 +107,6 @@
     "galleryView": "Gallery view",
     "listView": "List view",
     "loadFailed": "Couldn’t load these projects.",
-    "loadFailedCloud": "Couldn’t load cloud projects.",
-    "loadFailedLocal": "Couldn’t load the projects on this Mac.",
     "emptyTitle": "Create a new project to get started",
     "renameTitle": "Rename project",
     "rename": "Rename",
@@ -247,8 +245,6 @@
     "untitledNote": "Untitled note",
     "saveFailed": "Could not save the note.",
     "reopen": "Reopen and retry",
-    "loadFailed": "Could not load notes.",
-    "retry": "Retry",
     "delete": "Delete",
     "deleteTitle": "Delete {what}?",
     "removedFromPhone": "{count, plural, =1 {It is removed from your phone too.} other {They are removed from your phone too.}}"

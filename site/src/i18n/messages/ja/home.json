@@ -107,8 +107,6 @@
     "galleryView": "ギャラリー表示",
     "listView": "リスト表示",
     "loadFailed": "プロジェクトを読み込めませんでした。",
-    "loadFailedCloud": "クラウドプロジェクトを読み込めませんでした。",
-    "loadFailedLocal": "このMac上のプロジェクトを読み込めませんでした。",
     "emptyTitle": "新規プロジェクトを作成して始めましょう",
     "renameTitle": "プロジェクト名の変更",
     "rename": "名前を変更",
@@ -247,8 +245,6 @@
     "untitledNote": "無題のノート",
     "saveFailed": "ノートを保存できませんでした。",
     "reopen": "再度開いて再試行",
-    "loadFailed": "ノートを読み込めませんでした。",
-    "retry": "再試行",
     "delete": "削除",
     "deleteTitle": "{what}を削除しますか？",
     "removedFromPhone": "{count, plural, other {スマートフォンからも削除されます。}}"

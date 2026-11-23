@@ -511,7 +511,6 @@ export function NotesView({ library, query = "", layout = "tiles", ref }: Props)
           onDeleteLabel={removeLabel}
         />
       )}
-      {notes.isError && <p role="alert" className="py-3 text-sm text-destructive">{t("notes.loadFailed")} <button onClick={reload} className="underline">{t("notes.retry")}</button></p>}
       {/* A row per note in the Assets list: its paper colour, its title, and
           when it was last written. */}
       {layout === "rows" &&
