@@ -5,6 +5,7 @@ import { useParams, useSearchParams } from "next/navigation";
 import { Folder, Loader2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { buttonVariants } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { useSharedLibrary } from "@/queries/sharing";
 import { ApiError } from "@/queries/apiClient";
 import { librarySharePath, type SharedLibraryAsset } from "@/cut/lib/librarySharing";
@@ -34,7 +35,9 @@ function Asset({ asset, token }: { asset: SharedLibraryAsset; token: string }) {
  * under it. */
 function SharedAssetPage({ asset, token }: { asset: SharedLibraryAsset; token: string }) {
   const media = sharedMediaOf(asset, token);
-  return <div className="flex justify-center">
+  // The viewer fills the page below the header: a size container growing into
+  // the rest of the column, so the media sizes to it and follows resizes.
+  return <div className="flex min-h-0 flex-1 justify-center [container-type:size]">
     <MediaViewer item={{
       kind: asset.type, src: media.play ?? media.src, name: asset.name, prompt: "", assetId: null, bare: true,
       duration: asset.duration, poster: media.poster,
@@ -64,7 +67,9 @@ export function SharedLibraryView() {
   const data = query.data;
   const status = query.error instanceof ApiError ? query.error.status : 0;
   return <main className="app-surface min-h-dvh min-w-0 bg-background font-system text-foreground">
-    <div className="mx-auto max-w-6xl px-5 py-9 sm:px-10">
+    {/* A single shared asset takes the whole window; a folder keeps the
+        reading width its grid is laid out for. */}
+    <div className={cn("mx-auto flex min-h-dvh flex-col px-5 py-9 sm:px-10", data?.kind !== "asset" && "max-w-6xl")}>
       <header className="mb-8 flex items-center justify-between gap-4">
         <Link href={base} className="text-lg font-semibold">Donkey Cut</Link>
         <span className="text-xs text-muted-foreground">{data?.kind === "asset" ? t("viewOnlyAsset") : t("viewOnly")}</span>

@@ -39,6 +39,13 @@ const FALLBACK_RATIO = 16 / 9;
 // The side of the square whose area a frame decoded for the viewer covers.
 const VIEWER_FRAME_SIZE = 720;
 
+// The height kept free under a picture for what sits below it: nothing in a
+// bare lightbox, the name row with its Use button (36px plus the 12px gap) in
+// a captioned one, and one line of title (28px plus the gap) on a share page.
+const BARE_ROOM = "0px";
+const CAPTION_ROOM = "48px";
+const TITLE_ROOM = "40px";
+
 export function Lightbox() {
   const t = useTranslations("editor.lightbox");
   const item = useLightbox((s) => s.item);
@@ -109,9 +116,10 @@ export function Lightbox() {
       item.assetId !== null ||
       item.libraryId !== undefined);
 
-  // With a known aspect the dialog width follows it — capped so the media
-  // stays within 68vh tall and 860px/92vw wide — and the media box carries the
-  // same ratio, so nothing shifts when the file loads. Audio and text use
+  // With a known aspect the dialog width follows it — as big as the backdrop
+  // holds, leaving room for the caption, and tracking the window as it
+  // resizes — and the media box carries the same ratio, so nothing shifts
+  // when the file loads. Audio and text use
   // fixed reading widths instead. A picture opened without an aspect stays
   // hidden until the file reports one, so the viewer only ever shows the
   // media at its own shape.
@@ -119,11 +127,13 @@ export function Lightbox() {
   const picture = item.kind === "video" || item.kind === "image";
   const unshaped = picture && !ratio;
   const onRatio = (r: number) => setMeasured({ src: item.src, ratio: r });
-  const width = mediaWidth(item.kind, ratio);
+  const width = mediaWidth(item.kind, ratio, item.bare ? BARE_ROOM : CAPTION_ROOM);
 
   return (
+    // The backdrop is a size container, so the media measures itself against
+    // the space inside its padding (cqw/cqh).
     <div
-      className="fixed inset-0 z-70 grid place-items-center bg-black/70 p-6 backdrop-blur-sm"
+      className="fixed inset-0 z-70 grid place-items-center bg-black/70 p-4 backdrop-blur-sm [container-type:size] sm:p-6"
       onClick={() => useLightbox.getState().close()}
     >
       <div
@@ -202,8 +212,8 @@ export function Lightbox() {
   );
 }
 
-/** The lightbox's media laid inline at the same size, with what sits under
- * it — the page a shared asset opens on. */
+/** The lightbox's media laid inline, as big as its size container holds, with
+ * one line of title under it — the page a shared asset opens on. */
 export function MediaViewer({ item, children }: { item: LightboxItem; children?: ReactNode }) {
   const [measured, setMeasured] = useState<{ src: string; ratio: number } | null>(null);
   const ratio = item.ratio ?? (measured?.src === item.src ? measured.ratio : undefined);
@@ -211,7 +221,7 @@ export function MediaViewer({ item, children }: { item: LightboxItem; children?:
   return (
     <div
       className={cn("flex flex-col gap-3", unshaped && "invisible")}
-      style={{ width: mediaWidth(item.kind, ratio) }}
+      style={{ width: mediaWidth(item.kind, ratio, TITLE_ROOM) }}
     >
       <LightboxMedia item={item} ratio={ratio} onRatio={(r) => setMeasured({ src: item.src, ratio: r })} />
       {children}
@@ -219,8 +229,11 @@ export function MediaViewer({ item, children }: { item: LightboxItem; children?:
   );
 }
 
-/** How wide the viewer draws an item, per the sizing rule above. */
-function mediaWidth(kind: LightboxItem["kind"], ratio?: number) {
+/** How wide the viewer draws an item, per the sizing rule above. A picture
+ * fills the nearest size container: its full width, or the width its height
+ * allows after `room` is kept free below. A 9:16 video in a 1400×860 window
+ * with no caption draws (860 − 48) × 0.5625 ≈ 457px wide. */
+function mediaWidth(kind: LightboxItem["kind"], ratio: number | undefined, room: string) {
   if (kind === "audio") {
     return "min(92vw, 480px)";
   }
@@ -233,7 +246,10 @@ function mediaWidth(kind: LightboxItem["kind"], ratio?: number) {
   if (kind === "text") {
     return "min(92vw, 720px)";
   }
-  return ratio ? `min(92vw, 860px, ${Math.round(68 * ratio * 100) / 100}vh)` : "min(92vw, 860px)";
+  if (!ratio) {
+    return "100cqw";
+  }
+  return `min(100cqw, (100cqh - ${room}) * ${Math.round(ratio * 10000) / 10000})`;
 }
 
 function LightboxMedia({
