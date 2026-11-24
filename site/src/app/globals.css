@@ -213,6 +213,16 @@ html:has(.app-surface) {
   html {
     @apply bg-background font-sans;
   }
+
+  /* A video floating over the page — in a dialog, a popover, a picker —
+     draws through Chrome's own compositor. Chrome on macOS hands videos to
+     the system compositor, and with a backdrop blur anywhere on the page a
+     video in front shows the video behind it inside its own picture: a
+     media tile under the Adjust dialog played in the dialog's player. An
+     identity filter keeps the video out of that hand-off. */
+  :is([role="dialog"], [role="listbox"], [role="menu"]) video {
+    filter: brightness(1);
+  }
 }
 
 /* The preview's zoom bubble unfurling out of its round button: it stretches

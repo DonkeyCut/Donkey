@@ -137,6 +137,8 @@ export function Lightbox() {
       onClick={() => useLightbox.getState().close()}
     >
       <div
+        role="dialog"
+        aria-modal="true"
         className={cn("relative flex max-h-full flex-col gap-3", unshaped && "invisible")}
         style={{ width }}
         onClick={(e) => e.stopPropagation()}
