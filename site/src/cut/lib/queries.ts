@@ -21,13 +21,13 @@ import { useCallback, useEffect } from "react";
 
 import { confirmedEngineUser, currentEngineUser, engineLost, onEngineUserConfirmed } from "./api";
 import { cutMode } from "./backend";
-import { useCutMode } from "./backend/hooks";
+import { useComputeSettled, useCutMode } from "./backend/hooks";
 import { readSnapshot, snapshotKey, writeSnapshot } from "./cache";
 import { fetchLibrary, type LibraryAsset, type LibraryData } from "./library";
 import { freeItemName } from "./itemName";
 import { renameLibraryFile } from "./libraryRename";
 import { fetchNotes, placeLooseNotes, type NotesData } from "./notes";
-import { withFavorite, type TemplateCandidate } from "./templateGallery";
+import { ownTemplatesPending, withFavorite, type GateState, type TemplateCandidate } from "./templateGallery";
 import { fetchFavorites, fetchTemplateIndex, markFavorite, searchTemplateIndex } from "./templateUse";
 import {
   availableResidencies,
@@ -156,9 +156,15 @@ export function useOwnProjects(enabled: boolean): ProjectSummary[] {
 }
 
 /** The person's own templates on every shelf this browser can read now,
- * with the shelf each lives on. The same cache entries as the home's sections,
- * so making one there lists it here. */
-export function useOwnTemplates(): { project: ProjectSummary; residency: Residency }[] {
+ * with the shelf each lives on, and whether that list is still unknown. The
+ * same cache entries as the home's sections, so making one there lists it
+ * here. */
+export function useOwnTemplates(): {
+  templates: { project: ProjectSummary; residency: Residency }[];
+  pending: boolean;
+} {
+  // Subscribing to the gate redraws this when this Mac's shelf joins the read.
+  const gate: GateState = useComputeSettled() ? "settled" : "unsettled";
   const live = availableResidencies();
   return useQueries({
     queries: live.map((r) => ({
@@ -167,10 +173,12 @@ export function useOwnTemplates(): { project: ProjectSummary; residency: Residen
       staleTime: PROJECT_REFS_STALE_MS,
       retry: false,
     })),
-    combine: (results) =>
-      results.flatMap((q, i) =>
+    combine: (results) => ({
+      templates: results.flatMap((q, i) =>
         (q.data?.projects ?? []).filter((p) => p.kind === "template").map((project) => ({ project, residency: live[i] }))
       ),
+      pending: ownTemplatesPending(gate, results),
+    }),
   });
 }
 

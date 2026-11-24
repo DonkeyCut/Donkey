@@ -46,7 +46,7 @@ export function HomeTemplates({ panel }: { panel: PanelNav }) {
   const base = useCutBase();
   const index = useTemplateIndex();
   const favorites = useTemplateFavorites();
-  const mine = useOwnTemplates();
+  const mine = useOwnTemplates().templates;
   const [picked, setChip] = useState<Chip>(ALL);
 
   // A chip with fewer templates keeps the grid as tall as it was when the

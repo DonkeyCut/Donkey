@@ -235,3 +235,13 @@ export function templatePeaks(t: Pick<GalleryTemplate, "id" | "version">): strin
 export function templatePage(id: string): string {
   return `/templates/${encodeURIComponent(id)}`;
 }
+
+/** Whether the gate has answered if this Mac's shelf is in reach. */
+export type GateState = "settled" | "unsettled";
+
+/** Whether the person's own templates are still unknown: the gate has yet to
+ * say whether this Mac's shelf joins the read, or a shelf has yet to answer.
+ * A shelf that fails to answer counts as answered. */
+export function ownTemplatesPending(gate: GateState, shelves: { isPending: boolean }[]): boolean {
+  return gate === "unsettled" || shelves.some((s) => s.isPending);
+}

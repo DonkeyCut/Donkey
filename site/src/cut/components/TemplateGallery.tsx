@@ -167,7 +167,7 @@ export function TemplateGallery() {
   const router = useRouter();
   const pathname = usePathname();
   const base = useCutBase();
-  const mine = useOwnTemplates();
+  const { templates: mine, pending: minePending } = useOwnTemplates();
   const index = useTemplateIndex();
   const favorites = useTemplateFavorites();
   // The template the panel shows sits at its own page's URL, pushed over the
@@ -207,6 +207,7 @@ export function TemplateGallery() {
     matches,
   );
   const loading =
+    (filter.source === "mine" && minePending) ||
     (filter.source !== "mine" && index.isPending) ||
     (filter.source === "favorites" && favorites.pending) ||
     (!!query && search.isPending);

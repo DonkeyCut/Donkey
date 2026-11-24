@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { favoritesFirst, pageWindow, withFavorite } from "./templateGallery";
+import { favoritesFirst, ownTemplatesPending, pageWindow, withFavorite } from "./templateGallery";
 
 describe("pageWindow", () => {
   test("a short run shows every page", () => {
@@ -50,5 +50,22 @@ describe("withFavorite", () => {
     // A then B are starred; A's request fails and only A comes off.
     const both = withFavorite(withFavorite([], "a", "add"), "b", "add");
     expect(withFavorite(both, "a", "remove")).toEqual(["b"]);
+  });
+});
+
+describe("ownTemplatesPending", () => {
+  const read = { isPending: false };
+  const reading = { isPending: true };
+
+  test("waits while the gate has yet to say whether this Mac's shelf exists", () => {
+    expect(ownTemplatesPending("unsettled", [read])).toBe(true);
+  });
+
+  test("waits while any shelf is still being read", () => {
+    expect(ownTemplatesPending("settled", [read, reading])).toBe(true);
+  });
+
+  test("knows once the gate settled and every shelf answered", () => {
+    expect(ownTemplatesPending("settled", [read, read])).toBe(false);
   });
 });

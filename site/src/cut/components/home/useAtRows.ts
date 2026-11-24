@@ -23,7 +23,7 @@ export function useAtRows(open: boolean, projects: HomeProject[]): AtRow[] {
   const locale = useLocale();
   const library = useLibrary({ enabled: open }).data;
   const notes = useNotes(open).data;
-  const own = useOwnTemplates();
+  const own = useOwnTemplates().templates;
   const gallery = useTemplateIndex().data;
 
   return useMemo(() => {
