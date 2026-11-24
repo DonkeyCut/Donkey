@@ -75,11 +75,16 @@ WORKDIR /app
 # out of the bundle (worker:build marks them external) and installed for this
 # platform here. mediabunny itself comes along because its server package
 # registers into it — one registry instance, one copy.
-RUN npm install --no-package-lock --omit=dev \
-      skia-canvas@^3.0.8 \
-      mediabunny@^1.51.0 \
-      @mediabunny/server@^1.54.0 \
-      node-web-audio-api@^2.2.0
+# Each installs at the version the site's lockfile resolved, so the image runs
+# what the site was built and tested with and a release published between two
+# deploys never reaches it unseen (node-web-audio-api 2.3.0 began loading
+# libdbus, which this image does not carry).
+COPY package-lock.json /tmp/site-lock.json
+RUN npm install --no-package-lock --omit=dev $(node -e " \
+      const lock = require('/tmp/site-lock.json').packages; \
+      const names = ['skia-canvas', 'mediabunny', '@mediabunny/server', 'node-web-audio-api']; \
+      console.log(names.map((n) => n + '@' + lock['node_modules/' + n].version).join(' '))") \
+  && rm /tmp/site-lock.json
 # A headless job installs all three at once, so a native library missing from
 # the image fails the build here.
 RUN node -e "Promise.all([import('@mediabunny/server'), import('skia-canvas'), import('node-web-audio-api')]).catch((e) => { console.error(e.message); process.exit(1); })"
