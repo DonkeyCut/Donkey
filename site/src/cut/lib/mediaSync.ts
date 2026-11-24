@@ -118,7 +118,7 @@ export async function renameLocalMedia(
 ): Promise<void> {
   if (!supportsBrowserStore() || from === to) return;
   try {
-    const file = await readFileAt(await mediaDir(projectId), from);
+    const file = await localMediaFile(projectId, from);
     if (!file) return;
     const dir = await mediaDir(projectId, true);
     if (!dir) return;
@@ -163,10 +163,20 @@ export async function pendingUploadsFor(projectId: string): Promise<PendingUploa
   }
 }
 
-/** The store's copy of a cloud project's media file, when it holds one. */
+/** The store's copy of a cloud project's media file, when it holds one.
+ * Opening a file to write it puts an empty one on disk before the first byte
+ * lands, and a write cut off there leaves it behind: no media file is empty,
+ * so an empty one is no copy. It goes, and the next prefetch fetches the file
+ * again. */
 export async function localMediaFile(projectId: string, fileName: string): Promise<File | null> {
   if (!supportsBrowserStore()) return null;
-  return readFileAt(await mediaDir(projectId), fileName);
+  const dir = await mediaDir(projectId);
+  const file = await readFileAt(dir, fileName);
+  if (!file || file.size > 0) {
+    return file;
+  }
+  await dir?.removeEntry(fileName).catch(() => {});
+  return null;
 }
 
 /** The blob URL for a locally held media file, minting it on first ask.
@@ -349,7 +359,7 @@ async function cacheOne(
       await makeRoom(projectId, res.headers.get("content-length") ? 0 : 1 << 30);
     }
   }
-  const file = await readFileAt(await mediaDir(projectId), fileName);
+  const file = await localMediaFile(projectId, fileName);
   return { go: true, url: file ? registerBlobFile(path, file) : null };
 }
 
