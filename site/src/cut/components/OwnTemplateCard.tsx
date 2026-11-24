@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import {
@@ -46,7 +47,8 @@ import type { ProjectSummary } from "@/cut/lib/types";
 import { errorFromBody } from "@/cut/lib/userError";
 import { track } from "@/lib/analytics";
 import { CardPreview } from "./assets/ProjectCard";
-import { TemplateCaption, TemplateFacts } from "./GalleryTile";
+import { inPanel, TemplateCaption, TemplateFacts } from "./GalleryTile";
+import { OwnTemplatePanel } from "./OwnTemplatePanel";
 import { DeleteConfirm } from "./selectionMenu";
 
 // Projects without an aspect are 9:16.
@@ -54,9 +56,10 @@ export const DEFAULT_ASPECT = "9:16";
 
 export type OwnTemplate = { project: ProjectSummary; residency: Residency };
 
-/** One of the person's own templates: a project of theirs marked as one. It
- * opens in the editor like any project; its menu makes a new project from it,
- * renames it or deletes it. */
+/** One of the person's own templates: a project of theirs marked as one. A
+ * click opens it in the sheet Donkey's templates open in; a modified click
+ * opens it in the editor. Its menu makes a new project from it, renames it or
+ * deletes it. */
 export function OwnTemplateCard({
   template,
   from,
@@ -81,6 +84,53 @@ export function OwnTemplateCard({
   const [renaming, setRenaming] = useState(false);
   const [name, setName] = useState(p.name);
   const [error, setError] = useState<string | null>(null);
+  const [viewing, setViewing] = useState(false);
+  const [viewed, setViewed] = useState(false);
+
+  // The sheet takes a history entry of its own, so the back button closes it
+  // and closing it takes the entry back off.
+  const pushed = useRef(false);
+  const openSheet = () => {
+    window.history.pushState(null, "", window.location.href);
+    pushed.current = true;
+    setViewed(true);
+    setViewing(true);
+  };
+  const closeSheet = () => {
+    if (pushed.current) {
+      window.history.back();
+      return;
+    }
+    setViewing(false);
+  };
+  // Leave for the editor. The sheet's player closes the project it holds and
+  // drops its backend pin as it goes, so it goes first, synchronously, before
+  // the editor opens a project, which may be this same one. The sheet's
+  // history entry turns into the editor's, so Back returns to the grid.
+  const leaveTo = (href: string) => {
+    flushSync(() => {
+      setViewing(false);
+      setViewed(false);
+    });
+    if (pushed.current) {
+      pushed.current = false;
+      router.replace(href);
+      return;
+    }
+    router.push(href);
+  };
+
+  useEffect(() => {
+    if (!viewing) {
+      return;
+    }
+    const onPop = () => {
+      pushed.current = false;
+      setViewing(false);
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, [viewing]);
 
   // A copy of the template on its own shelf, marked a project, opened.
   const startFrom = async () => {
@@ -93,7 +143,7 @@ export function OwnTemplateCard({
       const id = await copyAsKind(r, p.id, "project", p.name);
       void refetchProjects(client, r);
       track("project_created", { source: "template" });
-      router.push(projectHref(base, id, "home"));
+      leaveTo(projectHref(base, id, "home"));
     } catch (e) {
       setError(describeError(e, t("detail.failed")));
     } finally {
@@ -157,6 +207,7 @@ export function OwnTemplateCard({
     <div className="group relative min-w-0">
       <Link
         href={projectHref(base, p.id, from)}
+        onClick={(e) => inPanel(e, openSheet)}
         onDragStart={dragRef ? (e) => setRefDragData(e, dragRef) : undefined}
         onDragEnd={dragRef ? clearRefDrag : undefined}
         className="flex min-w-0 flex-col gap-3 outline-none"
@@ -219,6 +270,19 @@ export function OwnTemplateCard({
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+
+      {viewed && (
+        <OwnTemplatePanel
+          template={template}
+          open={viewing}
+          from={from}
+          busy={busy}
+          error={error}
+          onUse={() => void startFrom()}
+          onEdit={() => leaveTo(projectHref(base, p.id, from))}
+          onClose={closeSheet}
+        />
+      )}
 
       <Dialog open={renaming} onOpenChange={(o) => !o && setRenaming(false)}>
         <DialogContent className="sm:max-w-sm">

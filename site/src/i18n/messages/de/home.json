@@ -393,6 +393,7 @@
       "close": "Zurück zu Vorlagen",
       "use": "Als neues Projekt verwenden",
       "using": "Projekt wird erstellt…",
+      "edit": "Vorlage bearbeiten",
       "progress": "Medien werden kopiert: {done} von {total}…",
       "copyLink": "Link kopieren",
       "linkCopied": "Link kopiert",

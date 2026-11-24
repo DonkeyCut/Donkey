@@ -2,9 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { templateBackendFor } from "@/cut/lib/backend/shared";
-import type { GalleryTemplate } from "@/cut/lib/templateGallery";
+import { localized, type GalleryTemplate } from "@/cut/lib/templateGallery";
 import type { ShareFeatures } from "@/cut/lib/types";
 import type { PanelNav } from "./GalleryTile";
 import { TemplateInfo, TemplateTopBar } from "./TemplateInfo";
@@ -33,6 +33,8 @@ export function TemplateDetail({
   panel?: PanelNav;
 }) {
   const t = useTranslations("home.templates");
+  const locale = useLocale();
+  const name = localized(template.name, locale);
   const [gate, setGate] = useState<Gate>({ state: "loading" });
 
   // Another template's meta loads behind the one showing, which stays up
@@ -62,7 +64,7 @@ export function TemplateDetail({
     return (
       <div className="flex h-full flex-col">
         <div className="h-[46px] shrink-0">
-          <TemplateTopBar template={template} closeHref={closeHref} panel={panel} />
+          <TemplateTopBar name={name} closeHref={closeHref} panel={panel} />
         </div>
         <div className="grid flex-1 place-items-center px-4">
           <p className="text-sm text-muted-foreground">{t("detail.missing")}</p>
@@ -74,17 +76,20 @@ export function TemplateDetail({
     <div className="flex h-full flex-col overflow-y-auto md:flex-row md:overflow-hidden">
       <div className="flex min-w-0 shrink-0 flex-col md:min-h-0 md:flex-1">
         <div className="h-[46px] shrink-0">
-          <TemplateTopBar template={template} closeHref={closeHref} panel={panel} />
+          <TemplateTopBar name={name} closeHref={closeHref} panel={panel} />
         </div>
         {/* On a phone the player and its timeline nearly fill the screen,
             and the panel scrolls up under them. */}
         <div className="h-[88dvh] min-h-0 md:h-auto md:flex-1">
           {gate.state === "ready" ? (
             <TemplatePlayer
-              templateId={gate.templateId}
-              version={template.version}
               projectId={gate.projectId}
-              features={gate.features}
+              source={{
+                kind: "gallery",
+                templateId: gate.templateId,
+                version: template.version,
+                features: gate.features,
+              }}
             />
           ) : (
             <div className="grid h-full place-items-center text-muted-foreground">

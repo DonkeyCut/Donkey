@@ -393,6 +393,7 @@
       "close": "Back to templates",
       "use": "Use as new project",
       "using": "Creating project…",
+      "edit": "Edit template",
       "progress": "Copying media {done} of {total}…",
       "copyLink": "Copy link",
       "linkCopied": "Link copied",

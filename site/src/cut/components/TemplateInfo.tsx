@@ -18,7 +18,7 @@ const SIMILAR_COUNT = 4;
 const COPIED_MS = 2000;
 
 // The shape line's icon follows the frame's shape, as in the editor's top bar.
-const ASPECT_ICON: Record<TemplateAspect, typeof Clock> = {
+export const ASPECT_ICON: Record<TemplateAspect, typeof Clock> = {
   "9:16": Smartphone,
   "4:5": Smartphone,
   "1:1": Square,
@@ -33,16 +33,15 @@ function runHref(base: string, id: string): string {
 
 /** The template page's top bar: the way back to the gallery and the name. */
 export function TemplateTopBar({
-  template,
+  name,
   closeHref,
   panel,
 }: {
-  template: GalleryTemplate;
+  name: string;
   closeHref: string;
-  panel?: PanelNav;
+  panel?: Pick<PanelNav, "close">;
 }) {
   const t = useTranslations("home.templates");
-  const locale = useLocale();
   return (
     <header className="flex h-full items-center gap-2 border-b border-border bg-card pr-3 pl-2">
       <Button
@@ -58,7 +57,7 @@ export function TemplateTopBar({
         <DonkeyMark alt="Donkey" />
       </span>
       <span className="max-w-64 truncate px-1 text-sm font-medium tracking-tight">
-        {localized(template.name, locale)}
+        {name}
       </span>
     </header>
   );

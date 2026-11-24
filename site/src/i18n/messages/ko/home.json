@@ -393,6 +393,7 @@
       "close": "템플릿 목록으로",
       "use": "새 프로젝트로 사용",
       "using": "프로젝트 생성 중…",
+      "edit": "템플릿 편집",
       "progress": "미디어 복사 중 ({done}/{total})…",
       "copyLink": "링크 복사",
       "linkCopied": "링크 복사됨",

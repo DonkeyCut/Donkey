@@ -393,6 +393,7 @@
       "close": "返回模板",
       "use": "以此创建新项目",
       "using": "正在创建项目…",
+      "edit": "编辑模板",
       "progress": "正在复制媒体（{done}/{total}）…",
       "copyLink": "复制链接",
       "linkCopied": "链接已复制",

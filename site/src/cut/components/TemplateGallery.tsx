@@ -55,8 +55,7 @@ import {
 } from "./OwnTemplateCard";
 import { TemplateDetail } from "./TemplateDetail";
 import { TemplateSearch } from "./TemplateSearch";
-import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
-import { Dialog, DialogPortal } from "@/components/ui/dialog";
+import { TemplateSheet } from "./TemplateSheet";
 
 // The gallery's filters, each a URL param so Back and reload keep the view.
 // Source shows Donkey's templates by default, the ones the person starred,
@@ -541,20 +540,16 @@ export function TemplatePanel({
 }) {
   const locale = useLocale();
   return (
-    <Dialog open={open} onOpenChange={(next) => !next && panel.close()}>
-      <DialogPortal>
-        <DialogPrimitive.Backdrop className="fixed inset-0 z-50 bg-black/60 transition-opacity duration-300 ease-out supports-backdrop-filter:backdrop-blur-xs data-ending-style:opacity-0 data-starting-style:opacity-0" />
-        <DialogPrimitive.Popup className="app-surface fixed inset-y-0 right-0 z-50 w-full max-w-[1600px] overflow-hidden border-border bg-background text-foreground shadow-2xl outline-none transition-transform duration-300 ease-out data-ending-style:translate-x-full data-starting-style:translate-x-full md:w-[calc(100vw-3rem)] md:rounded-l-2xl md:border-l">
-          <DialogPrimitive.Title className="sr-only">
-            {localized(template.name, locale)}
-          </DialogPrimitive.Title>
-          <TemplateDetail
-            template={template}
-            closeHref={closeHref}
-            panel={panel}
-          />
-        </DialogPrimitive.Popup>
-      </DialogPortal>
-    </Dialog>
+    <TemplateSheet
+      open={open}
+      title={localized(template.name, locale)}
+      onClose={panel.close}
+    >
+      <TemplateDetail
+        template={template}
+        closeHref={closeHref}
+        panel={panel}
+      />
+    </TemplateSheet>
   );
 }

@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { Clapperboard, Loader2, Volume2, VolumeX } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useDescribeError } from "@/i18n/describeError";
-import { bindCutMode, releaseCutMode } from "@/cut/lib/backend";
+import { bindCutMode, releaseCutMode, type CutMode } from "@/cut/lib/backend";
 import { bindTemplateBackend } from "@/cut/lib/backend/shared";
 import { holdThreadsInMemory, releaseThreadsMemory } from "@/cut/lib/chatThreads";
 import { holdEditorLoad } from "@/cut/lib/editorWork";
@@ -19,6 +19,7 @@ import { projectDuration, useEditor } from "@/cut/lib/store";
 import type { ShareFeatures } from "@/cut/lib/types";
 import { landBakedPeaks } from "@/cut/lib/media";
 import { reportSwallowed } from "@/cut/lib/report";
+import type { Residency } from "@/cut/lib/residency";
 import { templateFrame, templatePeaks } from "@/cut/lib/templateGallery";
 import { setFullTimeline, setLightTimeline } from "@/cut/lib/timelineDetail";
 import { Preview } from "./Preview";
@@ -30,6 +31,28 @@ const END_SLACK_S = 0.05;
 // How many seconds of a template the timeline fits as it opens.
 const OPEN_SPAN_S = 30;
 
+// The person's own template plays with every editing surface off, as a
+// share view with nothing shared but the cut.
+const OWN_VIEW: ShareFeatures = {
+  chat: false,
+  media: false,
+  genai: false,
+  subtitles: false,
+  details: false,
+};
+
+/** Where the template plays from: a published one through its read-only
+ * backend, or one of the person's own on the shelf that holds it. */
+export type PlayerSource =
+  | {
+      kind: "gallery";
+      templateId: string;
+      /** The published version, which keys the template's baked clip frames. */
+      version: string;
+      features: ShareFeatures;
+    }
+  | { kind: "own"; residency: Residency };
+
 /**
  * A template in the editor's own stage over its timeline, as a share shows
  * a project: the document loads read-only through the backend the page
@@ -38,17 +61,20 @@ const OPEN_SPAN_S = 30;
  * and the timeline shows how it is built.
  */
 export function TemplatePlayer({
-  templateId,
-  version,
   projectId,
-  features,
+  source,
 }: {
-  templateId: string;
-  /** The published version, which keys the template's baked clip frames. */
-  version: string;
   projectId: string;
-  features: ShareFeatures;
+  source: PlayerSource;
 }) {
+  // Plain values for the effects below: a published template's id, version
+  // and features, or the shelf of the person's own (null on the other kind).
+  const gallery = source.kind === "gallery" ? source : null;
+  const templateId = gallery?.templateId ?? null;
+  const version = gallery?.version ?? null;
+  const features = gallery?.features ?? OWN_VIEW;
+  const mode: CutMode = source.kind === "gallery" ? "shared" : source.residency;
+
   const describeError = useDescribeError();
   const loaded = useEditor((s) => s.loaded);
   const failure = useEditor((s) => s.loadFailure ?? s.loadError);
@@ -74,7 +100,7 @@ export function TemplatePlayer({
     opened.current = projectId;
   }, [projectId]);
   useEffect(() => {
-    bindCutMode("shared");
+    bindCutMode(mode);
     holdThreadsInMemory();
     return () => {
       useEditor.getState().closeProject(opened.current);
@@ -83,10 +109,15 @@ export function TemplatePlayer({
       setFullTimeline();
       setPreviewMuted(false);
     };
-  }, []);
+  }, [mode]);
 
-  // The timeline draws this template's clips from the frames it baked.
+  // The timeline draws a published template's clips from the frames it
+  // baked, and the person's own from its media, as the editor does.
   useEffect(() => {
+    if (templateId === null || version === null) {
+      setFullTimeline();
+      return;
+    }
     setLightTimeline((clipId) => templateFrame({ id: templateId, version }, clipId));
   }, [templateId, version]);
 
@@ -94,7 +125,9 @@ export function TemplatePlayer({
   // template loads over this one in place.
   useEffect(() => {
     let alive = true;
-    bindTemplateBackend(templateId);
+    if (templateId !== null) {
+      bindTemplateBackend(templateId);
+    }
     useEditor.getState().setSharedView(features);
     void holdEditorLoad().then(async (release) => {
       try {
@@ -104,7 +137,11 @@ export function TemplatePlayer({
         await useEditor.getState().loadProject(projectId, { viewer: true });
         if (alive) {
           useEditor.getState().setPlaying(true);
-          // The soundtrack's waveform comes from the peaks its publish baked.
+          // A published soundtrack's waveform comes from the peaks its
+          // publish baked.
+          if (templateId === null || version === null) {
+            return;
+          }
           void landBakedPeaks(templatePeaks({ id: templateId, version })).catch((e: unknown) =>
             reportSwallowed("[cut] template peaks failed", e, templateId)
           );

@@ -393,6 +393,7 @@
       "close": "Retour aux modèles",
       "use": "Utiliser comme nouveau projet",
       "using": "Création du projet…",
+      "edit": "Modifier le modèle",
       "progress": "Copie des médias {done} sur {total}…",
       "copyLink": "Copier le lien",
       "linkCopied": "Lien copié",
