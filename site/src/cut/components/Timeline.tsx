@@ -58,7 +58,7 @@ import { CLIP_GAP, landOnRow, laneDragFor, laneDragParts, laneDragSlots, resolve
 import { reportSwallowed } from "@/cut/lib/report";
 import { downloadMedia, dropEdgeFrames, ensurePeaks, importImage, importStockAudio, importStockVideo, peekEdgeFrame, requestEdgeFrame, missingMediaFor, revealMedia, stripFailedFor, subscribeStripStatus } from "@/cut/lib/media";
 import { planFilmstrip, type FilmTile } from "@/cut/lib/filmstrip";
-import { waveGain } from "@/cut/lib/waveform";
+import { waveLevel, waveRef } from "@/cut/lib/waveform";
 import { canSplitItem } from "@/cut/lib/itemKinds";
 import { track0Clips, laneGapAt, blockClipAt, sameLane, type LaneRef, clipLen, clipSpeed, getClipSpans, maxClipFade, overlayLaneOrder, overlayLayers, projectDuration, resolveTransitions, rippleInsert, useEditor } from "@/cut/lib/store";
 import type { VideoTrackPlacement } from "@/cut/lib/store";
@@ -5271,9 +5271,10 @@ function WaveformCanvas({
   className?: string;
 }) {
   const peaks = asset.peaks;
-  // The strip is drawn against the clip's own loudest moment, so a quietly
-  // recorded clip shows its shape instead of a flat line (lib/waveform.ts).
-  const gain = useMemo(() => waveGain(peaks ?? []), [peaks]);
+  // The strip is drawn in decibels against the clip's own loudest moment, so
+  // a quietly recorded clip shows its shape instead of a flat line
+  // (lib/waveform.ts).
+  const loudest = useMemo(() => waveRef(peaks ?? []), [peaks]);
   if (!peaks?.length) return null;
   const width = Math.max(1, Math.round(w));
   const tiles: { left: number; tw: number }[] = [];
@@ -5285,7 +5286,7 @@ function WaveformCanvas({
         <WaveTile
           key={t.left}
           peaks={peaks}
-          gain={gain}
+          loudest={loudest}
           duration={asset.duration}
           from={map ? map(t.left) : from + (to - from) * (t.left / width)}
           to={map ? map(t.left + t.tw) : from + (to - from) * ((t.left + t.tw) / width)}
@@ -5303,7 +5304,7 @@ function WaveformCanvas({
  * approach, so a deep zoom books backing store only for what gets seen. */
 function WaveTile({
   peaks,
-  gain,
+  loudest,
   duration,
   from,
   to,
@@ -5312,7 +5313,7 @@ function WaveTile({
   h,
 }: {
   peaks: number[];
-  gain: number;
+  loudest: number;
   duration: number;
   from: number;
   to: number;
@@ -5346,7 +5347,7 @@ function WaveTile({
         const b = Math.max(a + 1, Math.ceil(start + (i + 1) * perBar));
         let p = 0;
         for (let j = a; j < b && j < n; j++) if (peaks[j] > p) p = peaks[j];
-        const bh = Math.max(1.5, Math.min(1, p * gain) * (h - 2));
+        const bh = Math.max(1.5, waveLevel(p, loudest) * (h - 2));
         ctx.fillRect(i * 3, (h - bh) / 2, 2, bh);
       }
     };
@@ -5368,7 +5369,7 @@ function WaveTile({
     );
     io.observe(canvas);
     return () => io.disconnect();
-  }, [peaks, gain, duration, from, to, tw, h]);
+  }, [peaks, loudest, duration, from, to, tw, h]);
   return <canvas ref={ref} className="absolute top-0" style={{ left, width: tw, height: h }} />;
 }
 

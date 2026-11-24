@@ -48,7 +48,7 @@ import {
 } from "@/cut/lib/replaceFlow";
 import { useEditor } from "@/cut/lib/store";
 import { formatTime } from "@/cut/lib/time";
-import { waveGain } from "@/cut/lib/waveform";
+import { barPeak, waveLevel, waveRef } from "@/cut/lib/waveform";
 import {
   isLinkedAssetType,
   previewUrl,
@@ -655,6 +655,10 @@ function PickTile({
   );
 }
 
+/** Bars the sound preview folds its waveform into: each the loudest stretch
+ * of the file under it, wide enough to stay crisp at the preview's size. */
+const PREVIEW_BARS = 160;
+
 /** A waveform from normalized peaks, as bars across its box. */
 function Peaks({
   peaks,
@@ -665,20 +669,30 @@ function Peaks({
   className?: string;
   style?: React.CSSProperties;
 }) {
-  if (!peaks?.length) {
+  const bars = useMemo(() => {
+    if (!peaks?.length) {
+      return [];
+    }
+
+    // Drawn in decibels against the file's loudest moment, as the timeline
+    // draws it.
+    const ref = waveRef(peaks);
+    const count = Math.min(PREVIEW_BARS, peaks.length);
+    return Array.from({ length: count }, (_, i) => waveLevel(barPeak(peaks, i, count), ref));
+  }, [peaks]);
+  if (!bars.length) {
     return null;
   }
-  const n = peaks.length;
   return (
     <svg
-      viewBox={`0 0 ${n} 100`}
+      viewBox={`0 0 ${bars.length} 100`}
       preserveAspectRatio="none"
       className={className}
       style={style}
       aria-hidden
     >
-      {peaks.map((p, i) => {
-        const h = Math.max(2, p * 100);
+      {bars.map((level, i) => {
+        const h = Math.max(2, level * 100);
         return (
           <rect
             key={i}
@@ -719,7 +733,7 @@ function StripWave({
 }) {
   const ref = useRef<HTMLCanvasElement>(null);
   // Drawn against the file's loudest moment, as the timeline draws it.
-  const gain = useMemo(() => waveGain(peaks), [peaks]);
+  const loudest = useMemo(() => waveRef(peaks), [peaks]);
 
   useEffect(() => {
     const canvas = ref.current;
@@ -753,10 +767,10 @@ function StripWave({
           p = peaks[j];
         }
       }
-      const h = Math.max(1.5, Math.min(1, p * gain) * (STRIP_WAVE_H - 4));
+      const h = Math.max(1.5, waveLevel(p, loudest) * (STRIP_WAVE_H - 4));
       ctx.fillRect(i * WAVE_BAR_PITCH, (STRIP_WAVE_H - h) / 2, WAVE_BAR_W, h);
     }
-  }, [peaks, gain, pan, width, total]);
+  }, [peaks, loudest, pan, width, total]);
 
   return <canvas ref={ref} aria-hidden className="block w-full" style={{ height: STRIP_WAVE_H }} />;
 }

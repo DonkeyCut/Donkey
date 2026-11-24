@@ -2692,7 +2692,8 @@ type CachedPeaks = { peaks: number[]; duration: number; at: number };
 
 function peaksCacheKey(projectId: string | null, assetId: string) {
   // The density marker versions the cache; peaks sampled differently regenerate.
-  return `${projectId ?? ""}/${assetId}@peaks${PEAKS_PER_SECOND}`;
+  // "a" marks peaks read from every sample of every channel.
+  return `${projectId ?? ""}/${assetId}@peaks${PEAKS_PER_SECOND}a`;
 }
 
 function openStripDb(): Promise<IDBDatabase> {

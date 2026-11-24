@@ -53,7 +53,7 @@ import { generateButton, useGenerateCost } from "./GenerateCost";
 import { musicMicros } from "@/lib/credits/price-sheet";
 import { genPulseOverlay, useActiveWork, useGenNotify } from "@/cut/lib/genNotify";
 import { enrichAsset } from "@/cut/lib/media";
-import { waveGain } from "@/cut/lib/waveform";
+import { barPeak, waveLevel, waveRef } from "@/cut/lib/waveform";
 import { usePreviewAudio } from "@/cut/lib/previewAudio";
 import { useEditor } from "@/cut/lib/store";
 import { playheadAt } from "@/cut/lib/playhead";
@@ -553,7 +553,7 @@ function VoiceGenerator({ projectId }: { projectId: string }) {
  * bigger by the lightbox and the chat's audio cards (`className` restyles). */
 export function PeakStrip({ peaks, className }: { peaks: number[]; className?: string }) {
   const BARS = 48;
-  const gain = waveGain(peaks);
+  const ref = waveRef(peaks);
   const step = Math.max(1, Math.floor(peaks.length / BARS));
   const bars: number[] = [];
   for (let i = 0; i < BARS; i++) {
@@ -571,7 +571,7 @@ export function PeakStrip({ peaks, className }: { peaks: number[]; className?: s
       aria-hidden
     >
       {bars.map((p, i) => {
-        const h = Math.max(1.5, Math.min(1, p * gain) * 16);
+        const h = Math.max(1.5, waveLevel(p, ref) * 16);
         return <rect key={i} x={i * 2} y={(16 - h) / 2} width={1.2} height={h} rx={0.6} fill="currentColor" />;
       })}
     </svg>
@@ -612,7 +612,7 @@ export function AudioPillSurface({
  * than PeakStrip so they read at card size. */
 function CardBars({ peaks, className }: { peaks: number[]; className?: string }) {
   const BARS = 30;
-  const gain = waveGain(peaks);
+  const ref = waveRef(peaks);
   const step = Math.max(1, Math.floor(peaks.length / BARS));
   const bars: number[] = [];
   for (let i = 0; i < BARS; i++) {
@@ -628,7 +628,7 @@ function CardBars({ peaks, className }: { peaks: number[]; className?: string })
         <div
           key={i}
           className="min-w-0 flex-1 rounded-full bg-[#8fcba9]"
-          style={{ height: `${Math.round(Math.max(0.15, Math.min(1, p * gain)) * 100)}%` }}
+          style={{ height: `${Math.round(Math.max(0.15, waveLevel(p, ref)) * 100)}%` }}
         />
       ))}
     </div>
@@ -709,12 +709,11 @@ function buildAudioDragGhost(name: string, width: number, peaks?: number[]): HTM
     ctx.fillStyle = "rgba(255,255,255,0.85)";
     const bars = Math.max(1, Math.floor(width / 3));
     const n = peaks?.length ?? 0;
-    const gain = n ? waveGain(peaks!) : 1;
+    const ref = n ? waveRef(peaks!) : 1;
     for (let i = 0; i < bars; i++) {
-      // Use the asset's peaks when we have them; otherwise a gentle stand-in so
-      // the pill still reads as audio.
-      const p = n ? (peaks![Math.min(n - 1, Math.floor((i / bars) * n))] ?? 0) * gain : 0.32 + 0.26 * Math.abs(Math.sin(i / 2));
-      const h = Math.max(1.5, Math.min(1, p) * (wave - 2));
+      // Use the asset's peaks when we have them, each bar the loudest of its
+      // stretch; otherwise a gentle stand-in so the pill still reads as audio.
+      const h = Math.max(1.5, (n ? waveLevel(barPeak(peaks!, i, bars), ref) : 0.32 + 0.26 * Math.abs(Math.sin(i / 2))) * (wave - 2));
       ctx.fillRect(i * 3, (wave - h) / 2, 2, h);
     }
   }

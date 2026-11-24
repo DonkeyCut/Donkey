@@ -49,6 +49,7 @@ import { pictureAssetIds, type ItemLists } from "./itemKinds";
 import { allowance, holdMemory } from "./memoryBudget";
 import "./mediabunnyLog";
 import { SpsColorRewriter, descriptionLengthSize, spsCodecOf, tagsOfColorSpace } from "./spsColor";
+import { foldPeaks } from "./waveform";
 
 /** What a file turns out to be, read from its container. */
 export interface MediaProbe {
@@ -1016,15 +1017,11 @@ export async function audioPeaks(
       if (!(duration > 0)) return [];
 
       for await (const { buffer, timestamp } of new AudioBufferSink(track).buffers(from)) {
-        const data = buffer.getChannelData(0);
-        const rate = buffer.sampleRate;
-        // Every 8th sample, matching what the whole-file pass measured.
-        for (let i = 0; i < data.length; i += 8) {
-          const v = Math.abs(data[i]);
-          const at = (timestamp + i / rate) / duration;
-          const bucket = Math.min(buckets - 1, Math.max(0, Math.floor(at * buckets)));
-          if (v > peaks[bucket]) peaks[bucket] = v;
+        const channels: Float32Array[] = [];
+        for (let c = 0; c < buffer.numberOfChannels; c++) {
+          channels.push(buffer.getChannelData(c));
         }
+        foldPeaks(peaks, channels, timestamp, buffer.sampleRate, duration);
         read++;
         from = timestamp + buffer.duration;
         if (gate?.busy()) {
