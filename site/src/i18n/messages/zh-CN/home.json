@@ -387,6 +387,8 @@
     "noMatches": "未找到匹配的模板。",
     "favorite": "添加至收藏",
     "unfavorite": "取消收藏",
+    "renameTitle": "重命名模板",
+    "renameFailed": "无法重命名模板。",
     "detail": {
       "close": "返回模板",
       "use": "以此创建新项目",

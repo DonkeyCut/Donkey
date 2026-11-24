@@ -387,6 +387,8 @@
     "noMatches": "Keine Vorlagen entsprechen dieser Suche.",
     "favorite": "Zu Favoriten hinzufügen",
     "unfavorite": "Aus Favoriten entfernen",
+    "renameTitle": "Vorlage umbenennen",
+    "renameFailed": "Vorlage konnte nicht umbenannt werden.",
     "detail": {
       "close": "Zurück zu Vorlagen",
       "use": "Als neues Projekt verwenden",

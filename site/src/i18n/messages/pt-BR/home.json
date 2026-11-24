@@ -387,6 +387,8 @@
     "noMatches": "Nenhum modelo corresponde a esta busca.",
     "favorite": "Adicionar aos favoritos",
     "unfavorite": "Remover dos favoritos",
+    "renameTitle": "Renomear modelo",
+    "renameFailed": "Não foi possível renomear o modelo.",
     "detail": {
       "close": "Voltar aos modelos",
       "use": "Usar como novo projeto",

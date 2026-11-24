@@ -387,6 +387,8 @@
     "noMatches": "Ninguna plantilla coincide con esta búsqueda.",
     "favorite": "Agregar a favoritos",
     "unfavorite": "Quitar de favoritos",
+    "renameTitle": "Renombrar plantilla",
+    "renameFailed": "No se pudo renombrar la plantilla.",
     "detail": {
       "close": "Volver a plantillas",
       "use": "Usar como nuevo proyecto",

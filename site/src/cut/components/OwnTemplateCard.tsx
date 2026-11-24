@@ -5,8 +5,21 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
-import { LayoutTemplate, Loader2, MoreHorizontal, Trash2 } from "lucide-react";
+import {
+  LayoutTemplate,
+  Loader2,
+  MoreHorizontal,
+  Pencil,
+  Trash2,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -14,6 +27,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
 import { useDescribeError } from "@/i18n/describeError";
 import { apiJson } from "@/cut/lib/api";
 import {
@@ -24,7 +38,7 @@ import {
 import { projectHref, useCutBase, type CutTab } from "@/cut/lib/nav";
 import { newProjectAllowed } from "@/cut/lib/projectLimit";
 import { forgetProject } from "@/cut/lib/projectPurge";
-import { refetchProjects } from "@/cut/lib/queries";
+import { patchProjects, refetchProjects } from "@/cut/lib/queries";
 import { backendFor, type Residency } from "@/cut/lib/residency";
 import { copyAsKind } from "@/cut/lib/templateUse";
 import { formatTime } from "@/cut/lib/time";
@@ -41,8 +55,8 @@ export const DEFAULT_ASPECT = "9:16";
 export type OwnTemplate = { project: ProjectSummary; residency: Residency };
 
 /** One of the person's own templates: a project of theirs marked as one. It
- * opens in the editor like any project; its menu makes a new project from it
- * or deletes it. */
+ * opens in the editor like any project; its menu makes a new project from it,
+ * renames it or deletes it. */
 export function OwnTemplateCard({
   template,
   from,
@@ -64,6 +78,8 @@ export function OwnTemplateCard({
   const { project: p, residency: r } = template;
   const [busy, setBusy] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [renaming, setRenaming] = useState(false);
+  const [name, setName] = useState(p.name);
   const [error, setError] = useState<string | null>(null);
 
   // A copy of the template on its own shelf, marked a project, opened.
@@ -82,6 +98,36 @@ export function OwnTemplateCard({
       setError(describeError(e, t("detail.failed")));
     } finally {
       setBusy(false);
+    }
+  };
+
+  // The card shows the new name at once; a failed save puts the shelf's
+  // listing back and says so on the card.
+  const rename = async () => {
+    setRenaming(false);
+    const next = name.trim();
+    if (!next || next === p.name) {
+      return;
+    }
+    setError(null);
+    patchProjects(client, r, (s) => ({
+      ...s,
+      projects: s.projects.map((x) =>
+        x.id === p.id ? { ...x, name: next } : x,
+      ),
+    }));
+    try {
+      const res = await backendFor(r).fetch(`/api/cut/projects/${p.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: next }),
+      });
+      if (!res.ok) {
+        throw errorFromBody(await apiJson<object>(res), t("renameFailed"));
+      }
+    } catch (e) {
+      void refetchProjects(client, r);
+      setError(describeError(e, t("renameFailed")));
     }
   };
 
@@ -156,6 +202,14 @@ export function OwnTemplateCard({
           <DropdownMenuItem onClick={() => void startFrom()}>
             <LayoutTemplate /> {t("detail.use")}
           </DropdownMenuItem>
+          <DropdownMenuItem
+            onClick={() => {
+              setName(p.name);
+              setRenaming(true);
+            }}
+          >
+            <Pencil /> {tp("rename")}
+          </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem
             variant="destructive"
@@ -165,6 +219,31 @@ export function OwnTemplateCard({
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+
+      <Dialog open={renaming} onOpenChange={(o) => !o && setRenaming(false)}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>{t("renameTitle")}</DialogTitle>
+          </DialogHeader>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              void rename();
+            }}
+          >
+            <Input
+              autoFocus
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+            />
+            <DialogFooter className="mt-4">
+              <Button type="submit" className="w-full">
+                {tp("rename")}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       <DeleteConfirm
         open={deleting}

@@ -387,6 +387,8 @@
     "noMatches": "No templates match this search.",
     "favorite": "Add to favorites",
     "unfavorite": "Remove from favorites",
+    "renameTitle": "Rename template",
+    "renameFailed": "Could not rename the template.",
     "detail": {
       "close": "Back to templates",
       "use": "Use as new project",

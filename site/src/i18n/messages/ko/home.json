@@ -387,6 +387,8 @@
     "noMatches": "검색과 일치하는 템플릿이 없어요.",
     "favorite": "즐겨찾기에 추가",
     "unfavorite": "즐겨찾기에서 제거",
+    "renameTitle": "템플릿 이름 변경",
+    "renameFailed": "템플릿 이름을 변경하지 못했어요.",
     "detail": {
       "close": "템플릿 목록으로",
       "use": "새 프로젝트로 사용",
