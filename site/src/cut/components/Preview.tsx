@@ -1261,8 +1261,10 @@ function ClipTransformGizmo({ stage, selectedClip, grouped }: { stage: Stage; se
   };
 
   // Everything draws in the pane's own space, so an oversized picture's outline
-  // keeps going into the empty room around the frame instead of stopping at its
-  // edge; the layer clips it at the pane so it never reaches another panel.
+  // keeps going into the empty room around the frame, edges and grips included.
+  // The pane clips it at its own bounds: a clip on this layer would follow the
+  // camera, and once the view zooms or pans it cuts the outline short of the
+  // pane's edge, leaving the far side out of reach.
   const at = (rect: { x: number; y: number; w: number; h: number }) => ({
     left: stage.padX + rect.x,
     top: stage.padY + rect.y,
@@ -1278,7 +1280,7 @@ function ClipTransformGizmo({ stage, selectedClip, grouped }: { stage: Stage; se
   return (
     <div
       ref={layerRef}
-      className="pointer-events-none absolute overflow-hidden"
+      className="pointer-events-none absolute"
       style={{
         left: -stage.padX,
         top: -stage.padY,
