@@ -38,7 +38,7 @@ type QueueBatch = { queue: string; messages: QueueMessage[] };
 // at once. Keep it in step with max_instances in ../wrangler.jsonc. A wake
 // starts only as many as the queue needs (wakeSize.ts): a replica bills
 // its whole 12 GiB for every second it is up, idle polling included, so one
-// started with nothing to claim is a minute of paid memory for no render.
+// started with nothing to claim is 15 seconds of paid memory for no render.
 const REPLICAS = MAX_REPLICAS;
 
 const replicaName = (i: number) => `cut-render-${i}`;

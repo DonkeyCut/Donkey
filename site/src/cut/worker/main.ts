@@ -41,7 +41,7 @@ const WATCH_MS = 1000; // progress write + cancellation check cadence
 // the process exits so the container stops billing; the hosted API wakes it
 // again when a job is queued. Only successful empty polls count as idle — a
 // failing claim (DB unreachable) must not read as a drained queue.
-const IDLE_EXIT_MS = 60_000;
+const IDLE_EXIT_MS = 15_000;
 // Sustained claim failure: exit non-zero so the next wake retries with a
 // fresh process instead of burning container time on a dead DB connection.
 const FAIL_EXIT_MS = 5 * 60_000;
