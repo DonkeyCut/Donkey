@@ -890,6 +890,45 @@ function WindowStep({
     [],
   );
 
+  // Hovering the strip skims: the picture shows the frame under the pointer,
+  // and leaving puts playback back where it stood. A seek waits for the one
+  // in flight, so a fast sweep lands on the latest frame without a backlog.
+  const skimAt = useRef<number | null>(null);
+  const resume = useRef({ at: 0, playing: false });
+  const pumpSkim = () => {
+    const el = mediaRef.current;
+    const at = skimAt.current;
+    if (!el || at === null || el.seeking) {
+      return;
+    }
+    if (Math.abs(el.currentTime - at) > SKIM_EPSILON_S) {
+      el.currentTime = at;
+    }
+  };
+  const skim = (at: number | null) => {
+    const el = mediaRef.current;
+    if (!el) {
+      return;
+    }
+    if (at !== null) {
+      if (skimAt.current === null) {
+        resume.current = { at: el.currentTime, playing: !el.paused };
+        el.pause();
+      }
+      skimAt.current = at;
+      pumpSkim();
+      return;
+    }
+    if (skimAt.current === null) {
+      return;
+    }
+    skimAt.current = null;
+    el.currentTime = resume.current.at;
+    if (resume.current.playing) {
+      void el.play().catch(() => {});
+    }
+  };
+
   // The element is closed when the step goes: src cleared and reloaded, so
   // the browser lets its decoder go. An effect that runs again (React's dev
   // remount) puts the source back.
@@ -912,6 +951,10 @@ function WindowStep({
   const onTimeUpdate = () => {
     const el = mediaRef.current;
     if (!el) {
+      return;
+    }
+    // A skim shows frames outside the window; playback's clamp waits.
+    if (skimAt.current !== null) {
       return;
     }
     const head = fromRef.current;
@@ -940,6 +983,7 @@ function WindowStep({
     onPlay: () => setPlaying(true),
     onPause: () => setPlaying(false),
     onTimeUpdate,
+    onSeeked: pumpSkim,
     onLoadedMetadata: () => {
       const el = mediaRef.current;
       if (el) {
@@ -997,6 +1041,7 @@ function WindowStep({
             from={from}
             maxFrom={maxFrom}
             onMove={moveTo}
+            onSkim={skim}
           />
 
         </div>
@@ -1021,6 +1066,9 @@ function WindowStep({
  * runs wider than the strip and slides under the window. */
 const MIN_WINDOW_SHARE = 0.3;
 
+/** How close a skim seek must already be to skip another, s: under a frame. */
+const SKIM_EPSILON_S = 0.01;
+
 /** How far the window's frame stands out of the strip on each side, px. */
 const WINDOW_OUTSET = 4;
 /** Room the window keeps from the strip's ends while the film scrolls, px. */
@@ -1042,6 +1090,7 @@ function WindowStrip({
   from,
   maxFrom,
   onMove,
+  onSkim,
 }: {
   asset: MediaAsset;
   peaks?: number[];
@@ -1049,6 +1098,8 @@ function WindowStrip({
   from: number;
   maxFrom: number;
   onMove: (from: number) => void;
+  /** The source second under a hovering mouse, null once it leaves. */
+  onSkim: (at: number | null) => void;
 }) {
   const t = useTranslations("timeline.replace");
   const boxRef = useRef<HTMLDivElement>(null);
@@ -1084,6 +1135,14 @@ function WindowStrip({
     film: boolean;
   } | null>(null);
 
+  // Where a hovering mouse skims: the line's place on the strip and the
+  // source second under it. A press ends the skim; the drag owns the picture.
+  const [skimmed, setSkimmed] = useState<{ x: number; at: number } | null>(null);
+  const endSkim = () => {
+    setSkimmed(null);
+    onSkim(null);
+  };
+
   return (
     // The frame stands out of the strip on every side, so the outer box takes
     // the presses and the strip inside it clips only the film.
@@ -1099,6 +1158,7 @@ function WindowStrip({
         }
         e.preventDefault();
         e.currentTarget.setPointerCapture(e.pointerId);
+        endSkim();
 
         // A press inside the window grabs the window. Beside it, a film
         // longer than the strip is grabbed itself; one that fits puts the
@@ -1121,6 +1181,15 @@ function WindowStrip({
       onPointerMove={(e) => {
         const g = grab.current;
         if (!g) {
+          // A video skims under a hovering mouse; touch has no hover.
+          if (!pps || asset.type !== "video" || e.pointerType !== "mouse") {
+            return;
+          }
+          const box = e.currentTarget.getBoundingClientRect();
+          const x = Math.max(0, Math.min(width, e.clientX - box.left));
+          const at = Math.min(asset.duration, (x + pan) / pps);
+          setSkimmed({ x, at });
+          onSkim(at);
           return;
         }
         const dx = e.clientX - g.x;
@@ -1142,6 +1211,11 @@ function WindowStrip({
       }}
       onPointerCancel={() => {
         grab.current = null;
+      }}
+      onPointerLeave={() => {
+        if (!grab.current) {
+          endSkim();
+        }
       }}
     >
       <div
@@ -1187,6 +1261,22 @@ function WindowStrip({
               style={{ width: Math.max(0, width - (from * pps - pan) - winW) }}
             />
           </>
+        )}
+        {/* The skim line, with the source time it shows. */}
+        {skimmed && (
+          <div
+            className="pointer-events-none absolute inset-y-0 z-[1] w-0.5 -translate-x-1/2 bg-white shadow-[0_0_0_1px_rgba(0,0,0,0.35)]"
+            style={{ left: skimmed.x }}
+          >
+            <span
+              className={cn(
+                "absolute bottom-1 rounded-[4px] bg-black/80 px-1 py-px font-mono text-[10px] text-white tabular-nums",
+                skimmed.x > width / 2 ? "right-1.5" : "left-1.5",
+              )}
+            >
+              {formatTime(skimmed.at)}
+            </span>
+          </div>
         )}
       </div>
       {pps > 0 && (
