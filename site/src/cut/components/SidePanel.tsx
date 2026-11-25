@@ -157,6 +157,12 @@ import { MediaCardShell } from "./MediaCardShell";
 import { lightboxItemFromAsset } from "@/cut/lib/lightbox";
 import { PICKED_RING } from "@/cut/lib/assetPick";
 import { SubTabs } from "./SubTabs";
+import { Tip } from "./panelBits";
+
+// An export row's action: a 32px target with a 16px glyph, and a hover fill
+// strong enough to read on the dark card.
+const EXPORT_ACTION =
+  "size-8 rounded-lg text-muted-foreground hover:bg-foreground/10 hover:text-foreground dark:hover:bg-foreground/15 [&_svg:not([class*='size-'])]:size-4";
 
 // Drag a library clip onto a folder tile to file it (side panel, single card).
 const LIBRARY_MOVE_MIME = "application/x-cut-library-move";
@@ -1289,38 +1295,43 @@ function ProjectFilesPanel({
                     </span>
                   </button>
                   )}
-                  <div className="flex shrink-0 items-center gap-0.5 pr-0.5 opacity-0 transition-opacity group-hover:opacity-100 pointer-coarse:opacity-100">
+                  <div className="flex shrink-0 items-center gap-1 pr-0.5 opacity-0 transition-opacity group-hover:opacity-100 pointer-coarse:opacity-100">
                     {caps.revealInFinder ? (
-                      <Button
-                        variant="ghost"
-                        size="icon-xs"
-                        aria-label={te("showInFinder")}
-                        title={te("showInFinder")}
-                        onClick={() => void revealExport(projectId, it.file).catch(() => {})}
-                      >
-                        <FolderOpen />
-                      </Button>
+                      <Tip label={te("showInFinder")}>
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          aria-label={te("showInFinder")}
+                          className={EXPORT_ACTION}
+                          onClick={() => void revealExport(projectId, it.file).catch(() => {})}
+                        >
+                          <FolderOpen />
+                        </Button>
+                      </Tip>
                     ) : (
+                      <Tip label={te("download")}>
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          aria-label={te("downloadExport")}
+                          className={EXPORT_ACTION}
+                          onClick={() => downloadProjectExport(projectId, it)}
+                        >
+                          <Download />
+                        </Button>
+                      </Tip>
+                    )}
+                    <Tip label={te("deleteExport")}>
                       <Button
                         variant="ghost"
-                        size="icon-xs"
-                        aria-label={te("downloadExport")}
-                        title={te("download")}
-                        onClick={() => downloadProjectExport(projectId, it)}
+                        size="icon-sm"
+                        aria-label={te("deleteExport")}
+                        className={cn(EXPORT_ACTION, "hover:bg-destructive/10 hover:text-destructive dark:hover:bg-destructive/25")}
+                        onClick={() => setDeletingExport(it)}
                       >
-                        <Download />
+                        <Trash2 />
                       </Button>
-                    )}
-                    <Button
-                      variant="ghost"
-                      size="icon-xs"
-                      aria-label={te("deleteExport")}
-                      title={te("deleteExport")}
-                      className="text-muted-foreground hover:text-destructive"
-                      onClick={() => setDeletingExport(it)}
-                    >
-                      <Trash2 />
-                    </Button>
+                    </Tip>
                   </div>
                 </div>
               ))}
