@@ -223,6 +223,7 @@ export async function storedMediaUrl(
 export async function dropLocalMedia(projectId: string, fileName: string): Promise<void> {
   if (!supportsBrowserStore()) return;
   revokeRegistered(mediaPath(projectId, fileName));
+  copyTally = null;
   await deleteMedia(projectId, fileName).catch(() => {});
   void dropChunksMatching(`/projects/${projectId}/media/${fileName}`);
   await clearPendingUpload(projectId, fileName);
@@ -233,6 +234,7 @@ export async function dropLocalProjectCopy(projectId: string): Promise<void> {
   if (!supportsBrowserStore()) return;
   if (prefetch?.projectId === projectId) prefetch.ctrl.abort();
   revokeRegistered(`/api/cut/projects/${projectId}/`);
+  copyTally = null;
   void dropChunksMatching(`/projects/${projectId}/`);
   await deleteProject(projectId).catch(() => {});
   try {
@@ -360,7 +362,11 @@ async function cacheOne(
     }
   }
   const file = await localMediaFile(projectId, fileName);
-  return { go: true, url: file ? registerBlobFile(path, file) : null };
+  if (!file) {
+    return { go: true, url: null };
+  }
+  tallyCopyBytes(file.size);
+  return { go: true, url: registerBlobFile(path, file) };
 }
 
 // --- eviction ---
@@ -387,46 +393,85 @@ async function makeRoom(keepId: string, bytes: number, cached = true): Promise<v
   }
   const idx = await readIndex();
   const pinned = new Set(idx.pendingUploads.map((p) => `${p.projectId}/${p.fileName}`));
-  const candidates: { id: string; openedAt: number }[] = [];
-  let copies = 0;
-  for (const id of await listProjectIds()) {
-    // A directory holding a doc is a browser-resident project — the store is
-    // its only home. Cached cloud copies hold media alone.
-    if (await readFileAt(await projectDir(id), "project.json")) continue;
-    copies += await cachedCopyBytes(id, pinned);
-    if (id !== keepId) candidates.push({ id, openedAt: idx.opens[id] ?? 0 });
-  }
-  noteCachedCopyBytes(copies);
+  const copies = await cachedCopiesTotal(pinned);
   let deficit = Math.max(quotaDeficit, (await chunkStoreBytes()) + copies + (cached ? bytes : 0) - CUT_MEDIA_CACHE.maxBytes);
   if (deficit <= 0) return;
   // The chunk cache is the cheapest byte to lose — losing one costs a ranged
   // re-fetch, where losing a whole-file copy costs the file — so it goes first.
   deficit -= await evictChunkBytes(deficit);
   if (deficit <= 0) return;
-  candidates.sort((a, b) => a.openedAt - b.openedAt);
+
+  // Least recently opened copies go first; the one being written stays.
+  const candidates = (await cachedCopyIds())
+    .filter((id) => id !== keepId)
+    .map((id) => ({ id, openedAt: idx.opens[id] ?? 0 }))
+    .sort((a, b) => a.openedAt - b.openedAt);
   for (const c of candidates) {
     if (deficit <= 0) break;
     const freed = await evictCachedCopy(c.id, pinned);
     deficit -= freed;
-    copies -= freed;
+    tallyCopyBytes(-freed);
   }
-  noteCachedCopyBytes(copies);
 }
 
-/** Bytes a cloud project's cached copy holds, pinned files aside. */
+/** How long a measured total of the cached copies stands in for a walk. The
+ * writes and evictions here keep it current; the expiry catches what changes
+ * behind it — another tab's cache, a pin cleared by a finished upload. */
+const COPY_TALLY_TTL_MS = 60_000;
+
+let copyTally: { at: number; bytes: number } | null = null;
+
+/** Bytes the cloud projects' cached copies hold, pinned files aside. A walk
+ * reads every cached file, so it runs once per expiry: a prefetch queue
+ * checks room before each file, and a walk per file held each one's loading
+ * chip for seconds while the editor's load kept the thread busy. */
+async function cachedCopiesTotal(pinned: Set<string>): Promise<number> {
+  if (copyTally && Date.now() - copyTally.at <= COPY_TALLY_TTL_MS) {
+    return copyTally.bytes;
+  }
+  const ids = await cachedCopyIds();
+  const sizes = await Promise.all(ids.map((id) => cachedCopyBytes(id, pinned)));
+  copyTally = { at: Date.now(), bytes: sizes.reduce((sum, n) => sum + n, 0) };
+  noteCachedCopyBytes(copyTally.bytes);
+  return copyTally.bytes;
+}
+
+/** Move the cached-copy total by a write (+) or an eviction (−). */
+function tallyCopyBytes(delta: number): void {
+  if (!copyTally) {
+    return;
+  }
+  copyTally.bytes = Math.max(0, copyTally.bytes + delta);
+  noteCachedCopyBytes(copyTally.bytes);
+}
+
+/** The store's cloud project copies. A directory holding a doc is a
+ * browser-resident project — the store is its only home. Cached cloud copies
+ * hold media alone. */
+async function cachedCopyIds(): Promise<string[]> {
+  const ids = await listProjectIds();
+  const resident = await Promise.all(
+    ids.map(async (id) => Boolean(await readFileAt(await projectDir(id), "project.json")))
+  );
+  return ids.filter((_, i) => !resident[i]);
+}
+
+/** Bytes a cloud project's cached copy holds, pinned files aside. The sizes
+ * are read together, so a busy thread costs one wait per copy. */
 async function cachedCopyBytes(id: string, pinned: Set<string>): Promise<number> {
   const dir = await mediaDir(id);
   if (!dir) return 0;
-  let total = 0;
+  const handles: FileSystemFileHandle[] = [];
   try {
     for await (const [name, handle] of dir) {
       if (handle.kind !== "file" || pinned.has(`${id}/${name}`)) continue;
-      total += (await (handle as FileSystemFileHandle).getFile()).size;
+      handles.push(handle as FileSystemFileHandle);
     }
   } catch {
     // A directory swept mid-walk counts what it had.
   }
-  return total;
+  const sizes = await Promise.all(handles.map((h) => h.getFile().then((f) => f.size, () => 0)));
+  return sizes.reduce((sum, n) => sum + n, 0);
 }
 
 /** Drop a cloud project's cached media, keeping pinned files. A copy left
