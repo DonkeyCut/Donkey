@@ -44,7 +44,7 @@ import type { OutputSpace } from "@donkeycut/effects-kit";
 import { heldSpans, overlayPlan, trackZeroAt, trackZeroPlan } from "./framePlan";
 import { heldFrames, holdOverlays, type HeldFrames } from "./frameGrid";
 import { compatNeedOf } from "./codecSupport";
-import { frameSink, keyframeTimeAt, openMedia, videoTrackOf, withAssetColors } from "./mediaRead";
+import { frameSink, keyframeTimeAt, openMedia, openMediaShared, videoTrackOf, withAssetColors, type MediaHandle } from "./mediaRead";
 import type { InputVideoTrack, WrappedCanvas } from "mediabunny";
 import { allowance, canvasBytes, holdMemory } from "./memoryBudget";
 import { getClipSpans, overlayLayers, projectDuration, spanSequence } from "./store";
@@ -357,6 +357,19 @@ const READERS_TUNED = 12;
  * frame's own readers are never candidates, so what a join or a stack of
  * layers needs together is never taken away from the frame needing it. */
 const READER_GRACE = 2;
+/** Frames a reader may go unasked-for before it closes whatever the budget.
+ * Readers are keyed by clip, and a render walks forward, so a reader this
+ * idle belongs to a clip the cut has left; its walk would otherwise sit on
+ * decoded frames. Wide enough for a 15 fps matte read under a 120 fps render. */
+const READER_IDLE = 8;
+/** How far past the walk an ask has to land before the reader checks for a
+ * keyframe between them; nearer asks just step. */
+const WALK_JUMP_S = 0.5;
+/** Slack on timestamp comparisons, well under a frame at any rate. */
+const FRAME_EPS = 1e-4;
+/** How far ahead of a source's first clip the render opens it: long enough
+ * for a remote file's parse to land before the clip's first frame. */
+const WARM_AHEAD_S = 2;
 /**
  * Canvas bytes a reader may hold for a clip read backward.
  *
@@ -410,7 +423,9 @@ function sourceTimeAt(span: ClipSpan, t: number): number {
  * and is handed back for as long as its clip is on screen.
  */
 export class ClipReader {
-  private input: ReturnType<typeof openMedia> | null = null;
+  /** The open file, shared with every other reader of the same URL: the
+   * clips cut from one recording parse it and cache its bytes once. */
+  private handle: MediaHandle | null = null;
   private sink: ClipSink | null = null;
   private track: InputVideoTrack | null = null;
   private still: Frame | null = null;
@@ -421,6 +436,13 @@ export class ClipReader {
   private backSink: ClipSink | null = null;
   private backFrames: WrappedCanvas[] = [];
   private frameDt = 1 / 30;
+  /** The forward walk: one decoder streaming the source in order, the frame
+   * it last handed out, the frame after it (read to learn where the held one
+   * ends), and the earliest ask the walk still answers. */
+  private walk: AsyncGenerator<WrappedCanvas, void, unknown> | null = null;
+  private cur: WrappedCanvas | null = null;
+  private ahead: WrappedCanvas | null = null;
+  private walkFloor = Infinity;
   private opened: Promise<ClipSink | null> | null = null;
   /** Reads that failed in a row, each off a freshly rebuilt reader. Any
    * successful read clears it. */
@@ -500,13 +522,13 @@ export class ClipReader {
         };
         return null;
       }
-      const input = openMedia(this.url());
-      const track = await videoTrackOf(input);
+      const handle = openMediaShared(this.url());
+      const track = await videoTrackOf(handle.input);
       if (!track) {
-        input.dispose();
+        handle.release();
         return null;
       }
-      this.input = input;
+      this.handle = handle;
       this.track = track;
       // A small pool keeps the render's canvas allocation flat over thousands
       // of frames.
@@ -569,7 +591,7 @@ export class ClipReader {
         const wrapped =
           this.heldBack(at) ||
           (stepBack && (await this.backFrame(at))) ||
-          (await sink.getCanvas(Math.max(0, at)));
+          (await this.forwardAt(sink, at));
         this.failStreak = 0;
         return wrapped ?? null;
       } catch (err) {
@@ -583,10 +605,11 @@ export class ClipReader {
         if (++this.failStreak > 3) throw err;
         this.software = true;
         await new Promise((r) => setTimeout(r, 250 * this.failStreak));
-        this.input?.dispose();
-        this.input = null;
+        this.handle?.release();
+        this.handle = null;
         this.sink = null;
         this.track = null;
+        this.dropWalk();
         this.dropBack();
         this.opened = null;
         const reopened = await this.open();
@@ -594,6 +617,71 @@ export class ClipReader {
         sink = reopened;
       }
     }
+  }
+
+  /**
+   * The frame covering `at` off the forward walk.
+   *
+   * A render asks for its frames in rising order, so one decoder streams the
+   * source and steps to each ask: every packet decodes once, and the decoder
+   * works ahead while the frame composites. A point read per ask opens a
+   * decoder at the keyframe below every frame — up to a whole group of
+   * pictures decoded for each frame drawn. The walk restarts at an ask behind
+   * it, or past a keyframe it has not reached, which decodes fewer frames
+   * than stepping up to it.
+   */
+  private async forwardAt(sink: ClipSink, at: number): Promise<WrappedCanvas | null> {
+    if (!this.cur || at < this.walkFloor - FRAME_EPS || (await this.keyframeAhead(at))) {
+      await this.restartWalk(sink, at);
+    }
+
+    // Step until the next frame starts past the ask.
+    while (this.ahead && this.ahead.timestamp <= at + FRAME_EPS) {
+      this.cur = this.ahead;
+      this.walkFloor = this.cur.timestamp;
+      this.ahead = await this.pullWalk();
+    }
+    return this.cur;
+  }
+
+  /** Whether a keyframe the walk has not reached sits at or below `at`.
+   * Checked only for a jump: an ask a few frames on just steps. */
+  private async keyframeAhead(at: number): Promise<boolean> {
+    if (!this.track || !this.ahead || at - this.ahead.timestamp < WALK_JUMP_S) {
+      return false;
+    }
+
+    const kt = await keyframeTimeAt(this.track, Math.max(0, at));
+    return kt !== null && kt > this.ahead.timestamp + FRAME_EPS;
+  }
+
+  /** Start the walk at the frame covering `from`. An ask between `from` and
+   * the first frame gets that first frame, as a point read clamped to the
+   * track's head would. */
+  private async restartWalk(sink: ClipSink, from: number): Promise<void> {
+    this.dropWalk();
+    this.walk = sink.canvases(Math.max(0, from));
+    this.walkFloor = from;
+    this.cur = await this.pullWalk();
+    this.ahead = this.cur ? await this.pullWalk() : null;
+  }
+
+  private async pullWalk(): Promise<WrappedCanvas | null> {
+    if (!this.walk) {
+      return null;
+    }
+
+    const { value, done } = await this.walk.next();
+    return done || !value ? null : value;
+  }
+
+  /** End the walk, closing its decoder and the frames it decoded ahead. */
+  private dropWalk(): void {
+    void this.walk?.return(undefined).catch(() => {});
+    this.walk = null;
+    this.cur = null;
+    this.ahead = null;
+    this.walkFloor = Infinity;
   }
 
   /**
@@ -644,7 +732,7 @@ export class ClipReader {
   private heldBack(at: number): WrappedCanvas | null {
     return (
       this.backFrames.find(
-        (f) => f.timestamp <= at + 1e-4 && at < f.timestamp + Math.max(f.duration, 1e-4) + 1e-4
+        (f) => f.timestamp <= at + FRAME_EPS && at + FRAME_EPS < f.timestamp + Math.max(f.duration, 2 * FRAME_EPS)
       ) ?? null
     );
   }
@@ -656,8 +744,9 @@ export class ClipReader {
   }
 
   dispose() {
-    this.input?.dispose();
-    this.input = null;
+    this.dropWalk();
+    this.handle?.release();
+    this.handle = null;
     this.sink = null;
     this.track = null;
     this.dropBack();
@@ -1569,6 +1658,13 @@ export class FramePainter {
   private comp: FrameCompositor;
   private stamps: StampCache;
   private readers = new Map<string, ClipReader>();
+  /** One open of each source, held from shortly before its first clip until
+   * the render passes its last, so the file is parsed while earlier frames
+   * draw and every clip cut from it reuses that parse and read cache. Keyed
+   * by asset id. */
+  private holds = new Map<string, MediaHandle>();
+  /** Each source's clips' span on the timeline, in seconds. */
+  private uses = new Map<string, { asset: MediaAsset; first: number; last: number }>();
   /** What the open readers and the stamp scratch are standing on, so a
    * render in the tab shows up beside the preview's own pictures in the
    * memory report. */
@@ -1677,6 +1773,17 @@ export class FramePainter {
     );
     for (const list of this.byTrack.values())
       for (const sp of list) this.spanOfClip.set(sp.clip.id, sp);
+    for (const sp of [...this.spans, ...this.spanOfClip.values()]) {
+      if (sp.asset.type !== "video" || sp.asset.block) {
+        continue;
+      }
+      const use = this.uses.get(sp.asset.id);
+      this.uses.set(sp.asset.id, {
+        asset: sp.asset,
+        first: Math.min(use?.first ?? Infinity, sp.start),
+        last: Math.max(use?.last ?? 0, sp.start + sp.len),
+      });
+    }
     if (this.fps) {
       const fps = this.fps;
       this.trackZeroHeld = heldFrames(this.spans.map((sp) => ({ start: sp.start, end: sp.start + sp.len })), fps);
@@ -1685,17 +1792,6 @@ export class FramePainter {
     }
   }
 
-  /**
-   * The reader for one asset, opening it if this frame is the first to ask.
-   *
-   * Readers are kept between frames because a render walks time forward and
-   * asks the same clip for thousands of consecutive frames; reopening one per
-   * frame would pay a keyframe seek for every one of them. They are not kept
-   * forever: each holds a decoder and a pool of canvases at the render size, so
-   * a cut drawing from a hundred files would otherwise finish the render
-   * holding a hundred decoders. Past the budget the least recently drawn are
-   * let go, which costs one reopen if the cut returns to them.
-   */
   /** The frame maker for smoothed slow motion, opened on the first frame
    * that needs it. Its load — the runtime and the model — is part of the
    * render, so a failure there fails the export like a decoder would. */
@@ -1708,7 +1804,7 @@ export class FramePainter {
    * pair the real frame shows.
    */
   private async frameOf(span: ClipSpan, t: number): Promise<Frame> {
-    const reader = this.readerFor(span.asset);
+    const reader = this.readerFor(`clip:${span.clip.id}`, span.asset);
     const st = sourceTimeAt(span, t);
     if (!smoothsAt(span.clip, retimeOf(span.clip), Math.max(0, t - span.start))) return this.timed(reader.frameAt(st));
     const pair = await this.timed(reader.pairAt(st));
@@ -1738,9 +1834,16 @@ export class FramePainter {
     }
   }
 
-  private readerFor(asset: MediaAsset): ClipReader {
-    let r = this.readers.get(asset.id);
-    if (!r) this.readers.set(asset.id, (r = new ClipReader(asset, () => this.resolve(asset))));
+  /** Readers are keyed by clip, so each walks its own stretch of the source
+   * forward: two clips cut from one file, on screen together through a
+   * transition, would otherwise drag one reader back and forth each frame.
+   * A matte, read for one clip, keys by its own asset. */
+  private readerFor(key: string, asset: MediaAsset): ClipReader {
+    let r = this.readers.get(key);
+    if (!r) {
+      this.readers.set(key, (r = new ClipReader(asset, () => this.resolve(asset))));
+    }
+
     r.usedAt = this.frameNo;
     return r;
   }
@@ -1763,6 +1866,16 @@ export class FramePainter {
    * grace, cannot.
    */
   private evictReaders(): void {
+    // A reader idle this long belongs to a clip the cut has passed: close it
+    // and the frames its walk decoded ahead, whatever the budget.
+    for (const [key, r] of this.readers) {
+      if (this.frameNo - r.usedAt <= READER_IDLE) {
+        continue;
+      }
+      this.readers.delete(key);
+      r.dispose();
+    }
+
     const cost = (r: ClipReader) => canvasBytes(readerPoolFrames(r) * r.sourcePixels);
     const cap = allowance(
       "exportReaders",
@@ -1810,7 +1923,7 @@ export class FramePainter {
     // converted frame is reused until the read crosses into the next one.
     const stamp = matteStamp(m.assetId, mt);
     const held = alpha.held(stamp);
-    const frame = held ? null : await this.timed(this.readerFor(asset).frameAt(matteReadTime(mt, dur)));
+    const frame = held ? null : await this.timed(this.readerFor(`asset:${asset.id}`, asset).frameAt(matteReadTime(mt, dur)));
     const img = held ?? (frame?.kind === "ready" ? alpha.of(frame, stamp) : null);
     if (img) this.matteFrames.set(key, img);
   }
@@ -1819,6 +1932,7 @@ export class FramePainter {
   async drawAt(t: number): Promise<void> {
     this.frameNo++;
     this.evictReaders();
+    this.warmHolds(t);
     const { canvas, comp, doc, stamps } = this;
     const W = canvas.width;
     const H = canvas.height;
@@ -1826,6 +1940,7 @@ export class FramePainter {
 
     // A clip holding a frame past its own end is drawn as at its start.
     const shown = trackZeroAt(this.spans, this.trackZeroHeld, t);
+
     if (shown) {
       const { span: master, at } = shown;
       const plan = trackZeroPlan(master, this.spans, at);
@@ -1833,7 +1948,7 @@ export class FramePainter {
       if (plan.incoming) await this.fetchRemovalMatte(plan.incoming, at);
       if (plan.backdrop) {
         await this.fetchRemovalMatte(plan.backdrop.span, at);
-        const frame = await this.timed(this.readerFor(plan.backdrop.span.asset).frameAt(plan.backdrop.at));
+        const frame = await this.timed(this.readerFor(`clip:${plan.backdrop.span.clip.id}`, plan.backdrop.span.asset).frameAt(plan.backdrop.at));
         comp.drawLayer(frame, plan.backdrop.span.clip, false, 1, at);
       }
       const masterFrame = master.clip.hidden ? MISSING_FRAME : await this.frameOf(master, at);
@@ -1941,11 +2056,32 @@ export class FramePainter {
     stamps.retire(t);
   }
 
+  /** Open the sources a clip reads within WARM_AHEAD_S of `t`, and let go of
+   * those no clip reads from `t` on. */
+  private warmHolds(t: number): void {
+    for (const [id, use] of this.uses) {
+      const live = use.first <= t + WARM_AHEAD_S && use.last > t;
+      const handle = this.holds.get(id);
+      if (live && !handle) {
+        const opened = openMediaShared(this.resolve(use.asset));
+        // Parse now; the clip's reader finds the track already read.
+        void videoTrackOf(opened.input).catch(() => {});
+        this.holds.set(id, opened);
+      }
+      if (!live && handle) {
+        handle.release();
+        this.holds.delete(id);
+      }
+    }
+  }
+
   dispose(): void {
     this.stamps.dispose();
     this.behind?.dispose();
     for (const r of this.readers.values()) r.dispose();
     this.readers.clear();
+    for (const handle of this.holds.values()) handle.release();
+    this.holds.clear();
     void this.synth?.then((s) => s.dispose()).catch(() => {});
     this.synth = null;
     this.releaseMemory();
