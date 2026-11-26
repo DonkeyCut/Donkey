@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { choiceSettings, estimateExportBytes, EXPORT_QUICK_PRESETS, resolutionOptions, sourceFrame } from "@/cut/lib/exportClient";
+import { choiceSettings, estimateExportBytes, EXPORT_QUICK_PRESETS, frameRateShown, resolutionOptions, sourceFrame } from "@/cut/lib/exportClient";
 import { sourceFrameRateKey } from "@/cut/lib/exportRender";
 import type { MediaAsset, VideoClip } from "@/cut/lib/types";
 
@@ -60,4 +60,9 @@ test("original settings preserve source bitrates above the normal delivery budge
   const settings = choiceSettings(best, resolutionOptions("4:3", [clip], [asset]), 30, { videoBitrate: 10_000_000, audioBitrate: 256_000 });
   expect(settings.bitrate).toBe(10_000_000);
   expect(settings.audioBitrate).toBe(256_000);
+});
+
+test("a measured source rate reads at three decimals", () => {
+  expect(frameRateShown(29.98760842627014)).toBe(29.988);
+  expect(frameRateShown(30)).toBe(30);
 });

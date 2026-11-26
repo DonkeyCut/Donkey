@@ -412,6 +412,15 @@ export function audioBitrate(settings: Pick<ExportSettings, "audioCodec" | "audi
   return settings.audioCodec === "pcm" ? (settings.audioSampleRate ?? 48_000) * 16 * (settings.audioChannels ?? 2) : settings.audioBitrate ?? 192_000;
 }
 
+/** Decimals a frame rate shows with: a measured source rate such as
+ * 29.98760842627014 reads as 29.988. */
+const FRAME_RATE_DIGITS = 3;
+
+/** A frame rate as the export dialog shows it. */
+export function frameRateShown(fps: number): number {
+  return Number(fps.toFixed(FRAME_RATE_DIGITS));
+}
+
 /** Human-readable size estimate matching the finished-export MB display,
  * with the number and unit in the reader's locale ("~1.4 MB", "~1,4 Mo"). */
 export function formatSizeEstimate(bytes: number, locale: string): string {

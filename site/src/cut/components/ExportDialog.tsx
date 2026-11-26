@@ -30,6 +30,7 @@ import {
   estimateExportBytes,
   fixedRate,
   formatSizeEstimate,
+  frameRateShown,
   quickPresetOf,
   resolutionOptions,
   resolveResolution,
@@ -377,7 +378,7 @@ export function ExportDialog() {
                   <SelectItem value="source" title={t("sourceRateHint")}>
                     {probing
                       ? t("sourceReading")
-                      : t("sourceRate", { fps: Number((sourceFps ?? DEFAULT_EXPORT_FPS).toFixed(3)) })}
+                      : t("sourceRate", { fps: frameRateShown(sourceFps ?? DEFAULT_EXPORT_FPS) })}
                   </SelectItem>
                   {EXPORT_FRAME_RATES.map((f) => (
                     <SelectItem key={f} value={String(f)}>
@@ -549,7 +550,7 @@ export function ExportDialog() {
         <DialogFooter className="mx-0 mb-0 flex-col gap-3 rounded-b-xl bg-muted/40 px-6 py-5 sm:flex-col">
           <div className="text-sm text-muted-foreground">
             <span className="block truncate">
-              {t("size", { width: settings.width, height: settings.height })} · {t("fps", { fps: settings.fps })} ·{" "}
+              {t("size", { width: settings.width, height: settings.height })} · {t("fps", { fps: frameRateShown(settings.fps) })} ·{" "}
               {FORMATS.find((f) => f.id === formatId)?.label ?? formatId} · {settings.audioCodec.toUpperCase()}
               {hdr ? ` · ${t(`colorSpaces.${colorSpace}`)}` : ""}
               {range ? ` · ${formatTime(span)}` : ""}
