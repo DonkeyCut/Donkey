@@ -2670,7 +2670,7 @@ export function Timeline({
                     tabIndex={0}
                     title={tr("transitionTitle", { name: label, seconds: x.t.seconds.toFixed(1) })}
                     className={cn(
-                      "tl-xfade-bar group absolute flex cursor-grab touch-none items-center gap-1 overflow-hidden rounded-[3px] px-1.5 text-[10.5px] font-medium text-white shadow-[inset_0_0_0_1px_rgba(0,0,0,0.1)]",
+                      "tl-xfade-bar group isolate absolute flex cursor-grab touch-none items-center gap-1 overflow-hidden rounded-[3px] px-1.5 text-[10.5px] font-medium text-white shadow-[inset_0_0_0_1px_rgba(0,0,0,0.1)]",
                       // A parked bar reads muted: it is on the row but playing
                       // nothing until a boundary lines up with it.
                       playing ? "bg-[#2B6FD4]" : "bg-muted-foreground/50",
@@ -4028,7 +4028,7 @@ function ClipView({
     <>
     <div
       className={cn(
-        "tl-clip group absolute top-0.5 cursor-grab touch-none overflow-hidden rounded-[2.5px] bg-black shadow-[inset_0_0_0_1px_rgba(0,0,0,0.12)]",
+        "tl-clip group isolate absolute top-0.5 cursor-grab touch-none overflow-hidden rounded-[2.5px] bg-black shadow-[inset_0_0_0_1px_rgba(0,0,0,0.12)]",
         selected && SELECTED_SHADOW,
         lutTarget && "tl-clip-lut-target z-10 shadow-[inset_0_0_0_2px_#0a84ff]",
         clip.hidden && "opacity-40 grayscale",
@@ -5591,7 +5591,7 @@ function AudioView({
   return (
     <div
       className={cn(
-        "tl-audio-clip group absolute cursor-grab touch-none overflow-hidden rounded-[2.5px] bg-gradient-to-b from-emerald-500 to-emerald-600 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.1)]",
+        "tl-audio-clip group isolate absolute cursor-grab touch-none overflow-hidden rounded-[2.5px] bg-gradient-to-b from-emerald-500 to-emerald-600 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.1)]",
         selected && SELECTED_SHADOW,
         clip.hidden && "opacity-40 grayscale",
         drag
@@ -6020,10 +6020,15 @@ function TextBar({
       name
     );
 
+  // `isolate` on every bar: the bar's z-indexed parts (key diamonds, chips,
+  // trims) stack inside it instead of interleaving with the whole tracks
+  // layer. Without it every playhead move repainted all of them, and a cut
+  // with a few hundred keyed elements played at 30 fps with its sound
+  // starving for decode time.
   return (
     <div
       className={cn(
-        "tl-text-bar group absolute flex cursor-grab touch-none items-center overflow-hidden rounded-[3px] shadow-[inset_0_0_0_1px_rgba(0,0,0,0.1)]",
+        "tl-text-bar group isolate absolute flex cursor-grab touch-none items-center overflow-hidden rounded-[3px] shadow-[inset_0_0_0_1px_rgba(0,0,0,0.1)]",
         FAMILY_STYLE[overlayFamily(o)].bar,
         o.hidden && "opacity-40 grayscale",
         selected && SELECTED_SHADOW,
@@ -6121,7 +6126,7 @@ function SubBar({
   return (
     <div
       className={cn(
-        "tl-sub-bar group absolute flex cursor-grab touch-none items-center overflow-hidden rounded-[2.5px] bg-gradient-to-b from-amber-300 to-amber-400 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.12)]",
+        "tl-sub-bar group isolate absolute flex cursor-grab touch-none items-center overflow-hidden rounded-[2.5px] bg-gradient-to-b from-amber-300 to-amber-400 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.12)]",
         dimmed && "opacity-40 grayscale",
         selected && SELECTED_SHADOW,
         drag
