@@ -4,8 +4,10 @@
 import type { ExportSettings } from "./exportClient";
 import type { RenderTiming } from "./exportRender";
 
-/** Where the device's pace is kept between sessions. */
-const PACE_KEY = "cut-export-pace";
+/** Where the device's pace is kept between sessions. The name changes with
+ * the renderer's speed, so a pace learned from another renderer never sets
+ * the estimate. */
+const PACE_KEY = "cut-export-pace-2";
 
 /** How much a new render moves the stored pace: half, so one odd render
  * (a tab in the background) fades after the next. */
