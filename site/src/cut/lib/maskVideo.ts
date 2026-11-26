@@ -30,7 +30,7 @@ import { ClipReader, renderFile, settleRenderColor, WORKING_VIDEO_CODECS } from 
 import type { ExportDoc } from "./renderSnapshot";
 import { createRasterCanvas } from "./raster";
 import { getClipSpans } from "./store";
-import { clipCovers, frameOf, isEffectOverlay, isTextOverlay, rectOf, subjectMasked, type ClipSpan, type MediaAsset, type VideoClip } from "./types";
+import { clipCovers, frameOf, isEffectOverlay, isTextOverlay, rectOf, subjectMasked, type ClipSpan, type VideoClip } from "./types";
 import { liveReader } from "./liveReader";
 import { cardMatteKey } from "./cameraCard";
 import { matteStage } from "./matteAlpha";
@@ -107,11 +107,16 @@ export async function renderSubjectMask(
   const byTrack = new Map(overlayTracks.map((track) => [track, getClipSpans(doc.clips, doc.assets, track)]));
   const spanOfClip = new Map<string, ClipSpan>();
   for (const list of byTrack.values()) for (const sp of list) spanOfClip.set(sp.clip.id, sp);
-  const readers = new Map<string, ClipReader>();
-  const readerFor = (asset: MediaAsset) => {
-    let r = readers.get(asset.id);
-    if (!r) readers.set(asset.id, (r = liveReader(asset)));
-    return r;
+  // One reader per clip, each walking its own stretch of the source, closed
+  // on the first mask frame that does not draw its clip: an open walk holds
+  // the frames it decoded ahead.
+  const readers = new Map<string, { reader: ClipReader; frame: number }>();
+  let frameNo = 0;
+  const readerFor = (span: ClipSpan) => {
+    let r = readers.get(span.clip.id);
+    if (!r) readers.set(span.clip.id, (r = { reader: liveReader(span.asset), frame: frameNo }));
+    r.frame = frameNo;
+    return r.reader;
   };
   // Baked mattes ride along: a cutout keys its clip and a card pops its head
   // out above the card, so the segmenter sees the picture the preview draws.
@@ -145,11 +150,11 @@ export async function renderSubjectMask(
       if (master && !master.clip.hidden && !subjectClip(master.clip)) {
         const plan = trackZeroPlan(master, spans, t);
         if (plan.backdrop && !subjectClip(plan.backdrop.span.clip)) {
-          const f = await readerFor(plan.backdrop.span.asset).frameAt(plan.backdrop.at);
+          const f = await readerFor(plan.backdrop.span).frameAt(plan.backdrop.at);
           await stageMattes(plan.backdrop.span.clip, plan.backdrop.at);
           comp.drawLayer(f, plan.backdrop.span.clip, false, 1, t);
         }
-        const f = await readerFor(master.asset).frameAt(sourceTimeAt(master, t));
+        const f = await readerFor(master).frameAt(sourceTimeAt(master, t));
         await stageMattes(master.clip, sourceTimeAt(master, t));
         comp.drawLayer(f ?? MISSING_FRAME, master.clip, false, 1, t);
       }
@@ -157,7 +162,7 @@ export async function renderSubjectMask(
         if (subjectClip(layer.clip)) continue;
         const span = spanOfClip.get(layer.clip.id);
         if (!span) continue;
-        const f = await readerFor(layer.asset).frameAt(sourceTimeAt(span, t));
+        const f = await readerFor(span).frameAt(sourceTimeAt(span, t));
         await stageMattes(layer.clip, sourceTimeAt(span, t));
         const join = layer.join;
         if (!join || subjectClip(join.incoming.clip)) {
@@ -167,7 +172,7 @@ export async function renderSubjectMask(
         // A join draws its pair as one layer, the incoming clip held on its
         // first frame, as the preview and the export draw it.
         const head = sourceTimeAt(join.incoming, join.incoming.start);
-        const incFrame = await readerFor(join.incoming.asset).frameAt(head);
+        const incFrame = await readerFor(join.incoming).frameAt(head);
         await stageMattes(join.incoming.clip, head);
         comp.drawOverlayJoin(
           join.style,
@@ -193,6 +198,16 @@ export async function renderSubjectMask(
       const alpha = segmentSubjectAlpha(segmenter, compose as HTMLCanvasElement);
       if (alpha) mctx.drawImage(alpha, 0, 0, W, H);
       await video.add(i / MASK_FPS, 1 / MASK_FPS);
+
+      // Close the readers of clips this frame did not draw.
+      for (const [id, r] of readers) {
+        if (r.frame === frameNo) {
+          continue;
+        }
+        r.reader.dispose();
+        readers.delete(id);
+      }
+      frameNo++;
     }
     await output.finalize();
     const buffer = (output.target as BufferTarget).buffer;
@@ -202,7 +217,7 @@ export async function renderSubjectMask(
     await output.cancel().catch(() => {});
     return null;
   } finally {
-    for (const r of readers.values()) r.dispose();
+    for (const r of readers.values()) r.reader.dispose();
     for (const m of mattes.values()) m?.dispose();
     comp.releaseJoin();
   }
