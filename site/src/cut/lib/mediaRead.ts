@@ -753,20 +753,25 @@ export async function* audioChunks(
  * For callers that need random access to a span — resampling it, rendering it
  * out — where streaming would only mean assembling this by hand. The span is
  * what's decoded, so asking for thirty seconds of an hour-long file costs
- * thirty seconds.
+ * thirty seconds. `onDecoded` hears the source second the decode has
+ * reached after each chunk, for a caller showing how far a long read is.
  */
 export async function decodeAudioSpan(
   src: string | Blob,
   from = 0,
   to?: number,
-  read: typeof audioChunks = audioChunks
+  opts: { read?: typeof audioChunks; onDecoded?: (until: number) => void } = {}
 ): Promise<AudioBuffer | null> {
+  const { read = audioChunks, onDecoded } = opts;
   const chunks: WrappedAudioBuffer[] = [];
   // A compressed frame leans on the one before it — an MP3's bit reservoir,
   // AAC's overlap, Opus's pre-skip — so the first frame a decode opens on
   // comes out near-silent. Opening a little early puts that frame before the
   // span, and assembleAudio trims it away.
-  for await (const chunk of read(src, Math.max(0, from - AUDIO_PREROLL), to)) chunks.push(chunk);
+  for await (const chunk of read(src, Math.max(0, from - AUDIO_PREROLL), to)) {
+    chunks.push(chunk);
+    onDecoded?.(chunk.timestamp + chunk.duration);
+  }
   return assembleAudio(chunks, from, to);
 }
 

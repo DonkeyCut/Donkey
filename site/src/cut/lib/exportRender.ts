@@ -98,6 +98,10 @@ export function deliveryAudioCodec(settings: ExportSettings): AudioCodec {
  * any of these. A file that leaves the app uses `deliveryVideoCodec`. */
 export const WORKING_VIDEO_CODECS: VideoCodec[] = ["avc", "hevc", "vp9", "av1"];
 
+/** The share of a render's progress bar the audio mix fills before the
+ * frames take the rest. */
+const MIX_SHARE = 0.2;
+
 export interface RenderProgress {
   /** 0..1 across the whole render. */
   ratio: number;
@@ -1282,11 +1286,13 @@ export async function renderProjectToMp4(
   const timing: RenderTiming = { frames: 0, spanSec: span, audioMs: 0, prepareMs: 0, drawMs: 0, decodeMs: 0, encodeMs: 0, finalizeMs: 0 };
   const audioStart = performance.now();
 
-  onProgress?.({ ratio: 0, stage: "audio" });
+  // The mix fills the first slice of the bar as its sources decode: over
+  // cloud media that read can run a minute before the first frame draws.
   const whole = await renderMix(mixSpecFor(doc, resolve), {
     sampleRate: settings.audioSampleRate ?? AUDIO_RATE,
     channels: settings.audioChannels ?? AUDIO_CHANNELS,
     resolve: (file) => file, // mixSpecFor already resolved each asset to a URL
+    onProgress: (ratio) => onProgress?.({ ratio: ratio * MIX_SHARE, stage: "audio" }),
   });
   const mix = whole && settings.range ? sliceAudio(whole, from, from + span) : whole;
   stop();
@@ -1387,7 +1393,7 @@ export async function renderProjectToMp4(
       timing.drawMs += drawn - drawStart;
       timing.encodeMs += performance.now() - drawn;
       if (i % 15 === 0) {
-        onProgress?.({ ratio: i / frames, stage: "video" });
+        onProgress?.({ ratio: MIX_SHARE + (1 - MIX_SHARE) * (i / frames), stage: "video" });
         // Let the tab breathe: without a yield a long render starves every
         // other task on this thread, including the one listening for a cancel.
         await new Promise((r) => setTimeout(r, 0));

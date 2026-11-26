@@ -30,7 +30,7 @@ function framedDecoder(asked: number[]) {
 
 test("a span decodes from before its start, so its first sample sounds", async () => {
   const asked: number[] = [];
-  const out = (await decodeAudioSpan("x.mp3", 0.635, 0.9, framedDecoder(asked)))!;
+  const out = (await decodeAudioSpan("x.mp3", 0.635, 0.9, { read: framedDecoder(asked) }))!;
   expect(asked[0]).toBeLessThan(0.635 - FRAME);
   const head = out.getChannelData(0).subarray(0, 480);
   expect(Math.min(...head)).toBeCloseTo(0.5, 5);
@@ -39,6 +39,6 @@ test("a span decodes from before its start, so its first sample sounds", async (
 
 test("a span at the file's start reads from 0", async () => {
   const asked: number[] = [];
-  await decodeAudioSpan("x.mp3", 0.02, 0.5, framedDecoder(asked));
+  await decodeAudioSpan("x.mp3", 0.02, 0.5, { read: framedDecoder(asked) });
   expect(asked[0]).toBe(0);
 });

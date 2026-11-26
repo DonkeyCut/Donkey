@@ -133,7 +133,14 @@ export interface MixOptions {
   channels: number;
   /** Resolves a spec file name to something the reader can open. */
   resolve: (file: string) => string;
+  /** How much of the sound the mix reads has been decoded, 0..1, in whole
+   * percent steps. The decode is the slow part: over cloud media it reads
+   * each source across the network. */
+  onProgress?: (ratio: number) => void;
 }
+
+/** The steps a mix's decode progress moves in: whole percent. */
+const PROGRESS_STEPS = 100;
 
 /** Timeline length of one clip: its source span through its rate. A gap
  * spacer keeps its exact length — flooring it would land everything after it
@@ -370,6 +377,24 @@ export async function renderMix(spec: MixSpec, opts: MixOptions): Promise<AudioB
     if (read) wanted.set(spanKey(read), { file: read.file, from: read.lo, to: read.hi });
   }
 
+  // How far each span's decode has reached, summed against the seconds the
+  // mix reads in all. A step is reported once, so a decode yielding a chunk
+  // every few milliseconds sets the caller's state a hundred times at most.
+  const total = [...wanted.values()].reduce((sum, span) => sum + Math.max(0, span.to - span.from), 0);
+  const reached = new Map<string, number>();
+  let decoded = 0;
+  let step = -1;
+  const report = (ratio: number) => {
+    const next = Math.floor(Math.min(1, ratio) * PROGRESS_STEPS);
+    if (next <= step) {
+      return;
+    }
+
+    step = next;
+    opts.onProgress?.(next / PROGRESS_STEPS);
+  };
+  report(0);
+
   const buffers = new Map<string, AudioBuffer>();
   await Promise.all(
     [...wanted].map(async ([key, span]) => {
@@ -378,10 +403,19 @@ export async function renderMix(spec: MixSpec, opts: MixOptions): Promise<AudioB
       // check. A source that could not be *read* is a different thing and is
       // allowed to fail the render: silently dropping it would hand the user a
       // finished file with a clip, or a whole voiceover, missing its sound.
-      const buf = await decodeAudioSpan(resolve(span.file), span.from, span.to);
+      const onDecoded = (until: number) => {
+        const now = Math.min(span.to, Math.max(span.from, until)) - span.from;
+        decoded += now - (reached.get(key) ?? 0);
+        reached.set(key, now);
+        if (total > 0) {
+          report(decoded / total);
+        }
+      };
+      const buf = await decodeAudioSpan(resolve(span.file), span.from, span.to, { onDecoded });
       if (buf) buffers.set(key, buf);
     })
   );
+  report(1);
 
   if (buffers.size === 0) return null;
 
