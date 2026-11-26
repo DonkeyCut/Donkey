@@ -6060,11 +6060,12 @@ function TextBar({
       </span>
       {/* Keys sit on the bar where they fall, so a track is visible without
           opening the inspector. */}
-      {(o.kf ?? []).map((k) => (
-        <KeyMarker key={k.t} item={o} kind="overlay" t={k.t} pps={pps} width={barW} onMenu={onMenu} />
+      {/* Keyed by place too: imported docs can carry two keys on one time. */}
+      {(o.kf ?? []).map((k, i) => (
+        <KeyMarker key={`${k.t}-${i}`} item={o} kind="overlay" t={k.t} pps={pps} width={barW} onMenu={onMenu} />
       ))}
-      {(o.mask?.kf ?? []).map((k) => (
-        <KeyMarker key={`m${k.t}`} item={o} kind="overlay" track="mask" t={k.t} pps={pps} width={barW} />
+      {(o.mask?.kf ?? []).map((k, i) => (
+        <KeyMarker key={`m${k.t}-${i}`} item={o} kind="overlay" track="mask" t={k.t} pps={pps} width={barW} />
       ))}
       <HideChip
         hidden={!!o.hidden}
