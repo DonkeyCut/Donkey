@@ -49,6 +49,12 @@ export function fontKind(id: string): FontKind | undefined {
   return SYSTEM_FACES[id]?.kind ?? GOOGLE_FONTS.find((f) => f.id === id)?.kind;
 }
 
+/** The upright weights a bundled face ships; undefined for a system face
+ * or the account's own, whose weights the page can't know. */
+export function fontWeights(id: string): number[] | undefined {
+  return GOOGLE_FONTS.find((f) => f.id === id)?.weights;
+}
+
 /** How a bundled or system face looks, in a few words. */
 export function fontLook(id: string): string | undefined {
   return SYSTEM_FACES[id]?.look ?? GOOGLE_FONTS.find((f) => f.id === id)?.look;

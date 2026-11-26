@@ -7,6 +7,7 @@ import { AlignCenter, AlignHorizontalSpaceAround, AlignLeft, AlignRight, AlignVe
 import { Button } from "@/components/ui/button";
 import { EmojiPicker } from "@/cut/components/EmojiPicker";
 import { FontPicker } from "@/cut/components/FontPicker";
+import { fontWeights } from "@/cut/lib/fontCatalog";
 import { ClipAnimationTiles, previewBar } from "@/cut/components/TransitionsPanel";
 import { ClipEffectsSection } from "@/cut/components/ClipEffectsSection";
 import { TrackRow } from "@/cut/components/TrackRow";
@@ -2258,7 +2259,7 @@ function TextPanel({ overlay: o }: { overlay: TextOverlay }) {
             value={o.font}
             onChange={(v) => update(o.id, { font: v as TextOverlay["font"] })}
           />
-          <WeightSelect value={o.weight} onChange={(weight) => update(o.id, { weight })} />
+          <WeightSelect font={o.font} value={o.weight} onChange={(weight) => update(o.id, { weight })} />
         </div>
         <div className="mt-1 flex items-center gap-2">
           <SegGroup>
@@ -2992,21 +2993,24 @@ function HitSettings({ overlay: o, peers }: { overlay: Overlay; peers?: readonly
 }
 
 /** A title's weight, from regular to black; each weight names itself under
- * `inspector.text.weights`. */
-function WeightSelect({ value, onChange }: { value: TextWeight; onChange: (w: TextWeight) => void }) {
+ * `inspector.text.weights`. A bundled face offers only the weights it ships
+ * (plus the one already set), so a pick always draws as picked. */
+function WeightSelect({ font, value, onChange }: { font: string; value: TextWeight; onChange: (w: TextWeight) => void }) {
   const t = useTranslations("inspector.text");
   const weightLabel = (w: TextWeight) => t(`weights.${w}`);
+  const shipped = fontWeights(font);
+  const weights = shipped ? TEXT_WEIGHTS.filter((w) => w === value || shipped.includes(w)) : TEXT_WEIGHTS;
   return (
     <Select
       value={String(value)}
-      items={Object.fromEntries(TEXT_WEIGHTS.map((w) => [String(w), weightLabel(w)]))}
+      items={Object.fromEntries(weights.map((w) => [String(w), weightLabel(w)]))}
       onValueChange={(v) => onChange(Number(v) as TextWeight)}
     >
       <SelectTrigger aria-label={t("weight")} size="sm" className="w-24 text-[12px]">
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
-        {TEXT_WEIGHTS.map((w) => (
+        {weights.map((w) => (
           <SelectItem key={w} value={String(w)} className="text-[12px]">
             {weightLabel(w)}
           </SelectItem>
@@ -3070,7 +3074,7 @@ function FontCycleFaces({ overlay: o, peers }: { overlay: TextOverlay; peers?: r
           </div>
           <Row label={t("weight")}>
             <div className="flex items-center gap-1.5">
-              <WeightSelect value={face.weight ?? o.weight} onChange={(weight) => commit(setFace(i, { weight }))} />
+              <WeightSelect font={face.font} value={face.weight ?? o.weight} onChange={(weight) => commit(setFace(i, { weight }))} />
               <SegGroup>
                 <SegToggle
                   label={t("italic")}
