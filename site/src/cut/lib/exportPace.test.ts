@@ -1,10 +1,14 @@
 import { describe, expect, test } from "bun:test";
-import { blendPace, estimateRenderMs, formatTimeEstimate, paceOf } from "./exportPace";
+import { blendPace, devicePace, estimateRenderMs, formatTimeEstimate, paceOf } from "./exportPace";
 
 const timing = { frames: 900, spanSec: 30, audioMs: 500, prepareMs: 500, drawMs: 14_000, decodeMs: 6_000, encodeMs: 2_900, finalizeMs: 100 };
 const hd = { width: 1080, height: 1920 };
 
 describe("export pace", () => {
+  test("a device with no renders yet gets an estimate from the starting pace", () => {
+    expect(formatTimeEstimate(estimateRenderMs({ ...hd, fps: 30 }, 30, devicePace()), "en")).not.toBe("");
+  });
+
   test("a render's pace predicts the same render's time", () => {
     const pace = paceOf(timing, hd)!;
     expect(estimateRenderMs({ ...hd, fps: 30 }, 30, pace)).toBeCloseTo(18_000, 5);

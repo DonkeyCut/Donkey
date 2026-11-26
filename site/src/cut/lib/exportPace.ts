@@ -13,6 +13,12 @@ const PACE_KEY = "cut-export-pace-2";
  * (a tab in the background) fades after the next. */
 const PACE_BLEND = 0.5;
 
+/** The pace a device starts from before its first tab render, in ms per
+ * megapixel of frame: about 40 s for a 30 s 1080x1920 cut. Recent tab
+ * renders ran 6 ms on a fast Mac and 50 to 400 on slower machines and
+ * the previous decoder; one finished render replaces it. */
+const STARTING_PACE = 20;
+
 const PIXELS_PER_MEGAPIXEL = 1_000_000;
 const MS_PER_SECOND = 1000;
 const SECONDS_PER_MINUTE = 60;
@@ -44,13 +50,19 @@ export function blendPace(stored: number | null, fresh: number): number {
 }
 
 /** This device's pace, or null before its first tab render. */
-export function readPace(): number | null {
+function readPace(): number | null {
   try {
     const pace = Number(localStorage.getItem(PACE_KEY));
     return Number.isFinite(pace) && pace > 0 ? pace : null;
   } catch {
     return null;
   }
+}
+
+/** The pace the dialog estimates with: this device's own, or the starting
+ * pace before its first render. */
+export function devicePace(): number {
+  return readPace() ?? STARTING_PACE;
 }
 
 /** Fold a finished tab render into this device's pace. */

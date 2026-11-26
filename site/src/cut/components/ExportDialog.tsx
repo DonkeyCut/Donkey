@@ -43,7 +43,7 @@ import {
 import { useCutMode } from "@/cut/lib/backend/hooks";
 import { downloadText } from "@/cut/lib/download";
 import { deliverySpan, exportBaseName } from "@/cut/lib/exportDelivery";
-import { estimateRenderMs, formatTimeEstimate, readPace } from "@/cut/lib/exportPace";
+import { devicePace, estimateRenderMs, formatTimeEstimate } from "@/cut/lib/exportPace";
 import { sourceExportPlan } from "@/cut/lib/sourceExportPlan";
 import { canRenderInBrowser, sourceExportProfile, sourceFrameRateKey, type SourceExportProfile } from "@/cut/lib/exportRender";
 import { useExports } from "@/cut/lib/exportStore";
@@ -235,19 +235,18 @@ export function ExportDialog() {
 
   const sizeEstimate = formatSizeEstimate(estimateExportBytes(settings, span), locale);
 
-  // How long the render takes here, from this device's own past renders:
-  // "~2 min". Empty before its first render, for a render the machine behind
-  // the project does, and for a cut that copies its source without encoding.
+  // How long the render takes here, from this device's own past renders or
+  // the starting pace: "~2 min". Empty for a render the machine behind the
+  // project does, and for a cut that copies its source without encoding.
   const timeEstimate = (() => {
     const tabEncodes = inTab && !hdr && (settings.codec === "h264" || settings.codec === "hevc");
-    const pace = tabEncodes ? readPace() : null;
-    if (pace === null) {
+    if (!tabEncodes) {
       return "";
     }
 
     const { background } = useEditor.getState();
     const copies = sourceExportPlan({ aspect, assets, clips, audioClips, overlays, subtitles, background, colorSpace }, settings);
-    return copies ? "" : formatTimeEstimate(estimateRenderMs(settings, span, pace), locale);
+    return copies ? "" : formatTimeEstimate(estimateRenderMs(settings, span, devicePace()), locale);
   })();
 
   // The button names what the click costs: "Export video · ~13 MB · ~2 min".
