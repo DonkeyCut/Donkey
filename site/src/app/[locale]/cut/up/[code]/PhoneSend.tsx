@@ -38,7 +38,7 @@ const THROTTLE_TRIES = 8;
 const THROTTLE_WAIT_S = 5;
 const HTTP_PAYLOAD_TOO_LARGE = 413;
 
-type Session = { pass: string; label: string; single: boolean };
+type Session = { pass: string; label: string; place: "project" | "folder" | "library"; single: boolean };
 
 type Item = {
   key: string;
@@ -309,7 +309,7 @@ export function PhoneSend() {
             </div>
           )}
           <Button size="lg" className="h-14 rounded-2xl text-base" onClick={() => void send()}>
-            {t("send", { label: session.label })}
+            {t("send", { place: session.place })}
           </Button>
         </div>
       </Shell>

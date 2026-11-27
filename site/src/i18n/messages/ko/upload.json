@@ -8,7 +8,7 @@
     "selected": "{count, plural, other {#개 선택됨}}",
     "fullQuality": "{size} · 원본 화질",
     "remove": "{name} 제거",
-    "send": "{label}(으)로 보내기",
+    "send": "{place, select, project {프로젝트로} folder {폴더로} other {라이브러리로}} 보내기",
     "stop": "중단",
     "progress": "{total} 중 {done}",
     "aboutMinutes": "{minutes, plural, other {약 #분}}",

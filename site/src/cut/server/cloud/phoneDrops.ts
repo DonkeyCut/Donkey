@@ -110,6 +110,11 @@ const targetSchema = z.discriminatedUnion("kind", [
 ]);
 export type PhoneTarget = z.infer<typeof targetSchema>;
 
+/** What kind of place the phone's page names on its Send button. */
+type PhonePlace = "project" | "folder" | "library";
+const placeOf = (target: PhoneTarget): PhonePlace =>
+  target.kind === "project" ? "project" : target.folderId ? "folder" : "library";
+
 const openSchema = z.object({
   clientId: z.string().min(8).max(64),
   target: targetSchema,
@@ -356,7 +361,13 @@ export const phoneDropsPublic = {
 
     const pass = randomBytes(PASS_BYTES).toString("base64url");
     await prisma.cutPhonePass.create({ data: { dropId: drop.id, tokenHash: sha256(pass), device: deviceOf(req) } });
-    return Response.json({ pass, label: drop.label, single: drop.single, partBytes: PHONE_PART_BYTES });
+    return Response.json({
+      pass,
+      label: drop.label,
+      place: placeOf(targetSchema.parse(drop.target)),
+      single: drop.single,
+      partBytes: PHONE_PART_BYTES,
+    });
   },
 
   /** Start one file: only while the code is good. */

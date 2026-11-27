@@ -8,7 +8,7 @@
     "selected": "{count, plural, other {#件選択中}}",
     "fullQuality": "{size} · 最高画質",
     "remove": "{name}を削除",
-    "send": "{label}に送信",
+    "send": "{place, select, project {プロジェクト} folder {フォルダ} other {ライブラリ}}に送信",
     "stop": "停止",
     "progress": "{done} / {total}",
     "aboutMinutes": "{minutes, plural, other {約#分}}",

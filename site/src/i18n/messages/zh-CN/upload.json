@@ -8,7 +8,7 @@
     "selected": "{count, plural, other {已选 # 项}}",
     "fullQuality": "{size} · 原始画质",
     "remove": "移除 {name}",
-    "send": "发送到 {label}",
+    "send": "发送到{place, select, project {项目} folder {文件夹} other {素材库}}",
     "stop": "停止",
     "progress": "{done} / {total}",
     "aboutMinutes": "{minutes, plural, other {约 # 分钟}}",

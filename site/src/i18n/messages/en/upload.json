@@ -8,7 +8,7 @@
     "selected": "{count, plural, one {# selected} other {# selected}}",
     "fullQuality": "{size} · Full quality",
     "remove": "Remove {name}",
-    "send": "Send to {label}",
+    "send": "Send to {place, select, project {project} folder {folder} other {library}}",
     "stop": "Stop",
     "progress": "{done} of {total}",
     "aboutMinutes": "{minutes, plural, one {about # min} other {about # min}}",
