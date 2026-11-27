@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { getTranslations } from "next-intl/server";
+import { Suspense } from "react";
 
 import { NoSessionReplay } from "@/app/_components/NoSessionReplay";
 
@@ -18,9 +19,12 @@ export default function UploadPage() {
   return (
     <>
       <NoSessionReplay />
-      <div translate="no" className="contents">
-        <PhoneSend />
-      </div>
+      {/* The code comes from the address, which is known only per request. */}
+      <Suspense>
+        <div translate="no" className="contents">
+          <PhoneSend />
+        </div>
+      </Suspense>
     </>
   );
 }
