@@ -8,6 +8,7 @@ import { graceDeadline } from "./grace";
 import { cutLimitsFor, FREE_STORAGE_BYTES } from "./limits";
 import { collectable, listSweepableLadders, pruneLadder, readLadder } from "./ladderStore";
 import { deleteLibraryAssetCascade, libraryCloud } from "./library";
+import { sweepPhoneDrops } from "./phoneDrops";
 import { deleteProjectCascade } from "./projects";
 import {
   del,
@@ -516,6 +517,13 @@ export async function runGc(): Promise<Response> {
   ).catch(() => [] as string[]);
   await del(scratch);
 
+  // Upload-from-phone drops past their staging day, with whatever their
+  // phones left: unfinished uploads aborted, staged bytes deleted.
+  const phoneFiles = await sweepPhoneDrops().catch((e: unknown) => {
+    console.error("[cut-gc] phone sweep failed:", e instanceof Error ? e.message : e);
+    return 0;
+  });
+
   // Stale overlays, one listing per user tree that exists in the bucket.
   const overlays = await sweepStaleOverlays().catch((e: unknown) => {
     console.error("[cut-gc] overlay sweep failed:", e instanceof Error ? e.message : e);
@@ -544,6 +552,7 @@ export async function runGc(): Promise<Response> {
     orphanedMedia: orphans.length,
     orphanedProxies: orphanProxies.length,
     inferenceScratch: scratch.length,
+    phoneFiles,
     staleOverlays: overlays,
     renderJobs: jobs.count,
     libraryTombstones: tombstones.count,

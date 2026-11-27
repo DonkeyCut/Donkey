@@ -2,13 +2,19 @@
 // (CutMediaObject) record the keys. Only credentials come from env — bucket
 // name, key scheme, and expiries are code.
 import {
+  AbortMultipartUploadCommand,
+  CompleteMultipartUploadCommand,
   CopyObjectCommand,
+  CreateMultipartUploadCommand,
   DeleteObjectsCommand,
   GetObjectCommand,
   HeadObjectCommand,
   ListObjectsV2Command,
+  ListPartsCommand,
   PutObjectCommand,
   S3Client,
+  UploadPartCommand,
+  type CompletedPart,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
@@ -87,6 +93,15 @@ export const overlayKey = (userId: string, batchId: string, name: string) =>
 export const INFERENCE_PREFIX = "cut/inference/";
 export const inferenceBlobKey = (userId: string, sha256: string, ext: string) =>
   `${INFERENCE_PREFIX}${userId}/${sha256}.${ext}`;
+
+/** Files a phone sends before the computer takes them in. They sit outside
+ * `cut/` so the per-user sweeps never walk them; the phone sweep finds them by
+ * row, and the bytes never count against a storage quota. */
+export const PHONE_STAGING_PREFIX = "cut-phone/";
+export const phoneStagingKey = (userId: string, dropId: string, fileId: string) =>
+  `${PHONE_STAGING_PREFIX}${userId}/${dropId}/${fileId}`;
+export const phoneThumbKey = (userId: string, dropId: string, fileId: string) =>
+  `${PHONE_STAGING_PREFIX}${userId}/${dropId}/${fileId}.thumb.jpg`;
 
 /** A time-limited PUT URL. `bytes` pins the object size into the signature:
  * the claim the quota was checked against is the most R2 will accept, and a
@@ -278,6 +293,64 @@ export async function copy(srcKey: string, dstKey: string): Promise<void> {
       Key: dstKey,
     })
   );
+}
+
+// --- Multipart: a large file in parts, each its own PUT that can be resent. ---
+
+/** Start a multipart upload and return its id. */
+export async function createMultipart(key: string, mime: string): Promise<string> {
+  const res = await r2().send(new CreateMultipartUploadCommand({ Bucket: R2_BUCKET, Key: key, ContentType: mime }));
+  if (!res.UploadId) throw new Error("R2 returned no upload id");
+  return res.UploadId;
+}
+
+/** A time-limited PUT URL for one part. Parts are numbered from 1. */
+export function presignPart(key: string, uploadId: string, partNumber: number): Promise<string> {
+  return getSignedUrl(
+    r2(),
+    new UploadPartCommand({ Bucket: R2_BUCKET, Key: key, UploadId: uploadId, PartNumber: partNumber }),
+    { expiresIn: PUT_EXPIRY_SECONDS }
+  );
+}
+
+/** Join the uploaded parts into the object. The parts' ETags come from R2's own
+ * listing, so the browser that sent them never has to read a response header
+ * the bucket's CORS rules might hide. */
+export async function completeMultipart(key: string, uploadId: string): Promise<void> {
+  const s3 = r2();
+  const parts: CompletedPart[] = [];
+  let marker: string | undefined;
+  for (;;) {
+    const page = await s3.send(
+      new ListPartsCommand({ Bucket: R2_BUCKET, Key: key, UploadId: uploadId, PartNumberMarker: marker })
+    );
+    for (const p of page.Parts ?? []) {
+      parts.push({ PartNumber: p.PartNumber, ETag: p.ETag });
+    }
+    if (!page.IsTruncated || !page.NextPartNumberMarker) {
+      break;
+    }
+    marker = page.NextPartNumberMarker;
+  }
+  parts.sort((a, b) => (a.PartNumber ?? 0) - (b.PartNumber ?? 0));
+  await s3.send(
+    new CompleteMultipartUploadCommand({
+      Bucket: R2_BUCKET,
+      Key: key,
+      UploadId: uploadId,
+      MultipartUpload: { Parts: parts },
+    })
+  );
+}
+
+/** Drop an unfinished multipart upload and its parts. Best effort: an upload
+ * that already completed or expired has nothing left to abort. */
+export async function abortMultipart(key: string, uploadId: string): Promise<void> {
+  try {
+    await r2().send(new AbortMultipartUploadCommand({ Bucket: R2_BUCKET, Key: key, UploadId: uploadId }));
+  } catch (e) {
+    if (e instanceof R2NotConfiguredError) throw e;
+  }
 }
 
 export async function putObject(key: string, body: Buffer, mime: string): Promise<void> {

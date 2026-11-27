@@ -1,0 +1,56 @@
+// Upload from phone: a code shown on the computer lets a phone's browser send
+// files into one place in the account without signing in.
+//
+// The code opens a drop and lives while the computer keeps it alive. A phone
+// that scans it gets a send pass; files it starts while the drop is open carry
+// that pass to the last byte even after the drop closes. Bytes go straight to
+// R2 staging; the computer that opened the drop takes each one into its
+// destination through its own import path, then the staged copy goes.
+
+model CutPhoneDrop {
+  id       String    @id @default(cuid())
+  userId   String
+  codeHash String    @unique // sha256 of the code in the QR; the code itself is never stored
+  clientId String // the browser that opened it: browser and Mac destinations land only there
+  target   Json // { kind: "library", residency, folderId } | { kind: "project", residency, projectId, folderId }
+  label    String // the destination's name, shown on the phone
+  single   Boolean   @default(false) // Replace: one file
+  aliveAt  DateTime  @default(now()) // the computer's last heartbeat
+  closedAt DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([userId, aliveAt])
+  @@index([aliveAt])
+}
+
+model CutPhonePass {
+  id        String   @id @default(cuid())
+  dropId    String
+  tokenHash String   @unique // sha256 of the pass the phone holds
+  device    String // "iPhone", "iPad", "Android" or "Phone", from the user agent
+  createdAt DateTime @default(now())
+
+  @@index([dropId])
+}
+
+model CutPhoneFile {
+  id        String    @id @default(cuid())
+  dropId    String
+  passId    String
+  userId    String
+  name      String
+  mime      String
+  bytes     BigInt
+  sentBytes BigInt    @default(0) // what the phone reports sent
+  r2Key     String    @unique
+  uploadId  String // the R2 multipart upload
+  thumbKey  String?
+  state     String    @default("sending") // sending | staged | claimed | landed | failed
+  claimedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@index([dropId])
+  @@index([userId, state])
+  @@index([createdAt])
+}

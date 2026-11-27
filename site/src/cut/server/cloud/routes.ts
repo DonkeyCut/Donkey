@@ -19,6 +19,7 @@ import { jobsCloud } from "./jobs";
 import { libraryCloud } from "./library";
 import { mediaCloud } from "./media";
 import { notesCloud } from "./notes";
+import { phoneDropsOwner } from "./phoneDrops";
 import { projectsCloud } from "./projects";
 import { turnsCloud } from "./turns";
 import { cloudSceneLease } from "./sceneLease";
@@ -38,6 +39,16 @@ interface CloudRoute extends RouteEntry {
 }
 
 const CUT_CLOUD_ROUTES: CloudRoute[] = [
+  // Upload from phone, the computer's half: open a code, keep it alive, and
+  // take in what the phone staged.
+  { method: "POST", path: "/api/cut-cloud/phone/drops", handler: (r, u) => phoneDropsOwner.open(u, r) },
+  { method: "POST", path: "/api/cut-cloud/phone/drops/:id/alive", handler: (_r, u, p) => phoneDropsOwner.alive(u, p.id) },
+  { method: "POST", path: "/api/cut-cloud/phone/drops/:id/close", handler: (_r, u, p) => phoneDropsOwner.close(u, p.id) },
+  { method: "POST", path: "/api/cut-cloud/phone/inbox", handler: (r, u) => phoneDropsOwner.inbox(u, r) },
+  { method: "POST", path: "/api/cut-cloud/phone/files/:id/claim", handler: (_r, u, p) => phoneDropsOwner.claim(u, p.id) },
+  { method: "POST", path: "/api/cut-cloud/phone/files/:id/release", handler: (_r, u, p) => phoneDropsOwner.release(u, p.id) },
+  { method: "POST", path: "/api/cut-cloud/phone/files/:id/landed", handler: (_r, u, p) => phoneDropsOwner.landed(u, p.id) },
+  { method: "POST", path: "/api/cut-cloud/phone/files/:id/failed", handler: (_r, u, p) => phoneDropsOwner.failed(u, p.id) },
   { method: "GET", path: "/api/cut-cloud/projects", handler: (_r, u) => projectsCloud.list(u) },
   { method: "POST", path: "/api/cut-cloud/projects", handler: (r, u) => projectsCloud.create(u, r) },
   // Projects file into the Assets folders the library keeps; pages from
