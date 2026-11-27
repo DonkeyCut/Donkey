@@ -78,7 +78,7 @@ export function UploadDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className={cn("transition-[max-width]", wide ? "sm:max-w-3xl" : "sm:max-w-md")}>
+      <DialogContent className={cn("px-8 transition-[max-width]", wide ? "sm:max-w-3xl" : "sm:max-w-md")}>
         <DialogHeader>
           <div className="flex items-center gap-1">
             {view === "phone" && (
@@ -238,7 +238,8 @@ function PhoneView({
       <div className="rounded-2xl border border-border bg-white p-2">
         {drop ? <QrCode value={drop.url} label={t("qrLabel")} /> : <div className="size-56" />}
       </div>
-      <p className="text-center text-base font-semibold">{t("scan")}</p>
+      {/* Once a phone is sending, the list beside the code says what is happening. */}
+      {files.length === 0 && <p className="text-center text-base">{t("scan")}</p>}
     </div>
   );
   if (files.length === 0) {
