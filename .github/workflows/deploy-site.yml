@@ -59,17 +59,17 @@ jobs:
         working-directory: site
         run: npm run chatgpt:build
 
-      # The suite takes about four minutes. A hung test fails the step here as a
-      # failure Autopilot can rerun, ahead of the job's own limit.
+      # The suite takes about four minutes; each attempt stops at ten, and a
+      # failed one runs once more (scripts/ci-site-tests.sh says why).
       - name: Test
         working-directory: site
-        timeout-minutes: 15
+        timeout-minutes: 25
         env:
           DATABASE_URL: postgresql://placeholder:placeholder@localhost:5432/placeholder
           DIRECT_URL: postgresql://placeholder:placeholder@localhost:5432/placeholder
         run: |
           node --test scripts/prepare-vercel-build.test.mjs
-          npm test
+          ../scripts/ci-site-tests.sh
           npx bun scripts/i18n-translate.ts --check
 
       # The Vercel project sets site/ as its root directory. Run its CLI from
