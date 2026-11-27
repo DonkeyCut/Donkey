@@ -59,8 +59,11 @@ jobs:
         working-directory: site
         run: npm run chatgpt:build
 
+      # The suite takes about four minutes. A hung test fails the step here as a
+      # failure Autopilot can rerun, ahead of the job's own limit.
       - name: Test
         working-directory: site
+        timeout-minutes: 15
         env:
           DATABASE_URL: postgresql://placeholder:placeholder@localhost:5432/placeholder
           DIRECT_URL: postgresql://placeholder:placeholder@localhost:5432/placeholder
