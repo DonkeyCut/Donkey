@@ -3,7 +3,6 @@
     "title": "发送到 Donkey Cut"
   },
   "page": {
-    "brand": "Donkey Cut",
     "photosVideos": "照片和视频",
     "camera": "相机",
     "selected": "{count, plural, other {已选 # 项}}",

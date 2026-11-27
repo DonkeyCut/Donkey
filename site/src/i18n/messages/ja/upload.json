@@ -3,7 +3,6 @@
     "title": "Donkey Cutに送信"
   },
   "page": {
-    "brand": "Donkey Cut",
     "photosVideos": "写真と動画",
     "camera": "カメラ",
     "selected": "{count, plural, other {#件選択中}}",

@@ -271,11 +271,8 @@ export function PhoneSend() {
   if (screen === "pick") {
     return (
       <Shell>
-        <Header />
-        <div className="flex flex-1 flex-col justify-center gap-2 py-8">
-          <h1 className="text-3xl font-semibold tracking-tight break-words">{session.label}</h1>
-        </div>
-        <div className="flex flex-col gap-3">{pickers}</div>
+        <Header label={session.label} />
+        <div className="flex flex-1 flex-col justify-center gap-3 py-8">{pickers}</div>
       </Shell>
     );
   }
@@ -284,7 +281,7 @@ export function PhoneSend() {
     const bytes = items.reduce((n, i) => n + i.file.size, 0);
     return (
       <Shell>
-        <Header />
+        <Header label={session.label} />
         <div className="flex items-baseline justify-between gap-3 pt-6 pb-3">
           <h1 className="text-2xl font-semibold tracking-tight">{t("selected", { count: items.length })}</h1>
           <Size bytes={bytes} />
@@ -304,6 +301,13 @@ export function PhoneSend() {
           ))}
         </Grid>
         <div className="flex flex-col gap-3 pt-4">
+          {/* More from the library or the camera join the ones picked. */}
+          {!session.single && (
+            <div className="grid grid-cols-2 gap-3">
+              <PickButton label={t("photosVideos")} multiple onChange={add} />
+              <PickButton label={t("camera")} capture onChange={add} />
+            </div>
+          )}
           <Button size="lg" className="h-14 rounded-2xl text-base" onClick={() => void send()}>
             {t("send", { label: session.label })}
           </Button>
@@ -323,14 +327,14 @@ export function PhoneSend() {
     return (
       <Shell>
         <Header
+          label={session.label}
           action={
             <Button variant="ghost" onClick={() => stopRef.current?.abort()}>
               {t("stop")}
             </Button>
           }
         />
-        <h1 className="pt-6 pb-4 text-2xl font-semibold tracking-tight break-words">{session.label}</h1>
-        <div className="flex flex-col gap-2 pb-4">
+        <div className="flex flex-col gap-2 pt-6 pb-4">
           <div className="flex items-baseline justify-between text-sm">
             <span className="font-medium tabular-nums">{t("progress", { done, total })}</span>
             <Remaining fraction={fraction} startedAt={startedAt} now={now} />
@@ -399,14 +403,14 @@ function Shell({ children, centered = false }: { children: ReactNode; centered?:
   );
 }
 
-function Header({ action }: { action?: ReactNode }) {
-  const t = useTranslations("upload.page");
+/** The logo and the place the files go. */
+function Header({ label, action }: { label: string; action?: ReactNode }) {
   return (
     <header className="flex h-11 items-center gap-2">
-      <div className="size-7">
+      <div className="size-7 shrink-0">
         <DonkeyMark />
       </div>
-      <span className="flex-1 text-base font-semibold">{t("brand")}</span>
+      <span className="min-w-0 flex-1 truncate text-base font-semibold">{label}</span>
       {action}
     </header>
   );

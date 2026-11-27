@@ -3,7 +3,6 @@
     "title": "Donkey Cut으로 보내기"
   },
   "page": {
-    "brand": "Donkey Cut",
     "photosVideos": "사진 및 동영상",
     "camera": "카메라",
     "selected": "{count, plural, other {#개 선택됨}}",

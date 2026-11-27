@@ -3,7 +3,6 @@
     "title": "Send to Donkey Cut"
   },
   "page": {
-    "brand": "Donkey Cut",
     "photosVideos": "Photos & videos",
     "camera": "Camera",
     "selected": "{count, plural, one {# selected} other {# selected}}",
