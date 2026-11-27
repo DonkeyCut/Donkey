@@ -1,0 +1,27 @@
+{
+  "meta": {
+    "title": "Donkey Cutに送信"
+  },
+  "page": {
+    "brand": "Donkey Cut",
+    "photosVideos": "写真と動画",
+    "camera": "カメラ",
+    "selected": "{count, plural, other {#件選択中}}",
+    "fullQuality": "{size} · 最高画質",
+    "remove": "{name}を削除",
+    "send": "{label}に送信",
+    "stop": "停止",
+    "progress": "{done} / {total}",
+    "aboutMinutes": "{minutes, plural, other {約#分}}",
+    "underMinute": "1分未満",
+    "screenOn": "完了するまで画面はオンのままになります",
+    "added": "{count, plural, other {#件追加しました}}",
+    "to": "{label}へ",
+    "notSent": "{count, plural, other {#件送信できませんでした}}",
+    "noRoom": "Donkey Cutのストレージに空きがありません。",
+    "retry": "再試行",
+    "sendMore": "さらに送信",
+    "expired": "このリンクの有効期限が切れています",
+    "offline": "Donkey Cutに接続できませんでした。"
+  }
+}

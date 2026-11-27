@@ -1,0 +1,27 @@
+{
+  "meta": {
+    "title": "Enviar para o Donkey Cut"
+  },
+  "page": {
+    "brand": "Donkey Cut",
+    "photosVideos": "Fotos e vídeos",
+    "camera": "Câmera",
+    "selected": "{count, plural, one {# selecionado} other {# selecionados}}",
+    "fullQuality": "{size} · Qualidade máxima",
+    "remove": "Remover {name}",
+    "send": "Enviar para {label}",
+    "stop": "Parar",
+    "progress": "{done} de {total}",
+    "aboutMinutes": "{minutes, plural, one {cerca de # min} other {cerca de # min}}",
+    "underMinute": "menos de um minuto",
+    "screenOn": "A tela fica ligada até terminar",
+    "added": "{count, plural, one {# adicionado} other {# adicionados}}",
+    "to": "para {label}",
+    "notSent": "{count, plural, one {# não foi enviado} other {# não foram enviados}}",
+    "noRoom": "Seu armazenamento do Donkey Cut está cheio.",
+    "retry": "Tentar novamente",
+    "sendMore": "Enviar mais",
+    "expired": "Este link expirou",
+    "offline": "Não foi possível conectar ao Donkey Cut."
+  }
+}

@@ -48,6 +48,7 @@ const LOADERS: { [L in Locale]: { [N in Namespace]: () => Promise<{ default: unk
     settings: () => import("./messages/en/settings.json"),
     share: () => import("./messages/en/share.json"),
     timeline: () => import("./messages/en/timeline.json"),
+    upload: () => import("./messages/en/upload.json"),
   },
   es: {
     auth: () => import("./messages/es/auth.json"),
@@ -70,6 +71,7 @@ const LOADERS: { [L in Locale]: { [N in Namespace]: () => Promise<{ default: unk
     settings: () => import("./messages/es/settings.json"),
     share: () => import("./messages/es/share.json"),
     timeline: () => import("./messages/es/timeline.json"),
+    upload: () => import("./messages/es/upload.json"),
   },
   "pt-BR": {
     auth: () => import("./messages/pt-BR/auth.json"),
@@ -92,6 +94,7 @@ const LOADERS: { [L in Locale]: { [N in Namespace]: () => Promise<{ default: unk
     settings: () => import("./messages/pt-BR/settings.json"),
     share: () => import("./messages/pt-BR/share.json"),
     timeline: () => import("./messages/pt-BR/timeline.json"),
+    upload: () => import("./messages/pt-BR/upload.json"),
   },
   fr: {
     auth: () => import("./messages/fr/auth.json"),
@@ -114,6 +117,7 @@ const LOADERS: { [L in Locale]: { [N in Namespace]: () => Promise<{ default: unk
     settings: () => import("./messages/fr/settings.json"),
     share: () => import("./messages/fr/share.json"),
     timeline: () => import("./messages/fr/timeline.json"),
+    upload: () => import("./messages/fr/upload.json"),
   },
   de: {
     auth: () => import("./messages/de/auth.json"),
@@ -136,6 +140,7 @@ const LOADERS: { [L in Locale]: { [N in Namespace]: () => Promise<{ default: unk
     settings: () => import("./messages/de/settings.json"),
     share: () => import("./messages/de/share.json"),
     timeline: () => import("./messages/de/timeline.json"),
+    upload: () => import("./messages/de/upload.json"),
   },
   ja: {
     auth: () => import("./messages/ja/auth.json"),
@@ -158,6 +163,7 @@ const LOADERS: { [L in Locale]: { [N in Namespace]: () => Promise<{ default: unk
     settings: () => import("./messages/ja/settings.json"),
     share: () => import("./messages/ja/share.json"),
     timeline: () => import("./messages/ja/timeline.json"),
+    upload: () => import("./messages/ja/upload.json"),
   },
   ko: {
     auth: () => import("./messages/ko/auth.json"),
@@ -180,6 +186,7 @@ const LOADERS: { [L in Locale]: { [N in Namespace]: () => Promise<{ default: unk
     settings: () => import("./messages/ko/settings.json"),
     share: () => import("./messages/ko/share.json"),
     timeline: () => import("./messages/ko/timeline.json"),
+    upload: () => import("./messages/ko/upload.json"),
   },
   "zh-CN": {
     auth: () => import("./messages/zh-CN/auth.json"),
@@ -202,5 +209,6 @@ const LOADERS: { [L in Locale]: { [N in Namespace]: () => Promise<{ default: unk
     settings: () => import("./messages/zh-CN/settings.json"),
     share: () => import("./messages/zh-CN/share.json"),
     timeline: () => import("./messages/zh-CN/timeline.json"),
+    upload: () => import("./messages/zh-CN/upload.json"),
   },
 };

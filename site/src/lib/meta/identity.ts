@@ -25,9 +25,10 @@ export const META_COOKIE_MAX_AGE_S = 90 * 24 * 60 * 60;
 // The first-party route every page view reports through (app/p/route.ts).
 export const BEACON_PATH = "/p";
 
-// The pages that never report a page view: the editor, the shared player, and
-// the unsubscribe page, whose addresses carry project ids and tokens.
-export const UNTRACKED_PAGES = /^\/(?:(?:cut\/)?(?:app|s)|unsubscribe)(?:\/|$)/;
+// The pages that never report a page view: the editor, the shared player, the
+// phone upload page, and the unsubscribe page, whose addresses carry project
+// ids, tokens and codes.
+export const UNTRACKED_PAGES = /^\/(?:(?:cut\/)?(?:app|s|up)|unsubscribe)(?:\/|$)/;
 
 type CookieValue = { name: string; value: string };
 

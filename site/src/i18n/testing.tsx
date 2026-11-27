@@ -21,6 +21,7 @@ import panels from "@/i18n/messages/en/panels.json";
 import settings from "@/i18n/messages/en/settings.json";
 import share from "@/i18n/messages/en/share.json";
 import timeline from "@/i18n/messages/en/timeline.json";
+import upload from "@/i18n/messages/en/upload.json";
 import type { Messages } from "@/i18n/namespaces";
 
 // The whole English catalog, loaded synchronously for tests that render
@@ -46,6 +47,7 @@ export const EN_MESSAGES: Messages = {
   settings,
   share,
   timeline,
+  upload,
 };
 
 /** Wraps a tree in the English catalog, the way a page's IntlScope does. */

@@ -1,0 +1,27 @@
+{
+  "meta": {
+    "title": "Send to Donkey Cut"
+  },
+  "page": {
+    "brand": "Donkey Cut",
+    "photosVideos": "Photos & videos",
+    "camera": "Camera",
+    "selected": "{count, plural, one {# selected} other {# selected}}",
+    "fullQuality": "{size} · Full quality",
+    "remove": "Remove {name}",
+    "send": "Send to {label}",
+    "stop": "Stop",
+    "progress": "{done} of {total}",
+    "aboutMinutes": "{minutes, plural, one {about # min} other {about # min}}",
+    "underMinute": "under a minute",
+    "screenOn": "Screen stays on until it's done",
+    "added": "{count, plural, one {# added} other {# added}}",
+    "to": "to {label}",
+    "notSent": "{count, plural, one {# didn't send} other {# didn't send}}",
+    "noRoom": "Your Donkey Cut storage is full.",
+    "retry": "Try again",
+    "sendMore": "Send more",
+    "expired": "This link has expired",
+    "offline": "Couldn't reach Donkey Cut."
+  }
+}

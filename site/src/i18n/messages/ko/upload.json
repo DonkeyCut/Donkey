@@ -1,0 +1,27 @@
+{
+  "meta": {
+    "title": "Donkey Cut으로 보내기"
+  },
+  "page": {
+    "brand": "Donkey Cut",
+    "photosVideos": "사진 및 동영상",
+    "camera": "카메라",
+    "selected": "{count, plural, other {#개 선택됨}}",
+    "fullQuality": "{size} · 원본 화질",
+    "remove": "{name} 제거",
+    "send": "{label}(으)로 보내기",
+    "stop": "중단",
+    "progress": "{total} 중 {done}",
+    "aboutMinutes": "{minutes, plural, other {약 #분}}",
+    "underMinute": "1분 미만",
+    "screenOn": "완료될 때까지 화면이 켜져 있어요",
+    "added": "{count, plural, other {#개 추가됨}}",
+    "to": "{label}(으)로",
+    "notSent": "{count, plural, other {#개 전송되지 않음}}",
+    "noRoom": "Donkey Cut 저장 공간이 가득 찼어요.",
+    "retry": "다시 시도",
+    "sendMore": "더 보내기",
+    "expired": "이 링크는 만료되었어요",
+    "offline": "Donkey Cut에 연결할 수 없어요."
+  }
+}

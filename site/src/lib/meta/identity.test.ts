@@ -50,11 +50,11 @@ test("a malformed click id sets no cookie", () => {
   }
 });
 
-test("the editor, shared player, and unsubscribe page report no page views", () => {
-  for (const path of ["/app", "/app/p/abc", "/s/token", "/cut/app/settings", "/unsubscribe"]) {
+test("the editor, shared player, phone upload, and unsubscribe page report no page views", () => {
+  for (const path of ["/app", "/app/p/abc", "/s/token", "/up/CODE", "/cut/app/settings", "/unsubscribe"]) {
     expect(UNTRACKED_PAGES.test(path)).toBe(true);
   }
-  for (const path of ["/", "/sign-up", "/blog/post", "/apps", "/install"]) {
+  for (const path of ["/", "/sign-up", "/blog/post", "/apps", "/install", "/upgrade"]) {
     expect(UNTRACKED_PAGES.test(path)).toBe(false);
   }
 });

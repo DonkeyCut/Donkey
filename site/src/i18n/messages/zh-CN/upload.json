@@ -1,0 +1,27 @@
+{
+  "meta": {
+    "title": "发送到 Donkey Cut"
+  },
+  "page": {
+    "brand": "Donkey Cut",
+    "photosVideos": "照片和视频",
+    "camera": "相机",
+    "selected": "{count, plural, other {已选 # 项}}",
+    "fullQuality": "{size} · 原始画质",
+    "remove": "移除 {name}",
+    "send": "发送到 {label}",
+    "stop": "停止",
+    "progress": "{done} / {total}",
+    "aboutMinutes": "{minutes, plural, other {约 # 分钟}}",
+    "underMinute": "不到 1 分钟",
+    "screenOn": "完成前屏幕将保持常亮",
+    "added": "{count, plural, other {已添加 # 项}}",
+    "to": "到 {label}",
+    "notSent": "{count, plural, other {# 项未发送}}",
+    "noRoom": "你的 Donkey Cut 存储空间已满。",
+    "retry": "重试",
+    "sendMore": "发送更多",
+    "expired": "此链接已过期",
+    "offline": "无法连接到 Donkey Cut。"
+  }
+}

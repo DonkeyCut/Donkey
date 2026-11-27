@@ -18,6 +18,7 @@ import type panels from "@/i18n/messages/en/panels.json";
 import type settings from "@/i18n/messages/en/settings.json";
 import type share from "@/i18n/messages/en/share.json";
 import type timeline from "@/i18n/messages/en/timeline.json";
+import type upload from "@/i18n/messages/en/upload.json";
 
 // Every catalog is split into namespaces, one JSON file per namespace per
 // locale (messages/<locale>/<namespace>.json). The English files are the
@@ -44,6 +45,7 @@ export type Messages = {
   settings: typeof settings;
   share: typeof share;
   timeline: typeof timeline;
+  upload: typeof upload;
 };
 
 export type Namespace = keyof Messages;
@@ -69,6 +71,7 @@ export const NAMESPACES = [
   "settings",
   "share",
   "timeline",
+  "upload",
 ] as const satisfies readonly Namespace[];
 
 // What each subtree hands its client components. A page ships only the
@@ -103,3 +106,6 @@ export const EDITOR_NAMESPACES = [
 export const APP_NAMESPACES = [...EDITOR_NAMESPACES, "settings"] as const satisfies readonly Namespace[];
 
 export const SHARE_NAMESPACES = [...EDITOR_NAMESPACES, "share"] as const satisfies readonly Namespace[];
+
+// The page a phone opens from an Upload dialog's code.
+export const UPLOAD_NAMESPACES = ["common", "upload"] as const satisfies readonly Namespace[];

@@ -5,12 +5,12 @@ import { bindFailureSink } from "./cut/lib/report";
 import { reloadOnChunkError } from "./lib/chunkReload";
 
 // Surfaces that composite video onto a canvas every frame never record session
-// replay (see app/_components/NoSessionReplay.tsx): the Cut app and the shared
-// player, at their public paths and at the /cut/… routes the proxy serves them
+// replay (see app/_components/NoSessionReplay.tsx): the Cut app, the shared
+// player and the phone upload page, at their public paths and at the /cut/… routes the proxy serves them
 // from. Disabling at init keeps the recorder script from loading at all on a
 // direct load; NoSessionReplay stops a recorder carried in by a client-side
 // navigation.
-const REPLAY_FREE = /^\/(?:cut\/)?(?:app|s)(?:\/|$)/;
+const REPLAY_FREE = /^\/(?:cut\/)?(?:app|s|up)(?:\/|$)/;
 
 const replayFree = () => REPLAY_FREE.test(window.location.pathname);
 
