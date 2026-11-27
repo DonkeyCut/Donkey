@@ -6,6 +6,7 @@ on:
     paths:
       - site/**
       - scripts/install-ci-ffmpeg.sh
+      - scripts/ci-site-tests.sh
       - .github/workflows/deploy-site.yml
   workflow_dispatch:
 

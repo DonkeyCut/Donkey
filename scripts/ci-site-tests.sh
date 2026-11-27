@@ -15,6 +15,7 @@ TOOL_LIMIT_S=60
 SILENT_LIMIT_S=120
 POLL_S=5
 log="${RUNNER_TEMP:-/tmp}/site-tests.log"
+killed="${RUNNER_TEMP:-/tmp}/site-tests.killed"
 
 # What one process is doing: its command, state, kernel stack, threads, files.
 dump() {
@@ -51,6 +52,7 @@ watch() {
       dump "$pid" "media tool running over ${TOOL_LIMIT_S}s"
       dump "$(ps -o ppid= -p "$pid" | tr -d ' ')" "its parent"
       kill -9 "$pid" 2>/dev/null
+      echo "$pid" >> "$killed"
     done
 
     # A suite that prints nothing for minutes is blocked somewhere in Bun.
@@ -75,8 +77,16 @@ trap 'kill "$watcher" 2>/dev/null' EXIT
 
 for attempt in $(seq 1 "$ATTEMPTS"); do
   : > "$log"
+  rm -f "$killed"
   timeout --kill-after=10 "$ATTEMPT_LIMIT_S" npm test 2>&1 | tee "$log"
   code=${PIPESTATUS[0]}
+
+  # A stopped tool fails the attempt even when the suite exits 0: a test file
+  # that probes `ffmpeg -version` reads the kill as a missing tool and skips.
+  if [ "$code" -eq 0 ] && [ -s "$killed" ]; then
+    echo "::warning title=Site tests stopped a stuck media tool::the suite passed, so its export tests may have skipped"
+    code=1
+  fi
   if [ "$code" -eq 0 ]; then
     exit 0
   fi
