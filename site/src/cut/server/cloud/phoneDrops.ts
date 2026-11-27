@@ -14,6 +14,7 @@ import { z } from "zod";
 import { notFoundResponse, unauthorizedResponse } from "@/lib/donkey-api-auth";
 import { prisma } from "@/lib/prisma";
 
+import { mediaObjectUrl } from "./mediaCdn";
 import { getProject } from "./projects";
 import {
   abortMultipart,
@@ -23,7 +24,6 @@ import {
   head,
   phoneStagingKey,
   phoneThumbKey,
-  presignGet,
   presignPart,
   putObject,
 } from "./r2";
@@ -225,18 +225,16 @@ export const phoneDropsOwner = {
     return Response.json({
       open,
       phones: passes.length,
-      files: await Promise.all(
-        files.map(async (f) => ({
-          id: f.id,
-          name: f.name,
-          mime: f.mime,
-          bytes: Number(f.bytes),
-          sentBytes: Number(f.sentBytes),
-          state: f.state,
-          device: deviceOfPass.get(f.passId) ?? "Phone",
-          thumbUrl: f.thumbKey ? await presignGet(f.thumbKey) : null,
-        }))
-      ),
+      files: files.map((f) => ({
+        id: f.id,
+        name: f.name,
+        mime: f.mime,
+        bytes: Number(f.bytes),
+        sentBytes: Number(f.sentBytes),
+        state: f.state,
+        device: deviceOfPass.get(f.passId) ?? "Phone",
+        thumbUrl: f.thumbKey ? mediaObjectUrl(f.thumbKey, { version: f.id }) : null,
+      })),
     });
   },
 
@@ -295,7 +293,8 @@ export const phoneDropsOwner = {
 
   /** Take one staged file for this computer. Exactly one caller wins: the
    * claim is a guarded update, and the loser sees a 409. The winner gets a
-   * read URL for the bytes. */
+   * read URL for the bytes on the media edge, which answers the page's fetch
+   * with CORS; a raw R2 URL does not. */
   async claim(userId: string, fileId: string) {
     const lapsed = new Date(Date.now() - CLAIM_LAPSE_MS);
     const claimed = await prisma.cutPhoneFile.updateMany({
@@ -310,7 +309,7 @@ export const phoneDropsOwner = {
       return Response.json({ error: "Already taken" }, { status: HTTP_CONFLICT });
     }
     const file = await prisma.cutPhoneFile.findUniqueOrThrow({ where: { id: fileId } });
-    return Response.json({ url: await presignGet(file.r2Key) });
+    return Response.json({ url: mediaObjectUrl(file.r2Key, { version: file.id }) });
   },
 
   /** Put a claimed file back for another pass. */

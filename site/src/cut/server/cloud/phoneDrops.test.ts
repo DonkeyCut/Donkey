@@ -29,6 +29,8 @@ mock.module("@/lib/prisma", () => ({
         fileState = args.data.state ?? fileState;
         return file;
       },
+      updateMany: async () => ({ count: 1 }),
+      findUniqueOrThrow: async () => ({ ...file, state: fileState }),
     },
   },
 }));
@@ -45,7 +47,8 @@ mock.module("./r2", () => ({
     deleted.push(keys);
   },
 }));
-const { phoneDropsPublic } = await import("./phoneDrops");
+const { phoneDropsOwner, phoneDropsPublic } = await import("./phoneDrops");
+const { CUT_MEDIA_ORIGIN } = await import("@/cut/lib/hosts");
 
 const PASS = "a".repeat(32);
 const call = (body: unknown) =>
@@ -87,4 +90,11 @@ test("a joined file of the declared size is staged", async () => {
   expect(res.status).toBe(200);
   expect(fileState).toBe("staged");
   expect(deleted).toEqual([]);
+});
+
+test("a claimed file is read through the media edge, which answers the page's fetch", async () => {
+  process.env.CUT_MEDIA_SIGNING_SECRET ??= "test-secret";
+  const res = await phoneDropsOwner.claim("u1", "f1");
+  const { url } = (await res.json()) as { url: string };
+  expect(url.startsWith(`${CUT_MEDIA_ORIGIN}/cut-phone/u1/d1/f1?`)).toBe(true);
 });
