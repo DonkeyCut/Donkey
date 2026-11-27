@@ -100,7 +100,7 @@ export function UploadDialog({
         </DialogHeader>
 
         {view === "choose" ? (
-          <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-4 pb-2">
             <div className={cn("grid gap-3", offer ? "grid-cols-2" : "grid-cols-1")}>
               <Choice icon={<Monitor />} label={t("fromComputer")} onClick={onComputer} />
               {offer && <Choice icon={<Smartphone />} label={t("fromPhone")} onClick={() => setView("phone")} />}
