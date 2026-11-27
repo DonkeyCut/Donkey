@@ -234,7 +234,7 @@ function PhoneView({
   }
 
   const code = (
-    <div className="flex flex-col items-center gap-4 py-2">
+    <div className="flex flex-col items-center gap-4 pt-2 pb-8">
       <div className="rounded-2xl border border-border bg-white p-2">
         {drop ? <QrCode value={drop.url} label={t("qrLabel")} /> : <div className="size-56" />}
       </div>
@@ -275,9 +275,7 @@ function FileRow({ file }: { file: PhoneDropFile }) {
   const fraction = file.bytes > 0 ? Math.min(1, file.sentBytes / file.bytes) : 0;
   const sending = file.state === "sending";
   const status =
-    file.state === "landed" ? (
-      <Check className="size-4 text-emerald-600 dark:text-emerald-400" aria-label={t("added")} />
-    ) : file.state === "failed" ? (
+    file.state === "landed" ? null : file.state === "failed" ? (
       <span className="text-destructive">{t("failed")}</span>
     ) : sending && file.sentBytes === 0 ? (
       <span className="text-muted-foreground">{t("waiting")}</span>
@@ -290,12 +288,19 @@ function FileRow({ file }: { file: PhoneDropFile }) {
 
   return (
     <li className="flex items-center gap-3">
-      <div className="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-md bg-muted">
+      <div className="relative flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-md bg-muted">
         {shown ? (
-          // eslint-disable-next-line @next/next/no-img-element -- a signed R2 URL, outside next/image's loader
+          // eslint-disable-next-line @next/next/no-img-element -- a signed media URL, outside next/image's loader
           <img src={shown} alt="" className="size-full object-cover" />
         ) : (
           <Fallback className="size-4 text-muted-foreground" />
+        )}
+        {/* A landed file's check sits on its picture, light on a dimmed
+            thumbnail in either theme. */}
+        {file.state === "landed" && (
+          <span className="absolute inset-0 grid place-items-center bg-black/45 text-white">
+            <Check className="size-4" strokeWidth={3} aria-label={t("added")} />
+          </span>
         )}
       </div>
       <div className="flex min-w-0 flex-1 flex-col gap-1.5">
