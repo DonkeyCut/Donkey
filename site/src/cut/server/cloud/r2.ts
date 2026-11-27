@@ -300,15 +300,24 @@ export async function copy(srcKey: string, dstKey: string): Promise<void> {
 /** Start a multipart upload and return its id. */
 export async function createMultipart(key: string, mime: string): Promise<string> {
   const res = await r2().send(new CreateMultipartUploadCommand({ Bucket: R2_BUCKET, Key: key, ContentType: mime }));
-  if (!res.UploadId) throw new Error("R2 returned no upload id");
+  if (!res.UploadId) {
+    throw new Error("R2 returned no upload id");
+  }
   return res.UploadId;
 }
 
-/** A time-limited PUT URL for one part. Parts are numbered from 1. */
-export function presignPart(key: string, uploadId: string, partNumber: number): Promise<string> {
+/** A time-limited PUT URL for one part. Parts are numbered from 1. `bytes`
+ * pins the part's size into the signature, as `presignPut` does. */
+export function presignPart(key: string, uploadId: string, partNumber: number, bytes: number): Promise<string> {
   return getSignedUrl(
     r2(),
-    new UploadPartCommand({ Bucket: R2_BUCKET, Key: key, UploadId: uploadId, PartNumber: partNumber }),
+    new UploadPartCommand({
+      Bucket: R2_BUCKET,
+      Key: key,
+      UploadId: uploadId,
+      PartNumber: partNumber,
+      ContentLength: bytes,
+    }),
     { expiresIn: PUT_EXPIRY_SECONDS }
   );
 }
@@ -349,7 +358,9 @@ export async function abortMultipart(key: string, uploadId: string): Promise<voi
   try {
     await r2().send(new AbortMultipartUploadCommand({ Bucket: R2_BUCKET, Key: key, UploadId: uploadId }));
   } catch (e) {
-    if (e instanceof R2NotConfiguredError) throw e;
+    if (e instanceof R2NotConfiguredError) {
+      throw e;
+    }
   }
 }
 

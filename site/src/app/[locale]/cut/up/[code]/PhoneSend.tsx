@@ -3,8 +3,9 @@
 // The phone's page: pick photos and videos, send them to the place the
 // computer's Upload dialog named. The code in the address buys a send pass;
 // each file then goes straight to storage in 8 MiB parts, a few files at once,
-// every part resent alone when it fails. Files that started keep going after
-// the computer closes its dialog; the code only stops new ones.
+// every part resent alone when it fails. Every file starts when Send is tapped
+// and keeps going after the computer closes its dialog; the code only stops
+// new ones.
 import { Check, Loader2, X } from "lucide-react";
 import { useParams } from "next/navigation";
 import { useFormatter, useTranslations } from "next-intl";
@@ -169,13 +170,31 @@ export function PhoneSend() {
     setScreen("sending");
 
     const wake = holdScreenOn();
+
+    // Every file starts now, one after another, while the code is good: a
+    // started file finishes on the pass even after the computer closes its
+    // dialog. The parts then go a few files at once.
+    let chain: Promise<unknown> = Promise.resolve();
+    const starts = queue.map((item) => {
+      const started = chain.then(() => {
+        if (stop.signal.aborted) {
+          throw new DOMException("aborted", "AbortError");
+        }
+        return startFile(session.pass, item.file);
+      });
+      chain = started.catch(() => {});
+      return started;
+    });
+
     let next = 0;
     const worker = async () => {
       while (next < queue.length && !stop.signal.aborted) {
-        const item = queue[next++];
+        const index = next++;
+        const item = queue[index];
         patch(item.key, { state: "sending" });
         try {
-          await sendFile(session.pass, item.file, stop.signal, (sent) => patch(item.key, { sent }));
+          const started = await starts[index];
+          await sendParts(session.pass, started, item.file, stop.signal, (sent) => patch(item.key, { sent }));
           patch(item.key, { state: "done", sent: item.file.size });
         } catch (e) {
           if (stop.signal.aborted) {
@@ -188,6 +207,11 @@ export function PhoneSend() {
     };
     await Promise.all(Array.from({ length: FILES_AT_ONCE }, worker));
     wake.release();
+
+    // Stop ends the files that started but never sent a part.
+    for (const started of starts.slice(next)) {
+      void started.then(({ fileId }) => post(`/files/${fileId}/abort`, { pass: session.pass })).catch(() => {});
+    }
 
     if (stop.signal.aborted) {
       setScreen(itemsRef.current.some((i) => i.state === "done") ? "done" : "review");
@@ -493,8 +517,11 @@ async function openPass(code: string): Promise<Session | "expired" | "offline"> 
   }
 }
 
-/** Send one file: start it, send its parts in order, join them. */
-async function sendFile(pass: string, file: File, signal: AbortSignal, onSent: (bytes: number) => void) {
+/** A file the pass started, and the part size to cut it into. */
+type Started = { fileId: string; partBytes: number };
+
+/** Start one file: only while the code is good. */
+async function startFile(pass: string, file: File): Promise<Started> {
   const res = await post("/files", { pass, name: file.name, mime: file.type, bytes: file.size });
   if (res.status === HTTP_GONE) {
     throw new SendError("expired");
@@ -505,7 +532,17 @@ async function sendFile(pass: string, file: File, signal: AbortSignal, onSent: (
   if (res.status === HTTP_CONFLICT || !res.ok) {
     throw new SendError("failed");
   }
-  const { fileId, partBytes } = (await res.json()) as { fileId: string; partBytes: number };
+  return (await res.json()) as Started;
+}
+
+/** Send a started file's parts in order, then join them. */
+async function sendParts(
+  pass: string,
+  { fileId, partBytes }: Started,
+  file: File,
+  signal: AbortSignal,
+  onSent: (bytes: number) => void,
+) {
   void sendThumb(pass, fileId, file);
 
   try {
@@ -646,9 +683,10 @@ async function sendThumb(pass: string, fileId: string, file: File) {
 
 async function thumbnailOf(file: File): Promise<Blob | null> {
   const url = URL.createObjectURL(file);
+  const video = file.type.startsWith("video/") ? document.createElement("video") : null;
   try {
     const source = await Promise.race([
-      file.type.startsWith("video/") ? videoFrame(url) : imageOf(url),
+      video ? videoFrame(video, url) : imageOf(url),
       new Promise<null>((r) => setTimeout(() => r(null), THUMB_TIMEOUT_MS)),
     ]);
     if (!source) {
@@ -662,6 +700,11 @@ async function thumbnailOf(file: File): Promise<Blob | null> {
     canvas.getContext("2d")?.drawImage(el, 0, 0, canvas.width, canvas.height);
     return await new Promise<Blob | null>((r) => canvas.toBlob(r, "image/jpeg", THUMB_QUALITY));
   } finally {
+    // The video's decoder goes with the thumbnail, drawn or timed out.
+    if (video) {
+      video.removeAttribute("src");
+      video.load();
+    }
     URL.revokeObjectURL(url);
   }
 }
@@ -675,9 +718,8 @@ function imageOf(url: string) {
   });
 }
 
-function videoFrame(url: string) {
+function videoFrame(video: HTMLVideoElement, url: string) {
   return new Promise<{ el: HTMLVideoElement; width: number; height: number } | null>((resolve) => {
-    const video = document.createElement("video");
     video.muted = true;
     video.playsInline = true;
     video.preload = "auto";

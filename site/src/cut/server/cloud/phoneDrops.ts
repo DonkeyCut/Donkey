@@ -386,10 +386,12 @@ export const phoneDropsPublic = {
     // A cloud place says now when it has no room, so the phone does not send
     // a file the import will refuse. Staged bytes themselves never count.
     const target = targetSchema.parse(drop.target);
+    // The phone hears only that there is no room: the account's numbers stay
+    // with the account.
     if (target.residency === "cloud") {
       const full = await quotaCheck(drop.userId, body.bytes);
       if (full) {
-        return full;
+        return Response.json({ error: "no_room" }, { status: HTTP_PAYLOAD_TOO_LARGE });
       }
     }
 
@@ -427,13 +429,22 @@ export const phoneDropsPublic = {
     }
     const { file } = owned;
 
+    // Every part but the last is PHONE_PART_BYTES; each URL takes exactly its
+    // part's bytes, so a pass can stage no more than the file it declared.
+    // A 20 MiB file has parts 1–3 of 8, 8 and 4 MiB.
+    const total = Number(file.bytes);
+    const sizes = body.parts.map((n) => Math.min(PHONE_PART_BYTES, total - (n - 1) * PHONE_PART_BYTES));
+    if (sizes.some((size) => size <= 0)) {
+      return badRequest();
+    }
+
     await prisma.cutPhoneFile.update({
       where: { id: file.id },
-      data: { sentBytes: BigInt(Math.min(body.sent, Number(file.bytes))) },
+      data: { sentBytes: BigInt(Math.min(body.sent, total)) },
     });
     const urls: Record<number, string> = {};
-    for (const n of body.parts) {
-      urls[n] = await presignPart(file.r2Key, file.uploadId, n);
+    for (const [i, n] of body.parts.entries()) {
+      urls[n] = await presignPart(file.r2Key, file.uploadId, n, sizes[i]);
     }
     return Response.json({ urls });
   },
@@ -475,7 +486,14 @@ export const phoneDropsPublic = {
     }
     await completeMultipart(file.r2Key, file.uploadId);
     const stored = await head(file.r2Key);
-    if (!stored || stored.bytes !== Number(file.bytes)) {
+    if (!stored) {
+      return badRequest();
+    }
+
+    // A joined object of the wrong size is no file the phone declared: it goes.
+    if (stored.bytes !== Number(file.bytes)) {
+      await prisma.cutPhoneFile.update({ where: { id: file.id }, data: { state: "failed" } });
+      await del([file.r2Key, ...(file.thumbKey ? [file.thumbKey] : [])]);
       return badRequest();
     }
     await prisma.cutPhoneFile.update({ where: { id: file.id }, data: { state: "staged", sentBytes: file.bytes } });

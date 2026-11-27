@@ -170,7 +170,7 @@ function PhoneView({
       setFailed(false);
       try {
         const { target, label, count, land } = latest.current;
-        current = await openPhoneDrop(target, label, count === "one");
+        current = await openPhoneDrop(target, label, count);
         if (stopped) {
           closePhoneDrop(current.id);
           return;

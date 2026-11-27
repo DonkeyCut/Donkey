@@ -7,7 +7,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 
 import { uploadInFlight } from "@/cut/lib/importQueue";
-import { bindPhoneLanding, landProjectFiles } from "@/cut/lib/phoneDrop";
+import { bindPhoneLanding, landProjectFiles, type PhoneLanding } from "@/cut/lib/phoneDrop";
 import { useEditor } from "@/cut/lib/store";
 
 /** The editor's import, as far as a phone's file needs it. */
@@ -48,7 +48,7 @@ export function usePhoneProjectLanding(projectId: string | null, importFiles: Pr
     }
     const stop = landProjectFiles(
       projectId,
-      async (file, folderId) => (await importStored((f, o) => importRef.current(f, o), file, folderId)) !== null,
+      (file, folderId) => importStored((f, o) => importRef.current(f, o), file, folderId),
       setSending,
     );
     return () => {
@@ -61,15 +61,17 @@ export function usePhoneProjectLanding(projectId: string | null, importFiles: Pr
 }
 
 /** Import one file into the open project and wait until its bytes are in
- * project storage. Answers the asset's id, or null when it did not get there.
- * A half-import is taken back out, so the staged copy can go round again.
+ * project storage. A file the import refuses, or whose asset the person
+ * deleted, is refused; one that has not got there yet comes back "again" and
+ * a half-import is taken back out, so the staged copy can go round again.
  * `onPlaced` hears the asset as soon as it exists: Replace picks it then. */
 export async function importStored(
   importFiles: ProjectImport,
   file: File,
   folderId: string | null,
   onPlaced?: (assetId: string) => void,
-): Promise<string | null> {
+): Promise<PhoneLanding> {
+  const projectId = useEditor.getState().projectId;
   let assetId: string | null = null;
   await importFiles([file], {
     mediaOnly: true,
@@ -82,21 +84,26 @@ export async function importStored(
   });
   const id: string | null = assetId;
   if (!id) {
-    return null;
+    return "refused";
   }
   onPlaced?.(id);
 
   // The import queue holds a job while the bytes are in flight or retryable.
+  // Leaving the project ends the wait: the file lands when it is open again.
   const deadline = Date.now() + STORED_TIMEOUT_MS;
   while (Date.now() < deadline) {
-    if (!useEditor.getState().assets.some((a) => a.id === id)) {
-      return null;
+    const editor = useEditor.getState();
+    if (editor.projectId !== projectId) {
+      return "again";
+    }
+    if (!editor.assets.some((a) => a.id === id)) {
+      return "refused";
     }
     if (!uploadInFlight(id)) {
-      return id;
+      return "landed";
     }
     await new Promise((resolve) => setTimeout(resolve, STORED_POLL_MS));
   }
   useEditor.getState().removeAsset(id);
-  return null;
+  return "again";
 }

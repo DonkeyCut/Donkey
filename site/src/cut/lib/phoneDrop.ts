@@ -39,8 +39,12 @@ type InboxFile = { id: string; dropId: string; name: string; mime: string; bytes
 type InboxSending = { id: string; dropId: string; name: string; mime: string; target: PhoneTarget };
 type Inbox = { files: InboxFile[]; sending: InboxSending[] };
 
-/** Takes one file into its place and says whether it got there. */
-export type PhoneLander = (file: File, folderId: string | null) => Promise<boolean>;
+/** What became of a file a lander took: in its place, refused for good (the
+ * staged copy goes), or not there yet (the staged copy waits for another pass). */
+export type PhoneLanding = "landed" | "refused" | "again";
+
+/** Takes one file into its place and says how that went. */
+export type PhoneLander = (file: File, folderId: string | null) => Promise<PhoneLanding>;
 
 const BASE = "/api/cut-cloud/phone";
 const CLIENT_KEY = "cut-phone-client";
@@ -77,8 +81,8 @@ export function phoneClientId(): string {
 // --- The dialog's drop ---
 
 /** Open a drop for one place. The QR carries `url`. */
-export async function openPhoneDrop(target: PhoneTarget, label: string, single: boolean) {
-  const res = await post("/drops", { clientId: phoneClientId(), target, label, single });
+export async function openPhoneDrop(target: PhoneTarget, label: string, count: "one" | "many") {
+  const res = await post("/drops", { clientId: phoneClientId(), target, label, single: count === "one" });
   if (!res.ok) {
     throw new Error(`phone drop ${res.status}`);
   }
@@ -216,7 +220,7 @@ async function takeIn(file: InboxFile, land: PhoneLander) {
   const { url } = (await res.json()) as { url: string };
   clearPlaceholder(file.id);
 
-  let landed = false;
+  let landing: PhoneLanding;
   try {
     const bytes = await fetch(url);
     if (!bytes.ok) {
@@ -224,26 +228,35 @@ async function takeIn(file: InboxFile, land: PhoneLander) {
     }
     const blob = await bytes.blob();
     const picked = new File([blob], file.name, { type: file.mime || blob.type });
-    landed = await land(picked, file.target.folderId);
+    landing = await land(picked, file.target.folderId);
   } catch {
     // A fetch that broke puts the file back for the next pass.
+    landing = "again";
+  }
+
+  // A file that is not there yet keeps its staged copy for the next pass.
+  if (landing === "again") {
     await post(`/files/${file.id}/release`).catch(() => {});
     return;
   }
-  await post(`/files/${file.id}/${landed ? "landed" : "failed"}`).catch(() => {});
+  await post(`/files/${file.id}/${landing === "landed" ? "landed" : "failed"}`).catch(() => {});
 }
 
 /** The library's own import. Its tile keeps the file and a retry if saving
  * fails, so the staged copy can go either way. */
-async function landInLibrary(file: File, target: { residency: Residency; folderId: string | null }, client: QueryClient) {
-  let landed = false;
+async function landInLibrary(
+  file: File,
+  target: { residency: Residency; folderId: string | null },
+  client: QueryClient,
+): Promise<PhoneLanding> {
+  let landing: PhoneLanding = "refused";
   await importLibraryFiles([file], target, client, {
     prepared: () => {},
     landed: () => {
-      landed = true;
+      landing = "landed";
     },
   });
-  return landed;
+  return landing;
 }
 
 /** Library files still on a phone get the tile an upload shows, in the folder

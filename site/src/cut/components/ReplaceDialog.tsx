@@ -301,8 +301,8 @@ function PickStep({
   const projectId = useEditor((s) => s.projectId);
   const projectName = useEditor((s) => s.projectName);
   const mode = useCutMode();
-  const landFromPhone: PhoneLander = async (file) => {
-    const id = await importStored(
+  const landFromPhone: PhoneLander = (file) =>
+    importStored(
       (files, opts) => Promise.resolve(onImport(files, opts)),
       file,
       null,
@@ -314,8 +314,6 @@ function PickStep({
         }
       },
     );
-    return id !== null;
-  };
   const phoneUpload: PhoneUpload | null =
     projectId && mode !== "shared"
       ? {
