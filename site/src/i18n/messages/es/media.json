@@ -319,5 +319,21 @@
     "borderWidth": "Grosor del borde",
     "borderColor": "Color del borde",
     "offset": "Desplazamiento"
+  },
+  "uploadDialog": {
+    "title": "Subir",
+    "fromComputer": "Desde la computadora",
+    "fromPhone": "Desde el teléfono",
+    "back": "Atrás",
+    "scan": "Escanea con la cámara de tu teléfono",
+    "qrLabel": "Código para esta subida",
+    "progress": "{done} de {total}",
+    "percent": "{value}%",
+    "waiting": "Esperando",
+    "adding": "Agregando",
+    "added": "Agregado",
+    "failed": "No se pudo agregar",
+    "codeFailed": "No se pudo generar el código.",
+    "retry": "Reintentar"
   }
 }

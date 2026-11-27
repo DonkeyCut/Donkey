@@ -26,7 +26,7 @@ import { SectionTitle } from "@/cut/components/SectionTitle";
 import { DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { MEDIA_CORS } from "@/cut/lib/mediaCors";
 import { apiFetch } from "@/cut/lib/backend";
-import { useCutCaps, useLocalCompute } from "@/cut/lib/backend/hooks";
+import { useCutCaps, useCutMode, useLocalCompute } from "@/cut/lib/backend/hooks";
 import {
   clearAssetDrag,
   draggingLibrary,
@@ -90,6 +90,7 @@ import { isSoundPresetTemplate } from "@/cut/lib/soundPresets";
 import { isGradePresetTemplate } from "@/cut/lib/gradePresets";
 import { isStylePresetTemplate } from "@/cut/lib/stylePresets";
 import { retryUpload } from "@/cut/lib/importQueue";
+import { UploadDialog, type PhoneUpload } from "@/cut/components/UploadDialog";
 import {
   forgetLinkedCopies,
   linkedAccept,
@@ -857,6 +858,19 @@ function ProjectFilesPanel({
     storedFolder !== null && projectLoaded && !folders.some((f) => f.id === storedFolder)
       ? null
       : storedFolder;
+
+  // Upload asks where from; a phone sends into the open folder here.
+  const [uploading, setUploading] = useState(false);
+  const projectName = useEditor((s) => s.projectName);
+  const mode = useCutMode();
+  const phoneUpload: PhoneUpload | null =
+    mode === "shared"
+      ? null
+      : {
+          target: { kind: "project", residency: mode, projectId, folderId: openFolder },
+          label: (openFolder && folders.find((f) => f.id === openFolder)?.name) || projectName || t("root"),
+          count: "many",
+        };
   useRevealEffect((ref) => {
     if (ref.folder?.scope === "project" && ref.folder.projectId === projectId) setOpenFolder(ref.folder.folderId);
   });
@@ -1070,9 +1084,15 @@ function ProjectFilesPanel({
       {/* An export in flight spins on the Media rail tile, not here. */}
       {!readOnly && (
         <div className="px-3.5 pb-3">
-          <Button variant="outline" className="w-full" onClick={() => inputRef.current?.click()}>
+          <Button variant="outline" className="w-full" onClick={() => setUploading(true)}>
             <Upload data-icon="inline-start" /> {t("upload")}
           </Button>
+          <UploadDialog
+            open={uploading}
+            onOpenChange={setUploading}
+            onComputer={() => inputRef.current?.click()}
+            phone={phoneUpload}
+          />
           <input
             ref={inputRef}
             type="file"
@@ -1081,8 +1101,10 @@ function ProjectFilesPanel({
             hidden
             onChange={(e) => {
               // Upload stocks Project Files only; dropping on the canvas places.
-              if (e.target.files?.length)
+              if (e.target.files?.length) {
                 onImport(e.target.files, { mediaOnly: true, folderId: openFolder ?? undefined });
+                setUploading(false);
+              }
               e.target.value = "";
             }}
           />

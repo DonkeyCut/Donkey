@@ -5,6 +5,7 @@ import { NoTranslate } from "@/app/_components/NoTranslate";
 import { CardHost } from "@/cut/components/CardHost";
 import { ConnectGate } from "@/cut/components/ConnectGate";
 import { ExportsDock } from "@/cut/components/ExportsDock";
+import { PhoneLanding } from "@/cut/components/PhoneLanding";
 import { CutOnboarding } from "@/cut/components/onboarding/CutOnboarding";
 import { OnboardingHost } from "@/cut/components/onboarding/OnboardingHost";
 import { PhoneGate } from "@/cut/components/PhoneGate";
@@ -68,6 +69,7 @@ export default function CutAppLayout({ children }: { children: ReactNode }) {
                   shape worth drawing before then. */}
                 <SessionGate>
                   <ExportsDock placement="window" />
+                  <PhoneLanding />
                   <OnboardingHost />
                 </SessionGate>
               </ConnectGate>

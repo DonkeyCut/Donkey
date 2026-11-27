@@ -20,7 +20,9 @@ import { useDescribeError } from "@/i18n/describeError";
 import { useHoverPlay } from "@/cut/hooks/useHoverPlay";
 import { useInView } from "@/cut/hooks/useInView";
 import { FOCUS_RING } from "@/cut/lib/assetPick";
-import { useLocalCompute } from "@/cut/lib/backend/hooks";
+import { useCutMode, useLocalCompute } from "@/cut/lib/backend/hooks";
+import { importStored } from "@/cut/hooks/usePhoneDrops";
+import type { PhoneLander } from "@/cut/lib/phoneDrop";
 import { planFilmstrip } from "@/cut/lib/filmstrip";
 import { childrenOf, folderTrail } from "@/cut/lib/folderTree";
 import { importLibraryAsset, type LibraryAsset } from "@/cut/lib/library";
@@ -61,6 +63,7 @@ import { FolderCrumb, FolderShelf } from "./desktopFolders";
 import { LibraryCard } from "./LibraryCard";
 import { MediaTransport } from "./MediaTransport";
 import { SubTabs } from "./SubTabs";
+import { UploadDialog, type PhoneUpload } from "./UploadDialog";
 
 /**
  * Replace: swap what a timeline item plays. Step one picks a file from
@@ -89,7 +92,7 @@ type Imports = (
       result: { file: File; assetId: string } | { file: File; failed: true },
     ) => void;
   },
-) => void;
+) => unknown;
 
 /** Whether a Project Files file can go in the item: an import (no origin),
  * of a kind it plays, other than what it plays now. An animated sticker only
@@ -292,6 +295,37 @@ function PickStep({
     });
   };
 
+  // Upload asks where from. A file from a phone lands in Project Files the
+  // same way and is picked as soon as it is there.
+  const [uploading, setUploading] = useState(false);
+  const projectId = useEditor((s) => s.projectId);
+  const projectName = useEditor((s) => s.projectName);
+  const mode = useCutMode();
+  const landFromPhone: PhoneLander = async (file) => {
+    const id = await importStored(
+      (files, opts) => Promise.resolve(onImport(files, opts)),
+      file,
+      null,
+      (assetId) => {
+        const asset = useEditor.getState().assets.find((a) => a.id === assetId);
+        if (asset && types.includes(asset.type)) {
+          setUploading(false);
+          onPick(asset);
+        }
+      },
+    );
+    return id !== null;
+  };
+  const phoneUpload: PhoneUpload | null =
+    projectId && mode !== "shared"
+      ? {
+          target: { kind: "project", residency: mode, projectId, folderId: null },
+          label: projectName || tm("projectFiles"),
+          count: "one",
+          land: landFromPhone,
+        }
+      : null;
+
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3">
       {/* The shelves on the left, Upload on the right, one height. */}
@@ -311,7 +345,7 @@ function PickStep({
           variant="outline"
           className="ml-auto"
           disabled={busy}
-          onClick={() => inputRef.current?.click()}
+          onClick={() => setUploading(true)}
         >
           {busy ? (
             <Loader2 data-icon="inline-start" className="animate-spin" />
@@ -329,13 +363,18 @@ function PickStep({
         onChange={(e) => {
           if (e.target.files?.length) {
             upload(e.target.files);
+            setUploading(false);
           }
           e.target.value = "";
         }}
       />
-      <UploadButton.Provider
-        value={{ browse: () => inputRef.current?.click(), busy }}
-      >
+      <UploadDialog
+        open={uploading}
+        onOpenChange={setUploading}
+        onComputer={() => inputRef.current?.click()}
+        phone={phoneUpload}
+      />
+      <UploadButton.Provider value={{ browse: () => setUploading(true), busy }}>
         {shelf === "project" ? (
           <ProjectShelf
             types={types}

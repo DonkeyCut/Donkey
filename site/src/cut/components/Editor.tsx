@@ -6,6 +6,7 @@ import { CHAT_RUNTIME } from "@/cut/lib/chatRuntime";
 import { useHostReady } from "@/cut/lib/hostBridge";
 import { useCutMode } from "@/cut/lib/backend/hooks";
 import { usePhoneInbox } from "@/cut/hooks/usePhoneInbox";
+import { usePhoneProjectLanding } from "@/cut/hooks/usePhoneDrops";
 import { useTabTitle } from "@/cut/hooks/useTabTitle";
 import { useHostCommands } from "@/cut/lib/hostCommands";
 import { useEnvironment } from "@/cut/lib/environment";
@@ -1455,6 +1456,8 @@ export function Editor({
 
   // Takes shot on a paired phone land in this project's media as they arrive.
   usePhoneInbox(importFiles);
+  // Files sent from a phone by QR code to this project land in its media.
+  const phoneSending = usePhoneProjectLanding(sharedFeatures ? null : projectId, importFiles);
 
   // The way out of a project that can't open. On the web it is the home tab
   // the project was opened from; the card has no home behind it, so a new
@@ -1531,7 +1534,7 @@ export function Editor({
             chatStatus={chatStatus}
             from={from}
             folder={folder}
-            uploading={importing + sending}
+            uploading={importing + sending + phoneSending}
             copying={copying}
           />
         )}

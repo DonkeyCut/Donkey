@@ -23,7 +23,6 @@ import {
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -94,6 +93,7 @@ import { NotesView, notesShownIn, type NotesViewHandle } from "@/cut/components/
 import { ShelfBadge } from "@/cut/components/ShelfBadge";
 import { TabStatus } from "@/cut/components/TabStatus";
 import { TemplateCard } from "@/cut/components/TemplateCard";
+import { UploadDialog, type PhoneUpload } from "@/cut/components/UploadDialog";
 import {
   FolderCrumb,
   FolderMenuItems,
@@ -620,6 +620,18 @@ export function AssetsView() {
     setUrl("");
     setAddOpen(false);
     await importLibraryLink(value, destination, client);
+  };
+  // A phone sends into the folder an upload from here would land in.
+  const phoneUpload = (): PhoneUpload | null => {
+    const destination = landing(openFolder);
+    if (!live(destination.residency)) {
+      return null;
+    }
+    return {
+      target: { kind: "library", ...destination },
+      label: folderOf(destination.folderId)?.name ?? t("tabs.assets"),
+      count: "many",
+    };
   };
   // ⌘V takes what a drop takes: copied files upload into the open folder and
   // a copied link imports. A field with the caret keeps its own paste.
@@ -1294,45 +1306,36 @@ export function AssetsView() {
 
         {actions.dialogs}
 
-        <Dialog open={addOpen} onOpenChange={setAddOpen}>
-          <DialogContent className="sm:max-w-md">
-            <DialogHeader>
-              <DialogTitle>{t("assets.upload")}</DialogTitle>
-            </DialogHeader>
-            <div className="flex flex-col gap-4">
-              <button
-                className="flex flex-col items-center gap-2 rounded-xl py-8 transition-colors hover:bg-muted/40"
-                onClick={() => inputRef.current?.click()}
-              >
-                <Upload className="size-6 text-muted-foreground" />
-                <span className="text-sm font-medium">{t("library.chooseFiles")}</span>
-              </button>
-              <div className="flex items-center gap-3 text-[11px] tracking-wide text-muted-foreground uppercase">
-                <div className="h-px flex-1 bg-border" /> {t("library.orPasteLink")} <div className="h-px flex-1 bg-border" />
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="relative flex-1">
-                  <LinkIcon className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
-                  <Input
-                    autoFocus
-                    value={url}
-                    placeholder={t("library.linkPlaceholder")}
-                    className="pl-8"
-                    onChange={(e) => setUrl(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        void importLink(url);
-                      }
-                    }}
-                  />
-                </div>
-                <Button disabled={!url.trim()} onClick={() => void importLink(url)}>
-                  <LinkIcon /> {t("library.import")}
-                </Button>
-              </div>
+        <UploadDialog
+          open={addOpen}
+          onOpenChange={setAddOpen}
+          onComputer={() => inputRef.current?.click()}
+          phone={phoneUpload()}
+        >
+          <div className="flex items-center gap-3 text-[11px] tracking-wide text-muted-foreground uppercase">
+            <div className="h-px flex-1 bg-border" /> {t("library.orPasteLink")} <div className="h-px flex-1 bg-border" />
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="relative flex-1">
+              <LinkIcon className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                autoFocus
+                value={url}
+                placeholder={t("library.linkPlaceholder")}
+                className="pl-8"
+                onChange={(e) => setUrl(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    void importLink(url);
+                  }
+                }}
+              />
             </div>
-          </DialogContent>
-        </Dialog>
+            <Button disabled={!url.trim()} onClick={() => void importLink(url)}>
+              <LinkIcon /> {t("library.import")}
+            </Button>
+          </div>
+        </UploadDialog>
 
         {/* A pick with nothing live in it opens no menu: its shelf takes no
             changes. Right-click on the page itself offers what can be added. */}

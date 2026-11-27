@@ -319,5 +319,21 @@
     "borderWidth": "枠線の太さ",
     "borderColor": "枠線の色",
     "offset": "オフセット"
+  },
+  "uploadDialog": {
+    "title": "アップロード",
+    "fromComputer": "コンピューターから",
+    "fromPhone": "スマートフォンから",
+    "back": "戻る",
+    "scan": "スマートフォンのカメラでスキャン",
+    "qrLabel": "このアップロード用コード",
+    "progress": "{done} / {total}",
+    "percent": "{value}%",
+    "waiting": "待機中",
+    "adding": "追加中",
+    "added": "追加済み",
+    "failed": "追加できませんでした",
+    "codeFailed": "コードを作成できませんでした。",
+    "retry": "再試行"
   }
 }

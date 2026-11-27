@@ -319,5 +319,21 @@
     "borderWidth": "Border width",
     "borderColor": "Border color",
     "offset": "Offset"
+  },
+  "uploadDialog": {
+    "title": "Upload",
+    "fromComputer": "From computer",
+    "fromPhone": "From phone",
+    "back": "Back",
+    "scan": "Scan with your phone camera",
+    "qrLabel": "Code for this upload",
+    "progress": "{done} of {total}",
+    "percent": "{value}%",
+    "waiting": "Waiting",
+    "adding": "Adding",
+    "added": "Added",
+    "failed": "Couldn't add",
+    "codeFailed": "Couldn't make a code.",
+    "retry": "Try again"
   }
 }

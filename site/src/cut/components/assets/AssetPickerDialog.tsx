@@ -28,6 +28,7 @@ import { LibraryCard, LIBRARY_AUDIO_TILE_AREA, LIBRARY_SQUARE } from "@/cut/comp
 import { LibraryImportCard } from "@/cut/components/LibraryImportCard";
 import { NoteBodyPreview } from "@/cut/components/NoteBodyPreview";
 import { TemplateCard } from "@/cut/components/TemplateCard";
+import { UploadDialog, type PhoneUpload } from "@/cut/components/UploadDialog";
 import { FolderCrumb, FolderGlyph } from "@/cut/components/desktopFolders";
 import { ProjectTile } from "./ProjectCard";
 import {
@@ -164,6 +165,21 @@ function PickerBody({ onClose, onAdd }: { onClose: () => void; onAdd: (refs: Ass
     void importLibraryFiles(files, { residency, folderId }, client);
   };
 
+  // A phone sends where an upload from here would land.
+  const [uploading, setUploading] = useState(false);
+  const phoneUpload = (): PhoneUpload | null => {
+    const residency = open && live(open.residency) ? open.residency : target;
+    const folderId = open && open.residency === residency && open.store === "library" ? open.id : null;
+    if (!live(residency)) {
+      return null;
+    }
+    return {
+      target: { kind: "library", residency, folderId },
+      label: folderId && open ? open.name : t("tabs.assets"),
+      count: "many",
+    };
+  };
+
   const count =
     picked.length === 0
       ? t("assets.picker.none")
@@ -251,9 +267,15 @@ function PickerBody({ onClose, onAdd }: { onClose: () => void; onAdd: (refs: Ass
     <>
       <DialogHeader className="flex-row items-center gap-3 pr-10">
         <DialogTitle className="flex-1">{t("assets.picker.title")}</DialogTitle>
-        <Button variant="outline" size="sm" onClick={() => inputRef.current?.click()}>
+        <Button variant="outline" size="sm" onClick={() => setUploading(true)}>
           <Upload data-icon="inline-start" /> {t("assets.upload")}
         </Button>
+        <UploadDialog
+          open={uploading}
+          onOpenChange={setUploading}
+          onComputer={() => inputRef.current?.click()}
+          phone={phoneUpload()}
+        />
         <input
           ref={inputRef}
           type="file"
@@ -263,6 +285,7 @@ function PickerBody({ onClose, onAdd }: { onClose: () => void; onAdd: (refs: Ass
           onChange={(e) => {
             if (e.target.files?.length) {
               upload(e.target.files);
+              setUploading(false);
             }
             e.target.value = "";
           }}

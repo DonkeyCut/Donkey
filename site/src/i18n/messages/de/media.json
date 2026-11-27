@@ -319,5 +319,21 @@
     "borderWidth": "Rahmenbreite",
     "borderColor": "Rahmenfarbe",
     "offset": "Versatz"
+  },
+  "uploadDialog": {
+    "title": "Hochladen",
+    "fromComputer": "Vom Computer",
+    "fromPhone": "Vom Smartphone",
+    "back": "Zurück",
+    "scan": "Mit deiner Smartphone-Kamera scannen",
+    "qrLabel": "Code für diesen Upload",
+    "progress": "{done} von {total}",
+    "percent": "{value}%",
+    "waiting": "Warten",
+    "adding": "Wird hinzugefügt",
+    "added": "Hinzugefügt",
+    "failed": "Konnte nicht hinzugefügt werden",
+    "codeFailed": "Code konnte nicht erstellt werden.",
+    "retry": "Erneut versuchen"
   }
 }

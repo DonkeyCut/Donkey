@@ -319,5 +319,21 @@
     "borderWidth": "边框宽度",
     "borderColor": "边框颜色",
     "offset": "偏移"
+  },
+  "uploadDialog": {
+    "title": "上传",
+    "fromComputer": "从电脑",
+    "fromPhone": "从手机",
+    "back": "返回",
+    "scan": "用手机相机扫描",
+    "qrLabel": "本次上传二维码",
+    "progress": "{done} / {total}",
+    "percent": "{value}%",
+    "waiting": "等待中",
+    "adding": "添加中",
+    "added": "已添加",
+    "failed": "添加失败",
+    "codeFailed": "无法生成二维码。",
+    "retry": "重试"
   }
 }
