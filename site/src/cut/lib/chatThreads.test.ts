@@ -150,13 +150,16 @@ describe("a running thread's record", () => {
     try {
       const all = chunks(296);
       let sent = 0;
+      // The gate exists before the stream reaches it, so the release below
+      // opens it however late the stream asks for its next part.
       let release = () => {};
+      const paused = new Promise<void>((resolve) => { release = resolve; });
       const transport: ChatTransport<UIMessage> = {
         sendMessages: async () => new ReadableStream<UIMessageChunk>({
           async pull(controller) {
             // The turn pauses partway, as a long tool would, for the
             // record to be read mid-turn.
-            if (sent === 150) await new Promise<void>((resolve) => { release = resolve; });
+            if (sent === 150) await paused;
             else await new Promise((resolve) => setTimeout(resolve, 0));
             if (sent < all.length) controller.enqueue(all[sent++]);
             else controller.close();
